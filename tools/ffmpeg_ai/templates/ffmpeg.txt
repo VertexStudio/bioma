@@ -1,0 +1,1 @@
+ffmpeg -loglevel quiet -re -i "{{ input_source }}" -f rawvideo -pix_fmt rgb24 -vf fps=1,scale=1920x1080 -

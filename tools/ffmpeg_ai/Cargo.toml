@@ -1,0 +1,22 @@
+[package]
+name = "ffmpeg_ai"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.5.4", features = ["derive"] }
+askama = { version = "0.12" }
+askama_escape = { version = "0.10" }
+shlex = "1.3.0"
+env_logger = "0.11.2"
+color-backtrace = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+] }
+image = "0.25"
+
+bioma_behavior = { path = "../../bioma_behavior" }
+bioma_knowledge = { path = "../../bioma_knowledge" }

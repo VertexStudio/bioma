@@ -1,0 +1,35 @@
+{
+  "blackboard": {
+    "pubsubs": {
+      "test/my_channel/0": {
+        "capacity": 10,
+        "type": "bioma::core::StringChannel"
+      },
+      "test/my_channel/1": {
+        "capacity": 11,
+        "type": "bioma::core::StringChannel"
+      }
+    }
+  },
+  "config": {
+    "desc": "Async behavior tree system",
+    "name": "Behavior Tree",
+    "type": "bioma::core::DefaultBehaviorTreeConfig"
+  },
+  "id": "bt-0",
+  "nodes": [
+    {
+      "id": "mock-0",
+      "node": {
+        "inputs": [],
+        "mode": "Succeed",
+        "msg": "from subtree hello 0",
+        "outputs": [
+          "test/my_channel/0"
+        ],
+        "type": "bioma::core::Mock"
+      }
+    }
+  ],
+  "root": "mock-0"
+}
