@@ -1,0 +1,11 @@
+[workspace]
+members = ["tools/*", "bioma_behavior", "bioma_knowledge"]
+resolver = "2"
+
+default-members = ["bioma_behavior", "bioma_knowledge"]
+
+[profile.release]
+debug = true
+
+[profile.dev.package.askama_derive]
+opt-level = 3
