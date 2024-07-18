@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 # tokio = { version = "1", features = ["full"] }
 thiserror = "1.0"
-surrealdb = "1.4.2"
+surrealdb-alpha = "2.0.5"
 # async-trait = "0.1.80"
 # derive_more = "0.99"
 # as-any = "0.3"
