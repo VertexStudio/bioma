@@ -4,6 +4,7 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tracing::{error, info};
+use std::io::Cursor;
 
 #[derive(Template)]
 #[template(path = "ffmpeg.txt")]
@@ -102,7 +103,15 @@ async fn main() {
                     let image_data: Vec<u8> = buffer[..frame_size].to_vec();
                     let frame_name = format!("frame-{:04}", frame_index);
                     let frame_path = format!("output/{}.jpg", frame_name);
-                    let image = image::RgbImage::from_raw(width, height, image_data).unwrap();
+
+                    // Convert the image to a JPEG-encoded byte array
+                    let mut jpeg_bytes: Vec<u8> = Vec::new();
+                    let jpeg_cursor = Cursor::new(&mut jpeg_bytes);
+                    let mut jpeg_enc = image::codecs::jpeg::JpegEncoder::new_with_quality(jpeg_cursor, 85);
+                    jpeg_enc.encode(&image_data, width, height, image::ExtendedColorType::Rgb8).unwrap();
+
+                    // Save a copy to file
+                    let image = image::load_from_memory_with_format(&jpeg_bytes, image::ImageFormat::Jpeg).unwrap();
                     image.save(frame_path).unwrap();
                     info!("Saved frame: {}", frame_name);
 
