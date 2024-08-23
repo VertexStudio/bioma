@@ -1,4 +1,5 @@
-use bioma_actor::prelude::*;
+use crate::actor::ActorId;
+use crate::message::{Message, MessageHandler};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -56,7 +57,7 @@ pub struct BehaviorNode {
     pub children: Vec<ActorId>,
 }
 
-pub trait Behavior: MessageRx<Run> {
+pub trait Behavior: MessageHandler<Message = Run> {
     const TYPE: BehaviorType;
 
     fn node(&self) -> &BehaviorNode;

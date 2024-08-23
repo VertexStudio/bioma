@@ -1,10 +1,11 @@
 [package]
-name = "bioma_behavior"
+name = "bioma_actor"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+surrealdb-alpha = { version = "2.0.9", default-features = false }
 uuid = "1.10"
 thiserror = "1.0"
 once_cell = "1.19"
@@ -18,6 +19,15 @@ futures = "0.3"
 humantime = "2.1"
 humantime-serde = "1.1"
 jsonpath-rust = "0.5"
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
+tracing = "0.1"
 
 bioma_derive = { path = "../bioma_derive" }
-bioma_actor = { path = "../bioma_actor" }
+
+[dev-dependencies]
+surrealdb-alpha = { version = "2.0.9", default-features = false, features = [
+    "kv-mem",
+] }
