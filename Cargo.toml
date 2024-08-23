@@ -1,8 +1,8 @@
 [workspace]
-members = ["tools/*", "bioma_behavior", "bioma_knowledge"]
+members = ["tools/*", "bioma_actor", "bioma_behavior", "bioma_derive"]
 resolver = "2"
 
-default-members = ["bioma_behavior", "bioma_knowledge"]
+default-members = ["bioma_behavior"]
 
 [profile.release]
 debug = true

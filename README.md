@@ -45,3 +45,10 @@ We welcome contributions from the community to help improve and expand Bioma. If
 
 Bioma is released under the [MIT License](link-to-license).
 
+## Testing
+
+Examples:
+
+```bash
+RUST_LOG=info,bioma_actor::actor=debug cargo test --release -p bioma_actor -- --nocapture test_actor_
+```
