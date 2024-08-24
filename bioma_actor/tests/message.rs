@@ -2,6 +2,7 @@ use bioma_actor::prelude::*;
 use derive_more::Deref;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
+use test_log::test;
 
 struct TestActor;
 
@@ -21,7 +22,7 @@ impl MessageRx<TestMessage> for TestActor {
     }
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn test_message_recv_trait() {
     let actor = TestActor;
     let message = TestMessage("Hello, World!".to_string());
@@ -33,3 +34,13 @@ async fn test_message_recv_trait() {
     assert!(!response);
 }
 
+#[test(tokio::test)]
+async fn test_message_actor_send() -> Result<(), ActorError> {
+    Engine::test().await.unwrap();
+    let actor_0 = ActorId::new("actor-0").await?;
+    let actor_1 = ActorId::new("actor-1").await?;
+    let message = TestMessage("Hello, World!".to_string());
+    let response = message.send(&actor_0, &actor_1).await.unwrap();
+    assert!(response);
+    Ok(())
+}
