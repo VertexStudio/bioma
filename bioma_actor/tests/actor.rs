@@ -1,4 +1,4 @@
-use bioma_actor::{prelude::*, DB};
+use bioma_actor::{prelude::*, ActorProtocol, DB};
 use futures::StreamExt;
 use serde_json::json;
 use test_log::test;
