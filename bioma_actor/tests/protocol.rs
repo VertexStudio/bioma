@@ -43,5 +43,7 @@ async fn test_protocol_msg_send_recv() -> Result<(), ActorError> {
     let response = json!({"answer": format!("{}", request.rx)});
     actor_1.reply(&request, response).await.unwrap();
 
+    dbg_export_db!();
+
     Ok(())
 }

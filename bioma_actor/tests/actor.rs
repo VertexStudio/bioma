@@ -1,3 +1,4 @@
+use bioma_actor::dbg_export_db;
 use bioma_actor::prelude::*;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ struct Host {
 
 impl Host {
     async fn new(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
-        Ok(Self { id: ActorId::spawn(uid).await? })
+        Ok(Self { id: ActorId::spawn_of::<Self>(uid).await? })
     }
 }
 
@@ -38,7 +39,8 @@ impl ActorModel for Host {
 
     fn start(&mut self) -> impl Future<Output = Result<(), ActorError>> {
         async move {
-            while let Some(Ok(frame)) = self.recv().await?.next().await {
+            let mut stream = self.recv().await?;
+            while let Some(Ok(frame)) = stream.next().await {
                 if let Some(message) = self.is::<Self, Hello>(&frame) {
                     let response = self.handle(&message).await?;
                     self.reply::<Self, Hello>(&frame, response).await?;
@@ -63,7 +65,7 @@ struct Guest {
 
 impl Guest {
     async fn new(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
-        Ok(Self { id: ActorId::spawn(uid).await? })
+        Ok(Self { id: ActorId::spawn_of::<Self>(uid).await? })
     }
 }
 
@@ -74,17 +76,23 @@ impl ActorModel for Guest {
 
     fn start(&mut self) -> impl Future<Output = Result<(), ActorError>> {
         async move {
-            let host = ActorId::new(ACTOR_HOST);
+            let host = ActorId::of::<Host>(ACTOR_HOST);
+
             let message = Hello { subject: "guest".to_string() };
             let response: HelloResponse = self.send::<Host, Hello>(message, &host).await?;
             info!("Response: {}", response.greeting);
+
+            let message = Hello { subject: "world".to_string() };
+            let response: HelloResponse = self.send::<Host, Hello>(message, &host).await?;
+            info!("Response: {}", response.greeting);
+
             Ok(())
         }
     }
 }
 
 #[test(tokio::test)]
-async fn test_message_hello_world() {
+async fn test_message_hello_world() -> Result<(), ActorError> {
     EE.test().await.unwrap();
 
     // Spawn the host actor
@@ -105,4 +113,8 @@ async fn test_message_hello_world() {
         Ok(_) => (),
         Err(_) => panic!("Host actor failed to terminate"),
     }
+
+    dbg_export_db!();
+
+    Ok(())
 }

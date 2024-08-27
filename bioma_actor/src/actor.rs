@@ -43,9 +43,61 @@ pub struct Record {
 }
 
 /// A unique identifier for a distributed actor
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, Hash, PartialEq, Display)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, Hash, PartialEq)]
+
 pub struct ActorId {
     id: Thing,
+    #[serde(default)]
+    kind: Option<Cow<'static, str>>,
+}
+
+impl std::fmt::Display for ActorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            Some(kind) => write!(f, "{}:{}", self.id, kind),
+            None => write!(f, "{}", self.id),
+        }
+    }
+}
+
+impl ActorId {
+    /// Create an actor id to reference some actor, does not create the actor in the database
+    pub fn new(uid: impl Into<Cow<'static, str>>) -> Self {
+        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
+        Self { id, kind: None }
+    }
+
+    /// Create an actor id to reference some actor of type T
+    pub fn of<T: ActorModel>(uid: impl Into<Cow<'static, str>>) -> Self {
+        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
+        Self { id, kind: Some(type_name::<T>().into()) }
+    }
+
+    /// Create a new distributed actor
+    pub async fn spawn(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
+        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
+        let _actor: Vec<Record> =
+            EE.db().create(DB_TABLE_ACTOR).content(ActorId { id: id.clone(), kind: None }).await?;
+        Ok(Self { id, kind: None })
+    }
+
+    /// Create a new distributed actor of type T
+    pub async fn spawn_of<T: ActorModel>(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
+        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
+        let kind: Cow<'static, str> = type_name::<T>().into();
+        let _actor: Vec<Record> =
+            EE.db().create(DB_TABLE_ACTOR).content(ActorId { id: id.clone(), kind: Some(kind.clone()) }).await?;
+        Ok(Self { id, kind: Some(kind) })
+    }
+
+    /// Check if the actor is healthy, exists and is reachable
+    pub async fn health(&self) -> bool {
+        let actor: Result<Option<ActorId>, _> = EE.db().select(&self.id).await;
+        match actor {
+            Ok(Some(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 /// A distributed actor
@@ -60,7 +112,7 @@ pub trait ActorModel {
     {
         async move {
             let value = serde_json::to_value(&message)?;
-            let response = self.id().send(type_name::<M>(), to, &value).await?;
+            let response = self.id().send(type_name::<T>(), to, &value).await?;
             let response = serde_json::from_value(response)?;
             Ok(response)
         }
@@ -87,34 +139,10 @@ pub trait ActorModel {
         M: Message<T>,
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
-        if frame.name == type_name::<M>() {
+        if frame.name == type_name::<T>() {
             serde_json::from_value(frame.msg.clone()).ok()
         } else {
             None
-        }
-    }
-}
-
-impl ActorId {
-    /// Create an actor id to reference some actor, does not create the actor in the database
-    pub fn new(uid: impl Into<Cow<'static, str>>) -> Self {
-        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
-        Self { id }
-    }
-
-    /// Create a new distributed actor
-    pub async fn spawn(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
-        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
-        let _actor: Vec<Record> = EE.db().create(DB_TABLE_ACTOR).content(ActorId { id: id.clone() }).await?;
-        Ok(Self { id })
-    }
-
-    /// Check if the actor is healthy, exists and is reachable
-    pub async fn health(&self) -> bool {
-        let actor: Result<Option<ActorId>, _> = EE.db().select(&self.id).await;
-        match actor {
-            Ok(Some(_)) => true,
-            _ => false,
         }
     }
 }
@@ -153,7 +181,7 @@ pub trait Protocol {
                 msg: message.clone(),
             };
 
-            debug!("[{}] msg-send {} {} {} {}", self.id(), name, request.id, to, msg_str);
+            debug!("[{}] msg-send {} {} {} {}", self.id(), name, request.id, to.id, msg_str);
 
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(0)).await;
