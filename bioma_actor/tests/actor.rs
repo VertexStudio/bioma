@@ -1,46 +1,108 @@
-use bioma_actor::{prelude::*, ActorProtocol, DB};
+use bioma_actor::prelude::*;
 use futures::StreamExt;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::future::Future;
+use std::time::Duration;
 use test_log::test;
+use tokio::time::timeout;
+use tracing::info;
 
-#[test(tokio::test)]
-async fn test_actor_create_actor() -> Result<(), ActorError> {
-    Engine::test().await.unwrap();
-    let actor_0 = ActorId::new("actor-0").await.unwrap();
-    let actor_1 = ActorId::new("actor-1").await.unwrap();
-    dbg_export_db!();
-    assert!(actor_0.health().await);
-    assert!(actor_1.health().await);
-    Ok(())
+const ACTOR_HOST: &str = "/host";
+const ACTOR_GUEST: &str = "/guest";
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Hello {
+    subject: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct HelloResponse {
+    greeting: String,
+}
+
+struct Host {
+    id: ActorId,
+}
+
+impl Host {
+    async fn new(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
+        Ok(Self { id: ActorId::spawn(uid).await? })
+    }
+}
+
+impl ActorModel for Host {
+    fn id(&self) -> &ActorId {
+        &self.id
+    }
+
+    fn start(&mut self) -> impl Future<Output = Result<(), ActorError>> {
+        async move {
+            while let Some(Ok(frame)) = self.recv().await?.next().await {
+                if let Some(message) = self.is::<Self, Hello>(&frame) {
+                    let response = self.handle(&message).await?;
+                    self.reply::<Self, Hello>(&frame, response).await?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+impl Message<Hello> for Host {
+    type Response = HelloResponse;
+
+    fn handle(&mut self, message: &Hello) -> impl Future<Output = Result<Self::Response, ActorError>> {
+        async move { Ok(HelloResponse { greeting: format!("Hello, {}!", message.subject) }) }
+    }
+}
+
+struct Guest {
+    id: ActorId,
+}
+
+impl Guest {
+    async fn new(uid: impl Into<Cow<'static, str>>) -> Result<Self, ActorError> {
+        Ok(Self { id: ActorId::spawn(uid).await? })
+    }
+}
+
+impl ActorModel for Guest {
+    fn id(&self) -> &ActorId {
+        &self.id
+    }
+
+    fn start(&mut self) -> impl Future<Output = Result<(), ActorError>> {
+        async move {
+            let host = ActorId::new(ACTOR_HOST);
+            let message = Hello { subject: "guest".to_string() };
+            let response: HelloResponse = self.send::<Host, Hello>(message, &host).await?;
+            info!("Response: {}", response.greeting);
+            Ok(())
+        }
+    }
 }
 
 #[test(tokio::test)]
-async fn test_actor_msg_send_recv() -> Result<(), ActorError> {
-    Engine::test().await.unwrap();
-    let actor_0 = ActorId::new("actor-0").await.unwrap();
-    let actor_1 = ActorId::new("actor-1").await.unwrap();
-    assert!(actor_0.health().await);
-    assert!(actor_1.health().await);
+async fn test_message_hello_world() {
+    EE.test().await.unwrap();
 
-    // Send message from actor_0 to actor_1
-    let dest = actor_1.clone();
-    tokio::spawn(async move {
-        let msg = json!({"question": "What is your name?",});
-        let response = actor_0.send("msg-test-0", &dest, &msg).await.unwrap();
-        assert_eq!(
-            serde_json::to_string(&response).unwrap(),
-            serde_json::to_string(&json!({"answer": format!("{}", dest)})).unwrap()
-        );
+    // Spawn the host actor
+    let mut host = Host::new(ACTOR_HOST).await.unwrap();
+    let host_handle = tokio::spawn(async move {
+        host.start().await.unwrap();
     });
 
-    // Subscribe actor_1 to receiving messages
-    let mut stream = actor_1.recv().await.unwrap();
-    let Some(Ok(notification)) = stream.next().await else {
-        panic!("Empty stream");
-    };
-    let request = notification.data;
-    let response = json!({"answer": format!("{}", request.rx)});
-    actor_1.reply(&request, response).await.unwrap();
+    // Spawn the guest actor
+    let mut guest = Guest::new(ACTOR_GUEST).await.unwrap();
+    guest.start().await.unwrap();
 
-    Ok(())
+    // Terminate the host actor
+    host_handle.abort();
+
+    // Ensure the host actor has terminated
+    match timeout(Duration::from_secs(1), host_handle).await {
+        Ok(_) => (),
+        Err(_) => panic!("Host actor failed to terminate"),
+    }
 }

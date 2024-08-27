@@ -1,5 +1,10 @@
 [workspace]
-members = ["tools/*", "bioma_actor", "bioma_behavior", "bioma_derive"]
+members = [
+    "tools/*",
+    "bioma_actor",
+    # "bioma_behavior", 
+    "bioma_derive",
+]
 resolver = "2"
 
 default-members = ["bioma_behavior"]
