@@ -1,15 +1,14 @@
 mod actor;
 mod engine;
 mod error;
-mod message;
+// mod message;
 
-pub use actor::{ActorProtocol, Message};
-pub use engine::DB;
+pub use actor::{Frame, Protocol};
 
 pub mod prelude {
-    pub use crate::actor::ActorId;
+    pub use crate::actor::{ActorModel, ActorId, Message, Frame};
     pub use crate::dbg_export_db;
     pub use crate::engine::Engine;
+    pub use crate::engine::EE;
     pub use crate::error::ActorError;
-    pub use crate::message::{Message, MessageRx};
 }
