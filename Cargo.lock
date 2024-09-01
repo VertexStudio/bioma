@@ -449,13 +449,14 @@ version = "0.1.0"
 dependencies = [
  "as-any",
  "bioma_derive",
+ "color-backtrace",
  "derive_more",
  "futures",
  "humantime",
  "humantime-serde",
  "indexmap 2.4.0",
  "jsonpath-rust",
- "once_cell",
+ "rand",
  "serde",
  "serde_json",
  "surrealdb-alpha",
@@ -463,6 +464,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "typetag",
  "uuid",
 ]
@@ -1172,7 +1174,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f2c92ceda6ceec50f43169f9ee8424fe2db276791afde7b2cd8bc084cb376ab"
 dependencies = [
  "log",
- "regex",
 ]
 
 [[package]]
@@ -1184,7 +1185,6 @@ dependencies = [
  "anstream",
  "anstyle",
  "env_filter",
- "humantime",
  "log",
 ]
 
@@ -1273,7 +1273,6 @@ dependencies = [
  "bioma_behavior",
  "clap",
  "color-backtrace",
- "env_logger",
  "image",
  "shlex",
  "tokio",

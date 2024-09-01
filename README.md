@@ -41,14 +41,14 @@ For detailed documentation on how to use Bioma, including API references, tutori
 
 We welcome contributions from the community to help improve and expand Bioma. If you'd like to contribute, please follow the guidelines outlined in [CONTRIBUTING.md](link-to-contributing-guide).
 
-## License
-
-Bioma is released under the [MIT License](link-to-license).
-
 ## Testing
 
-Examples:
+```bash
+RUST_LOG=info,bioma_actor::actor=debug cargo test --release -p bioma_actor -- --nocapture test_actor_ping_pong
+```
+
+## Examples
 
 ```bash
-RUST_LOG=info,bioma_actor::actor=debug cargo test --release -p bioma_actor -- --nocapture test_actor_
+RUST_LOG=info,bioma_actor::actor=debug cargo run --release -p bioma_actor --example tictactoe
 ```
