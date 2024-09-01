@@ -383,16 +383,17 @@ mod tests {
     impl Actor for PingActor {
         fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
             async move {
-                info!("{} says hi!", type_name::<Self>());
+                info!("{} Says hi!", ctx.id());
                 let pong_id = self.pong_id.clone();
                 loop {
-                    info!("ping");
+                    info!("{} Ping", ctx.id());
                     let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id).await?;
+                    info!("{} Pong {}", ctx.id(), pong.times);
                     if pong.times == 0 {
                         break;
                     }
                 }
-                info!("{} says bye!", type_name::<Self>());
+                info!("{} Says bye!", ctx.id());
                 Ok(())
             }
         }
@@ -406,19 +407,18 @@ mod tests {
     impl Actor for PongActor {
         fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
             async move {
-                info!("{} says hi!", type_name::<Self>());
+                info!("{} Says hi!", ctx.id());
                 let mut stream = ctx.recv().await?;
                 while let Some(Ok(frame)) = stream.next().await {
                     if let Some(message) = ctx.is::<Self, Ping>(&frame) {
-                        self.times -= 1;
+                        info!("{} Pong", ctx.id());
                         let _response = self.reply(ctx, &message, &frame).await?;
-                        info!("pong");
                         if self.times == 0 {
                             break;
                         }
                     }
                 }
-                info!("{} says bye!", type_name::<Self>());
+                info!("{} Says bye!", ctx.id());
                 Ok(())
             }
         }
@@ -432,6 +432,7 @@ mod tests {
             _ctx: &mut ActorContext<Self>,
             _message: &Ping,
         ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+            self.times -= 1;
             async move { Ok(Pong { times: self.times }) }
         }
     }
