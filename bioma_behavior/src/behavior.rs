@@ -1,92 +1,99 @@
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Initialize;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BehaviorTick;
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Run;
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Interrupted;
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Shutdown;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Status {
-    Standby,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BehaviorStatus {
     Running,
-    Failure,
     Success,
+    Failure,
 }
 
-impl Default for Status {
-    fn default() -> Self {
-        Self::Standby
-    }
+pub trait Behavior: Clone + Debug + Serialize + for<'de> Deserialize<'de> {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActionBehavior<B: Behavior> {
+    _marker: std::marker::PhantomData<B>,
 }
 
-impl Message for Initialize {
-    type Response = Status;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DecoratorBehavior<B: Behavior> {
+    child: ActorId,
+    _marker: std::marker::PhantomData<B>,
 }
 
-impl Message for Run {
-    type Response = Status;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompositeBehavior<B: Behavior> {
+    children: Vec<ActorId>,
+    _marker: std::marker::PhantomData<B>,
 }
 
-impl Message for Interrupted {
-    type Response = ();
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl Message for Shutdown {
-    type Response = ();
-}
+    // MockAction behavior
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct MockAction;
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub enum BehaviorType {
-    Action,
-    Composite,
-    Decorator,
-}
+    impl Behavior for MockAction {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct BehaviorNode {
-    pub status: Status,
-    pub children: Vec<ActorId>,
-}
+    impl Message<BehaviorTick> for ActionBehavior<MockAction> {
+        type Response = BehaviorStatus;
 
-pub trait Behavior: MessageRx<Run> {
-    const TYPE: BehaviorType;
-
-    fn node(&self) -> &BehaviorNode;
-    fn node_mut(&mut self) -> &mut BehaviorNode;
-
-    fn status(&self) -> Status {
-        self.node().status
-    }
-
-    fn set_status(&mut self, status: Status) {
-        self.node_mut().status = status;
-    }
-
-    fn children(&self) -> &[ActorId] {
-        &self.node().children
-    }
-
-    fn set_children(&mut self, children: Vec<ActorId>) {
-        self.node_mut().children = children;
-    }
-}
-
-#[macro_export]
-macro_rules! impl_behavior_node {
-    () => {
-        fn node(&self) -> &BehaviorNode {
-            &self.node
+        fn handle(
+            &mut self,
+            _ctx: &mut ActorContext<Self>,
+            _msg: &BehaviorTick,
+        ) -> impl Future<Output = Result<BehaviorStatus, ActorError>> {
+            async move { Ok(BehaviorStatus::Success) }
         }
-        fn node_mut(&mut self) -> &mut BehaviorNode {
-            &mut self.node
+    }
+
+    impl Actor for ActionBehavior<MockAction> {
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+            async move {
+                let mut stream = ctx.recv().await?;
+                while let Some(Ok(frame)) = stream.next().await {
+                    if let Some(BehaviorTick) = ctx.is::<Self, BehaviorTick>(&frame) {
+                        self.reply(ctx, &BehaviorTick, &frame).await?;
+                    }
+                }
+                Ok(())
+            }
         }
-    };
+    }
+
+    // MockDecorator behavior
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct MockDecorator;
+
+    impl Behavior for MockDecorator {}
+
+    impl Message<BehaviorTick> for DecoratorBehavior<MockDecorator> {
+        type Response = BehaviorStatus;
+
+        fn handle(
+            &mut self,
+            ctx: &mut ActorContext<Self>,
+            _msg: &BehaviorTick,
+        ) -> impl Future<Output = Result<BehaviorStatus, ActorError>> {
+            async move {
+                let status = ctx.send_as::<BehaviorTick, BehaviorStatus>(BehaviorTick, &self.child).await?;
+                Ok(status)
+            }
+        }
+    }
+
+    impl Actor for DecoratorBehavior<MockDecorator> {
+        fn start(&mut self, _ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+            async move { Ok(()) }
+        }
+    }
+
+    #[test]
+    fn test_action_behavior() {}
 }
