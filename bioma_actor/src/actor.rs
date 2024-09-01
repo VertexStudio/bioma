@@ -177,89 +177,106 @@ pub trait ActorModel {
         async move { self.engine().health().await }
     }
 
-    /// Send a message to another actor and return without waiting for a reply
+    /// Internal method to prepare and send a message
+    fn prepare_and_send_message<T>(
+        &self,
+        message: T,
+        to: &ActorId,
+    ) -> impl Future<Output = Result<(Thing, Thing, Frame), ActorError>>
+    where
+        T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+    {
+        async move {
+            let msg_value = serde_json::to_value(&message)?;
+            let name = type_name::<T>();
+            let msg_id = Id::ulid();
+            let request_id = Thing::from((DB_TABLE_MESSAGE, msg_id.clone()));
+            let reply_id = Thing::from((DB_TABLE_REPLY, msg_id.clone()));
+
+            let request = Frame {
+                id: request_id.clone(),
+                name: name.into(),
+                tx: self.id().id.clone(),
+                rx: to.id.clone(),
+                msg: msg_value.clone(),
+            };
+
+            debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
+
+            let msg_engine = self.engine().clone();
+
+            let task_request_id = request_id.clone();
+            let task_request = request.clone();
+
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(0)).await;
+                let msg_ids: Result<Vec<Record>, _> =
+                    msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
+                if let Ok(msg_ids) = msg_ids {
+                    let id = msg_ids[0].id.clone();
+                    if task_request_id != id {
+                        error!("msg-send {}", &task_request_id);
+                    }
+                }
+            });
+
+            Ok((request_id, reply_id, request))
+        }
+    }
+
     fn do_send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<(), ActorError>>
     where
         M: Message<T>,
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
         async move {
-            // Serialize the message
-            let msg_value = serde_json::to_value(&message)?;
-
-            let name = type_name::<T>();
-            let msg_id = Id::ulid();
-            let request_id = Thing::from((DB_TABLE_MESSAGE, msg_id.clone()));
-
-            // Create the frame for the message
-            let request = Frame {
-                id: request_id.clone(),
-                name: name.into(),
-                tx: self.id().id.clone(),
-                rx: to.id.clone(),
-                msg: msg_value.clone(),
-            };
-
-            debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
-
-            let msg_engine = self.engine().clone();
-
-            let msg_ids: Result<Vec<Record>, _> = msg_engine.db().create(DB_TABLE_MESSAGE).content(request).await;
-            if let Ok(msg_ids) = msg_ids {
-                let id = msg_ids[0].id.clone();
-                if request_id != id {
-                    error!("msg-send {}", request_id);
-                }
-            }
-
+            let _ = self.prepare_and_send_message(message, to).await?;
             Ok(())
         }
     }
 
-    /// Send a message to another actor and wait for a reply
     fn send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<M::Response, ActorError>>
     where
         M: Message<T>,
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
         async move {
-            // Serialize the message
-            let msg_value = serde_json::to_value(&message)?;
+            let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
+            self.wait_for_reply::<M::Response>(reply_id).await
+        }
+    }
 
-            let name = type_name::<T>();
-            let msg_id = Id::ulid();
-            let request_id = Thing::from((DB_TABLE_MESSAGE, msg_id.clone()));
-            let reply_id = Thing::from((DB_TABLE_REPLY, msg_id.clone()));
+    fn do_send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<(), ActorError>>
+    where
+        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+    {
+        async move {
+            let (_, _, _) = self.prepare_and_send_message(message, to).await?;
+            Ok(())
+        }
+    }
 
-            // Create the frame for the message
-            let request = Frame {
-                id: request_id.clone(),
-                name: name.into(),
-                tx: self.id().id.clone(),
-                rx: to.id.clone(),
-                msg: msg_value.clone(),
-            };
+    fn send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<R, ActorError>>
+    where
+        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+    {
+        async move {
+            let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
+            self.wait_for_reply::<R>(reply_id).await
+        }
+    }
 
-            debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
-
-            let msg_engine = self.engine().clone();
-
-            // Spawn a task to create the message in the database
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(0)).await;
-                let msg_ids: Result<Vec<Record>, _> = msg_engine.db().create(DB_TABLE_MESSAGE).content(request).await;
-                if let Ok(msg_ids) = msg_ids {
-                    let id = msg_ids[0].id.clone();
-                    if request_id != id {
-                        error!("msg-send {}", request_id);
-                    }
-                }
-            });
-
-            // Wait for the reply
+    /// Wait for a reply to a sent message
+    fn wait_for_reply<R>(&self, reply_id: Thing) -> impl Future<Output = Result<R, ActorError>>
+    where
+        R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+    {
+        async move {
             let mut stream = self.engine().db().select(reply_id).live().await?;
             let Some(notification) = stream.next().await else {
-                return Err(ActorError::LiveStream(format!("Empty: {}", name).into()));
+                return Err(ActorError::LiveStream("Empty stream".into()));
             };
             let notification: Notification<Frame> = notification?;
             let response = match notification.action {
@@ -268,7 +285,7 @@ pub trait ActorModel {
                     debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
                     Ok(data.msg.clone())
                 }
-                _ => Err(ActorError::LiveStream(format!("!Action::Create: {}", name).into())),
+                _ => Err(ActorError::LiveStream("Unexpected action".into())),
             }?;
 
             let response = serde_json::from_value(response)?;
@@ -362,7 +379,6 @@ mod tests {
     use crate::prelude::*;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
-    use std::any::type_name;
     use std::future::Future;
     use test_log::test;
     use tracing::info;
