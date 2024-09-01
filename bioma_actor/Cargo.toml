@@ -18,15 +18,15 @@ futures = "0.3"
 humantime = "2.1"
 humantime-serde = "1.1"
 jsonpath-rust = "0.5"
-test-log = { version = "0.2", default-features = false, features = [
-    "trace",
-    "color",
-] }
 tracing = "0.1"
 
 bioma_derive = { path = "../bioma_derive" }
 
 [dev-dependencies]
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
 surrealdb-alpha = { version = "2.0.9", default-features = false, features = [
     "kv-mem",
 ] }

@@ -35,6 +35,21 @@ pub struct Frame {
     pub msg: Value,
 }
 
+impl Frame {
+    /// Check if this frame matches a specific message type
+    /// and deserialize it into the message type.
+    pub fn is<M>(&self) -> Option<M>
+    where
+        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+    {
+        if self.name == type_name::<M>() {
+            serde_json::from_value(self.msg.clone()).ok()
+        } else {
+            None
+        }
+    }
+}
+
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<Frame, ActorError>> + Send>>;
 
 /// Message handling behavior
@@ -357,20 +372,6 @@ pub trait ActorModel {
             Ok(Box::pin(live_query) as MessageStream)
         }
     }
-
-    /// Check if a received frame matches a specific message type
-    /// and deserialize it into the message type.
-    fn is<M, T>(&self, frame: &Frame) -> Option<T>
-    where
-        M: Message<T>,
-        T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
-    {
-        if frame.name == type_name::<T>() {
-            serde_json::from_value(frame.msg.clone()).ok()
-        } else {
-            None
-        }
-    }
 }
 
 #[cfg(test)]
@@ -426,7 +427,7 @@ mod tests {
                 info!("{} Says hi!", ctx.id());
                 let mut stream = ctx.recv().await?;
                 while let Some(Ok(frame)) = stream.next().await {
-                    if let Some(message) = ctx.is::<Self, Ping>(&frame) {
+                    if let Some(message) = frame.is::<Ping>() {
                         info!("{} Pong", ctx.id());
                         let _response = self.reply(ctx, &message, &frame).await?;
                         if self.times == 0 {

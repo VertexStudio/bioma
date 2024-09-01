@@ -1,5 +1,5 @@
 pub mod behavior;
-mod error;
+// mod error;
 
 // pub mod actions;
 // pub mod composites;

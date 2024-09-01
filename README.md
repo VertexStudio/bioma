@@ -47,6 +47,10 @@ We welcome contributions from the community to help improve and expand Bioma. If
 RUST_LOG=info,bioma_actor::actor=debug cargo test --release -p bioma_actor -- --nocapture test_actor_ping_pong
 ```
 
+```bash
+RUST_LOG=info,bioma_actor::actor=debug cargo test --release -p bioma_behavior -- --nocapture test_behavior_mock
+```
+
 ## Examples
 
 ```bash
