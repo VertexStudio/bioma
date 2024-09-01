@@ -50,5 +50,5 @@ RUST_LOG=info,bioma_actor::actor=debug cargo test --release -p bioma_actor -- --
 ## Examples
 
 ```bash
-RUST_LOG=info,bioma_actor::actor=debug cargo run --release -p bioma_actor --example tictactoe
+cargo run --release -p bioma_actor --example tictactoe
 ```

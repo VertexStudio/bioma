@@ -23,7 +23,9 @@ const DB_TABLE_REPLY: &str = "reply";
 /// The message frame that is sent between actors
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
+    /// Message id
     id: Thing,
+    /// Message name (usually a type name)
     pub name: Cow<'static, str>,
     /// Sender
     pub tx: Thing,
@@ -78,7 +80,7 @@ pub struct ActorId {
 
 impl std::fmt::Display for ActorId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "id:{} k:{}", self.id, self.kind)
+        write!(f, "{}", &self.id.id)
     }
 }
 
@@ -88,9 +90,13 @@ impl ActorId {
         let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
         Self { id, kind: type_name::<T>().into() }
     }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
 }
 
-/// Main Actor trait defining behavior for all actors
+/// Implement this trait to define an actor
 pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static + Debug {
     // Spawn a new actor
     fn spawn(
@@ -126,8 +132,8 @@ pub struct ActorRecord<T: Actor> {
     state: T,
 }
 
+/// Context for an actor, that binds an actor to its engine
 #[derive(Clone, Debug)]
-/// Context for an actor, holding necessary information and
 pub struct ActorContext<T: Actor> {
     engine: Engine,
     id: ActorId,
@@ -158,7 +164,7 @@ impl<T: Actor> ActorModel for ActorContext<T> {
     }
 }
 
-/// Trait defining the core functionality of a distributed actor
+/// Core functionality of a distributed actor
 pub trait ActorModel {
     /// Get the actor id
     fn id(&self) -> &ActorId;
@@ -194,7 +200,7 @@ pub trait ActorModel {
                 msg: msg_value.clone(),
             };
 
-            debug!("[{}] msg-send {} {} {} {}", self.id().id, name, request.id, to.id, msg_value);
+            debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
 
             let msg_engine = self.engine().clone();
 
@@ -234,7 +240,7 @@ pub trait ActorModel {
                 msg: msg_value.clone(),
             };
 
-            debug!("[{}] msg-send {} {} {} {}", self.id().id, name, request.id, to.id, msg_value);
+            debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
 
             let msg_engine = self.engine().clone();
 
@@ -259,7 +265,7 @@ pub trait ActorModel {
             let response = match notification.action {
                 Action::Create => {
                     let data = &notification.data;
-                    debug!("[{}] msg-done {} {} {} {}", self.id().id, data.name, data.id, data.rx, data.msg);
+                    debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
                     Ok(data.msg.clone())
                 }
                 _ => Err(ActorError::LiveStream(format!("!Action::Create: {}", name).into())),
@@ -295,7 +301,7 @@ pub trait ActorModel {
                 msg: msg_value.clone(),
             };
 
-            debug!("[{}] msg-rply {} {} {} {}", self.id().id, reply.name, reply_id, reply.tx, &msg_value);
+            debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
 
             let _entry: Vec<Record> = self.engine().db().create(DB_TABLE_REPLY).content(reply).await?;
             Ok(())
@@ -306,7 +312,7 @@ pub trait ActorModel {
     fn recv(&self) -> impl Future<Output = Result<MessageStream, ActorError>> {
         async move {
             let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().id);
-            debug!("[{}] msg-live {}", self.id().id, &query);
+            debug!("[{}] msg-live {}", &self.id().id, &query);
             let mut res = self.engine().db().query(&query).await?;
             let live_query = res.stream::<Notification<Frame>>(0)?;
             let self_id = self.id().clone();
@@ -326,7 +332,7 @@ pub trait ActorModel {
                     Ok(frame) => {
                         debug!(
                             "[{}] msg-recv {} {} {} -> {} {}",
-                            self_id.id, frame.name, frame.id, frame.tx, frame.rx, frame.msg
+                            &self_id.id, &frame.name, &frame.id, &frame.tx, &frame.rx, &frame.msg
                         );
                     }
                     Err(error) => debug!("msg-recv {} {:?}", self_id.id, error),
