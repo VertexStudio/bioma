@@ -18,4 +18,6 @@ pub enum ActorError {
     // Id mismatch a and b
     #[error("Id mismatch: {0:?} {1:?}")]
     IdMismatch(surrealdb::sql::Thing, surrealdb::sql::Thing),
+    #[error("Actor kind mismatch: {0} {1}")]
+    ActorKindMismatch(Cow<'static, str>, Cow<'static, str>),
 }
