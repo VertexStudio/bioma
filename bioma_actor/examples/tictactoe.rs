@@ -84,10 +84,10 @@ impl Actor for GameActor {
 
             let mut stream = ctx.recv().await?;
             while let Some(Ok(frame)) = stream.next().await {
-                if let Some(game_result) = ctx.is::<Self, GameResult>(&frame) {
+                if let Some(game_result) = frame.is::<GameResult>() {
                     self.reply(ctx, &game_result, &frame).await?;
                     break;
-                } else if let Some(start_game) = ctx.is::<Self, StartGame>(&frame) {
+                } else if let Some(start_game) = frame.is::<StartGame>() {
                     self.reply(ctx, &start_game, &frame).await?;
                 }
             }
@@ -168,9 +168,9 @@ impl Actor for PlayerActor {
             info!("{} {:?} started", ctx.id(), self.player_type);
             let mut stream = ctx.recv().await?;
             while let Some(Ok(frame)) = stream.next().await {
-                if let Some(game_state) = ctx.is::<Self, GameState>(&frame) {
+                if let Some(game_state) = frame.is::<GameState>() {
                     self.reply(ctx, &game_state, &frame).await?;
-                } else if let Some(game_result) = ctx.is::<Self, GameResult>(&frame) {
+                } else if let Some(game_result) = frame.is::<GameResult>() {
                     self.reply(ctx, &game_result, &frame).await?;
                     break;
                 }
@@ -331,7 +331,7 @@ impl Actor for BoardActor {
 
             let mut stream = ctx.recv().await?;
             while let Some(Ok(frame)) = stream.next().await {
-                if let Some(move_msg) = ctx.is::<Self, MakeMove>(&frame) {
+                if let Some(move_msg) = frame.is::<MakeMove>() {
                     self.reply(ctx, &move_msg, &frame).await?;
                 }
                 if self.game_over {
@@ -422,7 +422,7 @@ impl Actor for MainActor {
             });
 
             // Start the game actor
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(0)).await;
             ctx.do_send::<GameActor, StartGame>(StartGame, &game_id).await?;
 
             info!("{} Started game", ctx.id());

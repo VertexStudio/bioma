@@ -21,3 +21,16 @@ jsonpath-rust = "0.5"
 
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
+
+[dev-dependencies]
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
+color-backtrace = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rand = "0.8"
+surrealdb-alpha = { version = "2.0.9", default-features = false, features = [
+    "kv-mem",
+] }
