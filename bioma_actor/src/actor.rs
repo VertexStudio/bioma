@@ -40,7 +40,7 @@ impl Frame {
     /// and deserialize it into the message type.
     pub fn is<M>(&self) -> Option<M>
     where
-        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
     {
         if self.name == type_name::<M>() {
             serde_json::from_value(self.msg.clone()).ok()
@@ -58,7 +58,7 @@ pub trait Message<T>: Actor
 where
     T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
 {
-    type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync;
+    type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
 
     fn handle(
         &mut self,
@@ -164,7 +164,6 @@ impl<T: Actor> ActorContext<T> {
     pub async fn start(&mut self) -> Result<(), ActorError> {
         let mut actor = self.actor.clone();
         actor.start(self).await?;
-        self.actor = actor;
         Ok(())
     }
 }
