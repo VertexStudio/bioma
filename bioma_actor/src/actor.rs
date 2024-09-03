@@ -8,10 +8,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
-use surrealdb::{
-    sql::{Id, Thing},
-    Action, Notification,
-};
+use surrealdb::{sql::Id, value::RecordId, Action, Notification};
 use tracing::{debug, error};
 
 // Constants for database table names
@@ -38,7 +35,7 @@ pub enum SystemActorError {
     JsonSerde(#[from] serde_json::Error),
     // Id mismatch a and b
     #[error("Id mismatch: {0:?} {1:?}")]
-    IdMismatch(surrealdb::sql::Thing, surrealdb::sql::Thing),
+    IdMismatch(RecordId, RecordId),
     #[error("Actor kind mismatch: {0} {1}")]
     ActorKindMismatch(Cow<'static, str>, Cow<'static, str>),
 }
@@ -49,13 +46,13 @@ impl ActorError for SystemActorError {}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
     /// Message id
-    id: Thing,
+    id: RecordId,
     /// Message name (usually a type name)
     pub name: Cow<'static, str>,
     /// Sender
-    pub tx: Thing,
+    pub tx: RecordId,
     /// Receiver
-    pub rx: Thing,
+    pub rx: RecordId,
     /// Message content
     pub msg: Value,
 }
@@ -106,28 +103,35 @@ where
 }
 
 // Record struct for database entries
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, Hash, PartialEq, Display)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Display)]
 struct Record {
-    id: Thing,
+    id: RecordId,
 }
 
 /// A unique identifier for a distributed actor
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActorId {
-    id: Thing,
+    id: RecordId,
     kind: Cow<'static, str>,
 }
 
 impl std::fmt::Display for ActorId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.id.id)
+        write!(f, "{}", &self.id)
     }
 }
+
+// impl surrealdb::opt::IntoResource<Result<RecordId, surrealdb::Error>> for ActorId {
+//     fn into_resource(self) -> Result<RecordId, surrealdb::Error> {
+//         let record_id = surrealdb::opt::Resource::RecordId(self.id);
+//         Ok(self.id)
+//     }
+// }
 
 impl ActorId {
     /// Create an actor id to reference some actor
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
-        let id = Thing::from((DB_TABLE_ACTOR, Id::String(uid.into().to_string())));
+        let id = RecordId::from_table_key(DB_TABLE_ACTOR, uid.into().to_string());
         Self { id, kind: type_name::<T>().into() }
     }
 
@@ -173,7 +177,7 @@ pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static
 /// Database record for an actor
 #[derive(Clone, Debug, Serialize)]
 pub struct ActorRecord<T: Actor> {
-    id: Thing,
+    id: RecordId,
     kind: Cow<'static, str>,
     state: T,
 }
@@ -227,7 +231,7 @@ pub trait ActorModel {
         &self,
         message: T,
         to: &ActorId,
-    ) -> impl Future<Output = Result<(Thing, Thing, Frame), SystemActorError>>
+    ) -> impl Future<Output = Result<(RecordId, RecordId, Frame), SystemActorError>>
     where
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
@@ -235,8 +239,8 @@ pub trait ActorModel {
             let msg_value = serde_json::to_value(&message)?;
             let name = type_name::<T>();
             let msg_id = Id::ulid();
-            let request_id = Thing::from((DB_TABLE_MESSAGE, msg_id.clone()));
-            let reply_id = Thing::from((DB_TABLE_REPLY, msg_id.clone()));
+            let request_id = RecordId::from_table_key(DB_TABLE_MESSAGE, msg_id.to_string());
+            let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, msg_id.to_string());
 
             let request = Frame {
                 id: request_id.clone(),
@@ -287,7 +291,7 @@ pub trait ActorModel {
     {
         async move {
             let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
-            self.wait_for_reply::<M::Response>(reply_id).await
+            self.wait_for_reply::<M::Response>(&reply_id).await
         }
     }
 
@@ -309,12 +313,12 @@ pub trait ActorModel {
     {
         async move {
             let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
-            self.wait_for_reply::<R>(reply_id).await
+            self.wait_for_reply::<R>(&reply_id).await
         }
     }
 
     /// Wait for a reply to a sent message
-    fn wait_for_reply<R>(&self, reply_id: Thing) -> impl Future<Output = Result<R, SystemActorError>>
+    fn wait_for_reply<R>(&self, reply_id: &RecordId) -> impl Future<Output = Result<R, SystemActorError>>
     where
         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
@@ -348,7 +352,7 @@ pub trait ActorModel {
             let msg_value = serde_json::to_value(&message)?;
 
             // Use the request id as the reply id
-            let reply_id = Thing::from((DB_TABLE_REPLY, request.id.id.clone()));
+            let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
 
             // Assert request.rx == self, can only reply to messages sent to us
             if request.rx != self.id().id {
