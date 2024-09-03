@@ -1,5 +1,5 @@
-pub mod llm;
+pub mod chat;
 
 pub mod prelude {
-    pub use crate::llm::{self, LLM};
+    pub use crate::chat::{self, Chat};
 }
