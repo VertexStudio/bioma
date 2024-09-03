@@ -1,4 +1,4 @@
-use crate::error::ActorError;
+use crate::actor::SystemActorError;
 use surrealdb::engine::any::Any;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::opt::auth::Root;
@@ -31,12 +31,11 @@ pub struct Engine {
 }
 
 impl Engine {
-
     pub fn db(&self) -> &Surreal<Any> {
         &self.db
     }
 
-    pub async fn connect(address: impl IntoEndpoint) -> Result<Engine, ActorError> {
+    pub async fn connect(address: impl IntoEndpoint) -> Result<Engine, SystemActorError> {
         let db: Surreal<Any> = Surreal::init();
         db.connect(address).await?;
         db.signin(Root { username: "root", password: "root" }).await?;
@@ -44,7 +43,7 @@ impl Engine {
         Ok(Engine { db: Box::new(db) })
     }
 
-    pub async fn test() -> Result<Engine, ActorError> {
+    pub async fn test() -> Result<Engine, SystemActorError> {
         let db: Surreal<Any> = Surreal::init();
         db.connect("memory").await?;
         db.use_ns("N").use_db("D").await?;

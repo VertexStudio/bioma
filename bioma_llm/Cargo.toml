@@ -1,5 +1,5 @@
 [package]
-name = "bioma_behavior"
+name = "bioma_llm"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,6 +19,7 @@ humantime = "2.1"
 humantime-serde = "1.1"
 jsonpath-rust = "0.5"
 tracing = "0.1"
+ollama-rs = { version = "0.2.0", features = ["chat-history", "function-calling"] }
 
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
@@ -29,6 +30,7 @@ test-log = { version = "0.2", default-features = false, features = [
     "color",
 ] }
 color-backtrace = "0.6"
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 rand = "0.8"
 surrealdb-alpha = { version = "2.0.9", default-features = false, features = [

@@ -1,5 +1,4 @@
 use crate::engine::Engine;
-use crate::error::ActorError;
 use derive_more::Display;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -19,6 +18,32 @@ use tracing::{debug, error};
 const DB_TABLE_ACTOR: &str = "actor";
 const DB_TABLE_MESSAGE: &str = "message";
 const DB_TABLE_REPLY: &str = "reply";
+
+pub trait ActorError: std::error::Error + Debug + Send + Sync + 'static + From<SystemActorError> {}
+
+/// Enumerates the types of errors that can occur in Actor framework
+#[derive(thiserror::Error, Debug)]
+pub enum SystemActorError {
+    // IO error
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Engine error: {0}")]
+    EngineError(#[from] surrealdb::Error),
+    #[error("MessageTypeMismatch: {0}")]
+    MessageTypeMismatch(&'static str),
+    #[error("LiveStream error: {0}")]
+    LiveStream(Cow<'static, str>),
+    // json_serde::Error
+    #[error("JsonSerde error: {0}")]
+    JsonSerde(#[from] serde_json::Error),
+    // Id mismatch a and b
+    #[error("Id mismatch: {0:?} {1:?}")]
+    IdMismatch(surrealdb::sql::Thing, surrealdb::sql::Thing),
+    #[error("Actor kind mismatch: {0} {1}")]
+    ActorKindMismatch(Cow<'static, str>, Cow<'static, str>),
+}
+
+impl ActorError for SystemActorError {}
 
 /// The message frame that is sent between actors
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,7 +75,7 @@ impl Frame {
     }
 }
 
-pub type MessageStream = Pin<Box<dyn Stream<Item = Result<Frame, ActorError>> + Send>>;
+pub type MessageStream = Pin<Box<dyn Stream<Item = Result<Frame, SystemActorError>> + Send>>;
 
 /// Message handling behavior
 /// Actors implement this trait to handle messages
@@ -64,14 +89,14 @@ where
         &mut self,
         ctx: &mut ActorContext<Self>,
         message: &T,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>>;
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn reply(
         &mut self,
         ctx: &mut ActorContext<Self>,
         message: &T,
         frame: &Frame,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
             let response = self.handle(ctx, message).await?;
             ctx.reply::<Self, T>(frame, response.clone()).await?;
@@ -113,21 +138,27 @@ impl ActorId {
 
 /// Implement this trait to define an actor
 pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static + Debug {
+    type Error: ActorError;
+
     // Spawn a new actor
     fn spawn(
         engine: &Engine,
         id: &ActorId,
         actor: Self,
-    ) -> impl Future<Output = Result<ActorContext<Self>, ActorError>> {
+    ) -> impl Future<Output = Result<ActorContext<Self>, Self::Error>> {
         async move {
             // Check if the actor kind matches
             if id.kind != type_name::<Self>() {
-                return Err(ActorError::ActorKindMismatch(id.kind.clone(), type_name::<Self>().into()));
+                return Err(Self::Error::from(SystemActorError::ActorKindMismatch(
+                    id.kind.clone(),
+                    type_name::<Self>().into(),
+                )));
             }
 
             // Create actor record in the database
             let content = ActorRecord { id: id.id.clone(), kind: type_name::<Self>().into(), state: actor.clone() };
-            let _record: Vec<Record> = engine.db().create(DB_TABLE_ACTOR).content(content).await?;
+            let _record: Vec<Record> =
+                engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
             // Create and return the actor context
             let ctx = ActorContext::new(engine.clone(), id.clone(), actor);
@@ -136,7 +167,7 @@ pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static
     }
 
     // Start the actor
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>>;
+    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 /// Database record for an actor
@@ -161,7 +192,7 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Start the actor
-    pub async fn start(&mut self) -> Result<(), ActorError> {
+    pub async fn start(&mut self) -> Result<(), T::Error> {
         let mut actor = self.actor.clone();
         actor.start(self).await?;
         Ok(())
@@ -196,7 +227,7 @@ pub trait ActorModel {
         &self,
         message: T,
         to: &ActorId,
-    ) -> impl Future<Output = Result<(Thing, Thing, Frame), ActorError>>
+    ) -> impl Future<Output = Result<(Thing, Thing, Frame), SystemActorError>>
     where
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
@@ -238,7 +269,7 @@ pub trait ActorModel {
         }
     }
 
-    fn do_send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<(), ActorError>>
+    fn do_send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<(), SystemActorError>>
     where
         M: Message<T>,
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
@@ -249,7 +280,7 @@ pub trait ActorModel {
         }
     }
 
-    fn send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<M::Response, ActorError>>
+    fn send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<M::Response, SystemActorError>>
     where
         M: Message<T>,
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
@@ -260,7 +291,7 @@ pub trait ActorModel {
         }
     }
 
-    fn do_send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<(), ActorError>>
+    fn do_send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<(), SystemActorError>>
     where
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
@@ -271,7 +302,7 @@ pub trait ActorModel {
         }
     }
 
-    fn send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<R, ActorError>>
+    fn send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<R, SystemActorError>>
     where
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
@@ -283,14 +314,14 @@ pub trait ActorModel {
     }
 
     /// Wait for a reply to a sent message
-    fn wait_for_reply<R>(&self, reply_id: Thing) -> impl Future<Output = Result<R, ActorError>>
+    fn wait_for_reply<R>(&self, reply_id: Thing) -> impl Future<Output = Result<R, SystemActorError>>
     where
         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
     {
         async move {
             let mut stream = self.engine().db().select(reply_id).live().await?;
             let Some(notification) = stream.next().await else {
-                return Err(ActorError::LiveStream("Empty stream".into()));
+                return Err(SystemActorError::LiveStream("Empty stream".into()));
             };
             let notification: Notification<Frame> = notification?;
             let response = match notification.action {
@@ -299,7 +330,7 @@ pub trait ActorModel {
                     debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
                     Ok(data.msg.clone())
                 }
-                _ => Err(ActorError::LiveStream("Unexpected action".into())),
+                _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
             }?;
 
             let response = serde_json::from_value(response)?;
@@ -308,7 +339,7 @@ pub trait ActorModel {
     }
 
     /// Reply to a received message
-    fn reply<M, T>(&self, request: &Frame, message: M::Response) -> impl Future<Output = Result<(), ActorError>>
+    fn reply<M, T>(&self, request: &Frame, message: M::Response) -> impl Future<Output = Result<(), SystemActorError>>
     where
         M: Message<T>,
         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
@@ -321,7 +352,7 @@ pub trait ActorModel {
 
             // Assert request.rx == self, can only reply to messages sent to us
             if request.rx != self.id().id {
-                return Err(ActorError::IdMismatch(request.tx.clone(), self.id().id.clone()));
+                return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().id.clone()));
             }
 
             let reply = Frame {
@@ -340,7 +371,7 @@ pub trait ActorModel {
     }
 
     /// Receive messages for this actor
-    fn recv(&self) -> impl Future<Output = Result<MessageStream, ActorError>> {
+    fn recv(&self) -> impl Future<Output = Result<MessageStream, SystemActorError>> {
         async move {
             let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().id);
             debug!("[{}] msg-live {}", &self.id().id, &query);
@@ -381,7 +412,29 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use std::future::Future;
     use test_log::test;
-    use tracing::info;
+    use tracing::{error, info};
+
+    // Custom error types for PingActor and PongActor
+    // Not neccesary, just for illustration purposes
+    #[derive(Debug, thiserror::Error)]
+    enum PingActorError {
+        #[error("System error: {0}")]
+        System(#[from] SystemActorError),
+        #[error("Ping failed after {0} attempts")]
+        PingFailed(usize),
+    }
+
+    impl ActorError for PingActorError {}
+
+    #[derive(Debug, thiserror::Error)]
+    enum PongActorError {
+        #[error("System error: {0}")]
+        System(#[from] SystemActorError),
+        #[error("Pong limit reached")]
+        PongLimitReached,
+    }
+
+    impl ActorError for PongActorError {}
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct Ping;
@@ -394,19 +447,27 @@ mod tests {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct PingActor {
         pong_id: ActorId,
+        max_attempts: usize,
     }
 
     impl Actor for PingActor {
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+        type Error = PingActorError;
+
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
                 info!("{} Says hi!", ctx.id());
                 let pong_id = self.pong_id.clone();
+                let mut attempts = 0;
                 loop {
                     info!("{} Ping", ctx.id());
+                    attempts += 1;
                     let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id).await?;
                     info!("{} Pong {}", ctx.id(), pong.times);
                     if pong.times == 0 {
                         break;
+                    }
+                    if attempts >= self.max_attempts {
+                        return Err(PingActorError::PingFailed(attempts));
                     }
                 }
                 info!("{} Says bye!", ctx.id());
@@ -421,7 +482,9 @@ mod tests {
     }
 
     impl Actor for PongActor {
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+        type Error = PongActorError;
+
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
                 info!("{} Says hi!", ctx.id());
                 let mut stream = ctx.recv().await?;
@@ -447,14 +510,20 @@ mod tests {
             &mut self,
             _ctx: &mut ActorContext<Self>,
             _message: &Ping,
-        ) -> impl Future<Output = Result<Self::Response, ActorError>> {
-            self.times -= 1;
-            async move { Ok(Pong { times: self.times }) }
+        ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+            async move {
+                if self.times == 0 {
+                    Err(PongActorError::PongLimitReached)
+                } else {
+                    self.times -= 1;
+                    Ok(Pong { times: self.times })
+                }
+            }
         }
     }
 
     #[test(tokio::test)]
-    async fn test_actor_ping_pong() -> Result<(), ActorError> {
+    async fn test_actor_ping_pong() -> Result<(), Box<dyn std::error::Error>> {
         let engine = Engine::test().await?;
 
         // Create actor_ids for the ping and pong actors
@@ -462,7 +531,8 @@ mod tests {
         let ping_id = ActorId::of::<PingActor>("/ping");
 
         // Spawn the ping and pong actors
-        let mut ping_actor = Actor::spawn(&engine, &ping_id, PingActor { pong_id: pong_id.clone() }).await?;
+        let mut ping_actor =
+            Actor::spawn(&engine, &ping_id, PingActor { pong_id: pong_id.clone(), max_attempts: 5 }).await?;
         let mut pong_actor = Actor::spawn(&engine, &pong_id, PongActor { times: 3 }).await?;
 
         // Check health of the actors
@@ -473,10 +543,14 @@ mod tests {
 
         // Start the ping and pong actors
         let ping_handle = tokio::spawn(async move {
-            ping_actor.start().await.unwrap();
+            if let Err(e) = ping_actor.start().await {
+                error!("PingActor error: {}", e);
+            }
         });
         let pong_handle = tokio::spawn(async move {
-            pong_actor.start().await.unwrap();
+            if let Err(e) = pong_actor.start().await {
+                error!("PongActor error: {}", e);
+            }
         });
 
         // Wait for the ping and pong actors to finish
