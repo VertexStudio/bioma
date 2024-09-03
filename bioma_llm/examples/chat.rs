@@ -7,7 +7,7 @@ use tracing::{error, info};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MainActor {
-    llm_id: ActorId,
+    chat_id: ActorId,
     max_exchanges: usize,
 }
 
@@ -17,7 +17,7 @@ impl Actor for MainActor {
     fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             info!("{} Starting conversation with LLM", ctx.id());
-            let llm_id = self.llm_id.clone();
+            let chat_id = self.chat_id.clone();
             let mut exchanges = 0;
             let conversation_starters = vec![
                 "Hello! Can you tell me about the Rust programming language?",
@@ -32,7 +32,7 @@ impl Actor for MainActor {
 
                 info!("{} Sending message: {}", ctx.id(), starter);
                 let chat_message = ChatMessage::user(starter.to_string());
-                let response: ChatMessageResponse = ctx.send::<LLM, ChatMessage>(chat_message, &llm_id).await?;
+                let response: ChatMessageResponse = ctx.send::<Chat, ChatMessage>(chat_message, &chat_id).await?;
 
                 if let Some(assistant_message) = response.message {
                     info!("{} Received response: {}", ctx.id(), assistant_message.content);
@@ -44,7 +44,7 @@ impl Actor for MainActor {
 
             // Send exit message to LLM
             info!("{} Sending exit message to LLM", ctx.id());
-            ctx.do_send::<LLM, llm::SystemMessage>(llm::SystemMessage::Exit, &llm_id).await?;
+            ctx.do_send::<Chat, chat::SystemMessage>(chat::SystemMessage::Exit, &chat_id).await?;
 
             info!("{} Conversation ended", ctx.id());
             Ok(())
@@ -63,14 +63,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::test().await?;
 
     // Create actor IDs
-    let llm_id = ActorId::of::<LLM>("/llm");
+    let chat_id = ActorId::of::<Chat>("/llm");
     let main_id = ActorId::of::<MainActor>("/main");
 
-    // Spawn the LLM actor
-    let mut llm_actor = Actor::spawn(
+    // Spawn the chat actor
+    let mut chat_actor = Actor::spawn(
         &engine,
-        &llm_id,
-        LLM {
+        &chat_id,
+        Chat {
             model_name: "gemma2:2b".to_string(),
             generation_options: Default::default(),
             messages_number_limit: 10,
@@ -82,11 +82,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn the main actor
     let mut main_actor =
-        Actor::spawn(&engine, &main_id, MainActor { llm_id: llm_id.clone(), max_exchanges: 3 }).await?;
+        Actor::spawn(&engine, &main_id, MainActor { chat_id: chat_id.clone(), max_exchanges: 3 }).await?;
 
-    // Start the LLM actor
-    let llm_handle = tokio::spawn(async move {
-        if let Err(e) = llm_actor.start().await {
+    // Start the chat actor
+    let chat_handle = tokio::spawn(async move {
+        if let Err(e) = chat_actor.start().await {
             error!("LLM actor error: {}", e);
         }
     });
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Wait for both actors to finish
-    let _ = tokio::try_join!(llm_handle, main_handle);
+    let _ = tokio::try_join!(chat_handle, main_handle);
 
     // Export the database for debugging
     dbg_export_db!(engine);

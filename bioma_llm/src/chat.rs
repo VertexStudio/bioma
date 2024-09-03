@@ -12,7 +12,7 @@ use tracing::info;
 
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
-pub enum LLMError {
+pub enum ChatError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
     #[error("Ollama error: {0}")]
@@ -21,10 +21,10 @@ pub enum LLMError {
     OllamaNotInitialized,
 }
 
-impl ActorError for LLMError {}
+impl ActorError for ChatError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LLM {
+pub struct Chat {
     pub model_name: String,
     pub generation_options: GenerationOptions,
     pub messages_number_limit: usize,
@@ -33,18 +33,18 @@ pub struct LLM {
     pub ollama: Option<Ollama>,
 }
 
-impl Message<ChatMessage> for LLM {
+impl Message<ChatMessage> for Chat {
     type Response = ChatMessageResponse;
 
     fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
         message: &ChatMessage,
-    ) -> impl Future<Output = Result<ChatMessageResponse, LLMError>> {
+    ) -> impl Future<Output = Result<ChatMessageResponse, ChatError>> {
         async move {
             // Check if the ollama client is initialized
             let Some(ollama) = &self.ollama else {
-                return Err(LLMError::OllamaNotInitialized);
+                return Err(ChatError::OllamaNotInitialized);
             };
 
             // Add the user's message to the history
@@ -75,22 +75,22 @@ pub enum SystemMessage {
     Exit,
 }
 
-impl Message<SystemMessage> for LLM {
+impl Message<SystemMessage> for Chat {
     type Response = ();
 
     fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
         _message: &SystemMessage,
-    ) -> impl Future<Output = Result<(), LLMError>> {
+    ) -> impl Future<Output = Result<(), ChatError>> {
         async move { Ok(()) }
     }
 }
 
-impl Actor for LLM {
-    type Error = LLMError;
+impl Actor for Chat {
+    type Error = ChatError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), LLMError>> {
+    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ChatError>> {
         async move {
             info!("{} Started", ctx.id());
 
