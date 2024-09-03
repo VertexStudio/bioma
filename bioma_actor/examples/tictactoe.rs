@@ -48,7 +48,7 @@ impl Message<StartGame> for GameActor {
         &mut self,
         ctx: &mut ActorContext<Self>,
         _: &StartGame,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         let current_player = if self.current_player == PlayerType::X { &self.player_x } else { &self.player_o };
         let game_state =
             GameState { board: [None; 9], current_player: self.current_player, game_over: false, winner: None };
@@ -67,7 +67,7 @@ impl Message<GameResult> for GameActor {
         &mut self,
         ctx: &mut ActorContext<Self>,
         result: &GameResult,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
             info!("{} {:?}", ctx.id(), result);
             ctx.do_send::<PlayerActor, GameResult>(result.clone(), &self.player_x).await?;
@@ -78,7 +78,9 @@ impl Message<GameResult> for GameActor {
 }
 
 impl Actor for GameActor {
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+    type Error = SystemActorError;
+
+    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             info!("{} Started", ctx.id());
 
@@ -111,7 +113,7 @@ impl Message<GameState> for PlayerActor {
         &mut self,
         ctx: &mut ActorContext<Self>,
         state: &GameState,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         let player_type = self.player_type;
         let board = self.board.clone();
         let state = state.clone();
@@ -150,7 +152,7 @@ impl Message<GameResult> for PlayerActor {
         &mut self,
         ctx: &mut ActorContext<Self>,
         result: &GameResult,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
             match result.winner {
                 Some(winner) if winner == self.player_type => info!("{} Player {:?} wins!", ctx.id(), self.player_type),
@@ -163,7 +165,9 @@ impl Message<GameResult> for PlayerActor {
 }
 
 impl Actor for PlayerActor {
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+    type Error = SystemActorError;
+
+    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             info!("{} {:?} started", ctx.id(), self.player_type);
             let mut stream = ctx.recv().await?;
@@ -251,7 +255,7 @@ impl Message<MakeMove> for BoardActor {
         &mut self,
         ctx: &mut ActorContext<Self>,
         move_msg: &MakeMove,
-    ) -> impl Future<Output = Result<Self::Response, ActorError>> {
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
             info!("{} Received MakeMove: player {:?}, position {}", ctx.id(), move_msg.player, move_msg.position);
 
@@ -322,7 +326,9 @@ impl Message<MakeMove> for BoardActor {
 }
 
 impl Actor for BoardActor {
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+    type Error = SystemActorError;
+
+    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             info!("{} Started", ctx.id());
 
@@ -348,7 +354,9 @@ impl Actor for BoardActor {
 struct MainActor;
 
 impl Actor for MainActor {
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+    type Error = SystemActorError;
+
+    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             info!("{} Started", ctx.id());
             // Create actor IDs
@@ -440,7 +448,7 @@ impl Actor for MainActor {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), ActorError> {
+async fn main() -> Result<(), SystemActorError> {
     let filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
         Err(_) => tracing_subscriber::EnvFilter::new("info"),

@@ -52,14 +52,16 @@ mod tests {
             &mut self,
             ctx: &mut ActorContext<Self>,
             _msg: &BehaviorTick,
-        ) -> impl Future<Output = Result<BehaviorStatus, ActorError>> {
+        ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
             info!("{} {}", ctx.id(), self.node.fact);
             async move { Ok(BehaviorStatus::Success) }
         }
     }
 
     impl Actor for ActionBehavior<MockAction> {
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+        type Error = SystemActorError;
+
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
                 let mut stream = ctx.recv().await?;
                 while let Some(Ok(frame)) = stream.next().await {
@@ -85,7 +87,7 @@ mod tests {
             &mut self,
             ctx: &mut ActorContext<Self>,
             _msg: &BehaviorTick,
-        ) -> impl Future<Output = Result<BehaviorStatus, ActorError>> {
+        ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
             async move {
                 let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.child).await?;
                 Ok(status)
@@ -94,7 +96,9 @@ mod tests {
     }
 
     impl Actor for DecoratorBehavior<MockDecorator> {
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+        type Error = SystemActorError;
+
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
                 let mut stream = ctx.recv().await?;
                 while let Some(Ok(frame)) = stream.next().await {
@@ -120,7 +124,7 @@ mod tests {
             &mut self,
             ctx: &mut ActorContext<Self>,
             _msg: &BehaviorTick,
-        ) -> impl Future<Output = Result<BehaviorStatus, ActorError>> {
+        ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
             async move {
                 for child in &self.children {
                     let status: BehaviorStatus = ctx.send_as(BehaviorTick, child).await?;
@@ -132,7 +136,9 @@ mod tests {
     }
 
     impl Actor for CompositeBehavior<MockComposite> {
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+        type Error = SystemActorError;
+
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
                 let mut stream = ctx.recv().await?;
                 while let Some(Ok(frame)) = stream.next().await {
@@ -151,7 +157,9 @@ mod tests {
     }
 
     impl Actor for MainActor {
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), ActorError>> {
+        type Error = SystemActorError;
+
+        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
                 let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.root).await?;
                 info!("{} {:?}", ctx.id(), status);
@@ -161,7 +169,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_behavior_mock() -> Result<(), ActorError> {
+    async fn test_behavior_mock() -> Result<(), SystemActorError> {
         // Initialize the engine
         let engine = Engine::test().await?;
 
