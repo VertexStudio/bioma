@@ -24,10 +24,13 @@ pub enum SystemActorError {
     // IO error
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    // SurrealDB error
     #[error("Engine error: {0}")]
     EngineError(#[from] surrealdb::Error),
+    // Message are not of the same type
     #[error("MessageTypeMismatch: {0}")]
     MessageTypeMismatch(&'static str),
+    // LIVE query error
     #[error("LiveStream error: {0}")]
     LiveStream(Cow<'static, str>),
     // json_serde::Error
@@ -45,7 +48,7 @@ impl ActorError for SystemActorError {}
 /// The message frame that is sent between actors
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Frame {
-    /// Message id
+    /// Message id created with a ULID
     id: RecordId,
     /// Message name (usually a type name)
     pub name: Cow<'static, str>,
@@ -120,13 +123,6 @@ impl std::fmt::Display for ActorId {
         write!(f, "{}", &self.id)
     }
 }
-
-// impl surrealdb::opt::IntoResource<Result<RecordId, surrealdb::Error>> for ActorId {
-//     fn into_resource(self) -> Result<RecordId, surrealdb::Error> {
-//         let record_id = surrealdb::opt::Resource::RecordId(self.id);
-//         Ok(self.id)
-//     }
-// }
 
 impl ActorId {
     /// Create an actor id to reference some actor
