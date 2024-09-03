@@ -77,29 +77,32 @@ impl Frame {
 
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<Frame, SystemActorError>> + Send>>;
 
+pub trait MessageType: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync {}
+impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync {}
+
 /// Message handling behavior
 /// Actors implement this trait to handle messages
-pub trait Message<T>: Actor
+pub trait Message<MT>: Actor
 where
-    T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+    MT: MessageType,
 {
     type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
 
     fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
-        message: &T,
+        message: &MT,
     ) -> impl Future<Output = Result<Self::Response, Self::Error>>;
 
     fn reply(
         &mut self,
         ctx: &mut ActorContext<Self>,
-        message: &T,
+        message: &MT,
         frame: &Frame,
     ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
             let response = self.handle(ctx, message).await?;
-            ctx.reply::<Self, T>(frame, response.clone()).await?;
+            ctx.reply::<Self, MT>(frame, response.clone()).await?;
             Ok(response)
         }
     }
@@ -137,7 +140,7 @@ impl ActorId {
 }
 
 /// Implement this trait to define an actor
-pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static + Debug {
+pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static + Debug + Send + Sync {
     type Error: ActorError;
 
     // Spawn a new actor
@@ -179,16 +182,18 @@ pub struct ActorRecord<T: Actor> {
 }
 
 /// Context for an actor, that binds an actor to its engine
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ActorContext<T: Actor> {
     engine: Engine,
     id: ActorId,
+    #[allow(dead_code)]
+    inbox: Vec<Frame>,
     actor: T,
 }
 
 impl<T: Actor> ActorContext<T> {
     fn new(engine: Engine, id: ActorId, actor: T) -> Self {
-        Self { engine, id, actor }
+        Self { engine, id, inbox: Vec::new(), actor }
     }
 
     /// Start the actor
@@ -197,212 +202,403 @@ impl<T: Actor> ActorContext<T> {
         actor.start(self).await?;
         Ok(())
     }
-}
 
-impl<T: Actor> ActorModel for ActorContext<T> {
-    fn id(&self) -> &ActorId {
+    // async fn populate_inbox(&mut self) -> Result<(), SystemActorError> {
+    //     let query =
+    //         format!("SELECT * FROM {} WHERE rx = {} AND id NOT IN {}", DB_TABLE_MESSAGE, self.id.id, DB_TABLE_REPLY);
+    //     let mut res = self.engine.db().query(&query).await?;
+    //     let existing_messages: Vec<Frame> = res.take(0)?;
+    //     self.inbox.extend(existing_messages);
+    //     Ok(())
+    // }
+
+    /// Get the actor id
+    pub fn id(&self) -> &ActorId {
         &self.id
     }
 
-    fn engine(&self) -> &Engine {
+    /// Get the engine
+    pub fn engine(&self) -> &Engine {
         &self.engine
     }
-}
-
-/// Core functionality of a distributed actor
-pub trait ActorModel {
-    /// Get the actor id
-    fn id(&self) -> &ActorId;
-
-    /// Get the engine
-    fn engine(&self) -> &Engine;
 
     /// Check the health of the actor
-    fn health(&self) -> impl Future<Output = bool> {
-        async move { self.engine().health().await }
+    pub async fn health(&self) -> bool {
+        self.engine().health().await
     }
 
     /// Internal method to prepare and send a message
-    fn prepare_and_send_message<T>(
+    async fn prepare_and_send_message<MT>(
         &self,
-        message: T,
+        message: MT,
         to: &ActorId,
-    ) -> impl Future<Output = Result<(RecordId, RecordId, Frame), SystemActorError>>
+    ) -> Result<(RecordId, RecordId, Frame), SystemActorError>
     where
-        T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        MT: MessageType,
     {
-        async move {
-            let msg_value = serde_json::to_value(&message)?;
-            let name = type_name::<T>();
-            let msg_id = Id::ulid();
-            let request_id = RecordId::from_table_key(DB_TABLE_MESSAGE, msg_id.to_string());
-            let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, msg_id.to_string());
+        let msg_value = serde_json::to_value(&message)?;
+        let name = type_name::<MT>();
+        let msg_id = Id::ulid();
+        let request_id = RecordId::from_table_key(DB_TABLE_MESSAGE, msg_id.to_string());
+        let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, msg_id.to_string());
 
-            let request = Frame {
-                id: request_id.clone(),
-                name: name.into(),
-                tx: self.id().id.clone(),
-                rx: to.id.clone(),
-                msg: msg_value.clone(),
-            };
+        let request = Frame {
+            id: request_id.clone(),
+            name: name.into(),
+            tx: self.id().id.clone(),
+            rx: to.id.clone(),
+            msg: msg_value.clone(),
+        };
 
-            debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
+        debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
 
-            let msg_engine = self.engine().clone();
+        let msg_engine = self.engine().clone();
 
-            let task_request_id = request_id.clone();
-            let task_request = request.clone();
+        let task_request_id = request_id.clone();
+        let task_request = request.clone();
 
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(0)).await;
-                let msg_ids: Result<Vec<Record>, _> =
-                    msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
-                if let Ok(msg_ids) = msg_ids {
-                    let id = msg_ids[0].id.clone();
-                    if task_request_id != id {
-                        error!("msg-send {}", &task_request_id);
-                    }
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(0)).await;
+            let msg_ids: Result<Vec<Record>, _> = msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
+            if let Ok(msg_ids) = msg_ids {
+                let id = msg_ids[0].id.clone();
+                if task_request_id != id {
+                    error!("msg-send {}", &task_request_id);
                 }
-            });
+            }
+        });
 
-            Ok((request_id, reply_id, request))
-        }
+        Ok((request_id, reply_id, request))
     }
 
-    fn do_send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<(), SystemActorError>>
+    pub async fn do_send<M, MT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
-        M: Message<T>,
-        T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        M: Message<MT>,
+        MT: MessageType,
     {
-        async move {
-            let _ = self.prepare_and_send_message(message, to).await?;
-            Ok(())
-        }
+        let _ = self.prepare_and_send_message::<MT>(message, to).await?;
+        Ok(())
     }
 
-    fn send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<M::Response, SystemActorError>>
+    pub async fn send<M, MT>(&self, message: MT, to: &ActorId) -> Result<M::Response, SystemActorError>
     where
-        M: Message<T>,
-        T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        M: Message<MT>,
+        MT: MessageType,
     {
-        async move {
-            let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
-            self.wait_for_reply::<M::Response>(&reply_id).await
-        }
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(message, to).await?;
+        self.wait_for_reply::<M::Response>(&reply_id).await
     }
 
-    fn do_send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<(), SystemActorError>>
+    pub async fn do_send_as<MT, RT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
-        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
-        R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        MT: MessageType,
+        RT: MessageType,
     {
-        async move {
-            let (_, _, _) = self.prepare_and_send_message(message, to).await?;
-            Ok(())
-        }
+        let (_, _, _) = self.prepare_and_send_message(message, to).await?;
+        Ok(())
     }
 
-    fn send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<R, SystemActorError>>
+    pub async fn send_as<MT, RT>(&self, message: MT, to: &ActorId) -> Result<RT, SystemActorError>
     where
-        M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
-        R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        MT: MessageType,
+        RT: MessageType,
     {
-        async move {
-            let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
-            self.wait_for_reply::<R>(&reply_id).await
-        }
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(message, to).await?;
+        self.wait_for_reply::<RT>(&reply_id).await
     }
 
     /// Wait for a reply to a sent message
-    fn wait_for_reply<R>(&self, reply_id: &RecordId) -> impl Future<Output = Result<R, SystemActorError>>
+    async fn wait_for_reply<RT>(&self, reply_id: &RecordId) -> Result<RT, SystemActorError>
     where
-        R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        RT: MessageType,
     {
-        async move {
-            let mut stream = self.engine().db().select(reply_id).live().await?;
-            let Some(notification) = stream.next().await else {
-                return Err(SystemActorError::LiveStream("Empty stream".into()));
-            };
-            let notification: Notification<Frame> = notification?;
-            let response = match notification.action {
-                Action::Create => {
-                    let data = &notification.data;
-                    debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
-                    Ok(data.msg.clone())
-                }
-                _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
-            }?;
+        let mut stream = self.engine().db().select(reply_id).live().await?;
+        let Some(notification) = stream.next().await else {
+            return Err(SystemActorError::LiveStream("Empty stream".into()));
+        };
+        println!("notification: {:?}", notification);
+        let notification: Notification<Frame> = notification?;
+        let response = match notification.action {
+            Action::Create => {
+                let data = &notification.data;
+                debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
+                Ok(data.msg.clone())
+            }
+            _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
+        }?;
 
-            let response = serde_json::from_value(response)?;
-            Ok(response)
-        }
+        let response = serde_json::from_value(response)?;
+        Ok(response)
     }
 
     /// Reply to a received message
-    fn reply<M, T>(&self, request: &Frame, message: M::Response) -> impl Future<Output = Result<(), SystemActorError>>
+    async fn reply<M, MT>(&self, request: &Frame, message: M::Response) -> Result<(), SystemActorError>
     where
-        M: Message<T>,
-        T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+        M: Message<MT>,
+        MT: MessageType,
     {
-        async move {
-            let msg_value = serde_json::to_value(&message)?;
+        let msg_value = serde_json::to_value(&message)?;
 
-            // Use the request id as the reply id
-            let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
+        // Use the request id as the reply id
+        let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
 
-            // Assert request.rx == self, can only reply to messages sent to us
-            if request.rx != self.id().id {
-                return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().id.clone()));
-            }
-
-            let reply = Frame {
-                id: reply_id.clone(),
-                name: request.name.clone(),
-                tx: request.rx.clone(),
-                rx: request.tx.clone(),
-                msg: msg_value.clone(),
-            };
-
-            debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
-
-            let _entry: Vec<Record> = self.engine().db().create(DB_TABLE_REPLY).content(reply).await?;
-            Ok(())
+        // Assert request.rx == self, can only reply to messages sent to us
+        if request.rx != self.id().id {
+            return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().id.clone()));
         }
+
+        let reply = Frame {
+            id: reply_id.clone(),
+            name: request.name.clone(),
+            tx: request.rx.clone(),
+            rx: request.tx.clone(),
+            msg: msg_value.clone(),
+        };
+
+        debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
+
+        let _entry: Vec<Record> = self.engine().db().create(DB_TABLE_REPLY).content(reply).await?;
+        Ok(())
     }
 
     /// Receive messages for this actor
-    fn recv(&self) -> impl Future<Output = Result<MessageStream, SystemActorError>> {
-        async move {
-            let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().id);
-            debug!("[{}] msg-live {}", &self.id().id, &query);
-            let mut res = self.engine().db().query(&query).await?;
-            let live_query = res.stream::<Notification<Frame>>(0)?;
-            let self_id = self.id().clone();
-            let live_query = live_query
-                .filter(|item| {
-                    // Filter out non-create actions
-                    let should_filter =
-                        item.as_ref().ok().map(|notification| notification.action == Action::Create).unwrap_or(false);
-                    async move { should_filter }
-                })
-                // Map the notification to a frame
-                .map(|item| {
-                    let item = item?;
-                    Ok(item.data)
-                })
-                .inspect(move |item| match item {
-                    Ok(frame) => {
-                        debug!(
-                            "[{}] msg-recv {} {} {} -> {} {}",
-                            &self_id.id, &frame.name, &frame.id, &frame.tx, &frame.rx, &frame.msg
-                        );
-                    }
-                    Err(error) => debug!("msg-recv {} {:?}", self_id.id, error),
-                });
-            Ok(Box::pin(live_query) as MessageStream)
-        }
+    pub async fn recv(&self) -> Result<MessageStream, SystemActorError> {
+        let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().id);
+        debug!("[{}] msg-live {}", &self.id().id, &query);
+        let mut res = self.engine().db().query(&query).await?;
+        let live_query = res.stream::<Notification<Frame>>(0)?;
+        let self_id = self.id().clone();
+        let live_query = live_query
+            .filter(|item| {
+                // Filter out non-create actions
+                let should_filter =
+                    item.as_ref().ok().map(|notification| notification.action == Action::Create).unwrap_or(false);
+                async move { should_filter }
+            })
+            // Map the notification to a frame
+            .map(|item| {
+                let item = item?;
+                Ok(item.data)
+            })
+            .inspect(move |item| match item {
+                Ok(frame) => {
+                    debug!(
+                        "[{}] msg-recv {} {} {} -> {} {}",
+                        &self_id.id, &frame.name, &frame.id, &frame.tx, &frame.rx, &frame.msg
+                    );
+                }
+                Err(error) => debug!("msg-recv {} {:?}", self_id.id, error),
+            });
+        Ok(Box::pin(live_query) as MessageStream)
     }
 }
+
+// impl<T: Actor> ActorModel for ActorContext<T> {
+//     // fn id(&self) -> &ActorId {
+//     //     &self.id
+//     // }
+
+//     // fn engine(&self) -> &Engine {
+//     //     &self.engine
+//     // }
+// }
+
+// /// Core functionality of a distributed actor
+// pub trait ActorModel {
+//     /// Get the actor id
+//     fn id(&self) -> &ActorId;
+
+//     /// Get the engine
+//     fn engine(&self) -> &Engine;
+
+//     /// Check the health of the actor
+//     fn health(&self) -> impl Future<Output = bool> {
+//         async move { self.engine().health().await }
+//     }
+
+//     /// Internal method to prepare and send a message
+//     fn prepare_and_send_message<T>(
+//         &self,
+//         message: T,
+//         to: &ActorId,
+//     ) -> impl Future<Output = Result<(RecordId, RecordId, Frame), SystemActorError>>
+//     where
+//         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let msg_value = serde_json::to_value(&message)?;
+//             let name = type_name::<T>();
+//             let msg_id = Id::ulid();
+//             let request_id = RecordId::from_table_key(DB_TABLE_MESSAGE, msg_id.to_string());
+//             let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, msg_id.to_string());
+
+//             let request = Frame {
+//                 id: request_id.clone(),
+//                 name: name.into(),
+//                 tx: self.id().id.clone(),
+//                 rx: to.id.clone(),
+//                 msg: msg_value.clone(),
+//                 reply_to: None,
+//             };
+
+//             debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
+
+//             let msg_engine = self.engine().clone();
+
+//             let task_request_id = request_id.clone();
+//             let task_request = request.clone();
+
+//             tokio::spawn(async move {
+//                 tokio::time::sleep(std::time::Duration::from_secs(0)).await;
+//                 let msg_ids: Result<Vec<Record>, _> =
+//                     msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
+//                 if let Ok(msg_ids) = msg_ids {
+//                     let id = msg_ids[0].id.clone();
+//                     if task_request_id != id {
+//                         error!("msg-send {}", &task_request_id);
+//                     }
+//                 }
+//             });
+
+//             Ok((request_id, reply_id, request))
+//         }
+//     }
+
+//     fn do_send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<(), SystemActorError>>
+//     where
+//         M: Message<T>,
+//         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let _ = self.prepare_and_send_message(message, to).await?;
+//             Ok(())
+//         }
+//     }
+
+//     fn send<M, T>(&self, message: T, to: &ActorId) -> impl Future<Output = Result<M::Response, SystemActorError>>
+//     where
+//         M: Message<T>,
+//         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
+//             self.wait_for_reply::<M::Response>(&reply_id).await
+//         }
+//     }
+
+//     fn do_send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<(), SystemActorError>>
+//     where
+//         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let (_, _, _) = self.prepare_and_send_message(message, to).await?;
+//             Ok(())
+//         }
+//     }
+
+//     fn send_as<M, R>(&self, message: M, to: &ActorId) -> impl Future<Output = Result<R, SystemActorError>>
+//     where
+//         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let (_, reply_id, _) = self.prepare_and_send_message(message, to).await?;
+//             self.wait_for_reply::<R>(&reply_id).await
+//         }
+//     }
+
+//     /// Wait for a reply to a sent message
+//     fn wait_for_reply<R>(&self, reply_id: &RecordId) -> impl Future<Output = Result<R, SystemActorError>>
+//     where
+//         R: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let mut stream = self.engine().db().select(reply_id).live().await?;
+//             let Some(notification) = stream.next().await else {
+//                 return Err(SystemActorError::LiveStream("Empty stream".into()));
+//             };
+//             let notification: Notification<Frame> = notification?;
+//             let response = match notification.action {
+//                 Action::Create => {
+//                     let data = &notification.data;
+//                     debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
+//                     Ok(data.msg.clone())
+//                 }
+//                 _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
+//             }?;
+
+//             let response = serde_json::from_value(response)?;
+//             Ok(response)
+//         }
+//     }
+
+//     /// Reply to a received message
+//     fn reply<M, T>(&self, request: &Frame, message: M::Response) -> impl Future<Output = Result<(), SystemActorError>>
+//     where
+//         M: Message<T>,
+//         T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync,
+//     {
+//         async move {
+//             let msg_value = serde_json::to_value(&message)?;
+
+//             // Use the request id as the reply id
+//             let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, Id::ulid().to_string());
+
+//             // Assert request.rx == self, can only reply to messages sent to us
+//             if request.rx != self.id().id {
+//                 return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().id.clone()));
+//             }
+
+//             let reply = Frame {
+//                 id: reply_id.clone(),
+//                 name: request.name.clone(),
+//                 tx: request.rx.clone(),
+//                 rx: request.tx.clone(),
+//                 msg: msg_value.clone(),
+//                 reply_to: Some(request.id.clone()),
+//             };
+
+//             debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
+
+//             let _entry: Vec<Record> = self.engine().db().create(DB_TABLE_REPLY).content(reply).await?;
+//             Ok(())
+//         }
+//     }
+
+//     /// Receive messages for this actor
+//     fn recv(&self) -> impl Future<Output = Result<MessageStream, SystemActorError>> {
+//         async move {
+//             let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().id);
+//             debug!("[{}] msg-live {}", &self.id().id, &query);
+//             let mut res = self.engine().db().query(&query).await?;
+//             let live_query = res.stream::<Notification<Frame>>(0)?;
+//             let self_id = self.id().clone();
+//             let live_query = live_query
+//                 .filter(|item| {
+//                     // Filter out non-create actions
+//                     let should_filter =
+//                         item.as_ref().ok().map(|notification| notification.action == Action::Create).unwrap_or(false);
+//                     async move { should_filter }
+//                 })
+//                 // Map the notification to a frame
+//                 .map(|item| {
+//                     let item = item?;
+//                     Ok(item.data)
+//                 })
+//                 .inspect(move |item| match item {
+//                     Ok(frame) => {
+//                         debug!(
+//                             "[{}] msg-recv {} {} {} -> {} {}",
+//                             &self_id.id, &frame.name, &frame.id, &frame.tx, &frame.rx, &frame.msg
+//                         );
+//                     }
+//                     Err(error) => debug!("msg-recv {} {:?}", self_id.id, error),
+//                 });
+//             Ok(Box::pin(live_query) as MessageStream)
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
