@@ -40,6 +40,7 @@ impl Engine {
         db.connect(address).await?;
         db.signin(Root { username: "root", password: "root" }).await?;
         db.use_ns("N").use_db("D").await?;
+        Engine::define(&db).await?;
         Ok(Engine { db: Box::new(db) })
     }
 
@@ -47,11 +48,20 @@ impl Engine {
         let db: Surreal<Any> = Surreal::init();
         db.connect("memory").await?;
         db.use_ns("N").use_db("D").await?;
+        Engine::define(&db).await?;
         Ok(Engine { db: Box::new(db) })
     }
 
     pub async fn health(&self) -> bool {
         self.db.health().await.is_ok()
+    }
+
+    async fn define(db: &Surreal<Any>) -> Result<(), SystemActorError> {
+        // load the surreal definition file
+        // let def = std::fs::read_to_string("assets/surreal/def.surql").unwrap();
+        let def = include_str!("../../assets/surreal/def.surql").parse::<String>().unwrap();
+        db.query(&def).await?;
+        Ok(())
     }
 }
 

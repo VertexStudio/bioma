@@ -1,7 +1,7 @@
 mod actor;
 mod engine;
 
-pub use actor::Frame;
+pub use actor::FrameMessage;
 
 pub mod prelude {
     pub use futures::{Future, StreamExt};
