@@ -1,0 +1,1 @@
+SELECT * FROM message WHERE ->message_replies[0].out = NONE AND rx = $rx

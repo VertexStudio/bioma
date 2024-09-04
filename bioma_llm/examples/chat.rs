@@ -91,6 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Start the main actor
     let main_handle = tokio::spawn(async move {
         if let Err(e) = main_actor.start().await {

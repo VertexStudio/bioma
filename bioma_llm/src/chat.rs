@@ -8,7 +8,7 @@ use ollama_rs::{
     Ollama,
 };
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{error, info};
 
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
@@ -99,7 +99,10 @@ impl Actor for Chat {
             let mut stream = ctx.recv().await?;
             while let Some(Ok(frame)) = stream.next().await {
                 if let Some(chat_message) = frame.is::<ChatMessage>() {
-                    self.reply(ctx, &chat_message, &frame).await?;
+                    let response = self.reply(ctx, &chat_message, &frame).await;
+                    if let Err(err) = response {
+                        error!("{} {:?}", ctx.id(), err);
+                    }
                 } else if let Some(sys_msg) = frame.is::<SystemMessage>() {
                     self.reply(ctx, &sys_msg, &frame).await?;
                     match sys_msg {
