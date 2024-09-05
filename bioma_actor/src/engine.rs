@@ -14,12 +14,12 @@ macro_rules! dbg_export_db {
             .unwrap_or_else(|| std::path::PathBuf::from("."));
 
         let output_dir = workspace_root.join("output").join("db");
-        std::fs::create_dir_all(&output_dir)?;
+        std::fs::create_dir_all(&output_dir).unwrap();
 
         let file_name = format!("dbg_{}_{}", file!().replace("/", "_").replace(".", "_"), line!());
         let file_path = output_dir.join(format!("{}.surql", file_name));
 
-        $engine.db().export(file_path.to_str().unwrap()).await?
+        $engine.db().export(file_path.to_str().unwrap()).await.unwrap();
     }};
 }
 
