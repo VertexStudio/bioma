@@ -197,7 +197,7 @@ pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static
 
             // Create actor record in the database
             let content = ActorRecord { id: id.id.clone(), kind: type_name::<Self>().into(), state: actor.clone() };
-            let _record: Vec<Record> =
+            let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
             // Create and return the actor context
@@ -293,14 +293,15 @@ impl<T: Actor> ActorContext<T> {
 
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(0)).await;
-            let msg_ids: Result<Vec<Record>, _> = msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
-            if let Ok(msg_ids) = msg_ids {
-                let id = msg_ids[0].id.clone();
+            let msg_id: Result<Option<Record>, _> =
+                msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
+            if let Ok(Some(msg_id)) = msg_id {
+                let id = msg_id.id.clone();
                 if task_request_id != id {
                     error!("msg-send {}", &task_request_id);
                 }
             } else {
-                error!("msg-send {:?}", msg_ids);
+                error!("msg-send {:?}", msg_id);
             }
         });
 
