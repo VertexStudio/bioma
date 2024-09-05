@@ -60,6 +60,11 @@ cargo run --release -p bioma_actor --example tictactoe
 ```bash
 cargo run --release -p bioma_llm --example chat
 ```
+
 ```bash
 cargo run --release -p bioma_llm --example rerank
+```
+
+```bash
+cargo run --release -p bioma_llm --example embeddings
 ```
