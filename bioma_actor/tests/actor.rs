@@ -195,7 +195,8 @@ async fn test_actor_lifecycle() -> Result<(), TestActorError> {
 
     // Try to send a message to the terminated actor
     let message = TestMessage { content: "After termination".to_string() };
-    let result = bridge_actor.send::<TestActor, TestMessage>(message, &test_actor_id, SendOptions::default()).await;
+    let options = SendOptions::builder().timeout(Duration::from_secs(1)).build();
+    let result = bridge_actor.send::<TestActor, TestMessage>(message, &test_actor_id, options).await;
     info!("{:?}", result);
     assert!(result.is_err());
 
