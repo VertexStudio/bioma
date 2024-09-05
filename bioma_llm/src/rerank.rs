@@ -74,4 +74,3 @@ impl Actor for Rerank {
         }
     }
 }
-

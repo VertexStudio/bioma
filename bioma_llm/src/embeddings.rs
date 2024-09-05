@@ -56,23 +56,6 @@ impl Message<GenerateEmbeddings> for Embeddings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SystemMessage {
-    Exit,
-}
-
-impl Message<SystemMessage> for Embeddings {
-    type Response = ();
-
-    fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        _message: &SystemMessage,
-    ) -> impl Future<Output = Result<(), EmbeddingsError>> {
-        async move { Ok(()) }
-    }
-}
-
 impl Actor for Embeddings {
     type Error = EmbeddingsError;
 
@@ -88,11 +71,6 @@ impl Actor for Embeddings {
                     let response = self.reply(ctx, &input, &frame).await;
                     if let Err(err) = response {
                         error!("{} {:?}", ctx.id(), err);
-                    }
-                } else if let Some(sys_msg) = frame.is::<SystemMessage>() {
-                    self.reply(ctx, &sys_msg, &frame).await?;
-                    match sys_msg {
-                        SystemMessage::Exit => break,
                     }
                 }
             }
