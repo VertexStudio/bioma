@@ -32,7 +32,8 @@ impl Actor for MainActor {
 
                 info!("{} Sending message: {}", ctx.id(), starter);
                 let chat_message = ChatMessage::user(starter.to_string());
-                let response: ChatMessageResponse = ctx.send::<Chat, ChatMessage>(chat_message, &chat_id).await?;
+                let response: ChatMessageResponse =
+                    ctx.send::<Chat, ChatMessage>(chat_message, &chat_id, SendOptions::default()).await?;
 
                 if let Some(assistant_message) = response.message {
                     info!("{} Received response: {}", ctx.id(), assistant_message.content);
