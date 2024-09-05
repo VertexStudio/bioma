@@ -89,7 +89,7 @@ mod tests {
             _msg: &BehaviorTick,
         ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
             async move {
-                let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.child).await?;
+                let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.child, SendOptions::default()).await?;
                 Ok(status)
             }
         }
@@ -127,7 +127,7 @@ mod tests {
         ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
             async move {
                 for child in &self.children {
-                    let status: BehaviorStatus = ctx.send_as(BehaviorTick, child).await?;
+                    let status: BehaviorStatus = ctx.send_as(BehaviorTick, child, SendOptions::default()).await?;
                     info!("{} {} {:?}", ctx.id(), child, status);
                 }
                 Ok(BehaviorStatus::Success)
@@ -161,7 +161,7 @@ mod tests {
 
         fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
             async move {
-                let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.root).await?;
+                let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.root, SendOptions::default()).await?;
                 info!("{} {:?}", ctx.id(), status);
                 Ok(())
             }

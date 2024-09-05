@@ -1,4 +1,5 @@
 use crate::engine::Engine;
+use bon::builder;
 use derive_more::Display;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,8 @@ pub enum SystemActorError {
     // Message reply error
     #[error("Message reply error: {0}")]
     MessageReply(Cow<'static, str>),
+    #[error("Message timeout after {0:?}")]
+    MessageTimeout(std::time::Duration),
 }
 
 impl ActorError for SystemActorError {}
@@ -126,6 +129,17 @@ where
             ctx.reply::<Self, MT>(frame, &response).await?;
             response
         }
+    }
+}
+
+#[builder]
+pub struct SendOptions {
+    timeout: std::time::Duration,
+}
+
+impl Default for SendOptions {
+    fn default() -> Self {
+        Self { timeout: std::time::Duration::from_secs(10) }
     }
 }
 
@@ -302,13 +316,18 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Send a message to an actor and wait for a reply
-    pub async fn send<M, MT>(&self, message: MT, to: &ActorId) -> Result<M::Response, SystemActorError>
+    pub async fn send<M, MT>(
+        &self,
+        message: MT,
+        to: &ActorId,
+        options: SendOptions,
+    ) -> Result<M::Response, SystemActorError>
     where
         M: Message<MT>,
         MT: MessageType,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(message, to).await?;
-        self.wait_for_reply::<M::Response>(&reply_id).await
+        self.wait_for_reply::<M::Response>(&reply_id, options).await
     }
 
     /// Send a message to an actor without waiting for a reply
@@ -322,24 +341,27 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Send a message to an actor and wait for a reply
-    pub async fn send_as<MT, RT>(&self, message: MT, to: &ActorId) -> Result<RT, SystemActorError>
+    pub async fn send_as<MT, RT>(&self, message: MT, to: &ActorId, options: SendOptions) -> Result<RT, SystemActorError>
     where
         MT: MessageType,
         RT: MessageType,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(message, to).await?;
-        self.wait_for_reply::<RT>(&reply_id).await
+        self.wait_for_reply::<RT>(&reply_id, options).await
     }
 
     /// Wait for a reply to a sent message
-    async fn wait_for_reply<RT>(&self, reply_id: &RecordId) -> Result<RT, SystemActorError>
+    async fn wait_for_reply<RT>(&self, reply_id: &RecordId, options: SendOptions) -> Result<RT, SystemActorError>
     where
         RT: MessageType,
     {
         let mut stream = self.engine().db().select(reply_id).live().await?;
-        let Some(notification) = stream.next().await else {
-            return Err(SystemActorError::LiveStream("Empty stream".into()));
-        };
+
+        let notification = tokio::time::timeout(options.timeout, stream.next())
+            .await
+            .map_err(|_| SystemActorError::MessageTimeout(options.timeout))?
+            .ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
+
         let notification: Notification<FrameReply> = notification?;
         let response = match notification.action {
             Action::Create => {
@@ -519,7 +541,7 @@ mod tests {
                 loop {
                     info!("{} Ping", ctx.id());
                     attempts += 1;
-                    let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id).await?;
+                    let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
                     info!("{} Pong {}", ctx.id(), pong.times);
                     if pong.times == 0 {
                         break;
