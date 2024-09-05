@@ -1,6 +1,5 @@
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
-use ollama_rs::generation::chat::{ChatMessage, ChatMessageResponse};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use tracing::{error, info};
