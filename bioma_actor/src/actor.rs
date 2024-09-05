@@ -48,6 +48,8 @@ pub enum SystemActorError {
     MessageReply(Cow<'static, str>),
     #[error("Message timeout after {0:?}")]
     MessageTimeout(std::time::Duration),
+    #[error("Tasked timeout after {0:?}")]
+    TaskTimeout(std::time::Duration),
 }
 
 impl ActorError for SystemActorError {}
