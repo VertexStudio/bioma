@@ -16,6 +16,7 @@ const DB_TABLE_ACTOR: &str = "actor";
 const DB_TABLE_MESSAGE: &str = "message";
 const DB_TABLE_REPLY: &str = "reply";
 
+/// Implement this trait to define custom actor error types
 pub trait ActorError: std::error::Error + Debug + Send + Sync + 'static + From<SystemActorError> {}
 
 /// Enumerates the types of errors that can occur in Actor framework
@@ -41,6 +42,9 @@ pub enum SystemActorError {
     IdMismatch(RecordId, RecordId),
     #[error("Actor kind mismatch: {0} {1}")]
     ActorKindMismatch(Cow<'static, str>, Cow<'static, str>),
+    // Message reply error
+    #[error("Message reply error: {0}")]
+    MessageReply(Cow<'static, str>),
 }
 
 impl ActorError for SystemActorError {}
@@ -88,6 +92,8 @@ pub struct FrameReply {
     pub rx: RecordId,
     /// Message content
     pub msg: Value,
+    /// Error message
+    pub err: Value,
 }
 
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<FrameMessage, SystemActorError>> + Send>>;
@@ -116,9 +122,9 @@ where
         frame: &FrameMessage,
     ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
-            let response = self.handle(ctx, message).await?;
-            ctx.reply::<Self, MT>(frame, response.clone()).await?;
-            Ok(response)
+            let response = self.handle(ctx, message).await;
+            ctx.reply::<Self, MT>(frame, &response).await?;
+            response
         }
     }
 }
@@ -285,6 +291,7 @@ impl<T: Actor> ActorContext<T> {
         Ok((request_id, reply_id, request))
     }
 
+    /// Send a message to an actor without waiting for a reply
     pub async fn do_send<M, MT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
         M: Message<MT>,
@@ -294,6 +301,7 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
+    /// Send a message to an actor and wait for a reply
     pub async fn send<M, MT>(&self, message: MT, to: &ActorId) -> Result<M::Response, SystemActorError>
     where
         M: Message<MT>,
@@ -303,6 +311,7 @@ impl<T: Actor> ActorContext<T> {
         self.wait_for_reply::<M::Response>(&reply_id).await
     }
 
+    /// Send a message to an actor without waiting for a reply
     pub async fn do_send_as<MT, RT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
         MT: MessageType,
@@ -312,6 +321,7 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
+    /// Send a message to an actor and wait for a reply
     pub async fn send_as<MT, RT>(&self, message: MT, to: &ActorId) -> Result<RT, SystemActorError>
     where
         MT: MessageType,
@@ -335,22 +345,32 @@ impl<T: Actor> ActorContext<T> {
             Action::Create => {
                 let data = &notification.data;
                 debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
-                Ok(data.msg.clone())
+                Ok(data.clone())
             }
             _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
         }?;
 
-        let response = serde_json::from_value(response)?;
+        if response.err != serde_json::Value::Null {
+            return Err(SystemActorError::MessageReply(response.err.to_string().into()));
+        }
+        let response = serde_json::from_value(response.msg)?;
         Ok(response)
     }
 
     /// Reply to a received message
-    async fn reply<M, MT>(&self, request: &FrameMessage, message: M::Response) -> Result<(), SystemActorError>
+    async fn reply<M, MT>(
+        &self,
+        request: &FrameMessage,
+        message: &Result<M::Response, T::Error>,
+    ) -> Result<(), SystemActorError>
     where
         M: Message<MT>,
         MT: MessageType,
     {
-        let msg_value = serde_json::to_value(&message)?;
+        let (msg_value, err_value) = match message {
+            Ok(msg) => (serde_json::to_value(&msg)?, serde_json::Value::Null),
+            Err(err) => (serde_json::Value::Null, serde_json::to_value(&err.to_string())?),
+        };
 
         // Use the request id as the reply id
         let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
@@ -366,6 +386,7 @@ impl<T: Actor> ActorContext<T> {
             tx: request.rx.clone(),
             rx: request.tx.clone(),
             msg: msg_value.clone(),
+            err: err_value.clone(),
         };
 
         debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
@@ -424,6 +445,20 @@ impl<T: Actor> ActorContext<T> {
         Ok(Box::pin(chained_stream))
 
         // Ok(Box::pin(live_query) as MessageStream)
+    }
+}
+
+/// A bridge actor that sends messages to another actor from outside the actor system
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BridgeActor;
+
+impl Actor for BridgeActor {
+    type Error = SystemActorError;
+
+    fn start(&mut self, _ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
+        async move {
+            panic!("BridgeActor should not be started");
+        }
     }
 }
 
