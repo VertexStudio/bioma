@@ -464,8 +464,14 @@ async fn main() -> Result<(), SystemActorError> {
     // Setup the main actor
     let mut main_actor = Actor::spawn(&engine, &ActorId::of::<MainActor>("/main"), MainActor).await?;
 
-    // Start the main actor
-    main_actor.start().await?;
+    // Start the main actor with a timeout
+    // and wait for the main actor to finish or timeout after 10 seconds
+    let main_timeout = std::time::Duration::from_secs(10);
+    let main_actor_handle = main_actor.start();
+
+    let _result = tokio::time::timeout(main_timeout, main_actor_handle)
+        .await
+        .map_err(|_| SystemActorError::TaskTimeout(main_timeout))?;
 
     // Export the database for debugging
     dbg_export_db!(engine);
