@@ -21,6 +21,7 @@ jsonpath-rust = "0.5"
 tracing = "0.1"
 
 bioma_derive = { path = "../bioma_derive" }
+rerun = "0.18.2"
 
 [dev-dependencies]
 test-log = { version = "0.2", default-features = false, features = [
