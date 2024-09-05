@@ -26,7 +26,7 @@ impl ActorError for ChatError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chat {
     pub model_name: String,
-    pub generation_options: GenerationOptions,
+    pub generation_options: Option<GenerationOptions>,
     pub messages_number_limit: usize,
     pub history: Vec<ChatMessage>,
     #[serde(skip)]
@@ -55,10 +55,13 @@ impl Message<ChatMessage> for Chat {
                 self.history.drain(..self.history.len() - self.messages_number_limit);
             }
 
+            let mut chat_message_request = ChatMessageRequest::new(self.model_name.clone(), self.history.clone());
+            if let Some(generation_options) = &self.generation_options {
+                chat_message_request = chat_message_request.options(generation_options.clone());
+            }
+
             // Send the messages to the ollama client
-            let result = ollama
-                .send_chat_messages(ChatMessageRequest::new(self.model_name.clone(), self.history.clone()))
-                .await?;
+            let result = ollama.send_chat_messages(chat_message_request).await?;
 
             // Add the assistant's message to the history
             if let Some(message) = &result.message {
