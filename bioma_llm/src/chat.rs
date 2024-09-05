@@ -73,23 +73,6 @@ impl Message<ChatMessage> for Chat {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SystemMessage {
-    Exit,
-}
-
-impl Message<SystemMessage> for Chat {
-    type Response = ();
-
-    fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        _message: &SystemMessage,
-    ) -> impl Future<Output = Result<(), ChatError>> {
-        async move { Ok(()) }
-    }
-}
-
 impl Actor for Chat {
     type Error = ChatError;
 
@@ -105,11 +88,6 @@ impl Actor for Chat {
                     let response = self.reply(ctx, &chat_message, &frame).await;
                     if let Err(err) = response {
                         error!("{} {:?}", ctx.id(), err);
-                    }
-                } else if let Some(sys_msg) = frame.is::<SystemMessage>() {
-                    self.reply(ctx, &sys_msg, &frame).await?;
-                    match sys_msg {
-                        SystemMessage::Exit => break,
                     }
                 }
             }
