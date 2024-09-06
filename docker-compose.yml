@@ -14,89 +14,25 @@ services:
     ports:
       - "11434:11434"
     networks:
-      - vv-network
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "bash",
-          "-c",
-          "cat < /dev/null > /dev/tcp/localhost/11434"
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      - bioma-network
 
   surrealdb:
-    image: surrealdb/surrealdb:latest
+    image: surrealdb/surrealdb:v2.0.0-beta.2
     container_name: surrealdb
-    command: start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root file:/data/hme.db
+    command: start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root file:/data/bioma.db
     user: "1000:1000"
     volumes:
       - surreal_data:/data
     ports:
       - "9123:9123"
-    depends_on:
-      - ollama
     networks:
-      - vv-network
-
-  vv-agents:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: vv-agents
-    volumes:
-      - veoveo_data:/data
-    ports:
-      - "7123:7123"
-    depends_on:
-      - surrealdb
-      - ollama
-    environment:
-      - SURREALDB_URL=surrealdb:9123
-      - RUST_BACKTRACE=1
-      - RUST_LOG=info
-    working_dir: /app
-    command: ./vv_agents
-    networks:
-      - vv-network
+      - bioma-network
 
   init-volume:
     image: busybox
     volumes:
       - surreal_data:/data
     command: chown -R 1000:1000 /data
-
-  model-pull-nomic-embed-text:
-    image: curlimages/curl:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: >
-      curl -X POST http://ollama:11434/api/pull -d '{"name":"nomic-embed-text"}'
-    networks:
-      - vv-network
-
-  model-pull-starcoder2-3b:
-    image: curlimages/curl:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: >
-      curl -X POST http://ollama:11434/api/pull -d '{"name":"starcoder2:3b"}'
-    networks:
-      - vv-network
-
-  model-pull-llama3.1:
-    image: curlimages/curl:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: >
-      curl -X POST http://ollama:11434/api/pull -d '{"name":"llama3.1"}'
-    networks:
-      - vv-network
 
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:1.5
@@ -114,25 +50,7 @@ services:
     ports:
       - "9124:80"
     networks:
-      - vv-network
-
-  text-embeddings:
-    image: ghcr.io/huggingface/text-embeddings-inference:1.5
-    container_name: text-embeddings
-    command: --model-id nomic-ai/nomic-embed-text-v1.5
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
-    volumes:
-      - text_embeddings_data:/data
-    ports:
-      - "9125:80"
-    networks:
-      - vv-network
+      - bioma-network
 
 volumes:
   ollama_data:
@@ -142,5 +60,5 @@ volumes:
   text_embeddings_data:
 
 networks:
-  vv-network:
+  bioma-network:
     driver: bridge
