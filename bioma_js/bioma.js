@@ -53,7 +53,7 @@ class BiomaInterface {
 
         try {
             await this.db.create(recordId, frame);
-            console.log(`Message sent to Bioma actor ${rx}`);
+            console.log(`Message sent to: ${rx.id}`);
             return messageId;
         } catch (error) {
             console.error('Failed to send message to Bioma actor:', error);

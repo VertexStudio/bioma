@@ -4,8 +4,6 @@ const BiomaInterface = require('./bioma');
 
 const bioma = new BiomaInterface();
 
-
-
 async function main() {
 
     await bioma.connect();
