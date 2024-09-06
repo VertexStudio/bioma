@@ -10,7 +10,7 @@
 /// To send a message from js, in a separate terminal:
 ///     cd bioma_js
 ///     npm install
-///     node bioma.testjs
+///     node bioma.test.js
 ///
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
