@@ -1,14 +1,18 @@
-const { Surreal } = require('surrealdb.js');
-const crypto = require('crypto');
+const { Surreal, RecordId } = require('surrealdb');
+const { ulid } = require('ulid');
 
 class BiomaInterface {
     constructor() {
         this.db = new Surreal();
     }
 
-    async connect(url = 'http://127.0.0.1:9123/rpc', namespace = 'test', database = 'test') {
+    async connect(url = 'ws://127.0.0.1:9123', namespace = 'dev', database = 'bioma', user = 'root', password = 'root') {
         try {
             await this.db.connect(url);
+            await this.db.signin({
+                username: user,
+                password: password,
+            });
             await this.db.use({ namespace, database });
             console.log('Connected to Bioma SurrealDB');
         } catch (error) {
@@ -25,19 +29,31 @@ class BiomaInterface {
         }
     }
 
-    async sendMessage(actorId, message) {
-        const messageId = crypto.randomUUID();
+    createActorId(id, kind) {
+        return {
+            id: new RecordId('actor', id),
+            kind: kind
+        }
+    }
+
+    async createActor(id) {
+        const actor = await this.db.create('actor', id);
+        return actor;
+    }
+
+    async sendMessage(tx, rx, name, message) {
+        const messageId = ulid();
+        const recordId = new RecordId('message', messageId);
         const frame = {
-            id: `message:${messageId}`,
-            name: message.constructor.name,
-            tx: 'interface:js',
-            rx: actorId,
+            name: name,
+            tx: tx.id,
+            rx: rx.id,
             msg: message
         };
 
         try {
-            await this.db.create('message', frame);
-            console.log(`Message sent to Bioma actor ${actorId}`);
+            await this.db.create(recordId, frame);
+            console.log(`Message sent to Bioma actor ${rx}`);
             return messageId;
         } catch (error) {
             console.error('Failed to send message to Bioma actor:', error);
@@ -45,37 +61,26 @@ class BiomaInterface {
         }
     }
 
-    async waitForReply(messageId) {
-        const query = `
-            LIVE SELECT * FROM reply 
-            WHERE id = $replyId
-        `;
+    async waitForReply(messageId, maxWaitTime = 10000) {
+        const recordId = new RecordId('reply', messageId);
+        let waitTime = 0;
+        let sleepTime = 100;  // Start with a 100ms sleep
 
-        try {
-            const stream = await this.db.query(query, { replyId: `reply:${messageId}` });
-            return new Promise((resolve, reject) => {
-                stream.on('data', (data) => {
-                    if (data.result && data.result.length > 0) {
-                        const reply = data.result[0];
-                        console.log(`Received reply from Bioma:`, reply);
-                        stream.unsubscribe();
-                        resolve(reply.msg);
-                    }
-                });
-                stream.on('error', (error) => {
-                    console.error('Error waiting for Bioma reply:', error);
-                    reject(error);
-                });
-            });
-        } catch (error) {
-            console.error('Failed to set up live query for Bioma reply:', error);
-            throw error;
+        while (waitTime < maxWaitTime) {
+            await new Promise(resolve => setTimeout(resolve, sleepTime));
+            waitTime += sleepTime;
+            sleepTime = Math.min(sleepTime * 2, 1000);  // Cap at 1 second
+            try {
+                const reply = await this.db.select(recordId);
+                if (reply) {
+                    return reply;
+                }
+            } catch (error) {
+                console.error('Error querying for reply:', error);
+                throw error;
+            }
         }
-    }
-
-    async sendAndWaitForReply(actorId, message) {
-        const messageId = await this.sendMessage(actorId, message);
-        return this.waitForReply(messageId);
+        throw new Error('Timeout waiting for reply');
     }
 }
 
