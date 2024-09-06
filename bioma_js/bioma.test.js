@@ -4,26 +4,25 @@ const BiomaInterface = require('./bioma');
 
 const bioma = new BiomaInterface();
 
-bioma.connect();
 
 
-// const BiomaInterface = require('./BiomaInterface');
+async function main() {
 
-// async function main() {
-//     const biomaInterface = new BiomaInterface();
-//     try {
-//         await biomaInterface.connect('http://127.0.0.1:8000/rpc', 'test', 'test');
+    await bioma.connect();
 
-//         const actorId = 'actor:123';
-//         const message = { type: 'Ping' };
+    const dummyId = bioma.createActorId('/dummy', 'dummy::Dummy');
+    const dummyActor = await bioma.createActor(dummyId);
 
-//         const reply = await biomaInterface.sendAndWaitForReply(actorId, message);
-//         console.log('Received reply from Bioma actor:', reply);
-//     } catch (error) {
-//         console.error('Error interacting with Bioma:', error);
-//     } finally {
-//         await biomaInterface.close();
-//     }
-// }
+    const echoActorId = bioma.createActorId('/echo', 'echo::Echo');
+    const echoMessage = { text: 'Hello, world!' };
 
-// main().catch(console.error);
+    let messageId = await bioma.sendMessage(dummyId, echoActorId, 'echo::EchoText', echoMessage);
+
+    let reply = await bioma.waitForReply(messageId);
+
+    console.log('Reply:', reply);
+
+    await bioma.close();
+}
+
+main();

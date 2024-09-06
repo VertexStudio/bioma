@@ -39,7 +39,7 @@ impl Engine {
         let db: Surreal<Any> = Surreal::init();
         db.connect(address).await?;
         db.signin(Root { username: "root", password: "root" }).await?;
-        db.use_ns("N").use_db("D").await?;
+        db.use_ns("dev").use_db("bioma").await?;
         Engine::define(&db).await?;
         Ok(Engine { db: Box::new(db) })
     }
@@ -47,7 +47,7 @@ impl Engine {
     pub async fn test() -> Result<Engine, SystemActorError> {
         let db: Surreal<Any> = Surreal::init();
         db.connect("memory").await?;
-        db.use_ns("N").use_db("D").await?;
+        db.use_ns("dev").use_db("bioma").await?;
         Engine::define(&db).await?;
         Ok(Engine { db: Box::new(db) })
     }

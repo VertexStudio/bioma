@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-surrealdb-beta = { version = "2.0.1", default-features = false }
+surrealdb-beta = { version = "2.0.1", features = ["kv-mem"] }
 uuid = "1.10"
 thiserror = "1.0"
 derive_more = "0.99"
@@ -27,9 +27,6 @@ bioma_derive = { path = "../bioma_derive" }
 test-log = { version = "0.2", default-features = false, features = [
     "trace",
     "color",
-] }
-surrealdb-beta = { version = "2.0.1", default-features = false, features = [
-    "kv-mem",
 ] }
 color-backtrace = "0.6"
 tracing = "0.1"
