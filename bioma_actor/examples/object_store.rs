@@ -73,7 +73,7 @@ impl Message<ObjectSaved> for RandomObjectLoader {
             return Err(RandomObjectLoaderError::LocalFileSystemNotInitialized);
         };
         self.num_objects -= 1;
-        info!("{} Received ObjectSaved: {:?}", ctx.id(), msg);
+        info!("{} Received: {:?}", ctx.id(), msg);
         let path = Path::parse(&msg.path.to_string_lossy()).map_err(SystemActorError::PathError)?;
         let data = store.get(&path).await.map_err(SystemActorError::ObjectStore)?;
         info!("{} Data: {:?}", ctx.id(), data);
