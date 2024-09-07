@@ -1,7 +1,6 @@
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use tracing::{error, info};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -12,63 +11,61 @@ struct MainActor {
 impl Actor for MainActor {
     type Error = ChatError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            let chat_id = ActorId::of::<Chat>("/llm");
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        let chat_id = ActorId::of::<Chat>("/llm");
 
-            // Spawn the chat actor
-            let mut chat_actor = Actor::spawn(
-                ctx.engine(),
-                &chat_id,
-                Chat {
-                    model_name: "gemma2:2b".to_string(),
-                    generation_options: Default::default(),
-                    messages_number_limit: 10,
-                    history: Vec::new(),
-                    ollama: None,
-                },
-            )
-            .await?;
+        // Spawn the chat actor
+        let mut chat_actor = Actor::spawn(
+            ctx.engine(),
+            &chat_id,
+            Chat {
+                model_name: "gemma2:2b".to_string(),
+                generation_options: Default::default(),
+                messages_number_limit: 10,
+                history: Vec::new(),
+                ollama: None,
+            },
+        )
+        .await?;
 
-            info!("{} Starting conversation with LLM", ctx.id());
+        info!("{} Starting conversation with LLM", ctx.id());
 
-            // Start the chat actor
-            let chat_handle = tokio::spawn(async move {
-                if let Err(e) = chat_actor.start().await {
-                    error!("LLM actor error: {}", e);
-                }
-            });
+        // Start the chat actor
+        let chat_handle = tokio::spawn(async move {
+            if let Err(e) = chat_actor.start().await {
+                error!("LLM actor error: {}", e);
+            }
+        });
 
-            let mut exchanges = 0;
-            let conversation_starters = vec![
-                "Hello! Can you tell me about the Rust programming language?",
-                "What are some key features of Rust?",
-                "How does Rust ensure memory safety?",
-            ];
+        let mut exchanges = 0;
+        let conversation_starters = vec![
+            "Hello! Can you tell me about the Rust programming language?",
+            "What are some key features of Rust?",
+            "How does Rust ensure memory safety?",
+        ];
 
-            for starter in conversation_starters {
-                if exchanges >= self.max_exchanges {
-                    break;
-                }
-
-                info!("{} Sending message: {}", ctx.id(), starter);
-                let chat_message = ChatMessage::user(starter.to_string());
-                let response: ChatMessageResponse =
-                    ctx.send::<Chat, ChatMessage>(chat_message, &chat_id, SendOptions::default()).await?;
-
-                if let Some(assistant_message) = response.message {
-                    info!("{} Received response: {}", ctx.id(), assistant_message.content);
-                    exchanges += 1;
-                } else {
-                    error!("{} No response received from LLM", ctx.id());
-                }
+        for starter in conversation_starters {
+            if exchanges >= self.max_exchanges {
+                break;
             }
 
-            chat_handle.abort();
+            info!("{} Sending message: {}", ctx.id(), starter);
+            let chat_message = ChatMessage::user(starter.to_string());
+            let response: ChatMessageResponse =
+                ctx.send::<Chat, ChatMessage>(chat_message, &chat_id, SendOptions::default()).await?;
 
-            info!("{} Conversation ended", ctx.id());
-            Ok(())
+            if let Some(assistant_message) = response.message {
+                info!("{} Received response: {}", ctx.id(), assistant_message.content);
+                exchanges += 1;
+            } else {
+                error!("{} No response received from LLM", ctx.id());
+            }
         }
+
+        chat_handle.abort();
+
+        info!("{} Conversation ended", ctx.id());
+        Ok(())
     }
 }
 

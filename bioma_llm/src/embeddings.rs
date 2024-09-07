@@ -36,46 +36,42 @@ pub struct Embeddings {
 impl Message<GenerateEmbeddings> for Embeddings {
     type Response = GeneratedEmbeddings;
 
-    fn handle(
+    async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
-    ) -> impl Future<Output = Result<GeneratedEmbeddings, EmbeddingsError>> {
-        async move {
-            let Some(ollama) = &self.ollama else {
-                return Err(EmbeddingsError::OllamaNotInitialized);
-            };
+    ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
+        let Some(ollama) = &self.ollama else {
+            return Err(EmbeddingsError::OllamaNotInitialized);
+        };
 
-            let result = ollama
-                .generate_embeddings(self.model_name.clone(), message.text.clone(), self.generation_options.clone())
-                .await?;
-            let embeddings = result.embeddings.into_iter().map(|e| e as f32).collect::<Vec<f32>>();
+        let result = ollama
+            .generate_embeddings(self.model_name.clone(), message.text.clone(), self.generation_options.clone())
+            .await?;
+        let embeddings = result.embeddings.into_iter().map(|e| e as f32).collect::<Vec<f32>>();
 
-            Ok(GeneratedEmbeddings { embeddings })
-        }
+        Ok(GeneratedEmbeddings { embeddings })
     }
 }
 
 impl Actor for Embeddings {
     type Error = EmbeddingsError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), EmbeddingsError>> {
-        async move {
-            info!("{} Started", ctx.id());
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
+        info!("{} Started", ctx.id());
 
-            self.ollama = Some(Ollama::default());
+        self.ollama = Some(Ollama::default());
 
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(input) = frame.is::<GenerateEmbeddings>() {
-                    let response = self.reply(ctx, &input, &frame).await;
-                    if let Err(err) = response {
-                        error!("{} {:?}", ctx.id(), err);
-                    }
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(input) = frame.is::<GenerateEmbeddings>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
                 }
             }
-            info!("{} Finished", ctx.id());
-            Ok(())
         }
+        info!("{} Finished", ctx.id());
+        Ok(())
     }
 }

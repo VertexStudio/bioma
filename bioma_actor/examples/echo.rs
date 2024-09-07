@@ -12,6 +12,9 @@
 ///     npm install
 ///     node bioma.test.js
 ///
+use bioma_actor::prelude::*;
+use serde::{Deserialize, Serialize};
+use tracing::{error, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EchoText {
@@ -24,10 +27,7 @@ pub struct EchoedText {
     echoes_left: usize,
 }
 
-use bioma_actor::prelude::*;
-use serde::{Deserialize, Serialize};
-use tracing::{error, info};
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Echo {
     max_echoes: usize,
 }
@@ -35,43 +35,35 @@ pub struct Echo {
 impl Message<EchoText> for Echo {
     type Response = EchoedText;
 
-    fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        msg: &EchoText,
-    ) -> impl Future<Output = Result<EchoedText, Self::Error>> {
-        async move {
-            info!("{} Received message: {:?}", ctx.id(), msg);
-            self.max_echoes = self.max_echoes.saturating_sub(1);
-            let echoed_text = EchoedText { text: msg.text.clone(), echoes_left: self.max_echoes };
-            Ok(echoed_text)
-        }
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &EchoText) -> Result<EchoedText, Self::Error> {
+        info!("{} Received message: {:?}", ctx.id(), msg);
+        self.max_echoes = self.max_echoes.saturating_sub(1);
+        let echoed_text = EchoedText { text: msg.text.clone(), echoes_left: self.max_echoes };
+        Ok(echoed_text)
     }
 }
 
 impl Actor for Echo {
     type Error = SystemActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            info!("{} Started", ctx.id());
-            info!("{} Waiting for messages of type {}", ctx.id(), std::any::type_name::<EchoText>());
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
+        info!("{} Waiting for messages of type {}", ctx.id(), std::any::type_name::<EchoText>());
 
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(echo) = frame.is::<EchoText>() {
-                    let response = self.reply(ctx, &echo, &frame).await;
-                    if let Err(err) = response {
-                        error!("{} {:?}", ctx.id(), err);
-                    }
-                    if self.max_echoes == 0 {
-                        break;
-                    }
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(echo) = frame.is::<EchoText>() {
+                let response = self.reply(ctx, &echo, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+                if self.max_echoes == 0 {
+                    break;
                 }
             }
-            info!("{} Finished", ctx.id());
-            Ok(())
         }
+        info!("{} Finished", ctx.id());
+        Ok(())
     }
 }
 
@@ -83,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // Initialize the actor system
-    let engine = Engine::connect("ws://localhost:9123").await?;
+    let engine = Engine::connect("ws://localhost:9123", EngineOptions::default()).await?;
 
     // Create echo ID
     let echo_id = ActorId::of::<Echo>("/echo");

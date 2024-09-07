@@ -48,29 +48,27 @@ mod tests {
     impl Message<BehaviorTick> for ActionBehavior<MockAction> {
         type Response = BehaviorStatus;
 
-        fn handle(
+        async fn handle(
             &mut self,
             ctx: &mut ActorContext<Self>,
             _msg: &BehaviorTick,
-        ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
+        ) -> Result<BehaviorStatus, Self::Error> {
             info!("{} {}", ctx.id(), self.node.fact);
-            async move { Ok(BehaviorStatus::Success) }
+            Ok(BehaviorStatus::Success)
         }
     }
 
     impl Actor for ActionBehavior<MockAction> {
         type Error = SystemActorError;
 
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-            async move {
-                let mut stream = ctx.recv().await?;
-                while let Some(Ok(frame)) = stream.next().await {
-                    if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
-                        self.reply(ctx, &BehaviorTick, &frame).await?;
-                    }
+        async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+            let mut stream = ctx.recv().await?;
+            while let Some(Ok(frame)) = stream.next().await {
+                if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
+                    self.reply(ctx, &BehaviorTick, &frame).await?;
                 }
-                Ok(())
             }
+            Ok(())
         }
     }
 
@@ -83,31 +81,27 @@ mod tests {
     impl Message<BehaviorTick> for DecoratorBehavior<MockDecorator> {
         type Response = BehaviorStatus;
 
-        fn handle(
+        async fn handle(
             &mut self,
             ctx: &mut ActorContext<Self>,
             _msg: &BehaviorTick,
-        ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
-            async move {
-                let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.child, SendOptions::default()).await?;
-                Ok(status)
-            }
+        ) -> Result<BehaviorStatus, Self::Error> {
+            let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.child, SendOptions::default()).await?;
+            Ok(status)
         }
     }
 
     impl Actor for DecoratorBehavior<MockDecorator> {
         type Error = SystemActorError;
 
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-            async move {
-                let mut stream = ctx.recv().await?;
-                while let Some(Ok(frame)) = stream.next().await {
-                    if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
-                        self.reply(ctx, &BehaviorTick, &frame).await?;
-                    }
+        async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+            let mut stream = ctx.recv().await?;
+            while let Some(Ok(frame)) = stream.next().await {
+                if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
+                    self.reply(ctx, &BehaviorTick, &frame).await?;
                 }
-                Ok(())
             }
+            Ok(())
         }
     }
 
@@ -120,34 +114,30 @@ mod tests {
     impl Message<BehaviorTick> for CompositeBehavior<MockComposite> {
         type Response = BehaviorStatus;
 
-        fn handle(
+        async fn handle(
             &mut self,
             ctx: &mut ActorContext<Self>,
             _msg: &BehaviorTick,
-        ) -> impl Future<Output = Result<BehaviorStatus, Self::Error>> {
-            async move {
-                for child in &self.children {
-                    let status: BehaviorStatus = ctx.send_as(BehaviorTick, child, SendOptions::default()).await?;
-                    info!("{} {} {:?}", ctx.id(), child, status);
-                }
-                Ok(BehaviorStatus::Success)
+        ) -> Result<BehaviorStatus, Self::Error> {
+            for child in &self.children {
+                let status: BehaviorStatus = ctx.send_as(BehaviorTick, child, SendOptions::default()).await?;
+                info!("{} {} {:?}", ctx.id(), child, status);
             }
+            Ok(BehaviorStatus::Success)
         }
     }
 
     impl Actor for CompositeBehavior<MockComposite> {
         type Error = SystemActorError;
 
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-            async move {
-                let mut stream = ctx.recv().await?;
-                while let Some(Ok(frame)) = stream.next().await {
-                    if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
-                        self.reply(ctx, &BehaviorTick, &frame).await?;
-                    }
+        async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+            let mut stream = ctx.recv().await?;
+            while let Some(Ok(frame)) = stream.next().await {
+                if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
+                    self.reply(ctx, &BehaviorTick, &frame).await?;
                 }
-                Ok(())
             }
+            Ok(())
         }
     }
 
@@ -159,12 +149,10 @@ mod tests {
     impl Actor for MainActor {
         type Error = SystemActorError;
 
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-            async move {
-                let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.root, SendOptions::default()).await?;
-                info!("{} {:?}", ctx.id(), status);
-                Ok(())
-            }
+        async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+            let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.root, SendOptions::default()).await?;
+            info!("{} {:?}", ctx.id(), status);
+            Ok(())
         }
     }
 

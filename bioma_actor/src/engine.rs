@@ -1,4 +1,7 @@
 use crate::actor::SystemActorError;
+use bon::builder;
+use object_store::local::LocalFileSystem;
+use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::engine::any::IntoEndpoint;
 use surrealdb::opt::auth::Root;
@@ -23,11 +26,41 @@ macro_rules! dbg_export_db {
     }};
 }
 
+#[builder]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EngineOptions {
+    namespace: String,
+    database: String,
+    username: String,
+    password: String,
+    local_store: std::path::PathBuf,
+}
+
+impl Default for EngineOptions {
+    fn default() -> Self {
+        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
+            .map(std::path::PathBuf::from)
+            .ok()
+            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let local_store = workspace_root.join("output").join("store");
+        std::fs::create_dir_all(&local_store).unwrap();
+        EngineOptions {
+            namespace: "dev".to_string(),
+            database: "bioma".to_string(),
+            username: "root".to_string(),
+            password: "root".to_string(),
+            local_store,
+        }
+    }
+}
+
 /// The engine is the main entry point for the Actor framework.
 /// Responsible for creating and managing the database connection.
 #[derive(Clone, Debug)]
 pub struct Engine {
     db: Box<Surreal<Any>>,
+    options: EngineOptions,
 }
 
 impl Engine {
@@ -35,21 +68,22 @@ impl Engine {
         &self.db
     }
 
-    pub async fn connect(address: impl IntoEndpoint) -> Result<Engine, SystemActorError> {
+    pub async fn connect(address: impl IntoEndpoint, options: EngineOptions) -> Result<Engine, SystemActorError> {
         let db: Surreal<Any> = Surreal::init();
         db.connect(address).await?;
-        db.signin(Root { username: "root", password: "root" }).await?;
-        db.use_ns("dev").use_db("bioma").await?;
+        db.signin(Root { username: &options.username, password: &options.password }).await?;
+        db.use_ns(&options.namespace).use_db(&options.database).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db) })
+        Ok(Engine { db: Box::new(db), options })
     }
 
     pub async fn test() -> Result<Engine, SystemActorError> {
+        let options = EngineOptions::default();
         let db: Surreal<Any> = Surreal::init();
         db.connect("memory").await?;
-        db.use_ns("dev").use_db("bioma").await?;
+        db.use_ns(&options.namespace).use_db(&options.database).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db) })
+        Ok(Engine { db: Box::new(db), options })
     }
 
     pub async fn health(&self) -> bool {
@@ -62,6 +96,11 @@ impl Engine {
         let def = include_str!("../../assets/surreal/def.surql").parse::<String>().unwrap();
         db.query(&def).await?;
         Ok(())
+    }
+
+    pub fn local_store(&self) -> Result<LocalFileSystem, SystemActorError> {
+        let store = LocalFileSystem::new_with_prefix(self.options.local_store.clone())?;
+        Ok(store)
     }
 }
 

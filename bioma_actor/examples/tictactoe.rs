@@ -2,7 +2,6 @@ use bioma_actor::prelude::*;
 use futures::StreamExt;
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use tracing::{error, info};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -33,7 +32,7 @@ struct GameResult {
     winner: Option<PlayerType>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct GameActor {
     player_x: ActorId,
     player_o: ActorId,
@@ -44,62 +43,51 @@ struct GameActor {
 impl Message<StartGame> for GameActor {
     type Response = ();
 
-    fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _: &StartGame,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _: &StartGame) -> Result<Self::Response, Self::Error> {
         let current_player = if self.current_player == PlayerType::X { &self.player_x } else { &self.player_o };
         let game_state =
             GameState { board: [None; 9], current_player: self.current_player, game_over: false, winner: None };
         info!("{}: Sending GameState to player: {:?}", ctx.id(), self.current_player);
-        async move {
-            ctx.do_send::<PlayerActor, GameState>(game_state, current_player).await?;
-            Ok(())
-        }
+        ctx.do_send::<PlayerActor, GameState>(game_state, current_player).await?;
+        Ok(())
     }
 }
 
 impl Message<GameResult> for GameActor {
     type Response = ();
 
-    fn handle(
+    async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
         result: &GameResult,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        async move {
-            info!("{} {:?}", ctx.id(), result);
-            ctx.do_send::<PlayerActor, GameResult>(result.clone(), &self.player_x).await?;
-            ctx.do_send::<PlayerActor, GameResult>(result.clone(), &self.player_o).await?;
-            Ok(())
-        }
+    ) -> Result<Self::Response, Self::Error> {
+        info!("{} {:?}", ctx.id(), result);
+        ctx.do_send::<PlayerActor, GameResult>(result.clone(), &self.player_x).await?;
+        ctx.do_send::<PlayerActor, GameResult>(result.clone(), &self.player_o).await?;
+        Ok(())
     }
 }
 
 impl Actor for GameActor {
     type Error = SystemActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            info!("{} Started", ctx.id());
-
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(game_result) = frame.is::<GameResult>() {
-                    self.reply(ctx, &game_result, &frame).await?;
-                    break;
-                } else if let Some(start_game) = frame.is::<StartGame>() {
-                    self.reply(ctx, &start_game, &frame).await?;
-                }
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(game_result) = frame.is::<GameResult>() {
+                self.reply(ctx, &game_result, &frame).await?;
+                break;
+            } else if let Some(start_game) = frame.is::<StartGame>() {
+                self.reply(ctx, &start_game, &frame).await?;
             }
-            info!("{} Finished", ctx.id());
-            Ok(())
         }
+        info!("{} Finished", ctx.id());
+        Ok(())
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PlayerActor {
     player_type: PlayerType,
     game: ActorId,
@@ -109,83 +97,73 @@ struct PlayerActor {
 impl Message<GameState> for PlayerActor {
     type Response = ();
 
-    fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        state: &GameState,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, state: &GameState) -> Result<Self::Response, Self::Error> {
         let player_type = self.player_type;
         let board = self.board.clone();
         let state = state.clone();
-        async move {
-            info!("{} Analyzing GameState", ctx.id());
-            if state.current_player == player_type {
-                let empty_positions: Vec<usize> = state
-                    .board
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, &cell)| if cell.is_none() { Some(i) } else { None })
-                    .collect();
+        info!("{} Analyzing GameState", ctx.id());
+        if state.current_player == player_type {
+            let empty_positions: Vec<usize> = state
+                .board
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &cell)| if cell.is_none() { Some(i) } else { None })
+                .collect();
 
-                if !empty_positions.is_empty() {
-                    let mut rng = StdRng::from_entropy();
-                    let random_position = empty_positions[rng.gen_range(0..empty_positions.len())];
-                    info!("{} Making move at position {}", ctx.id(), random_position);
-                    ctx.do_send::<BoardActor, MakeMove>(
-                        MakeMove { player: player_type, position: random_position },
-                        &board,
-                    )
-                    .await?;
-                } else {
-                    info!("{} No empty positions available", ctx.id());
-                }
+            if !empty_positions.is_empty() {
+                let mut rng = StdRng::from_entropy();
+                let random_position = empty_positions[rng.gen_range(0..empty_positions.len())];
+                info!("{} Making move at position {}", ctx.id(), random_position);
+                ctx.do_send::<BoardActor, MakeMove>(
+                    MakeMove { player: player_type, position: random_position },
+                    &board,
+                )
+                .await?;
+            } else {
+                info!("{} No empty positions available", ctx.id());
             }
-            Ok(())
         }
+        Ok(())
     }
 }
 
 impl Message<GameResult> for PlayerActor {
     type Response = ();
 
-    fn handle(
+    async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
         result: &GameResult,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        async move {
-            match result.winner {
-                Some(winner) if winner == self.player_type => info!("{} Player {:?} wins!", ctx.id(), self.player_type),
-                Some(_) => info!("{} Player {:?} loses!", ctx.id(), self.player_type),
-                None => info!("{} It's a draw!", ctx.id()),
-            }
-            Ok(())
+    ) -> Result<Self::Response, Self::Error> {
+        match result.winner {
+            Some(winner) if winner == self.player_type => info!("{} Player {:?} wins!", ctx.id(), self.player_type),
+            Some(_) => info!("{} Player {:?} loses!", ctx.id(), self.player_type),
+            None => info!("{} It's a draw!", ctx.id()),
         }
+        Ok(())
     }
 }
 
 impl Actor for PlayerActor {
     type Error = SystemActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            info!("{} {:?} started", ctx.id(), self.player_type);
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(game_state) = frame.is::<GameState>() {
-                    self.reply(ctx, &game_state, &frame).await?;
-                } else if let Some(game_result) = frame.is::<GameResult>() {
-                    self.reply(ctx, &game_result, &frame).await?;
-                    break;
-                }
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} {:?} started", ctx.id(), self.player_type);
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(game_state) = frame.is::<GameState>() {
+                self.reply(ctx, &game_state, &frame).await?;
+            } else if let Some(game_result) = frame.is::<GameResult>() {
+                self.reply(ctx, &game_result, &frame).await?;
+                break;
             }
-            info!("{} {:?} finished", ctx.id(), self.player_type);
-            Ok(())
         }
+        info!("{} {:?} finished", ctx.id(), self.player_type);
+        Ok(())
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct BoardActor {
     game: ActorId,
     player_x: ActorId,
@@ -251,199 +229,192 @@ impl BoardActor {
 impl Message<MakeMove> for BoardActor {
     type Response = ();
 
-    fn handle(
+    async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
         move_msg: &MakeMove,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-        async move {
-            info!("{} Received MakeMove: player {:?}, position {}", ctx.id(), move_msg.player, move_msg.position);
+    ) -> Result<Self::Response, Self::Error> {
+        info!("{} Received MakeMove: player {:?}, position {}", ctx.id(), move_msg.player, move_msg.position);
 
-            // Check if the move is valid
-            if move_msg.player == self.current_player && self.board[move_msg.position].is_none() {
-                info!("{} Move is valid. Updating board state.", ctx.id());
-                self.board[move_msg.position] = Some(move_msg.player);
+        // Check if the move is valid
+        if move_msg.player == self.current_player && self.board[move_msg.position].is_none() {
+            info!("{} Move is valid. Updating board state.", ctx.id());
+            self.board[move_msg.position] = Some(move_msg.player);
 
-                info!("{} Current board state:\n{}", ctx.id(), self.draw_board());
+            info!("{} Current board state:\n{}", ctx.id(), self.draw_board());
 
-                let winner = self.check_winner();
-                info!("{} Winner: {:?}", ctx.id(), winner);
+            let winner = self.check_winner();
+            info!("{} Winner: {:?}", ctx.id(), winner);
 
-                let is_full = self.is_full();
-                info!("{} Board full: {}", ctx.id(), is_full);
+            let is_full = self.is_full();
+            info!("{} Board full: {}", ctx.id(), is_full);
 
-                self.game_over = winner.is_some() || is_full;
-                info!("{} Game over: {}", ctx.id(), self.game_over);
+            self.game_over = winner.is_some() || is_full;
+            info!("{} Game over: {}", ctx.id(), self.game_over);
 
-                if self.game_over {
-                    info!("{} Game is over. Sending GameResult to {}", ctx.id(), &self.game);
-                    ctx.do_send::<GameActor, GameResult>(GameResult { winner }, &self.game).await?;
-                } else {
-                    info!("{} Game continues. Switching current player.", ctx.id());
-                    self.current_player = match self.current_player {
-                        PlayerType::X => PlayerType::O,
-                        PlayerType::O => PlayerType::X,
-                    };
-
-                    info!("{} Current player is now: {:?}", ctx.id(), self.current_player);
-
-                    let next_player =
-                        if self.current_player == PlayerType::X { &self.player_x } else { &self.player_o };
-
-                    info!("{} Sending updated GameState to next player: {:?}", ctx.id(), self.current_player);
-                    ctx.do_send::<PlayerActor, GameState>(
-                        GameState {
-                            board: self.board,
-                            current_player: self.current_player,
-                            game_over: self.game_over,
-                            winner,
-                        },
-                        next_player,
-                    )
-                    .await?;
-                }
+            if self.game_over {
+                info!("{} Game is over. Sending GameResult to {}", ctx.id(), &self.game);
+                ctx.do_send::<GameActor, GameResult>(GameResult { winner }, &self.game).await?;
             } else {
-                if move_msg.player != self.current_player {
-                    error!(
-                        "{} Invalid move: Not the current player's turn. Current player: {:?}, Move attempt by: {:?}",
-                        ctx.id(),
-                        self.current_player,
-                        move_msg.player
-                    );
-                } else {
-                    let player_at_position = self.board[move_msg.position];
-                    error!(
-                        "{} Invalid move: Position {} is already occupied by {:?}",
-                        ctx.id(),
-                        move_msg.position,
-                        player_at_position
-                    );
-                }
+                info!("{} Game continues. Switching current player.", ctx.id());
+                self.current_player = match self.current_player {
+                    PlayerType::X => PlayerType::O,
+                    PlayerType::O => PlayerType::X,
+                };
+
+                info!("{} Current player is now: {:?}", ctx.id(), self.current_player);
+
+                let next_player = if self.current_player == PlayerType::X { &self.player_x } else { &self.player_o };
+
+                info!("{} Sending updated GameState to next player: {:?}", ctx.id(), self.current_player);
+                ctx.do_send::<PlayerActor, GameState>(
+                    GameState {
+                        board: self.board,
+                        current_player: self.current_player,
+                        game_over: self.game_over,
+                        winner,
+                    },
+                    next_player,
+                )
+                .await?;
             }
-            Ok(())
+        } else {
+            if move_msg.player != self.current_player {
+                error!(
+                    "{} Invalid move: Not the current player's turn. Current player: {:?}, Move attempt by: {:?}",
+                    ctx.id(),
+                    self.current_player,
+                    move_msg.player
+                );
+            } else {
+                let player_at_position = self.board[move_msg.position];
+                error!(
+                    "{} Invalid move: Position {} is already occupied by {:?}",
+                    ctx.id(),
+                    move_msg.position,
+                    player_at_position
+                );
+            }
         }
+        Ok(())
     }
 }
 
 impl Actor for BoardActor {
     type Error = SystemActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            info!("{} Started", ctx.id());
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
 
-            // Draw the initial empty board
-            info!("{} Initial board state:\n{}", ctx.id(), self.draw_board());
+        // Draw the initial empty board
+        info!("{} Initial board state:\n{}", ctx.id(), self.draw_board());
 
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(move_msg) = frame.is::<MakeMove>() {
-                    self.reply(ctx, &move_msg, &frame).await?;
-                }
-                if self.game_over {
-                    break;
-                }
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(move_msg) = frame.is::<MakeMove>() {
+                self.reply(ctx, &move_msg, &frame).await?;
             }
-            info!("{} Finished", ctx.id());
-            Ok(())
+            if self.game_over {
+                break;
+            }
         }
+        info!("{} Finished", ctx.id());
+        Ok(())
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MainActor;
 
 impl Actor for MainActor {
     type Error = SystemActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            info!("{} Started", ctx.id());
-            // Create actor IDs
-            let game_id = ActorId::of::<GameActor>("/game");
-            let board_id = ActorId::of::<BoardActor>("/board");
-            let player_x_id = ActorId::of::<PlayerActor>("/player_x");
-            let player_o_id = ActorId::of::<PlayerActor>("/player_o");
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
+        // Create actor IDs
+        let game_id = ActorId::of::<GameActor>("/game");
+        let board_id = ActorId::of::<BoardActor>("/board");
+        let player_x_id = ActorId::of::<PlayerActor>("/player_x");
+        let player_o_id = ActorId::of::<PlayerActor>("/player_o");
 
-            // Spawn game actor
-            let mut game_actor = Actor::spawn(
-                &ctx.engine(),
-                &game_id,
-                GameActor {
-                    player_x: player_x_id.clone(),
-                    player_o: player_o_id.clone(),
-                    board: board_id.clone(),
-                    current_player: PlayerType::X,
-                },
-            )
-            .await?;
+        // Spawn game actor
+        let mut game_actor = Actor::spawn(
+            &ctx.engine(),
+            &game_id,
+            GameActor {
+                player_x: player_x_id.clone(),
+                player_o: player_o_id.clone(),
+                board: board_id.clone(),
+                current_player: PlayerType::X,
+            },
+        )
+        .await?;
 
-            // Spawn board actor
-            let mut board_actor = Actor::spawn(
-                &ctx.engine(),
-                &board_id,
-                BoardActor {
-                    game: game_id.clone(),
-                    player_x: player_x_id.clone(),
-                    player_o: player_o_id.clone(),
-                    board: [None; 9],
-                    current_player: PlayerType::X,
-                    game_over: false,
-                },
-            )
-            .await?;
+        // Spawn board actor
+        let mut board_actor = Actor::spawn(
+            &ctx.engine(),
+            &board_id,
+            BoardActor {
+                game: game_id.clone(),
+                player_x: player_x_id.clone(),
+                player_o: player_o_id.clone(),
+                board: [None; 9],
+                current_player: PlayerType::X,
+                game_over: false,
+            },
+        )
+        .await?;
 
-            // Spawn player_x actor
-            let mut player_x_actor = Actor::spawn(
-                &ctx.engine(),
-                &player_x_id,
-                PlayerActor { player_type: PlayerType::X, game: game_id.clone(), board: board_id.clone() },
-            )
-            .await?;
+        // Spawn player_x actor
+        let mut player_x_actor = Actor::spawn(
+            &ctx.engine(),
+            &player_x_id,
+            PlayerActor { player_type: PlayerType::X, game: game_id.clone(), board: board_id.clone() },
+        )
+        .await?;
 
-            // Spawn player_o actor
-            let mut player_o_actor = Actor::spawn(
-                &ctx.engine(),
-                &player_o_id,
-                PlayerActor { player_type: PlayerType::O, game: game_id.clone(), board: board_id.clone() },
-            )
-            .await?;
+        // Spawn player_o actor
+        let mut player_o_actor = Actor::spawn(
+            &ctx.engine(),
+            &player_o_id,
+            PlayerActor { player_type: PlayerType::O, game: game_id.clone(), board: board_id.clone() },
+        )
+        .await?;
 
-            // Start the game actor
-            let game_handle = tokio::spawn(async move {
-                game_actor.start().await.unwrap();
-            });
+        // Start the game actor
+        let game_handle = tokio::spawn(async move {
+            game_actor.start().await.unwrap();
+        });
 
-            // Start the board actor
-            let board_handle = tokio::spawn(async move {
-                board_actor.start().await.unwrap();
-            });
+        // Start the board actor
+        let board_handle = tokio::spawn(async move {
+            board_actor.start().await.unwrap();
+        });
 
-            // Start the player_x actor
-            let player_x_handle = tokio::spawn(async move {
-                player_x_actor.start().await.unwrap();
-            });
+        // Start the player_x actor
+        let player_x_handle = tokio::spawn(async move {
+            player_x_actor.start().await.unwrap();
+        });
 
-            // Start the player_o actor
-            let player_o_handle = tokio::spawn(async move {
-                player_o_actor.start().await.unwrap();
-            });
+        // Start the player_o actor
+        let player_o_handle = tokio::spawn(async move {
+            player_o_actor.start().await.unwrap();
+        });
 
-            // Start the game actor
-            tokio::time::sleep(std::time::Duration::from_secs(0)).await;
-            ctx.do_send::<GameActor, StartGame>(StartGame, &game_id).await?;
+        // Start the game actor
+        tokio::time::sleep(std::time::Duration::from_secs(0)).await;
+        ctx.do_send::<GameActor, StartGame>(StartGame, &game_id).await?;
 
-            info!("{} Started game", ctx.id());
+        info!("{} Started game", ctx.id());
 
-            // Wait for all actors to finish
-            let _ = game_handle.await;
-            let _ = board_handle.await;
-            let _ = player_x_handle.await;
-            let _ = player_o_handle.await;
+        // Wait for all actors to finish
+        let _ = game_handle.await;
+        let _ = board_handle.await;
+        let _ = player_x_handle.await;
+        let _ = player_o_handle.await;
 
-            info!("{} Finished", ctx.id());
-            Ok(())
-        }
+        info!("{} Finished", ctx.id());
+        Ok(())
     }
 }
 
