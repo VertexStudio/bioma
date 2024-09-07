@@ -50,6 +50,12 @@ pub enum SystemActorError {
     MessageTimeout(std::time::Duration),
     #[error("Tasked timeout after {0:?}")]
     TaskTimeout(std::time::Duration),
+    #[error("Object store error: {0}")]
+    ObjectStore(#[from] object_store::Error),
+    #[error("Object store error: {0}")]
+    PathError(#[from] object_store::path::Error),
+    #[error("Url error: {0}")]
+    UrlError(#[from] url::ParseError),
 }
 
 impl ActorError for SystemActorError {}
@@ -177,7 +183,7 @@ impl ActorId {
 }
 
 /// Implement this trait to define an actor
-pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static + Debug + Send + Sync {
+pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug + Send + Sync {
     type Error: ActorError;
 
     // Spawn a new actor
@@ -195,8 +201,16 @@ pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static
                 )));
             }
 
+            // Serialize actor properties
+            let actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
+
             // Create actor record in the database
-            let content = ActorRecord { id: id.id.clone(), kind: type_name::<Self>().into(), state: actor.clone() };
+            let content: ActorRecord<Self> = ActorRecord {
+                id: id.id.clone(),
+                kind: type_name::<Self>().into(),
+                state: actor_state,
+                _phantom: std::marker::PhantomData,
+            };
             let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
@@ -215,7 +229,8 @@ pub trait Actor: Sized + Clone + Serialize + for<'de> Deserialize<'de> + 'static
 pub struct ActorRecord<T: Actor> {
     id: RecordId,
     kind: Cow<'static, str>,
-    state: T,
+    state: Value,
+    _phantom: std::marker::PhantomData<T>,
 }
 
 /// Context for an actor, that binds an actor to its engine
@@ -233,7 +248,8 @@ impl<T: Actor> ActorContext<T> {
 
     /// Start the actor
     pub async fn start(&mut self) -> Result<(), T::Error> {
-        let mut actor = self.actor.clone();
+        let actor_state = serde_json::to_value(&self.actor).map_err(SystemActorError::from)?;
+        let mut actor: T = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
         actor.start(self).await?;
         Ok(())
     }
@@ -493,7 +509,6 @@ mod tests {
     use crate::prelude::*;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
-    use std::future::Future;
     use test_log::test;
     use tracing::{error, info};
 
@@ -527,7 +542,7 @@ mod tests {
         times: usize,
     }
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     struct PingActor {
         pong_id: ActorId,
         max_attempts: usize,
@@ -536,30 +551,28 @@ mod tests {
     impl Actor for PingActor {
         type Error = PingActorError;
 
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-            async move {
-                info!("{} Says hi!", ctx.id());
-                let pong_id = self.pong_id.clone();
-                let mut attempts = 0;
-                loop {
-                    info!("{} Ping", ctx.id());
-                    attempts += 1;
-                    let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
-                    info!("{} Pong {}", ctx.id(), pong.times);
-                    if pong.times == 0 {
-                        break;
-                    }
-                    if attempts >= self.max_attempts {
-                        return Err(PingActorError::PingFailed(attempts));
-                    }
+        async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+            info!("{} Says hi!", ctx.id());
+            let pong_id = self.pong_id.clone();
+            let mut attempts = 0;
+            loop {
+                info!("{} Ping", ctx.id());
+                attempts += 1;
+                let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
+                info!("{} Pong {}", ctx.id(), pong.times);
+                if pong.times == 0 {
+                    break;
                 }
-                info!("{} Says bye!", ctx.id());
-                Ok(())
+                if attempts >= self.max_attempts {
+                    return Err(PingActorError::PingFailed(attempts));
+                }
             }
+            info!("{} Says bye!", ctx.id());
+            Ok(())
         }
     }
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     struct PongActor {
         times: usize,
     }
@@ -567,40 +580,36 @@ mod tests {
     impl Actor for PongActor {
         type Error = PongActorError;
 
-        fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-            async move {
-                info!("{} Says hi!", ctx.id());
-                let mut stream = ctx.recv().await?;
-                while let Some(Ok(frame)) = stream.next().await {
-                    if let Some(message) = frame.is::<Ping>() {
-                        info!("{} Pong", ctx.id());
-                        let _response = self.reply(ctx, &message, &frame).await?;
-                        if self.times == 0 {
-                            break;
-                        }
+        async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+            info!("{} Says hi!", ctx.id());
+            let mut stream = ctx.recv().await?;
+            while let Some(Ok(frame)) = stream.next().await {
+                if let Some(message) = frame.is::<Ping>() {
+                    info!("{} Pong", ctx.id());
+                    let _response = self.reply(ctx, &message, &frame).await?;
+                    if self.times == 0 {
+                        break;
                     }
                 }
-                info!("{} Says bye!", ctx.id());
-                Ok(())
             }
+            info!("{} Says bye!", ctx.id());
+            Ok(())
         }
     }
 
     impl Message<Ping> for PongActor {
         type Response = Pong;
 
-        fn handle(
+        async fn handle(
             &mut self,
             _ctx: &mut ActorContext<Self>,
             _message: &Ping,
-        ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
-            async move {
-                if self.times == 0 {
-                    Err(PongActorError::PongLimitReached)
-                } else {
-                    self.times -= 1;
-                    Ok(Pong { times: self.times })
-                }
+        ) -> Result<Self::Response, Self::Error> {
+            if self.times == 0 {
+                Err(PongActorError::PongLimitReached)
+            } else {
+                self.times -= 1;
+                Ok(Pong { times: self.times })
             }
         }
     }

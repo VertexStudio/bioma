@@ -1,7 +1,6 @@
 use bioma_actor::prelude::*;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use test_log::test;
 use tokio::time::{sleep, Duration};
 use tracing::info;
@@ -30,7 +29,7 @@ struct TestResponse {
 }
 
 // Test actor for basic message handling
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TestActor {
     count: usize,
 }
@@ -38,35 +37,33 @@ struct TestActor {
 impl Message<TestMessage> for TestActor {
     type Response = TestResponse;
 
-    fn handle(
+    async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
         msg: &TestMessage,
-    ) -> impl Future<Output = Result<Self::Response, TestActorError>> {
+    ) -> Result<Self::Response, TestActorError> {
         self.count += 1;
         let response = TestResponse { content: format!("Received: {}", msg.content), count: self.count };
-        async move { Ok(response) }
+        Ok(response)
     }
 }
 
 impl Actor for TestActor {
     type Error = TestActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), TestActorError>> {
-        async move {
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(msg) = frame.is::<TestMessage>() {
-                    self.reply(ctx, &msg, &frame).await?;
-                }
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestActorError> {
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(msg) = frame.is::<TestMessage>() {
+                self.reply(ctx, &msg, &frame).await?;
             }
-            Ok(())
         }
+        Ok(())
     }
 }
 
 // Additional actor and message types for error handling test
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ErrorActor;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,28 +72,22 @@ struct TriggerError;
 impl Message<TriggerError> for ErrorActor {
     type Response = ();
 
-    fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        _: &TriggerError,
-    ) -> impl Future<Output = Result<(), TestActorError>> {
-        async move { Err(TestActorError::Custom("Simulated error".to_string())) }
+    async fn handle(&mut self, _ctx: &mut ActorContext<Self>, _: &TriggerError) -> Result<(), TestActorError> {
+        Err(TestActorError::Custom("Simulated error".to_string()))
     }
 }
 
 impl Actor for ErrorActor {
     type Error = TestActorError;
 
-    fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), TestActorError>> {
-        async move {
-            let mut stream = ctx.recv().await?;
-            while let Some(Ok(frame)) = stream.next().await {
-                if let Some(trigger) = frame.is::<TriggerError>() {
-                    self.reply(ctx, &trigger, &frame).await?;
-                }
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestActorError> {
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(trigger) = frame.is::<TriggerError>() {
+                self.reply(ctx, &trigger, &frame).await?;
             }
-            Ok(())
         }
+        Ok(())
     }
 }
 
