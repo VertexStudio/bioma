@@ -69,6 +69,10 @@ cargo run --release -p bioma_llm --example rerank
 cargo run --release -p bioma_llm --example embeddings
 ```
 
+```bash
+cargo run --release -p bioma_actor --example object_store
+```
+
 If manually launching surrealdb:
 ```
 surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://output/bioma.db
