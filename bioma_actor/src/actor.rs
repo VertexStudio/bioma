@@ -280,7 +280,7 @@ impl<T: Actor> ActorContext<T> {
     /// Internal method to prepare and send a message
     async fn prepare_and_send_message<MT>(
         &self,
-        message: MT,
+        message: &MT,
         to: &ActorId,
     ) -> Result<(RecordId, RecordId, FrameMessage), SystemActorError>
     where
@@ -330,7 +330,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let _ = self.prepare_and_send_message::<MT>(message, to).await?;
+        let _ = self.prepare_and_send_message::<MT>(&message, to).await?;
         Ok(())
     }
 
@@ -345,7 +345,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(message, to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
         self.wait_for_reply::<M::Response>(&reply_id, options).await
     }
 
@@ -355,7 +355,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
         RT: MessageType,
     {
-        let (_, _, _) = self.prepare_and_send_message(message, to).await?;
+        let (_, _, _) = self.prepare_and_send_message(&message, to).await?;
         Ok(())
     }
 
@@ -365,7 +365,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
         RT: MessageType,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(message, to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
         self.wait_for_reply::<RT>(&reply_id, options).await
     }
 
