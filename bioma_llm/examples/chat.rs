@@ -25,6 +25,7 @@ impl Actor for MainActor {
                 history: Vec::new(),
                 ollama: None,
             },
+            SpawnOptions::default(),
         )
         .await?;
 
@@ -83,7 +84,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let main_id = ActorId::of::<MainActor>("/main");
 
     // Spawn the main actor
-    let mut main_actor = Actor::spawn(&engine, &main_id, MainActor { max_exchanges: 3 }).await?;
+    let mut main_actor =
+        Actor::spawn(&engine, &main_id, MainActor { max_exchanges: 3 }, SpawnOptions::default()).await?;
 
     // Start the main actor
     main_actor.start().await?;

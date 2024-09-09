@@ -12,7 +12,7 @@ pub enum BehaviorStatus {
     Failure,
 }
 
-pub trait Behavior {}
+pub trait Behavior: Sized {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActionBehavior<B: Behavior> {
@@ -189,12 +189,18 @@ mod tests {
             DecoratorBehavior::<MockDecorator> { node: MockDecorator, child: mock_composite_id.clone() };
 
         // Spawn the actors
-        let mut mock_action_0 = Actor::spawn(&engine, &mock_action_id_0, mock_action_0).await?;
-        let mut mock_action_1 = Actor::spawn(&engine, &mock_action_id_1, mock_action_1).await?;
-        let mut mock_action_2 = Actor::spawn(&engine, &mock_action_id_2, mock_action_2).await?;
-        let mut mock_action_3 = Actor::spawn(&engine, &mock_action_id_3, mock_action_3).await?;
-        let mut mock_composite = Actor::spawn(&engine, &mock_composite_id, mock_composite).await?;
-        let mut mock_decorator = Actor::spawn(&engine, &mock_decorator_id, mock_decorator).await?;
+        let mut mock_action_0 =
+            Actor::spawn(&engine, &mock_action_id_0, mock_action_0, SpawnOptions::default()).await?;
+        let mut mock_action_1 =
+            Actor::spawn(&engine, &mock_action_id_1, mock_action_1, SpawnOptions::default()).await?;
+        let mut mock_action_2 =
+            Actor::spawn(&engine, &mock_action_id_2, mock_action_2, SpawnOptions::default()).await?;
+        let mut mock_action_3 =
+            Actor::spawn(&engine, &mock_action_id_3, mock_action_3, SpawnOptions::default()).await?;
+        let mut mock_composite =
+            Actor::spawn(&engine, &mock_composite_id, mock_composite, SpawnOptions::default()).await?;
+        let mut mock_decorator =
+            Actor::spawn(&engine, &mock_decorator_id, mock_decorator, SpawnOptions::default()).await?;
 
         // Start the actors
         tokio::spawn(async move { mock_action_0.start().await.unwrap() });
@@ -209,7 +215,7 @@ mod tests {
         // Main actor
         let main_actor_id = ActorId::of::<MainActor>("main");
         let main_actor = MainActor { root: mock_decorator_id };
-        let mut main_actor = Actor::spawn(&engine, &main_actor_id, main_actor).await?;
+        let mut main_actor = Actor::spawn(&engine, &main_actor_id, main_actor, SpawnOptions::default()).await?;
         main_actor.start().await?;
 
         // Export the database for debugging

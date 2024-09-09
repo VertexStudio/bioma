@@ -347,6 +347,7 @@ impl Actor for MainActor {
                 board: board_id.clone(),
                 current_player: PlayerType::X,
             },
+            SpawnOptions::default(),
         )
         .await?;
 
@@ -362,6 +363,7 @@ impl Actor for MainActor {
                 current_player: PlayerType::X,
                 game_over: false,
             },
+            SpawnOptions::default(),
         )
         .await?;
 
@@ -370,6 +372,7 @@ impl Actor for MainActor {
             &ctx.engine(),
             &player_x_id,
             PlayerActor { player_type: PlayerType::X, game: game_id.clone(), board: board_id.clone() },
+            SpawnOptions::default(),
         )
         .await?;
 
@@ -378,6 +381,7 @@ impl Actor for MainActor {
             &ctx.engine(),
             &player_o_id,
             PlayerActor { player_type: PlayerType::O, game: game_id.clone(), board: board_id.clone() },
+            SpawnOptions::default(),
         )
         .await?;
 
@@ -402,7 +406,7 @@ impl Actor for MainActor {
         });
 
         // Start the game actor
-        tokio::time::sleep(std::time::Duration::from_secs(0)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         ctx.do_send::<GameActor, StartGame>(StartGame, &game_id).await?;
 
         info!("{} Started game", ctx.id());
@@ -418,7 +422,7 @@ impl Actor for MainActor {
     }
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 10)]
 async fn main() -> Result<(), SystemActorError> {
     let filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
@@ -433,7 +437,8 @@ async fn main() -> Result<(), SystemActorError> {
     let engine = Engine::test().await?;
 
     // Setup the main actor
-    let mut main_actor = Actor::spawn(&engine, &ActorId::of::<MainActor>("/main"), MainActor).await?;
+    let mut main_actor =
+        Actor::spawn(&engine, &ActorId::of::<MainActor>("/main"), MainActor, SpawnOptions::default()).await?;
 
     // Start the main actor with a timeout
     // and wait for the main actor to finish or timeout after 10 seconds

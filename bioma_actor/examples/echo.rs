@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let echo_id = ActorId::of::<Echo>("/echo");
 
     // Spawn the echo actor
-    let mut echo_actor = Actor::spawn(&engine, &echo_id, Echo { max_echoes: 3 }).await?;
+    let mut echo_actor = Actor::spawn(&engine, &echo_id, Echo { max_echoes: 3 }, SpawnOptions::default()).await?;
 
     // Start the echo actor
     echo_actor.start().await?;

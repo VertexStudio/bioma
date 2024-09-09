@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &engine,
         &embeddings_id,
         Embeddings { model_name: "nomic-embed-text".to_string(), generation_options: Default::default(), ollama: None },
+        SpawnOptions::default(),
     )
     .await?;
 
@@ -31,15 +32,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    // Create a bridge actor to connect the rerank actor
-    let bridge_id = ActorId::of::<BridgeActor>("/bridge");
-    let bridge_actor = Actor::spawn(&engine, &bridge_id, BridgeActor).await?;
+    // Spawn a relay actor to connect to embeddings actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let relay_actor = Actor::spawn(&engine, &relay_id, Relay, SpawnOptions::default()).await?;
 
     // Text to embed
     let text = "Hello, how are you?";
 
     // Send the text to the embeddings actor
-    let embeddings = bridge_actor
+    let embeddings = relay_actor
         .send::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { text: text.to_string() },
             &embeddings_id,

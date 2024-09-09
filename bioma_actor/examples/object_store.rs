@@ -120,6 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &engine,
         &random_object_loader_id,
         RandomObjectLoader { prefix: prefix.clone(), num_objects, store: None },
+        SpawnOptions::default(),
     )
     .await?;
     let random_object_loader_handle = tokio::spawn(async move {
@@ -136,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &engine,
         &random_object_saver_id,
         RandomObjectSaver { prefix: prefix.clone(), num_objects, loader_id: random_object_loader_id },
+        SpawnOptions::default(),
     )
     .await?;
     let random_object_saver_handle = tokio::spawn(async move {
