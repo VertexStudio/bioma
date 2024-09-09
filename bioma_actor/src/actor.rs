@@ -78,6 +78,15 @@ pub struct FrameMessage {
 impl FrameMessage {
     /// Check if this frame matches a specific message type
     /// and deserialize it into the message type.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M` - The message type to check against and deserialize into.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(M)` if the frame's name matches the type name of `M` and deserialization succeeds.
+    /// * `None` if the frame's name doesn't match or deserialization fails.
     pub fn is<M>(&self) -> Option<M>
     where
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
@@ -120,12 +129,60 @@ where
 {
     type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
 
+    /// Handles a message of type `MT` for this actor.
+    ///
+    /// This function must be implemented for any actor that wants to handle messages of type `MT`.
+    /// It defines how the actor processes the incoming message and what response it generates.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - A mutable reference to the actor instance.
+    /// * `ctx` - A mutable reference to the actor's context, providing access to the actor's state and environment.
+    /// * `message` - A reference to the message of type `MT` to be handled.
+    ///
+    /// # Returns
+    ///
+    /// An implementation of `Future` that resolves to a `Result` containing either:
+    /// - `Ok(Self::Response)`: The successful response to the message.
+    /// - `Err(Self::Error)`: An error that occurred during message handling.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// impl Message<Ping> for PongActor {
+    ///     type Response = Pong;
+    ///
+    ///     async fn handle(
+    ///         &mut self,
+    ///         ctx: &mut ActorContext<Self>,
+    ///         message: &Ping,
+    ///     ) -> Result<Self::Response, Self::Error> {
+    ///         // Handle the Ping message and return a Pong response
+    ///         Ok(Pong { times: self.times })
+    ///     }
+    /// }
+    /// ```
     fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
         message: &MT,
     ) -> impl Future<Output = Result<Self::Response, Self::Error>>;
 
+    /// Handle and reply to a message.
+    ///
+    /// This method will:
+    /// 1. Call the actor's `handle` method for this message type
+    /// 2. Reply to the sender of the message with the response
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - A mutable reference to the actor context
+    /// * `message` - A reference to the message to be handled
+    /// * `frame` - A reference to the original message frame
+    ///
+    /// # Returns
+    ///
+    /// A future that resolves to a `Result` containing the response or an error
     fn reply(
         &mut self,
         ctx: &mut ActorContext<Self>,
