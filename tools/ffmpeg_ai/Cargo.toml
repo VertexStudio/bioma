@@ -13,5 +13,3 @@ color-backtrace = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 image = "0.25"
-
-bioma_behavior = { path = "../../bioma_behavior" }
