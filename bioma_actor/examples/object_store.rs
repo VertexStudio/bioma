@@ -222,7 +222,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut s3_uploader_actor = Actor::spawn(
         &engine,
         &s3_uploader_id,
-        S3Uploader { bucket: env.s3.bucket_name, region: env.s3.region, access_key: env.s3.access_key_id, secret_key: env.s3.secret_access_key },
+        S3Uploader { 
+            bucket: env.s3.bucket_name, 
+            region: env.s3.region, 
+            access_key: env.s3.access_key_id, 
+            secret_key: env.s3.secret_access_key 
+        },
         SpawnOptions::default(),
     )
     .await?;

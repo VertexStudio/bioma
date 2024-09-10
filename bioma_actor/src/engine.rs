@@ -1,6 +1,9 @@
 use crate::actor::SystemActorError;
 use bon::builder;
 use object_store::local::LocalFileSystem;
+use object_store::path::Path;
+use object_store::GetOptions;
+use object_store::ObjectStore;
 use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::engine::any::IntoEndpoint;
@@ -101,6 +104,22 @@ impl Engine {
     pub fn local_store(&self) -> Result<LocalFileSystem, SystemActorError> {
         let store = LocalFileSystem::new_with_prefix(self.options.local_store.clone())?;
         Ok(store)
+    }
+
+    pub async fn get_file_from_s3(path: &Path) -> Result<Vec<u8>, SystemActorError> {
+        let s3 = object_store::aws::AmazonS3Builder::new()
+            .with_region("us-east-2")
+            .with_bucket_name("bucket-name")
+            .with_access_key_id("aws-access-key-id")
+            .with_secret_access_key("aws-secret-key-id")
+            .build()?;
+
+        // For example random_objects/1
+        // let path = Path::from("random_objects/1");
+        let get_result = s3.get_opts(&path, GetOptions::default()).await?;
+        let bytes = get_result.bytes().await?;
+
+        Ok(bytes.to_vec())
     }
 }
 
