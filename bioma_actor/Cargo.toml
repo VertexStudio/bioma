@@ -18,10 +18,17 @@ humantime-serde = { workspace = true }
 jsonpath-rust = { workspace = true }
 tracing = { workspace = true }
 bon = { workspace = true }
-object_store = { workspace = true, features = ["serde"] }
+object_store = { workspace = true, features = ["serde", "aws"] }
 url = { workspace = true, features = ["serde"] }
 
 bioma_derive = { path = "../bioma_derive" }
+
+dotenv = "0.15"
+log = "0.4"
+env_logger = "0.11"
+backtrace = "0.3"
+color-backtrace = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 test-log = { workspace = true, default-features = false, features = [

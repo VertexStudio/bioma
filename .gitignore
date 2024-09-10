@@ -3,3 +3,6 @@
 /output
 bioma_behavior_v0
 bioma_js/node_modules
+
+.env
+.vscode
