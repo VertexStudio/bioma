@@ -29,11 +29,11 @@ macro_rules! dbg_export_db {
 #[builder]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EngineOptions {
-    namespace: String,
-    database: String,
-    username: String,
-    password: String,
-    local_store: std::path::PathBuf,
+    pub namespace: String,
+    pub database: String,
+    pub username: String,
+    pub password: String,
+    pub local_store: std::path::PathBuf,
 }
 
 impl Default for EngineOptions {
