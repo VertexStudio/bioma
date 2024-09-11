@@ -121,11 +121,36 @@ pub struct FrameReply {
 
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<FrameMessage, SystemActorError>> + Send>>;
 
+/// A trait for message types that can be sent between actors.
 pub trait MessageType: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync {}
+// Blanket implementation for all types that meet the criteria
 impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync {}
 
-/// Message handling behavior
-/// Actors implement this trait to handle messages
+/// Defines message handling behavior for actors.
+///
+/// This trait should be implemented by actors that want to handle specific message types.
+/// It provides methods for processing incoming messages and generating responses.
+///
+/// # Type Parameters
+///
+/// * `MT`: The specific message type this implementation handles.
+///
+/// # Examples
+///
+/// ```
+/// impl Message<Ping> for PongActor {
+///     type Response = Pong;
+///
+///     async fn handle(
+///         &mut self,
+///         ctx: &mut ActorContext<Self>,
+///         message: &Ping,
+///     ) -> Result<Self::Response, Self::Error> {
+///         // Handle the Ping message and return a Pong response
+///         Ok(Pong { count: self.count })
+///     }
+/// }
+/// ```
 pub trait Message<MT>: Actor
 where
     MT: MessageType,
@@ -227,8 +252,10 @@ where
     }
 }
 
+/// Options for configuring message sending behavior.
 #[builder]
 pub struct SendOptions {
+    /// The maximum duration to wait for a reply before timing out.
     timeout: std::time::Duration,
 }
 
@@ -290,8 +317,15 @@ impl ActorId {
     }
 }
 
+/// Options for spawning an actor.
+///
+/// Configuration options for the actor spawning process.
 #[builder]
 pub struct SpawnOptions {
+    /// Specifies how to handle the case when an actor with the same ID already exists.
+    ///
+    /// This field determines the behavior of the spawning process when it encounters
+    /// an existing actor with the same ID as the one being spawned.
     exists: SpawnExistsOptions,
 }
 
@@ -417,8 +451,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug
 
     /// Starts the actor's main loop.
     ///
-    /// This function is the entry point for the actor's lifecycle. It initializes the actor,
-    /// processes incoming messages, and performs cleanup when the actor is done.
+    /// This function is the entry point for the actor's lifecycle.
     ///
     /// # Arguments
     ///
@@ -508,7 +541,15 @@ impl<T: Actor> ActorContext<T> {
         Self { engine, id, actor }
     }
 
-    /// Start the actor
+    /// Starts the actor's main loop.
+    ///
+    /// This function is the entry point for the actor's lifecycle.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result<(), T::Error>`:
+    /// - `Ok(())` if the actor completes its work successfully.
+    /// - `Err(T::Error)` if an error occurs during the actor's execution.
     pub async fn start(&mut self) -> Result<(), T::Error> {
         let actor_state = serde_json::to_value(&self.actor).map_err(SystemActorError::from)?;
         let mut actor: T = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
@@ -586,7 +627,30 @@ impl<T: Actor> ActorContext<T> {
         Ok((request_id, reply_id, request))
     }
 
-    /// Send a message to an actor without waiting for a reply
+    /// Send a message to an actor without waiting for a reply.
+    ///
+    /// This method sends a message to another actor without expecting or waiting for a response.
+    /// It's useful for fire-and-forget type operations where you don't need to process a reply.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M`: The message handler type, which must implement `Message<MT>`.
+    /// * `MT`: The message type, which must implement `MessageType`.
+    ///
+    /// # Arguments
+    ///
+    /// * `message`: The message to be sent.
+    /// * `to`: The `ActorId` of the recipient actor.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    /// - `Ok(())` if the message was successfully sent.
+    /// - `Err(SystemActorError)` if there was an error in sending the message.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if the message preparation or sending process fails.
     pub async fn do_send<M, MT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
         M: Message<MT>,
@@ -597,6 +661,32 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Send a message to an actor and wait for a reply
+    ///
+    /// This method sends a message to another actor and waits for a response.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M`: The message handler type, which must implement `Message<MT>`.
+    /// * `MT`: The message type, which must implement `MessageType`.
+    ///
+    /// # Arguments
+    ///
+    /// * `message`: The message to be sent.
+    /// * `to`: The `ActorId` of the recipient actor.
+    /// * `options`: The `SendOptions` for this message.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing either:
+    /// - `Ok(M::Response)`: The successfully received reply.
+    /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if:
+    /// - The message preparation fails.
+    /// - The message sending fails.
+    /// - Waiting for the reply times out or encounters other issues.
     pub async fn send<M, MT>(
         &self,
         message: MT,
@@ -611,17 +701,59 @@ impl<T: Actor> ActorContext<T> {
         self.wait_for_reply::<M::Response>(&reply_id, options).await
     }
 
-    /// Send a message to an actor without waiting for a reply
-    pub async fn do_send_as<MT, RT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
+    /// Send a message to an actor without waiting for a reply.
+    ///
+    /// This method allows sending a message to an actor without expecting a response.
+    /// It's useful for fire-and-forget type operations where you don't need to wait
+    /// for or process a reply.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `MT`: The type of the message being sent, which must implement `MessageType`.
+    ///
+    /// # Arguments
+    ///
+    /// * `message`: The message to be sent.
+    /// * `to`: The `ActorId` of the recipient actor.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    /// - `Ok(())` if the message was successfully sent.
+    /// - `Err(SystemActorError)` if there was an error in sending the message.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if the message preparation or sending process fails.
+    pub async fn do_send_as<MT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
         MT: MessageType,
-        RT: MessageType,
     {
         let (_, _, _) = self.prepare_and_send_message(&message, to).await?;
         Ok(())
     }
 
-    /// Send a message to an actor and wait for a reply
+    /// Send a message to an actor and wait for a reply.
+    ///
+    /// This method is similar to `send` but allows for sending a message to an actor
+    /// and waiting for a reply without knowing if the actor can handle the message type.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `MT`: The type of the message being sent.
+    /// * `RT`: The expected type of the reply.
+    ///
+    /// # Arguments
+    ///
+    /// * `message`: The message to be sent.
+    /// * `to`: The `ActorId` of the recipient actor.
+    /// * `options`: The `SendOptions` for this message.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing either:
+    /// - `Ok(RT)`: The successfully received reply of type `RT`.
+    /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
     pub async fn send_as<MT, RT>(&self, message: MT, to: &ActorId, options: SendOptions) -> Result<RT, SystemActorError>
     where
         MT: MessageType,
@@ -661,6 +793,31 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Reply to a received message
+    ///
+    /// This method sends a reply to a previously received message.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M`: The message handler type, which must implement `Message<MT>`.
+    /// * `MT`: The message type, which must implement `MessageType`.
+    ///
+    /// # Arguments
+    ///
+    /// * `request`: A reference to the original `FrameMessage` that is being replied to.
+    /// * `message`: A reference to the `Result` containing either the response or an error.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` which is:
+    /// - `Ok(())` if the reply was successfully sent.
+    /// - `Err(SystemActorError)` if there was an error in sending the reply.
+    ///
+    /// # Errors
+    ///
+    /// This method will return an error if:
+    /// - The receiver ID in the request doesn't match the current actor's ID.
+    /// - There's an issue with serializing the response or error.
+    /// - The database query to store the reply fails.
     async fn reply<M, MT>(
         &self,
         request: &FrameMessage,
@@ -712,6 +869,22 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Receive messages for this actor
+    ///
+    /// This method sets up a stream of messages for the actor, combining any unreplied messages
+    /// with a live query for new incoming messages.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing:
+    /// - `Ok(MessageStream)`: A pinned box containing a stream of `Result<FrameMessage, SystemActorError>`.
+    /// - `Err(SystemActorError)`: If there's an error setting up the message stream.
+    ///
+    /// # Errors
+    ///
+    /// This method can return an error if:
+    /// - There's an issue retrieving unreplied messages.
+    /// - The live query setup fails.
+    /// - There's an error in the database query.
     pub async fn recv(&self) -> Result<MessageStream, SystemActorError> {
         let unreplied_messages = self.unreplied_messages().await?;
         let unreplied_stream = futures::stream::iter(unreplied_messages).map(Ok);
@@ -746,8 +919,6 @@ impl<T: Actor> ActorContext<T> {
         let chained_stream = unreplied_stream.chain(live_query);
 
         Ok(Box::pin(chained_stream))
-
-        // Ok(Box::pin(live_query) as MessageStream)
     }
 }
 

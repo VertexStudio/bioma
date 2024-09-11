@@ -18,7 +18,7 @@ humantime-serde = { workspace = true }
 jsonpath-rust = { workspace = true }
 tracing = { workspace = true }
 bon = { workspace = true }
-object_store = { workspace = true, features = ["serde"] }
+object_store = { workspace = true, features = ["serde", "aws"] }
 url = { workspace = true, features = ["serde"] }
 
 bioma_derive = { path = "../bioma_derive" }
@@ -32,3 +32,4 @@ color-backtrace = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 rand = { workspace = true }
+console-subscriber = { workspace = true }
