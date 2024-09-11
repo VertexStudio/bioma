@@ -39,10 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Text to embed
     let text = "Hello, how are you?";
 
-    // Send the text to the embeddings actor
+    // Send the texts to the embeddings actor
     let embeddings = relay_actor
         .send::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { text: text.to_string() },
+            GenerateEmbeddings { texts: vec![text.to_string()] },
             &embeddings_id,
             SendOptions::default(),
         )

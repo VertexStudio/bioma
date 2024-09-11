@@ -26,13 +26,19 @@ macro_rules! dbg_export_db {
     }};
 }
 
+/// Configuration options for the Engine.
 #[builder]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EngineOptions {
+    /// The namespace to use in the database.
     pub namespace: String,
+    /// The name of the database to connect to.
     pub database: String,
+    /// The username for database authentication.
     pub username: String,
+    /// The password for database authentication.
     pub password: String,
+    /// The local file system path for object store.
     pub local_store: std::path::PathBuf,
 }
 

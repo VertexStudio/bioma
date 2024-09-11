@@ -1,5 +1,12 @@
 use bioma_actor::prelude::*;
-use ollama_rs::{error::OllamaError, generation::options::GenerationOptions, Ollama};
+use ollama_rs::{
+    error::OllamaError,
+    generation::{
+        embeddings::request::{EmbeddingsInput, GenerateEmbeddingsRequest},
+        options::GenerationOptions,
+    },
+    Ollama,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
@@ -17,12 +24,12 @@ impl ActorError for EmbeddingsError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateEmbeddings {
-    pub text: String,
+    pub texts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneratedEmbeddings {
-    pub embeddings: Vec<f32>,
+    pub embeddings: Vec<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,12 +52,13 @@ impl Message<GenerateEmbeddings> for Embeddings {
             return Err(EmbeddingsError::OllamaNotInitialized);
         };
 
-        let result = ollama
-            .generate_embeddings(self.model_name.clone(), message.text.clone(), self.generation_options.clone())
-            .await?;
-        let embeddings = result.embeddings.into_iter().map(|e| e as f32).collect::<Vec<f32>>();
+        let input = EmbeddingsInput::Multiple(message.texts.clone());
 
-        Ok(GeneratedEmbeddings { embeddings })
+        let request = GenerateEmbeddingsRequest::new(self.model_name.clone(), input);
+
+        let result = ollama.generate_embeddings(request).await?;
+
+        Ok(GeneratedEmbeddings { embeddings: result.embeddings })
     }
 }
 
