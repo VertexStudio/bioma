@@ -338,9 +338,9 @@ impl Actor for MainActor {
         let player_o_id = ActorId::of::<PlayerActor>("/player_o");
 
         // Spawn game actor
-        let mut game_actor = Actor::spawn(
-            &ctx.engine(),
-            &game_id,
+        let (mut game_actor_ctx, mut game_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            game_id.clone(),
             GameActor {
                 player_x: player_x_id.clone(),
                 player_o: player_o_id.clone(),
@@ -352,9 +352,9 @@ impl Actor for MainActor {
         .await?;
 
         // Spawn board actor
-        let mut board_actor = Actor::spawn(
-            &ctx.engine(),
-            &board_id,
+        let (mut board_actor_ctx, mut board_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            board_id.clone(),
             BoardActor {
                 game: game_id.clone(),
                 player_x: player_x_id.clone(),
@@ -368,18 +368,18 @@ impl Actor for MainActor {
         .await?;
 
         // Spawn player_x actor
-        let mut player_x_actor = Actor::spawn(
-            &ctx.engine(),
-            &player_x_id,
+        let (mut player_x_actor_ctx, mut player_x_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            player_x_id.clone(),
             PlayerActor { player_type: PlayerType::X, game: game_id.clone(), board: board_id.clone() },
             SpawnOptions::default(),
         )
         .await?;
 
         // Spawn player_o actor
-        let mut player_o_actor = Actor::spawn(
-            &ctx.engine(),
-            &player_o_id,
+        let (mut player_o_actor_ctx, mut player_o_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            player_o_id.clone(),
             PlayerActor { player_type: PlayerType::O, game: game_id.clone(), board: board_id.clone() },
             SpawnOptions::default(),
         )
@@ -387,22 +387,22 @@ impl Actor for MainActor {
 
         // Start the game actor
         let game_handle = tokio::spawn(async move {
-            game_actor.start().await.unwrap();
+            game_actor.start(&mut game_actor_ctx).await.unwrap();
         });
 
         // Start the board actor
         let board_handle = tokio::spawn(async move {
-            board_actor.start().await.unwrap();
+            board_actor.start(&mut board_actor_ctx).await.unwrap();
         });
 
         // Start the player_x actor
         let player_x_handle = tokio::spawn(async move {
-            player_x_actor.start().await.unwrap();
+            player_x_actor.start(&mut player_x_actor_ctx).await.unwrap();
         });
 
         // Start the player_o actor
         let player_o_handle = tokio::spawn(async move {
-            player_o_actor.start().await.unwrap();
+            player_o_actor.start(&mut player_o_actor_ctx).await.unwrap();
         });
 
         // Start the game actor
@@ -437,15 +437,13 @@ async fn main() -> Result<(), SystemActorError> {
     let engine = Engine::test().await?;
 
     // Setup the main actor
-    let mut main_actor =
-        Actor::spawn(&engine, &ActorId::of::<MainActor>("/main"), MainActor, SpawnOptions::default()).await?;
+    let (mut main_actor_ctx, mut main_actor) =
+        Actor::spawn(engine.clone(), ActorId::of::<MainActor>("/main"), MainActor, SpawnOptions::default()).await?;
 
     // Start the main actor with a timeout
     // and wait for the main actor to finish or timeout after 10 seconds
     let main_timeout = std::time::Duration::from_secs(10);
-    let main_actor_handle = main_actor.start();
-
-    let _result = tokio::time::timeout(main_timeout, main_actor_handle)
+    let _result = tokio::time::timeout(main_timeout, main_actor.start(&mut main_actor_ctx))
         .await
         .map_err(|_| SystemActorError::TaskTimeout(main_timeout))?;
 

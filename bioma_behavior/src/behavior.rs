@@ -189,34 +189,35 @@ mod tests {
             DecoratorBehavior::<MockDecorator> { node: MockDecorator, child: mock_composite_id.clone() };
 
         // Spawn the actors
-        let mut mock_action_0 =
-            Actor::spawn(&engine, &mock_action_id_0, mock_action_0, SpawnOptions::default()).await?;
-        let mut mock_action_1 =
-            Actor::spawn(&engine, &mock_action_id_1, mock_action_1, SpawnOptions::default()).await?;
-        let mut mock_action_2 =
-            Actor::spawn(&engine, &mock_action_id_2, mock_action_2, SpawnOptions::default()).await?;
-        let mut mock_action_3 =
-            Actor::spawn(&engine, &mock_action_id_3, mock_action_3, SpawnOptions::default()).await?;
-        let mut mock_composite =
-            Actor::spawn(&engine, &mock_composite_id, mock_composite, SpawnOptions::default()).await?;
-        let mut mock_decorator =
-            Actor::spawn(&engine, &mock_decorator_id, mock_decorator, SpawnOptions::default()).await?;
+        let (mut mock_action_0_ctx, mut mock_action_0) =
+            Actor::spawn(engine.clone(), mock_action_id_0.clone(), mock_action_0, SpawnOptions::default()).await?;
+        let (mut mock_action_1_ctx, mut mock_action_1) =
+            Actor::spawn(engine.clone(), mock_action_id_1.clone(), mock_action_1, SpawnOptions::default()).await?;
+        let (mut mock_action_2_ctx, mut mock_action_2) =
+            Actor::spawn(engine.clone(), mock_action_id_2.clone(), mock_action_2, SpawnOptions::default()).await?;
+        let (mut mock_action_3_ctx, mut mock_action_3) =
+            Actor::spawn(engine.clone(), mock_action_id_3.clone(), mock_action_3, SpawnOptions::default()).await?;
+        let (mut mock_composite_ctx, mut mock_composite) =
+            Actor::spawn(engine.clone(), mock_composite_id.clone(), mock_composite, SpawnOptions::default()).await?;
+        let (mut mock_decorator_ctx, mut mock_decorator) =
+            Actor::spawn(engine.clone(), mock_decorator_id.clone(), mock_decorator, SpawnOptions::default()).await?;
 
         // Start the actors
-        tokio::spawn(async move { mock_action_0.start().await.unwrap() });
-        tokio::spawn(async move { mock_action_1.start().await.unwrap() });
-        tokio::spawn(async move { mock_action_2.start().await.unwrap() });
-        tokio::spawn(async move { mock_action_3.start().await.unwrap() });
-        tokio::spawn(async move { mock_composite.start().await.unwrap() });
-        tokio::spawn(async move { mock_decorator.start().await.unwrap() });
+        tokio::spawn(async move { mock_action_0.start(&mut mock_action_0_ctx).await.unwrap() });
+        tokio::spawn(async move { mock_action_1.start(&mut mock_action_1_ctx).await.unwrap() });
+        tokio::spawn(async move { mock_action_2.start(&mut mock_action_2_ctx).await.unwrap() });
+        tokio::spawn(async move { mock_action_3.start(&mut mock_action_3_ctx).await.unwrap() });
+        tokio::spawn(async move { mock_composite.start(&mut mock_composite_ctx).await.unwrap() });
+        tokio::spawn(async move { mock_decorator.start(&mut mock_decorator_ctx).await.unwrap() });
 
         tokio::time::sleep(std::time::Duration::from_secs(0)).await;
 
         // Main actor
         let main_actor_id = ActorId::of::<MainActor>("main");
         let main_actor = MainActor { root: mock_decorator_id };
-        let mut main_actor = Actor::spawn(&engine, &main_actor_id, main_actor, SpawnOptions::default()).await?;
-        main_actor.start().await?;
+        let (mut main_ctx, mut main_actor) =
+            Actor::spawn(engine.clone(), main_actor_id.clone(), main_actor, SpawnOptions::default()).await?;
+        main_actor.start(&mut main_ctx).await?;
 
         // Export the database for debugging
         dbg_export_db!(engine);

@@ -17,15 +17,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rerank_id = ActorId::of::<Rerank>("/rerank");
 
     // Spawn and start the rerank actor
-    let mut rerank_actor = Actor::spawn(
-        &engine,
-        &rerank_id,
+    let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
+        engine.clone(),
+        rerank_id.clone(),
         Rerank { url: Url::parse("http://localhost:9124/rerank").unwrap() },
         SpawnOptions::default(),
     )
     .await?;
     let rerank_handle = tokio::spawn(async move {
-        if let Err(e) = rerank_actor.start().await {
+        if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
             error!("Rerank actor error: {}", e);
         }
     });
@@ -34,7 +34,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn a relay actor to connect to rerank actor
     let relay_id = ActorId::of::<Relay>("/relay");
-    let relay_actor = Actor::spawn(&engine, &relay_id, Relay, SpawnOptions::default()).await?;
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Texts to rerank
     let texts: Vec<String> = vec![
@@ -47,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let query = "What is the weather in Tokyo?";
 
     // Send the texts to the rerank actor
-    let ranked_texts = relay_actor
+    let ranked_texts = relay_ctx
         .send::<Rerank, RankTexts>(
             RankTexts { query: query.to_string(), texts: texts, raw_scores: false },
             &rerank_id,
