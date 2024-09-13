@@ -116,15 +116,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn the RandomObjectLoader actor
     let random_object_loader_id = ActorId::of::<RandomObjectLoader>("/random_object_loader");
-    let mut random_object_loader_actor = Actor::spawn(
-        &engine,
-        &random_object_loader_id,
+    let (mut random_object_loader_ctx, mut random_object_loader) = Actor::spawn(
+        engine.clone(),
+        random_object_loader_id.clone(),
         RandomObjectLoader { prefix: prefix.clone(), num_objects, store: None },
         SpawnOptions::default(),
     )
     .await?;
     let random_object_loader_handle = tokio::spawn(async move {
-        if let Err(e) = random_object_loader_actor.start().await {
+        if let Err(e) = random_object_loader.start(&mut random_object_loader_ctx).await {
             error!("RandomObjectLoader actor error: {}", e);
         }
     });
@@ -133,15 +133,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn the RandomObjectSaver actor
     let random_object_saver_id = ActorId::of::<RandomObjectSaver>("/random_object_saver");
-    let mut random_object_saver_actor = Actor::spawn(
-        &engine,
-        &random_object_saver_id,
+    let (mut random_object_saver_ctx, mut random_object_saver) = Actor::spawn(
+        engine.clone(),
+        random_object_saver_id.clone(),
         RandomObjectSaver { prefix: prefix.clone(), num_objects, loader_id: random_object_loader_id },
         SpawnOptions::default(),
     )
     .await?;
     let random_object_saver_handle = tokio::spawn(async move {
-        if let Err(e) = random_object_saver_actor.start().await {
+        if let Err(e) = random_object_saver.start(&mut random_object_saver_ctx).await {
             error!("RandomObjectSaver actor error: {}", e);
         }
     });

@@ -18,7 +18,7 @@ const DB_TABLE_MESSAGE: &str = "message";
 const DB_TABLE_REPLY: &str = "reply";
 
 /// Implement this trait to define custom actor error types
-pub trait ActorError: std::error::Error + Debug + Send + Sync + 'static + From<SystemActorError> {}
+pub trait ActorError: std::error::Error + Debug + Send + Sync + From<SystemActorError> {}
 
 /// Enumerates the types of errors that can occur in Actor framework
 #[derive(thiserror::Error, Debug)]
@@ -122,9 +122,9 @@ pub struct FrameReply {
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<FrameMessage, SystemActorError>> + Send>>;
 
 /// A trait for message types that can be sent between actors.
-pub trait MessageType: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync {}
+pub trait MessageType: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync {}
 // Blanket implementation for all types that meet the criteria
-impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de> + Send + 'static + Sync {}
+impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync {}
 
 /// Defines message handling behavior for actors.
 ///
@@ -134,23 +134,6 @@ impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de>
 /// # Type Parameters
 ///
 /// * `MT`: The specific message type this implementation handles.
-///
-/// # Examples
-///
-/// ```
-/// impl Message<Ping> for PongActor {
-///     type Response = Pong;
-///
-///     async fn handle(
-///         &mut self,
-///         ctx: &mut ActorContext<Self>,
-///         message: &Ping,
-///     ) -> Result<Self::Response, Self::Error> {
-///         // Handle the Ping message and return a Pong response
-///         Ok(Pong { count: self.count })
-///     }
-/// }
-/// ```
 pub trait Message<MT>: Actor
 where
     MT: MessageType,
@@ -173,23 +156,6 @@ where
     /// An implementation of `Future` that resolves to a `Result` containing either:
     /// - `Ok(Self::Response)`: The successful response to the message.
     /// - `Err(Self::Error)`: An error that occurred during message handling.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// impl Message<Ping> for PongActor {
-    ///     type Response = Pong;
-    ///
-    ///     async fn handle(
-    ///         &mut self,
-    ///         ctx: &mut ActorContext<Self>,
-    ///         message: &Ping,
-    ///     ) -> Result<Self::Response, Self::Error> {
-    ///         // Handle the Ping message and return a Pong response
-    ///         Ok(Pong { times: self.times })
-    ///     }
-    /// }
-    /// ```
     fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
@@ -300,13 +266,6 @@ impl ActorId {
     /// # Returns
     ///
     /// Returns a new `ActorId` instance with the generated id and the type name of the actor.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use your_crate::{ActorId, MyActor};
-    /// let actor_id = ActorId::of::<MyActor>("unique_actor_name");
-    /// ```
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
         let id = RecordId::from_table_key(DB_TABLE_ACTOR, uid.into().to_string());
         Self { id, kind: type_name::<T>().into() }
@@ -355,17 +314,16 @@ pub enum SpawnExistsOptions {
 }
 
 /// Implement this trait to define an actor
-pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug + Send + Sync {
+pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + Sync {
     type Error: ActorError;
 
     /// Spawns a new actor in the system or handles an existing one based on the provided options.
     ///
-    /// This function creates a new actor instance, registers it in the database, and returns
-    /// an `ActorContext` for the newly spawned or existing actor.
+    /// This function creates a new actor instance, registers it in the database, or restores an existing actor.
     ///
     /// # Arguments
     ///
-    /// * `engine` - A reference to the `Engine` instance.
+    /// * `engine` - The `Engine` instance.
     /// * `id` - The `ActorId` for the actor.
     /// * `actor` - The actor instance to be spawned.
     /// * `options` - `SpawnOptions` to control behavior when the actor already exists.
@@ -373,7 +331,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug
     /// # Returns
     ///
     /// A `Future` that resolves to a `Result` containing either:
-    /// - `Ok(ActorContext<Self>)`: The context for the spawned or existing actor.
+    /// - `Ok((ActorContext<Self>, Self))`: The actor context and the actor instance.
     /// - `Err(Self::Error)`: An error if the spawning process fails.
     ///
     /// # Errors
@@ -383,22 +341,13 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug
     /// - Serialization of the actor state fails.
     /// - Creating or updating the actor record in the database fails.
     /// - The actor already exists and `SpawnOptions::Error` is specified.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let engine = Engine::new().await?;
-    /// let actor_id = ActorId::of::<MyActor>("unique_id");
-    /// let actor = MyActor::new();
-    /// let options = SpawnOptions::default();
-    /// let actor_context = MyActor::spawn(&engine, &actor_id, actor, options).await?;
-    /// ```
+    /// - Deserialization of an existing actor's state fails when using `SpawnOptions::Restore`.
     fn spawn(
-        engine: &Engine,
-        id: &ActorId,
+        engine: Engine,
+        id: ActorId,
         actor: Self,
         options: SpawnOptions,
-    ) -> impl Future<Output = Result<ActorContext<Self>, Self::Error>> {
+    ) -> impl Future<Output = Result<(ActorContext<Self>, Self), Self::Error>> {
         async move {
             // Check if the actor kind matches
             if id.kind != type_name::<Self>() {
@@ -425,10 +374,11 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug
                     }
                     SpawnExistsOptions::Restore => {
                         // Restore the actor by loading its state from the database
-                        let actor = serde_json::from_value(actor_record.state).map_err(SystemActorError::from)?;
+                        let actor: Self = serde_json::from_value(actor_record.state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
-                        let ctx = ActorContext::new(engine.clone(), id.clone(), actor);
-                        return Ok(ctx);
+                        let ctx =
+                            ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
+                        return Ok((ctx, actor));
                     }
                 }
             }
@@ -444,8 +394,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
             // Create and return the actor context
-            let ctx = ActorContext::new(engine.clone(), id.clone(), actor);
-            Ok(ctx)
+            let ctx = ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
+            Ok((ctx, actor))
         }
     }
 
@@ -464,23 +414,6 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + 'static + Debug
     /// Returns a `Result<(), Self::Error>`:
     /// - `Ok(())` if the actor completes its work successfully.
     /// - `Err(Self::Error)` if an error occurs during the actor's execution.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
-    ///     info!("{} Says hi!", ctx.id());
-    ///     let mut stream = ctx.recv().await?;
-    ///     while let Some(Ok(frame)) = stream.next().await {
-    ///         if let Some(message) = frame.is::<Ping>() {
-    ///             info!("{} Pong", ctx.id());
-    ///             self.reply(ctx, &message, &frame).await?;
-    ///         }
-    ///     }
-    ///     info!("{} Says bye!", ctx.id());
-    ///     Ok(())
-    /// }
-    /// ```
     fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Saves the current state of the actor in the system.
@@ -533,30 +466,10 @@ pub struct ActorRecord {
 pub struct ActorContext<T: Actor> {
     engine: Engine,
     id: ActorId,
-    actor: T,
+    _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: Actor> ActorContext<T> {
-    fn new(engine: Engine, id: ActorId, actor: T) -> Self {
-        Self { engine, id, actor }
-    }
-
-    /// Starts the actor's main loop.
-    ///
-    /// This function is the entry point for the actor's lifecycle.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result<(), T::Error>`:
-    /// - `Ok(())` if the actor completes its work successfully.
-    /// - `Err(T::Error)` if an error occurs during the actor's execution.
-    pub async fn start(&mut self) -> Result<(), T::Error> {
-        let actor_state = serde_json::to_value(&self.actor).map_err(SystemActorError::from)?;
-        let mut actor: T = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
-        actor.start(self).await?;
-        Ok(())
-    }
-
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
         let query = include_str!("../../assets/surreal/unreplied_messages.surql");
         let mut res = self.engine().db().query(query).bind(("rx", self.id.id.clone())).await?;
@@ -577,7 +490,20 @@ impl<T: Actor> ActorContext<T> {
 
     /// Check the health of the actor
     pub async fn health(&self) -> bool {
-        self.engine().health().await
+        // Check if the actor is still in the database
+        let record: Result<Option<ActorRecord>, SystemActorError> =
+            self.engine().db().select(&self.id.id).await.map_err(SystemActorError::from);
+        if let Ok(Some(_)) = record {
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Kill the actor
+    pub async fn kill(&self) -> Result<(), SystemActorError> {
+        let _: Option<ActorRecord> = self.engine().db().delete(&self.id.id).await.map_err(SystemActorError::from)?;
+        Ok(())
     }
 
     /// Internal method to prepare and send a message
@@ -1042,29 +968,30 @@ mod tests {
         let ping_id = ActorId::of::<PingActor>("/ping");
 
         // Spawn the ping and pong actors
-        let mut ping_actor = Actor::spawn(
-            &engine,
-            &ping_id,
+        let (mut ping_ctx, mut ping_actor) = Actor::spawn(
+            engine.clone(),
+            ping_id,
             PingActor { pong_id: pong_id.clone(), max_attempts: 5 },
             SpawnOptions::default(),
         )
         .await?;
-        let mut pong_actor = Actor::spawn(&engine, &pong_id, PongActor { times: 3 }, SpawnOptions::default()).await?;
+        let (mut pong_ctx, mut pong_actor) =
+            Actor::spawn(engine.clone(), pong_id, PongActor { times: 3 }, SpawnOptions::default()).await?;
 
         // Check health of the actors
-        let ping_health = ping_actor.health().await;
-        let pong_health = pong_actor.health().await;
+        let ping_health = ping_ctx.health().await;
+        let pong_health = pong_ctx.health().await;
         assert!(ping_health);
         assert!(pong_health);
 
         // Start the ping and pong actors
         let ping_handle = tokio::spawn(async move {
-            if let Err(e) = ping_actor.start().await {
+            if let Err(e) = ping_actor.start(&mut ping_ctx).await {
                 error!("PingActor error: {}", e);
             }
         });
         let pong_handle = tokio::spawn(async move {
-            if let Err(e) = pong_actor.start().await {
+            if let Err(e) = pong_actor.start(&mut pong_ctx).await {
                 error!("PongActor error: {}", e);
             }
         });

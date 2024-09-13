@@ -16,16 +16,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
 
     // Spawn and start the embeddings actor
-    let mut embeddings_actor = Actor::spawn(
-        &engine,
-        &embeddings_id,
+    let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
+        engine.clone(),
+        embeddings_id.clone(),
         Embeddings { model_name: "nomic-embed-text".to_string(), generation_options: Default::default(), ollama: None },
         SpawnOptions::default(),
     )
     .await?;
 
     let embeddings_handle = tokio::spawn(async move {
-        if let Err(e) = embeddings_actor.start().await {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
         }
     });
@@ -34,13 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn a relay actor to connect to embeddings actor
     let relay_id = ActorId::of::<Relay>("/relay");
-    let relay_actor = Actor::spawn(&engine, &relay_id, Relay, SpawnOptions::default()).await?;
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Text to embed
     let text = "Hello, how are you?";
 
     // Send the texts to the embeddings actor
-    let embeddings = relay_actor
+    let embeddings = relay_ctx
         .send::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { texts: vec![text.to_string()] },
             &embeddings_id,

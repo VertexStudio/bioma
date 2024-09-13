@@ -15,9 +15,9 @@ impl Actor for MainActor {
         let chat_id = ActorId::of::<Chat>("/llm");
 
         // Spawn the chat actor
-        let mut chat_actor = Actor::spawn(
-            ctx.engine(),
-            &chat_id,
+        let (mut chat_ctx, mut chat_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            chat_id.clone(),
             Chat {
                 model_name: "gemma2:2b".to_string(),
                 generation_options: Default::default(),
@@ -33,7 +33,7 @@ impl Actor for MainActor {
 
         // Start the chat actor
         let chat_handle = tokio::spawn(async move {
-            if let Err(e) = chat_actor.start().await {
+            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
                 error!("LLM actor error: {}", e);
             }
         });
@@ -84,11 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let main_id = ActorId::of::<MainActor>("/main");
 
     // Spawn the main actor
-    let mut main_actor =
-        Actor::spawn(&engine, &main_id, MainActor { max_exchanges: 3 }, SpawnOptions::default()).await?;
+    let (mut main_ctx, mut main_actor) =
+        Actor::spawn(engine.clone(), main_id.clone(), MainActor { max_exchanges: 3 }, SpawnOptions::default()).await?;
 
     // Start the main actor
-    main_actor.start().await?;
+    main_actor.start(&mut main_ctx).await?;
 
     // Export the database for debugging
     dbg_export_db!(engine);
