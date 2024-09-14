@@ -681,6 +681,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "surrealdb-beta",
  "test-log",
  "thiserror",
  "tokio",

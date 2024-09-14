@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
         engine.clone(),
         embeddings_id.clone(),
-        Embeddings { model_name: "nomic-embed-text".to_string(), generation_options: Default::default(), ollama: None },
+        Embeddings { model_name: "nomic-embed-text".to_string(), ..Default::default() },
         SpawnOptions::default(),
     )
     .await?;
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the texts to the embeddings actor
     let embeddings = relay_ctx
         .send::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { texts: vec![text.to_string()] },
+            GenerateEmbeddings { texts: vec![text.to_string()], store: true },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -52,6 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Embeddings: {:?}", embeddings);
 
     embeddings_handle.abort();
+
+    dbg_export_db!(engine);
 
     Ok(())
 }

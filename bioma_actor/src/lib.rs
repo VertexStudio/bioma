@@ -6,7 +6,7 @@ pub use crate::actor::{
     Actor, ActorContext, ActorError, ActorId, FrameMessage, Message, MessageType, SendOptions, SpawnExistsOptions,
     SpawnOptions, SystemActorError,
 };
-pub use crate::engine::{Engine, EngineOptions};
+pub use crate::engine::{Engine, EngineOptions, Record};
 pub use crate::util::Relay;
 pub use futures::{Future, StreamExt};
 

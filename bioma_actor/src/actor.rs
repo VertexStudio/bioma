@@ -1,6 +1,5 @@
-use crate::engine::Engine;
+use crate::engine::{Engine, Record};
 use bon::builder;
-use derive_more::Display;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -229,12 +228,6 @@ impl Default for SendOptions {
     fn default() -> Self {
         Self { timeout: std::time::Duration::from_secs(10) }
     }
-}
-
-// Record struct for database entries
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Display)]
-struct Record {
-    id: RecordId,
 }
 
 /// A unique identifier for a distributed actor
@@ -471,7 +464,7 @@ pub struct ActorContext<T: Actor> {
 
 impl<T: Actor> ActorContext<T> {
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
-        let query = include_str!("../../assets/surreal/unreplied_messages.surql");
+        let query = include_str!("../sql/unreplied_messages.surql");
         let mut res = self.engine().db().query(query).bind(("rx", self.id.id.clone())).await?;
         let existing_messages: Vec<FrameMessage> = res.take(0)?;
         trace!("unreplied_messages: {:?}", existing_messages);
@@ -777,7 +770,7 @@ impl<T: Actor> ActorContext<T> {
 
         debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
 
-        let reply_query = include_str!("../../assets/surreal/reply.surql");
+        let reply_query = include_str!("../sql/reply.surql");
 
         let response = self
             .engine()

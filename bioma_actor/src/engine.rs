@@ -1,11 +1,14 @@
 use crate::actor::SystemActorError;
 use bon::builder;
+use derive_more::Display;
 use object_store::local::LocalFileSystem;
 use serde::{Deserialize, Serialize};
-use surrealdb::engine::any::Any;
-use surrealdb::engine::any::IntoEndpoint;
-use surrealdb::opt::auth::Root;
-use surrealdb::Surreal;
+use surrealdb::{
+    engine::any::{Any, IntoEndpoint},
+    opt::auth::Root,
+    value::RecordId,
+    Surreal,
+};
 
 #[macro_export]
 macro_rules! dbg_export_db {
@@ -16,7 +19,7 @@ macro_rules! dbg_export_db {
             .and_then(|path| path.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-        let output_dir = workspace_root.join("output").join("db");
+        let output_dir = workspace_root.join("output").join("debug");
         std::fs::create_dir_all(&output_dir).unwrap();
 
         let file_name = format!("dbg_{}_{}", file!().replace("/", "_").replace(".", "_"), line!());
@@ -24,6 +27,12 @@ macro_rules! dbg_export_db {
 
         $engine.db().export(file_path.to_str().unwrap()).await.unwrap();
     }};
+}
+
+// Record struct for database entries
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Display)]
+pub struct Record {
+    pub id: RecordId,
 }
 
 /// Configuration options for the Engine.
@@ -99,7 +108,7 @@ impl Engine {
     async fn define(db: &Surreal<Any>) -> Result<(), SystemActorError> {
         // load the surreal definition file
         // let def = std::fs::read_to_string("assets/surreal/def.surql").unwrap();
-        let def = include_str!("../../assets/surreal/def.surql").parse::<String>().unwrap();
+        let def = include_str!("../sql/def.surql").parse::<String>().unwrap();
         db.query(&def).await?;
         Ok(())
     }
