@@ -183,9 +183,9 @@ impl Actor for Embeddings {
         // Store model in database if not already present
         let model_info: ollama_rs::models::ModelInfo = self.ollama.show_model_info(self.model_name.clone()).await?;
         let model = Model { name: self.model_name.clone(), info: model_info };
-        let model: Option<Record> =
-            db.create(("model", self.model_name.clone())).content(model).await.map_err(SystemActorError::from)?;
-        if let Some(model) = model {
+        let model: Result<Option<Record>, _> =
+            db.create(("model", self.model_name.clone())).content(model).await.map_err(SystemActorError::from);
+        if let Ok(Some(model)) = model {
             info!("Model {} stored with id: {}", self.model_name, model.id);
         }
 
