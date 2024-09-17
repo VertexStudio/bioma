@@ -37,19 +37,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Text to embed
-    let text = "Hello, how are you?";
+    // Texts to embed
+    let texts = vec![
+        "Hello, how are you?",
+        "What is the meaning of life?",
+        "The quick brown fox jumps over the lazy dog",
+        "Why is the sky blue?",
+        "What is the capital of the moon?",
+        "How are they doing?",
+        "Are you ok?",
+    ]
+    .iter()
+    .map(|text| text.to_string())
+    .collect::<Vec<String>>();
 
     // Send the texts to the embeddings actor
     let embeddings = relay_ctx
         .send::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { texts: vec![text.to_string()], store: true },
+            GenerateEmbeddings { texts: texts.clone(), tag: Some("test".to_string()) },
             &embeddings_id,
             SendOptions::default(),
         )
         .await?;
 
-    info!("Embeddings: {:?}", embeddings);
+    for (idx, text) in texts.iter().enumerate() {
+        info!("Generated embeddings for text: {}   {:?} ...", text, &embeddings.embeddings[idx][0..5]);
+    }
+
+    // Get similarities
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("Hello, how are you?".to_string()),
+        threshold: -0.5,
+        k: 5,
+        tag: Some("test".to_string()),
+    };
+    info!("Query: {:?}", top_k);
+    let similarities =
+        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+
+    for similarity in similarities {
+        info!("Similarity: {}   {}", similarity.text, similarity.similarity);
+    }
 
     embeddings_handle.abort();
 
