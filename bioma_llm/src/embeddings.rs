@@ -21,6 +21,8 @@ pub enum EmbeddingsError {
     OllamaNotInitialized,
     #[error("Url error: {0}")]
     Url(#[from] url::ParseError),
+    #[error("No embeddings generated")]
+    NoEmbeddingsGenerated,
 }
 
 impl ActorError for EmbeddingsError {}
@@ -103,6 +105,9 @@ impl Message<TopK> for Embeddings {
                 let input = EmbeddingsInput::Single(text.to_string());
                 let request = GenerateEmbeddingsRequest::new(self.model_name.clone(), input);
                 let result = self.ollama.generate_embeddings(request).await?;
+                if result.embeddings.is_empty() {
+                    return Err(EmbeddingsError::NoEmbeddingsGenerated);
+                }
                 result.embeddings[0].clone()
             }
         };
