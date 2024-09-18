@@ -531,7 +531,7 @@ impl<T: Actor> ActorContext<T> {
 
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(0)).await;
-            let msg_id: Result<Option<Record>, _> =
+            let msg_id: Result<Option<Record>, surrealdb::Error> =
                 msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
             if let Ok(Some(msg_id)) = msg_id {
                 let id = msg_id.id.clone();

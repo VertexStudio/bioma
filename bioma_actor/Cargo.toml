@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { workspace = true }
-surrealdb-beta = { workspace = true, features = ["kv-mem"] }
+surrealdb = { workspace = true, features = ["kv-mem"] }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 derive_more = { workspace = true }
