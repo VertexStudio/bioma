@@ -42,5 +42,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 rand = "0.8"
 reqwest = "0.12"
+glob = "0.3"
 
 bioma_derive = { path = "../bioma_derive" }
