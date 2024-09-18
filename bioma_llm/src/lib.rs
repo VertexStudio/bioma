@@ -1,6 +1,7 @@
 pub mod chat;
 pub mod embeddings;
 pub mod rerank;
+pub mod indexer;
 
 pub mod prelude {
     pub use crate::chat::{self, Chat, ChatError};
