@@ -77,3 +77,11 @@ If manually launching surrealdb:
 ```
 surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://output/bioma.db
 ```
+
+Rerank for OSX (or non docker):
+```
+python3 -m venv .bioma
+source .bioma/bin/activate
+pip install torch transformers flask
+python assets/scripts/rerank_server.py
+```

@@ -24,6 +24,7 @@ ollama-rs = { version = "0.2.1", features = [
     "chat-history",
     "function-calling",
 ] }
+text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
