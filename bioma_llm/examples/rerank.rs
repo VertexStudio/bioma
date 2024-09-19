@@ -42,6 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Hello, how are you?".to_string(),
         "What is the weather in Tokyo?".to_string(),
         "Can you recommend a good book?".to_string(),
+        "The weather in Tokyo is sunny today.".to_string(),
+        "Tokyo's climate is generally mild.".to_string(),
+        "What's the temperature in Tokyo right now?".to_string(),
+        "Tokyo experiences four distinct seasons.".to_string(),
+        "Is it raining in Tokyo at the moment?".to_string(),
     ];
 
     // Query to use for reranking
@@ -50,13 +55,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the texts to the rerank actor
     let ranked_texts = relay_ctx
         .send::<Rerank, RankTexts>(
-            RankTexts { query: query.to_string(), texts: texts, raw_scores: false },
+            RankTexts { query: query.to_string(), texts: texts.clone(), raw_scores: false },
             &rerank_id,
             SendOptions::default(),
         )
         .await?;
 
     info!("Ranked texts: {:?}", ranked_texts);
+
+    // Clone the ranked_texts so we can sort them
+    let mut sorted_texts = ranked_texts.clone();
+
+    // Sort the texts by score in descending order
+    sorted_texts.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+    println!("Query: {}", query);
+    for ranked_text in sorted_texts {
+        println!(
+            "{:>2}: {:>6.2} {}",
+            ranked_text.index,
+            ranked_text.score,
+            &texts[ranked_text.index]
+        );
+    }
 
     rerank_handle.abort();
 
