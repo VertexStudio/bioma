@@ -34,11 +34,12 @@ impl ActorError for IndexerError {}
 pub struct IndexGlobs {
     pub globs: Vec<String>,
     pub chunk_capacity: std::ops::Range<usize>,
+    pub timeout: std::time::Duration,
 }
 
 impl Default for IndexGlobs {
     fn default() -> Self {
-        Self { globs: vec![], chunk_capacity: 500..2000 }
+        Self { globs: vec![], chunk_capacity: 500..2000, timeout: std::time::Duration::from_secs(10) }
     }
 }
 
@@ -220,13 +221,22 @@ impl Message<IndexGlobs> for Indexer {
                     .map(|(i, c)| format!("---\nFILE: {}\nCHUNK: {:04}\nCONTEXT:\n\n{}", &file_name, i + 1, c))
                     .collect::<Vec<String>>();
 
-                ctx.send::<Embeddings, GenerateEmbeddings>(
-                    GenerateEmbeddings { texts: chunks, tag: Some("indexer_content".to_string()) },
-                    &self.embeddings_actor,
-                    SendOptions::default(),
-                )
-                .await?;
-                indexed += 1;
+                let result = ctx
+                    .send::<Embeddings, GenerateEmbeddings>(
+                        GenerateEmbeddings { texts: chunks, tag: Some("indexer_content".to_string()) },
+                        &self.embeddings_actor,
+                        SendOptions::builder().timeout(message.timeout).build(),
+                    )
+                    .await;
+
+                match result {
+                    Ok(_result) => {
+                        indexed += 1;
+                    }
+                    Err(e) => {
+                        error!("Failed to generate embeddings: {} {}", e, file_name);
+                    }
+                }
             }
         }
         if indexed > 0 {
