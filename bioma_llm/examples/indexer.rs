@@ -11,6 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the actor system
     let engine = Engine::test().await?;
+    let output_dir = engine.debug_output_dir()?;
 
     let query = "list ffmpeg dependencies";
 
@@ -29,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create chat pre-history
     let history = vec![
-        ChatMessage::system("You are a helpful programmingassistant".into()),
+        ChatMessage::system("You are a helpful programming assistant".into()),
         ChatMessage::user("Hello, how are you?".into()),
         ChatMessage::assistant("I'm doing well, thank you! How can I help you today?".into()),
         ChatMessage::user(query.into()),
@@ -40,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         model_name: "gemma2:2b".to_string(),
         generation_options: Default::default(),
         messages_number_limit: 10,
-        history,
+        history: history.clone(),
         ollama: None,
     };
 
@@ -77,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // workspace_root.clone() + "/**/*.surql",
             workspace_root.clone() + "/**/*.toml",
         ],
+        ..Default::default()
     };
     let _indexer = relay_ctx
         .send::<Indexer, IndexGlobs>(
@@ -90,12 +92,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Fetching context");
     let fetch_context = FetchContext { query: query.to_string(), limit: 10 };
     let context = relay_ctx.send::<Indexer, FetchContext>(fetch_context, &indexer_id, SendOptions::default()).await?;
-    println!("{:?}", context);
+    info!("Number of chunks: {}", context.context.len());
+
+    // Save context to file for debugging
+    tokio::fs::write(output_dir.join("indexer_context.md"), context.context.join("\n\n")).await?;
 
     // Send the context to the chat actor
+    info!("Sending context to chat actor");
     let chat_message = ChatMessage::system("Context to answer user query: ".to_string() + &context.context.join("\n"));
-    let chat_response = relay_ctx.send::<Chat, ChatMessage>(chat_message, &chat_id, SendOptions::default()).await?;
-    println!("{:?}", chat_response.message.unwrap());
+    let chat_response = relay_ctx
+        .send::<Chat, ChatMessage>(
+            chat_message,
+            &chat_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
+        )
+        .await?;
+    info!("Chat {} responded", &chat_response.model);
+
+    // Save chat to file for debugging
+    let mut chat_content = String::new();
+    for message in &history {
+        chat_content.push_str(&format!("{:?}: {}\n\n", message.role, message.content));
+    }
+    let response = chat_response.message.unwrap();
+    chat_content.push_str(&format!("{:?}: {}\n\n", &response.role, &response.content));
+    tokio::fs::write(output_dir.join("indexer_chat.md"), chat_content).await?;
 
     indexer_handle.abort();
     chat_handle.abort();
