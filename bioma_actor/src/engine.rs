@@ -128,6 +128,10 @@ impl Engine {
         std::fs::create_dir_all(&output_dir).unwrap();
         Ok(output_dir)
     }
+
+    pub fn options(&self) -> &EngineOptions {
+        &self.options
+    }
 }
 
 #[cfg(test)]
