@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 // Constants for database table names
 const DB_TABLE_ACTOR: &str = "actor";
@@ -691,10 +691,7 @@ impl<T: Actor> ActorContext<T> {
 
         let notification = tokio::time::timeout(options.timeout, stream.next())
             .await
-            .map_err(|_| {
-                warn!("[{}] msg-wait timeout:{:?} {}", self.id().id, options.timeout, reply_id);
-                SystemActorError::MessageTimeout(options.timeout)
-            })?
+            .map_err(|_| SystemActorError::MessageTimeout(options.timeout))?
             .ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
 
         let notification: Notification<FrameReply> = notification?;
