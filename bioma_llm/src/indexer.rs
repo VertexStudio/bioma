@@ -1,8 +1,8 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError, GenerateEmbeddings};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
+use bloomfilter::Bloom;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::PathBuf;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
@@ -148,12 +148,12 @@ impl Message<IndexGlobs> for Indexer {
                     warn!("Skipping path: {:?}", path);
                     continue;
                 };
-                if self.cache.contains(&path) {
+                if self.indexed.check(&path) {
                     debug!("Path already indexed: {}", path.display());
                     cached += 1;
                     continue;
                 }
-                self.cache.insert(path.clone());
+                self.indexed.set(&path);
 
                 let ext = path.extension().and_then(|ext| ext.to_str());
                 let text_type = match ext {
@@ -232,6 +232,7 @@ impl Message<IndexGlobs> for Indexer {
                 match result {
                     Ok(_result) => {
                         indexed += 1;
+                        self.save(ctx).await?;
                     }
                     Err(e) => {
                         error!("Failed to generate embeddings: {} {}", e, file_name);
@@ -251,15 +252,19 @@ impl Message<IndexGlobs> for Indexer {
 pub struct Indexer {
     embeddings_actor: ActorId,
     rerank_actor: ActorId,
-    cache: HashSet<PathBuf>,
+    indexed: Bloom<PathBuf>,
 }
 
 impl Default for Indexer {
     fn default() -> Self {
+        let false_positive_rate = 0.01;
+        let num_elements = 100_000;
+        let bloom = Bloom::new_for_fp_rate(num_elements, false_positive_rate);
+
         Self {
             embeddings_actor: ActorId::of::<Embeddings>("/indexer/embeddings"),
             rerank_actor: ActorId::of::<Rerank>("/indexer/rerank"),
-            cache: HashSet::new(),
+            indexed: bloom,
         }
     }
 }
