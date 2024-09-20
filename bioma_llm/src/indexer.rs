@@ -33,6 +33,13 @@ impl ActorError for IndexerError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
     pub globs: Vec<String>,
+    pub chunk_capacity: std::ops::Range<usize>,
+}
+
+impl Default for IndexGlobs {
+    fn default() -> Self {
+        Self { globs: vec![], chunk_capacity: 500..2000 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,9 +111,16 @@ impl Message<FetchContext> for Indexer {
     }
 }
 
-pub enum TextSplitterType {
+pub enum CodeLanguage {
+    Rust,
+    Python,
+    Cue,
+    Cpp,
+}
+
+pub enum TextType {
     Markdown,
-    Code,
+    Code(CodeLanguage),
     Text,
 }
 
@@ -140,24 +154,74 @@ impl Message<IndexGlobs> for Indexer {
                 }
                 self.cache.insert(path.clone());
 
-                // let max_characters = 1000;
-
-                // let splitter = CodeSplitter::new(tree_sitter_rust::LANGUAGE, ChunkConfig::new(max_characters))
-                //     .expect("Invalid tree-sitter language");
-
-                // let chunks = splitter.chunks("your code file");
-
-                // let ext = path.extension().and_then(|ext| ext.to_str());
-                // let splitter = match ext {
-                //     Some("md") => TextSplitterType::Markdown,
-                //     Some("rs") => TextSplitterType::Code,
-                //     _ => TextSplitterType::Text,
-                // };
+                let ext = path.extension().and_then(|ext| ext.to_str());
+                let text_type = match ext {
+                    Some("md") => TextType::Markdown,
+                    Some("rs") => TextType::Code(CodeLanguage::Rust),
+                    Some("py") => TextType::Code(CodeLanguage::Python),
+                    Some("cue") => TextType::Code(CodeLanguage::Cue),
+                    Some("cpp") => TextType::Code(CodeLanguage::Cpp),
+                    Some("h") => TextType::Text,
+                    _ => TextType::Text,
+                };
 
                 info!("Indexing path: {}", &path.display());
-                let content = tokio::fs::read_to_string(path).await?;
+                let content = tokio::fs::read_to_string(&path).await?;
+
+                let chunks = match text_type {
+                    TextType::Text => {
+                        let splitter =
+                            TextSplitter::new(ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false));
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Markdown => {
+                        let splitter =
+                            MarkdownSplitter::new(ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false));
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Code(CodeLanguage::Rust) => {
+                        let splitter = CodeSplitter::new(
+                            tree_sitter_rust::LANGUAGE,
+                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                        )
+                        .expect("Invalid tree-sitter language");
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Code(CodeLanguage::Python) => {
+                        let splitter = CodeSplitter::new(
+                            tree_sitter_python::LANGUAGE,
+                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                        )
+                        .expect("Invalid tree-sitter language");
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Code(CodeLanguage::Cue) => {
+                        let splitter = CodeSplitter::new(
+                            tree_sitter_cue::LANGUAGE,
+                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                        )
+                        .expect("Invalid tree-sitter language");
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Code(CodeLanguage::Cpp) => {
+                        let splitter = CodeSplitter::new(
+                            tree_sitter_cpp::LANGUAGE,
+                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                        )
+                        .expect("Invalid tree-sitter language");
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                };
+
+                let file_name = path.to_string_lossy().to_string();
+                let chunks = chunks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("---\nFILE: {}\nCHUNK: {:04}\nCONTEXT:\n\n{}", &file_name, i + 1, c))
+                    .collect::<Vec<String>>();
+
                 ctx.send::<Embeddings, GenerateEmbeddings>(
-                    GenerateEmbeddings { texts: vec![content], tag: Some("indexer_content".to_string()) },
+                    GenerateEmbeddings { texts: chunks, tag: Some("indexer_content".to_string()) },
                     &self.embeddings_actor,
                     SendOptions::default(),
                 )

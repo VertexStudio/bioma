@@ -117,6 +117,17 @@ impl Engine {
         let store = LocalFileSystem::new_with_prefix(self.options.local_store.clone())?;
         Ok(store)
     }
+
+    pub fn debug_output_dir(&self) -> Result<std::path::PathBuf, SystemActorError> {
+        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
+            .map(std::path::PathBuf::from)
+            .ok()
+            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let output_dir = workspace_root.join("output").join("debug");
+        std::fs::create_dir_all(&output_dir).unwrap();
+        Ok(output_dir)
+    }
 }
 
 #[cfg(test)]

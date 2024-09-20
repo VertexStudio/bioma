@@ -5053,7 +5053,7 @@ dependencies = [
  "regex",
  "strum",
  "thiserror",
- "tree-sitter 0.23.0",
+ "tree-sitter",
  "unicode-segmentation",
 ]
 
@@ -5404,16 +5404,6 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.20.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e747b1f9b7b931ed39a548c1fae149101497de3c1fc8d9e18c62c1a66c683d3d"
-dependencies = [
- "cc",
- "regex",
-]
-
-[[package]]
-name = "tree-sitter"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20f4cd3642c47a85052a887d86704f4eac272969f61b686bdd3f772122aabaff"
@@ -5436,12 +5426,11 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-cue"
-version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "159a9840016502ed789a5f87d4e798a08952ec867a2e6916cd316a346719cbec"
+version = "0.23.0"
+source = "git+https://github.com/rozgo/tree-sitter-cue.git?branch=main#fd5b8db46165d3eb2ccdaebc38e9e2c75d3b1ee3"
 dependencies = [
  "cc",
- "tree-sitter 0.20.10",
+ "tree-sitter-language",
 ]
 
 [[package]]
