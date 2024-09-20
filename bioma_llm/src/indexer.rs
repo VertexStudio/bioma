@@ -1,9 +1,10 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError, GenerateEmbeddings};
-use crate::rerank::{self, RankTexts, Rerank, RerankError};
+use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
 use url::Url;
 
@@ -53,6 +54,7 @@ pub struct FetchContextResponse {
 
 impl Message<FetchContext> for Indexer {
     type Response = FetchContextResponse;
+
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
@@ -102,8 +104,15 @@ impl Message<FetchContext> for Indexer {
     }
 }
 
+pub enum TextSplitterType {
+    Markdown,
+    Code,
+    Text,
+}
+
 impl Message<IndexGlobs> for Indexer {
     type Response = IndexGlobsResponse;
+
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
@@ -130,6 +139,21 @@ impl Message<IndexGlobs> for Indexer {
                     continue;
                 }
                 self.cache.insert(path.clone());
+
+                // let max_characters = 1000;
+
+                // let splitter = CodeSplitter::new(tree_sitter_rust::LANGUAGE, ChunkConfig::new(max_characters))
+                //     .expect("Invalid tree-sitter language");
+
+                // let chunks = splitter.chunks("your code file");
+
+                // let ext = path.extension().and_then(|ext| ext.to_str());
+                // let splitter = match ext {
+                //     Some("md") => TextSplitterType::Markdown,
+                //     Some("rs") => TextSplitterType::Code,
+                //     _ => TextSplitterType::Text,
+                // };
+
                 info!("Indexing path: {}", &path.display());
                 let content = tokio::fs::read_to_string(path).await?;
                 ctx.send::<Embeddings, GenerateEmbeddings>(
@@ -168,6 +192,7 @@ impl Default for Indexer {
 
 impl Actor for Indexer {
     type Error = IndexerError;
+
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
             ctx.engine().clone(),
