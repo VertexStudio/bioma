@@ -123,6 +123,12 @@ impl Message<IndexGlobs> for Indexer {
                     continue;
                 };
 
+                // Convert html to markdown
+                let content = match text_type {
+                    TextType::Code(CodeLanguage::Html) => mdka::from_html(&content),
+                    _ => content,
+                };
+
                 let chunks = match text_type {
                     TextType::Text => {
                         let splitter = TextSplitter::new(
@@ -181,14 +187,7 @@ impl Message<IndexGlobs> for Indexer {
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
                     TextType::Code(CodeLanguage::Html) => {
-                        let splitter = CodeSplitter::new(
-                            tree_sitter_html::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        )
-                        .expect("Invalid tree-sitter language");
-                        splitter.chunks(&content).collect::<Vec<&str>>()
+                        panic!("Should have been converted to markdown");
                     }
                 };
 

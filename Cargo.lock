@@ -679,6 +679,7 @@ dependencies = [
  "humantime-serde",
  "indexmap 2.5.0",
  "jsonpath-rust",
+ "mdka",
  "ollama-rs",
  "rand",
  "reqwest",
@@ -694,7 +695,6 @@ dependencies = [
  "tree-sitter-cpp",
  "tree-sitter-csv",
  "tree-sitter-cue",
- "tree-sitter-html",
  "tree-sitter-python",
  "tree-sitter-rust",
  "url",
@@ -2653,6 +2653,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "markup5ever_rcdom"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edaa21ab3701bfee5099ade5f7e1f84553fd19228cf332f13cd6e964bf59be18"
+dependencies = [
+ "html5ever",
+ "markup5ever",
+ "tendril",
+ "xml5ever",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2694,6 +2706,16 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest",
+]
+
+[[package]]
+name = "mdka"
+version = "1.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65e86d148a94989de0269b5be793d5b1e0e62dc774ebd98c829368447b834f50"
+dependencies = [
+ "html5ever",
+ "markup5ever_rcdom",
 ]
 
 [[package]]
@@ -3029,7 +3051,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
- "snafu 0.8.4",
+ "snafu 0.8.5",
  "tokio",
  "tracing",
  "url",
@@ -3387,9 +3409,9 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pkg-config"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d231b230927b5e4ad203db57bbcbee2802f6bce620b1e4a9024a07d94e2907ec"
+checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 
 [[package]]
 name = "png"
@@ -4586,11 +4608,11 @@ dependencies = [
 
 [[package]]
 name = "snafu"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b835cb902660db3415a672d862905e791e54d306c6e8189168c7f3d9ae1c79d"
+checksum = "223891c85e2a29c3fe8fb900c1fae5e69c2e42415e3177752e8718475efa5019"
 dependencies = [
- "snafu-derive 0.8.4",
+ "snafu-derive 0.8.5",
 ]
 
 [[package]]
@@ -4607,9 +4629,9 @@ dependencies = [
 
 [[package]]
 name = "snafu-derive"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d1e02fca405f6280643174a50c942219f0bbf4dbf7d480f1dd864d6f211ae5"
+checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5490,16 +5512,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-html"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d52d710a3723360ebade986d3f0ae2aa2c3bcfb87bb1cdf60988ec51c81c40d"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "tree-sitter-language"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6073,6 +6085,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
+]
+
+[[package]]
+name = "xml5ever"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bbb26405d8e919bc1547a5aa9abc95cbfa438f04844f5fdd9dc7596b748bf69"
+dependencies = [
+ "log",
+ "mac",
+ "markup5ever",
 ]
 
 [[package]]
