@@ -1,5 +1,4 @@
 use crate::engine::{Engine, Record};
-use bon::builder;
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -218,7 +217,7 @@ where
 }
 
 /// Options for configuring message sending behavior.
-#[builder]
+#[derive(bon::Builder)]
 pub struct SendOptions {
     /// The maximum duration to wait for a reply before timing out.
     timeout: std::time::Duration,
@@ -272,7 +271,7 @@ impl ActorId {
 /// Options for spawning an actor.
 ///
 /// Configuration options for the actor spawning process.
-#[builder]
+#[derive(bon::Builder)]
 pub struct SpawnOptions {
     /// Specifies how to handle the case when an actor with the same ID already exists.
     ///

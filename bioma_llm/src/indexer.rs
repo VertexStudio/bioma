@@ -1,12 +1,10 @@
-use crate::embeddings::{self, Embeddings, EmbeddingsError, GenerateEmbeddings};
-use crate::rerank::{RankTexts, Rerank, RerankError};
+use crate::embeddings::{Embeddings, EmbeddingsError, GenerateEmbeddings};
 use bioma_actor::prelude::*;
 use bloomfilter::Bloom;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
-use url::Url;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IndexerError {
@@ -14,8 +12,6 @@ pub enum IndexerError {
     System(#[from] SystemActorError),
     #[error("Embeddings error: {0}")]
     Embeddings(#[from] EmbeddingsError),
-    #[error("Rerank error: {0}")]
-    Rerank(#[from] RerankError),
     #[error("Glob error: {0}")]
     Glob(#[from] glob::GlobError),
     #[error("Pattern error: {0}")]
@@ -24,8 +20,6 @@ pub enum IndexerError {
     IO(#[from] std::io::Error),
     #[error("Similarity fetch error: {0}")]
     ComputingSimilarity(String),
-    #[error("Rerank error: {0}")]
-    ComputingRerank(String),
 }
 
 impl ActorError for IndexerError {}
@@ -34,82 +28,25 @@ impl ActorError for IndexerError {}
 pub struct IndexGlobs {
     pub globs: Vec<String>,
     pub chunk_capacity: std::ops::Range<usize>,
+    pub chunk_overlap: usize,
     pub timeout: std::time::Duration,
 }
 
 impl Default for IndexGlobs {
     fn default() -> Self {
-        Self { globs: vec![], chunk_capacity: 500..2000, timeout: std::time::Duration::from_secs(10) }
+        Self {
+            globs: vec![],
+            chunk_capacity: 500..2000,
+            chunk_overlap: 200,
+            timeout: std::time::Duration::from_secs(10),
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexGlobsResponse {
+pub struct IndexedGlobs {
     pub indexed: usize,
     pub cached: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FetchContext {
-    pub query: String,
-    pub limit: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FetchContextResponse {
-    pub context: Vec<String>,
-}
-
-impl Message<FetchContext> for Indexer {
-    type Response = FetchContextResponse;
-
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &FetchContext,
-    ) -> Result<FetchContextResponse, IndexerError> {
-        info!("Fetching context for query: {}", message.query);
-        let embeddings_req = embeddings::TopK {
-            query: embeddings::Query::Text(message.query.clone()),
-            k: message.limit * 2,
-            threshold: 0.0,
-            tag: Some("indexer_content".to_string()),
-        };
-        info!("Searching for texts similarities");
-        let similarities = match ctx
-            .send::<Embeddings, embeddings::TopK>(embeddings_req, &self.embeddings_actor, SendOptions::default())
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Failed to get similarities: {}", e);
-                return Err(IndexerError::ComputingSimilarity(e.to_string()));
-            }
-        };
-        // Rank the embeddings
-        info!("Ranking similarity texts");
-        let rerank_req = RankTexts {
-            query: message.query.clone(),
-            texts: similarities.iter().map(|s| s.text.clone()).collect(),
-            raw_scores: false,
-        };
-        let ranked_texts =
-            match ctx.send::<Rerank, RankTexts>(rerank_req, &self.rerank_actor, SendOptions::default()).await {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Failed to rank texts: {}", e);
-                    return Err(IndexerError::ComputingRerank(e.to_string()));
-                }
-            };
-        // Get the context from the ranked texts
-        info!("Getting context from ranked texts");
-        let context = if ranked_texts.len() > 0 {
-            ranked_texts.iter().map(|t| similarities[t.index].text.clone()).take(message.limit).collect()
-        } else {
-            vec!["No context found".to_string()]
-        };
-        Ok(FetchContextResponse { context })
-    }
 }
 
 pub enum CodeLanguage {
@@ -117,6 +54,7 @@ pub enum CodeLanguage {
     Python,
     Cue,
     Cpp,
+    Html,
 }
 
 pub enum TextType {
@@ -126,13 +64,14 @@ pub enum TextType {
 }
 
 impl Message<IndexGlobs> for Indexer {
-    type Response = IndexGlobsResponse;
+    type Response = IndexedGlobs;
 
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
         message: &IndexGlobs,
-    ) -> Result<IndexGlobsResponse, IndexerError> {
+    ) -> Result<IndexedGlobs, IndexerError> {
+        let total_index_globs_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
         for glob in message.globs.iter() {
@@ -161,13 +100,18 @@ impl Message<IndexGlobs> for Indexer {
                     Some("rs") => TextType::Code(CodeLanguage::Rust),
                     Some("py") => TextType::Code(CodeLanguage::Python),
                     Some("cue") => TextType::Code(CodeLanguage::Cue),
+                    Some("html") => TextType::Code(CodeLanguage::Html),
                     Some("cpp") => TextType::Code(CodeLanguage::Cpp),
                     Some("h") => TextType::Text,
                     _ => TextType::Text,
                 };
 
                 info!("Indexing path: {}", &path.display());
-                let content = tokio::fs::read_to_string(&path).await?;
+                let content = tokio::fs::read_to_string(&path).await;
+                let Ok(content) = content else {
+                    error!("Failed to index file: {}", path.display());
+                    continue;
+                };
 
                 let chunks = match text_type {
                     TextType::Text => {
@@ -212,15 +156,27 @@ impl Message<IndexGlobs> for Indexer {
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
+                    TextType::Code(CodeLanguage::Html) => {
+                        let splitter = CodeSplitter::new(
+                            tree_sitter_html::LANGUAGE,
+                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                        )
+                        .expect("Invalid tree-sitter language");
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
                 };
 
+                let start_time = std::time::Instant::now();
                 let file_name = path.to_string_lossy().to_string();
                 let chunks = chunks
                     .iter()
                     .enumerate()
                     .map(|(i, c)| format!("---\nFILE: {}\nCHUNK: {:04}\nCONTEXT:\n\n{}", &file_name, i + 1, c))
                     .collect::<Vec<String>>();
+                let chunks_time = start_time.elapsed();
+                debug!("Generated {} chunks in {:?}", chunks.len(), chunks_time);
 
+                let start_time = std::time::Instant::now();
                 let result = ctx
                     .send::<Embeddings, GenerateEmbeddings>(
                         GenerateEmbeddings { texts: chunks, tag: Some("indexer_content".to_string()) },
@@ -228,6 +184,8 @@ impl Message<IndexGlobs> for Indexer {
                         SendOptions::builder().timeout(message.timeout).build(),
                     )
                     .await;
+                let embeddings_time = start_time.elapsed();
+                debug!("Generated embeddings in {:?}", embeddings_time);
 
                 match result {
                     Ok(_result) => {
@@ -240,18 +198,14 @@ impl Message<IndexGlobs> for Indexer {
                 }
             }
         }
-        if indexed > 0 {
-            self.save(ctx).await?;
-        }
-        info!("Indexed {} paths, cached {} paths", indexed, cached);
-        Ok(IndexGlobsResponse { indexed, cached })
+        info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
+        Ok(IndexedGlobs { indexed, cached })
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Indexer {
     embeddings_actor: ActorId,
-    rerank_actor: ActorId,
     indexed: Bloom<PathBuf>,
 }
 
@@ -260,12 +214,8 @@ impl Default for Indexer {
         let false_positive_rate = 0.01;
         let num_elements = 100_000;
         let bloom = Bloom::new_for_fp_rate(num_elements, false_positive_rate);
-
-        Self {
-            embeddings_actor: ActorId::of::<Embeddings>("/indexer/embeddings"),
-            rerank_actor: ActorId::of::<Rerank>("/indexer/rerank"),
-            indexed: bloom,
-        }
+        let embeddings_actor_id = ActorId::of::<Embeddings>("/indexer/embeddings");
+        Self { embeddings_actor: embeddings_actor_id.clone(), indexed: bloom }
     }
 }
 
@@ -280,21 +230,9 @@ impl Actor for Indexer {
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
-        let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
-            ctx.engine().clone(),
-            self.rerank_actor.clone(),
-            Rerank { url: Url::parse("http://localhost:9124/rerank").unwrap() },
-            SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
-        )
-        .await?;
         let embeddings_handle = tokio::spawn(async move {
             if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
                 error!("Embeddings actor error: {}", e);
-            }
-        });
-        let rerank_handle = tokio::spawn(async move {
-            if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
-                error!("Rerank actor error: {}", e);
             }
         });
         info!("Indexer ready");
@@ -306,15 +244,9 @@ impl Actor for Indexer {
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
                 }
-            } else if let Some(input) = frame.is::<FetchContext>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
             }
         }
         embeddings_handle.abort();
-        rerank_handle.abort();
         Ok(())
     }
 }

@@ -1,5 +1,4 @@
 use crate::actor::SystemActorError;
-use bon::builder;
 use derive_more::Display;
 use object_store::local::LocalFileSystem;
 use serde::{Deserialize, Serialize};
@@ -36,8 +35,7 @@ pub struct Record {
 }
 
 /// Configuration options for the Engine.
-#[builder]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, bon::Builder)]
 pub struct EngineOptions {
     /// The namespace to use in the database.
     pub namespace: String,
