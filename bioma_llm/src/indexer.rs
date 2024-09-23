@@ -2,9 +2,11 @@ use crate::embeddings::{Embeddings, EmbeddingsError, GenerateEmbeddings};
 use bioma_actor::prelude::*;
 use bloomfilter::Bloom;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
+use url::Url;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IndexerError {
@@ -20,6 +22,8 @@ pub enum IndexerError {
     IO(#[from] std::io::Error),
     #[error("Similarity fetch error: {0}")]
     ComputingSimilarity(String),
+    #[error("Chunk config error: {0}")]
+    ChunkConfig(#[from] text_splitter::ChunkConfigError),
 }
 
 impl ActorError for IndexerError {}
@@ -61,6 +65,18 @@ pub enum TextType {
     Markdown,
     Code(CodeLanguage),
     Text,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Source {
+    File(PathBuf),
+    Url(Url),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkMetadata {
+    pub source: Source,
+    pub chunk_number: usize,
 }
 
 impl Message<IndexGlobs> for Indexer {
@@ -115,19 +131,27 @@ impl Message<IndexGlobs> for Indexer {
 
                 let chunks = match text_type {
                     TextType::Text => {
-                        let splitter =
-                            TextSplitter::new(ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false));
+                        let splitter = TextSplitter::new(
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
+                        );
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
                     TextType::Markdown => {
-                        let splitter =
-                            MarkdownSplitter::new(ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false));
+                        let splitter = MarkdownSplitter::new(
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
+                        );
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
                     TextType::Code(CodeLanguage::Rust) => {
                         let splitter = CodeSplitter::new(
                             tree_sitter_rust::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
@@ -135,7 +159,9 @@ impl Message<IndexGlobs> for Indexer {
                     TextType::Code(CodeLanguage::Python) => {
                         let splitter = CodeSplitter::new(
                             tree_sitter_python::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
@@ -143,7 +169,9 @@ impl Message<IndexGlobs> for Indexer {
                     TextType::Code(CodeLanguage::Cue) => {
                         let splitter = CodeSplitter::new(
                             tree_sitter_cue::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
@@ -151,7 +179,9 @@ impl Message<IndexGlobs> for Indexer {
                     TextType::Code(CodeLanguage::Cpp) => {
                         let splitter = CodeSplitter::new(
                             tree_sitter_cpp::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
@@ -159,7 +189,9 @@ impl Message<IndexGlobs> for Indexer {
                     TextType::Code(CodeLanguage::Html) => {
                         let splitter = CodeSplitter::new(
                             tree_sitter_html::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone()).with_trim(false),
+                            ChunkConfig::new(message.chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(message.chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
@@ -168,18 +200,24 @@ impl Message<IndexGlobs> for Indexer {
 
                 let start_time = std::time::Instant::now();
                 let file_name = path.to_string_lossy().to_string();
-                let chunks = chunks
+                let chunks = chunks.iter().map(|c| c.to_string()).collect::<Vec<String>>();
+                let metadata = chunks
                     .iter()
                     .enumerate()
-                    .map(|(i, c)| format!("---\nFILE: {}\nCHUNK: {:04}\nCONTEXT:\n\n{}", &file_name, i + 1, c))
-                    .collect::<Vec<String>>();
+                    .map(|(i, _)| ChunkMetadata { source: Source::File(path.clone()), chunk_number: i })
+                    .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
+                    .collect::<Vec<Value>>();
                 let chunks_time = start_time.elapsed();
                 debug!("Generated {} chunks in {:?}", chunks.len(), chunks_time);
 
                 let start_time = std::time::Instant::now();
                 let result = ctx
                     .send::<Embeddings, GenerateEmbeddings>(
-                        GenerateEmbeddings { texts: chunks, tag: Some("indexer_content".to_string()) },
+                        GenerateEmbeddings {
+                            texts: chunks,
+                            metadata: Some(metadata),
+                            tag: Some("indexer_content".to_string()),
+                        },
                         &self.embeddings_actor,
                         SendOptions::builder().timeout(message.timeout).build(),
                     )

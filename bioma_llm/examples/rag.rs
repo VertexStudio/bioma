@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::test().await?;
     let output_dir = engine.debug_output_dir()?;
 
-    let query = "list ffmpeg dependencies";
+    let query = "identify the most important dependency found in cargo workspace";
 
     // Create indexer actor ID
     let indexer_id = ActorId::of::<Indexer>("/indexer");
@@ -28,20 +28,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Create chat pre-history
-    let history = vec![
-        ChatMessage::system("You are a helpful programming assistant".into()),
-        ChatMessage::user("Hello, how are you?".into()),
-        ChatMessage::assistant("I'm doing well, thank you! How can I help you today?".into()),
-        ChatMessage::user(query.into()),
-    ];
+    // Create retriever actor ID
+    let retriever_id = ActorId::of::<Retriever>("/retriever");
 
-    // Create chat actor with pre-history
+    // Spawn and start the retriever actor
+    let (mut retriever_ctx, mut retriever_actor) =
+        Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
+
+    let retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+
+    // Create chat conversation
+    let mut conversation = vec![];
+
+    // Create chat actor
     let chat = Chat {
-        model_name: "gemma2:2b".to_string(),
+        model_name: "llama3.1".to_string(),
         generation_options: Default::default(),
         messages_number_limit: 10,
-        history: history.clone(),
+        history: conversation.clone(),
         ollama: None,
     };
 
@@ -88,27 +96,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    // Fetch context
-    info!("Fetching context");
-    let fetch_context = RetrieveContext { query: query.to_string(), limit: 10, threshold: 0.0 };
+    // Retrieve context
+    info!("Retrieving context");
+    let retrieve_context = RetrieveContext { query: query.to_string(), limit: 10, threshold: 0.0 };
     let context = relay_ctx
         .send::<Retriever, RetrieveContext>(
-            fetch_context,
-            &indexer_id,
+            retrieve_context,
+            &retriever_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         )
         .await?;
     info!("Number of chunks: {}", context.context.len());
 
     // Save context to file for debugging
-    tokio::fs::write(output_dir.join("rag_context.md"), context.context.join("\n\n")).await?;
+    let context_content = context.to_markdown();
+    tokio::fs::write(output_dir.join("rag_context.md"), &context_content).await?;
+
+    // Add context to history as a system message
+    let context_message = ChatMessage::system(
+        "You are a helpful programming assistant. Use the following context to answer the user's query: \n\n"
+            .to_string()
+            + &context_content,
+    );
+    conversation.push(context_message);
+
+    // Add user's query to history
+    let user_query = ChatMessage::user(query.to_string());
+    conversation.push(user_query);
 
     // Send the context to the chat actor
     info!("Sending context to chat actor");
-    let chat_message = ChatMessage::system("Context to answer user query: ".to_string() + &context.context.join("\n"));
     let chat_response = relay_ctx
-        .send::<Chat, ChatMessage>(
-            chat_message,
+        .send::<Chat, ChatMessages>(
+            ChatMessages { messages: conversation.clone(), restart: false },
             &chat_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )
@@ -117,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Save chat to file for debugging
     let mut chat_content = String::new();
-    for message in &history {
+    for message in &conversation {
         chat_content.push_str(&format!("{:?}: {}\n\n", message.role, message.content));
     }
     let response = chat_response.message.unwrap();
@@ -125,6 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::fs::write(output_dir.join("rag_chat.md"), chat_content).await?;
 
     indexer_handle.abort();
+    retriever_handle.abort();
     chat_handle.abort();
 
     // Export the database for debugging

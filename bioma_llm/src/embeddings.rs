@@ -8,6 +8,7 @@ use ollama_rs::{
     Ollama,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use surrealdb::{sql::Id, value::RecordId};
 use tracing::{error, info};
 
@@ -32,6 +33,8 @@ impl ActorError for EmbeddingsError {}
 pub struct GenerateEmbeddings {
     /// The texts to embed
     pub texts: Vec<String>,
+    /// Metadata to store with the embeddings
+    pub metadata: Option<Vec<Value>>,
     /// The tag to store the embeddings with
     pub tag: Option<String>,
 }
@@ -67,6 +70,7 @@ pub struct TopK {
 pub struct Similarity {
     pub text: String,
     pub similarity: f32,
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,7 +149,17 @@ impl Message<GenerateEmbeddings> for Embeddings {
         if let Some(tag) = &message.tag {
             let db = _ctx.engine().db();
             let emb_query = include_str!("../sql/embeddings.surql");
+
+            // Check if metadata is same length as texts
+            if let Some(metadata) = &message.metadata {
+                if metadata.len() != message.texts.len() {
+                    error!("Metadata length does not match texts length");
+                }
+            }
+
+            // Store embeddings
             for (i, text) in message.texts.iter().enumerate() {
+                let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
                 let embedding = result.embeddings[i].clone();
                 let model_id = RecordId::from_table_key("model", self.model_name.clone());
                 let emb_id = Id::ulid();
@@ -154,6 +168,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
                     .bind(("tag", tag.to_string()))
                     .bind(("text", text.to_string()))
                     .bind(("embedding", embedding))
+                    .bind(("metadata", metadata))
                     .bind(("model_id", model_id))
                     .await
                     .map_err(SystemActorError::from)?;

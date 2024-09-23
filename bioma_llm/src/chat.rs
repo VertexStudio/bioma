@@ -33,25 +33,37 @@ pub struct Chat {
     pub ollama: Option<Ollama>,
 }
 
-impl Message<ChatMessage> for Chat {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessages {
+    pub messages: Vec<ChatMessage>,
+    pub restart: bool,
+}
+
+impl Message<ChatMessages> for Chat {
     type Response = ChatMessageResponse;
 
     async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
-        message: &ChatMessage,
+        messages: &ChatMessages,
     ) -> Result<ChatMessageResponse, ChatError> {
         // Check if the ollama client is initialized
         let Some(ollama) = &self.ollama else {
             return Err(ChatError::OllamaNotInitialized);
         };
 
-        // Add the user's message to the history
-        self.history.push(message.clone());
+        if messages.restart {
+            self.history.clear();
+        }
 
-        // Truncate history if it exceeds the limit
-        if self.history.len() > self.messages_number_limit {
-            self.history.drain(..self.history.len() - self.messages_number_limit);
+        for message in messages.messages.iter() {
+            // Add the message to the history
+            self.history.push(message.clone());
+
+            // Truncate history if it exceeds the limit
+            if self.history.len() > self.messages_number_limit {
+                self.history.drain(..self.history.len() - self.messages_number_limit);
+            }
         }
 
         let mut chat_message_request = ChatMessageRequest::new(self.model_name.clone(), self.history.clone());
@@ -81,8 +93,8 @@ impl Actor for Chat {
 
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            if let Some(chat_message) = frame.is::<ChatMessage>() {
-                let response = self.reply(ctx, &chat_message, &frame).await;
+            if let Some(chat_messages) = frame.is::<ChatMessages>() {
+                let response = self.reply(ctx, &chat_messages, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
                 }

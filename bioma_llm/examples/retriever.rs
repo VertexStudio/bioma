@@ -46,6 +46,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Create retriever actor ID
+    let retriever_id = ActorId::of::<Retriever>("/retriever");
+
+    // Spawn and start the retriever actor
+    let (mut retriever_ctx, mut retriever_actor) =
+        Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
+
+    let retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor to connect to embeddings actor
@@ -84,21 +97,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Retrieve context
     info!("Retrieving context");
-    let fetch_context = RetrieveContext { query: args.query, limit: 10, threshold: 0.0 };
+    let retrieve_context = RetrieveContext { query: args.query, limit: 10, threshold: 0.0 };
     let context = relay_ctx
         .send::<Retriever, RetrieveContext>(
-            fetch_context,
-            &indexer_id,
+            retrieve_context,
+            &retriever_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         )
         .await?;
     info!("Number of chunks: {}", context.context.len());
 
     // Save context to file for debugging
-    tokio::fs::write(output_dir.join("retriever_context.md"), context.context.join("\n\n")).await?;
+    let context_content = context.to_markdown();
+    tokio::fs::write(output_dir.join("retriever_context.md"), context_content).await?;
 
     indexer_handle.abort();
-
+    retriever_handle.abort();
     // Export the database for debugging
     dbg_export_db!(engine);
 
