@@ -30,11 +30,12 @@ text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
 tree-sitter-python = "0.23.2"
 tree-sitter-cpp = "0.23.0"
-tree-sitter-html = "0.23.0"
+# tree-sitter-html = "0.23.0"
 # tree-sitter-csv = "1.2.0"
 # tree-sitter-typescript = "0.23.0"
 tree-sitter-cue = { git = "https://github.com/rozgo/tree-sitter-cue.git", branch = "main" }
 tree-sitter-csv = { git = "https://github.com/rozgo/tree-sitter-csv.git", branch = "master" }
+mdka = "1.2"
 
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
