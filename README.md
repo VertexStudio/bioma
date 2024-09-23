@@ -70,6 +70,19 @@ cargo run --release -p bioma_llm --example embeddings
 ```
 
 ```bash
+cargo run --release -p bioma_llm --example indexer -- --root /path/to/custom/root --globs "**/*.rs" --globs "**/*.toml"  
+```
+
+```bash
+cargo run --release -p bioma_llm --example retriever -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"  
+```
+
+```bash
+cargo run --release -p bioma_llm --example rag -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"
+```
+
+
+```bash
 cargo run --release -p bioma_actor --example object_store
 ```
 

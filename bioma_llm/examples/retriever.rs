@@ -13,6 +13,10 @@ struct Args {
     /// Globs to index (can be specified multiple times)
     #[arg(short, long)]
     globs: Vec<String>,
+
+    /// Query to search for
+    #[arg(short, long, default_value = "list ffmpeg dependencies")]
+    query: String,
 }
 
 #[tokio::main]
@@ -27,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the actor system
     let engine = Engine::test().await?;
+    let output_dir = engine.debug_output_dir()?;
 
     // Create indexer actor ID
     let indexer_id = ActorId::of::<Indexer>("/indexer");
@@ -35,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut indexer_ctx, mut indexer_actor) =
         Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
 
-    let _indexer_handle = tokio::spawn(async move {
+    let indexer_handle = tokio::spawn(async move {
         if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
             error!("Indexer actor error: {}", e);
         }
@@ -43,12 +48,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    // Spawn a relay actor to send messages to other actors
+    // Spawn a relay actor to connect to embeddings actor
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Get root for indexer or default to workspace root
+    // Get the workspace root
     let workspace_root = args.root.unwrap_or_else(|| {
         std::env::var("CARGO_MANIFEST_DIR")
             .map(std::path::PathBuf::from)
@@ -69,7 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send globs to the indexer actor
     info!("Indexing");
     let index_globs = IndexGlobs { globs, ..Default::default() };
-
     let _indexer = relay_ctx
         .send::<Indexer, IndexGlobs>(
             index_globs,
@@ -77,6 +81,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )
         .await?;
+
+    // Retrieve context
+    info!("Retrieving context");
+    let fetch_context = RetrieveContext { query: args.query, limit: 10, threshold: 0.0 };
+    let context = relay_ctx
+        .send::<Retriever, RetrieveContext>(
+            fetch_context,
+            &indexer_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+        )
+        .await?;
+    info!("Number of chunks: {}", context.context.len());
+
+    // Save context to file for debugging
+    tokio::fs::write(output_dir.join("retriever_context.md"), context.context.join("\n\n")).await?;
+
+    indexer_handle.abort();
 
     // Export the database for debugging
     dbg_export_db!(engine);
