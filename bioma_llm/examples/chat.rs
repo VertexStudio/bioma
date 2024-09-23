@@ -19,7 +19,7 @@ impl Actor for MainActor {
             ctx.engine().clone(),
             chat_id.clone(),
             Chat {
-                model_name: "gemma2:2b".to_string(),
+                model_name: "llama3.1".to_string(),
                 generation_options: Default::default(),
                 messages_number_limit: 10,
                 history: Vec::new(),
@@ -52,8 +52,13 @@ impl Actor for MainActor {
 
             info!("{} Sending message: {}", ctx.id(), starter);
             let chat_message = ChatMessage::user(starter.to_string());
-            let response: ChatMessageResponse =
-                ctx.send::<Chat, ChatMessage>(chat_message, &chat_id, SendOptions::default()).await?;
+            let response: ChatMessageResponse = ctx
+                .send::<Chat, ChatMessages>(
+                    ChatMessages { messages: vec![chat_message], restart: false },
+                    &chat_id,
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                )
+                .await?;
 
             if let Some(assistant_message) = response.message {
                 info!("{} Received response: {}", ctx.id(), assistant_message.content);

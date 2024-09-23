@@ -52,6 +52,12 @@ pub struct Rerank {
     pub url: Url,
 }
 
+impl Default for Rerank {
+    fn default() -> Self {
+        Self { url: Url::parse("http://localhost:9124/rerank").unwrap() }
+    }
+}
+
 impl Actor for Rerank {
     type Error = RerankError;
 

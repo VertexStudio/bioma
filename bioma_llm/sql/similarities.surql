@@ -2,6 +2,7 @@ SELECT * FROM (
     SELECT
         text,
         vector::similarity::cosine(embedding, $query) AS similarity,
+        metadata,
         id.tag AS tag
     FROM embedding
 ) WHERE

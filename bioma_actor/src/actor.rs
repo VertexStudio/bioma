@@ -523,7 +523,7 @@ impl<T: Actor> ActorContext<T> {
 
         debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
 
-        let msg_engine = self.engine().clone();
+        let db = self.engine().db().clone();
 
         let task_request_id = request_id.clone();
         let task_request = request.clone();
@@ -531,7 +531,7 @@ impl<T: Actor> ActorContext<T> {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(0)).await;
             let msg_id: Result<Option<Record>, surrealdb::Error> =
-                msg_engine.db().create(DB_TABLE_MESSAGE).content(task_request).await;
+                db.create(DB_TABLE_MESSAGE).content(task_request).await;
             if let Ok(Some(msg_id)) = msg_id {
                 let id = msg_id.id.clone();
                 if task_request_id != id {
