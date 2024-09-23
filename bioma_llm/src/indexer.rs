@@ -124,9 +124,9 @@ impl Message<IndexGlobs> for Indexer {
                 };
 
                 // Convert html to markdown
-                let content = match text_type {
-                    TextType::Code(CodeLanguage::Html) => mdka::from_html(&content),
-                    _ => content,
+                let (text_type, content) = match text_type {
+                    TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
+                    _ => (text_type, content),
                 };
 
                 let chunks = match text_type {
