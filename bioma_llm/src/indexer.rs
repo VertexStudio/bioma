@@ -204,29 +204,33 @@ impl Message<IndexGlobs> for Indexer {
                 debug!("Generated {} chunks in {:?}", chunks.len(), chunks_time);
 
                 let start_time = std::time::Instant::now();
-                let result = ctx
-                    .send::<Embeddings, GenerateEmbeddings>(
-                        GenerateEmbeddings {
-                            texts: chunks,
-                            metadata: Some(metadata),
-                            tag: Some("indexer_content".to_string()),
-                        },
-                        &self.embeddings_actor,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                    )
-                    .await;
-                let embeddings_time = start_time.elapsed();
-                debug!("Generated embeddings in {:?}", embeddings_time);
 
-                match result {
-                    Ok(_result) => {
-                        indexed += 1;
-                        self.save(ctx).await?;
-                    }
-                    Err(e) => {
-                        error!("Failed to generate embeddings: {} {}", e, file_name);
+                let chunk_batches = chunks.chunks(10);
+                let metadata_batches = metadata.chunks(10);
+                for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
+                    let result = ctx
+                        .send::<Embeddings, GenerateEmbeddings>(
+                            GenerateEmbeddings {
+                                texts: chunk_batch.to_vec(),
+                                metadata: Some(metadata_batch.to_vec()),
+                                tag: Some("indexer_content".to_string()),
+                            },
+                            &self.embeddings_actor,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        )
+                        .await;
+                    match result {
+                        Ok(_result) => {
+                            indexed += 1;
+                            self.save(ctx).await?;
+                        }
+                        Err(e) => {
+                            error!("Failed to generate embeddings: {} {}", e, file_name);
+                        }
                     }
                 }
+                let embeddings_time = start_time.elapsed();
+                debug!("Generated embeddings in {:?}", embeddings_time);
             }
         }
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());

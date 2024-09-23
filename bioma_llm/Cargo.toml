@@ -20,10 +20,7 @@ tracing = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
 glob = { workspace = true }
-ollama-rs = { version = "0.2.1", features = [
-    "chat-history",
-    "function-calling",
-] }
+ollama-rs = { version = "0.2.1", features = ["function-calling"] }
 bloomfilter = { version = "1", features = ["serde"] }
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
