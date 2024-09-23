@@ -139,9 +139,9 @@ impl Message<RetrieveContext> for Retriever {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Retriever {
-    embeddings_actor: ActorId,
-    rerank_actor: ActorId,
-    endpoint: Url,
+    pub embeddings_actor: ActorId,
+    pub rerank_actor: ActorId,
+    pub endpoint: Url,
 }
 
 impl Default for Retriever {

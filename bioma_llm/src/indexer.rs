@@ -237,8 +237,8 @@ impl Message<IndexGlobs> for Indexer {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Indexer {
-    embeddings_actor: ActorId,
-    indexed: Bloom<PathBuf>,
+    pub embeddings_actor: ActorId,
+    pub indexed: Bloom<PathBuf>,
 }
 
 impl Default for Indexer {
