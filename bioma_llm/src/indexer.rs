@@ -33,17 +33,11 @@ pub struct IndexGlobs {
     pub globs: Vec<String>,
     pub chunk_capacity: std::ops::Range<usize>,
     pub chunk_overlap: usize,
-    pub timeout: std::time::Duration,
 }
 
 impl Default for IndexGlobs {
     fn default() -> Self {
-        Self {
-            globs: vec![],
-            chunk_capacity: 500..2000,
-            chunk_overlap: 200,
-            timeout: std::time::Duration::from_secs(10),
-        }
+        Self { globs: vec![], chunk_capacity: 500..2000, chunk_overlap: 200 }
     }
 }
 
@@ -219,7 +213,7 @@ impl Message<IndexGlobs> for Indexer {
                             tag: Some("indexer_content".to_string()),
                         },
                         &self.embeddings_actor,
-                        SendOptions::builder().timeout(message.timeout).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                     )
                     .await;
                 let embeddings_time = start_time.elapsed();
