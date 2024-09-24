@@ -21,7 +21,6 @@ reqwest = { workspace = true }
 url = { workspace = true }
 glob = { workspace = true }
 ollama-rs = { version = "0.2.1", features = ["function-calling"] }
-bloomfilter = { version = "1", features = ["serde"] }
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
@@ -47,3 +46,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 rand = "0.8"
 clap = { version = "4.5", features = ["derive"] }
+actix-web = "4.9.0"
+actix-cors = "0.7.0"

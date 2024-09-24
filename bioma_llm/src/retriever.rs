@@ -88,7 +88,7 @@ impl Message<RetrieveContext> for Retriever {
             query: embeddings::Query::Text(message.query.clone()),
             k: message.limit * 2,
             threshold: message.threshold,
-            tag: Some("indexer_content".to_string()),
+            tag: Some(self.tag.clone()),
         };
         info!("Searching for texts similarities");
         let similarities = match ctx
@@ -141,7 +141,8 @@ impl Message<RetrieveContext> for Retriever {
 pub struct Retriever {
     pub embeddings_actor: ActorId,
     pub rerank_actor: ActorId,
-    pub endpoint: Url,
+    pub rerank_endpoint: Url,
+    pub tag: String,
 }
 
 impl Default for Retriever {
@@ -151,7 +152,8 @@ impl Default for Retriever {
         Self {
             embeddings_actor: embeddings_actor_id.clone(),
             rerank_actor: rerank_actor_id.clone(),
-            endpoint: Url::parse("http://localhost:9124/rerank").unwrap(),
+            rerank_endpoint: Url::parse("http://localhost:9124/rerank").unwrap(),
+            tag: "indexer_content".to_string(),
         }
     }
 }
@@ -170,8 +172,8 @@ impl Actor for Retriever {
         let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
             ctx.engine().clone(),
             self.rerank_actor.clone(),
-            Rerank { url: self.endpoint.clone() },
-            SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
+            Rerank { url: self.rerank_endpoint.clone() },
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
         let embeddings_handle = tokio::spawn(async move {

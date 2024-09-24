@@ -9,7 +9,7 @@ use ollama_rs::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use surrealdb::{sql::Id, value::RecordId};
+use surrealdb::value::RecordId;
 use tracing::{error, info};
 
 #[derive(thiserror::Error, Debug)]
@@ -31,6 +31,8 @@ impl ActorError for EmbeddingsError {}
 /// Generate embeddings for a set of texts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateEmbeddings {
+    /// Source of the embeddings
+    pub source: String,
     /// The texts to embed
     pub texts: Vec<String>,
     /// Metadata to store with the embeddings
@@ -162,14 +164,13 @@ impl Message<GenerateEmbeddings> for Embeddings {
                 let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
                 let embedding = result.embeddings[i].clone();
                 let model_id = RecordId::from_table_key("model", self.model_name.clone());
-                let emb_id = Id::ulid();
                 db.query(emb_query)
-                    .bind(("id", emb_id))
                     .bind(("tag", tag.to_string()))
                     .bind(("text", text.to_string()))
                     .bind(("embedding", embedding))
                     .bind(("metadata", metadata))
                     .bind(("model_id", model_id))
+                    .bind(("source", message.source.clone()))
                     .await
                     .map_err(SystemActorError::from)?;
             }

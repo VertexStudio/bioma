@@ -71,12 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Query: {}", query);
     for ranked_text in sorted_texts {
-        println!(
-            "{:>2}: {:>6.2} {}",
-            ranked_text.index,
-            ranked_text.score,
-            &texts[ranked_text.index]
-        );
+        println!("{:>2}: {:>6.2} {}", ranked_text.index, ranked_text.score, &texts[ranked_text.index]);
     }
 
     rerank_handle.abort();
