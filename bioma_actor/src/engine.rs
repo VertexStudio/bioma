@@ -99,6 +99,16 @@ impl Engine {
         Ok(Engine { db: Box::new(db), options })
     }
 
+    pub async fn reset(&self) -> Result<(), SystemActorError> {
+        let db = self.db.clone();
+        let db_name = self.options.database.clone();
+        db.use_db("test").await?;
+        db.query(format!("REMOVE DATABASE `{}`;", db_name)).await?;
+        db.use_ns(&self.options.namespace).use_db(db_name.clone()).await?;
+        Engine::define(&db).await?;
+        Ok(())
+    }
+
     pub async fn health(&self) -> bool {
         self.db.health().await.is_ok()
     }

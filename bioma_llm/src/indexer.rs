@@ -1,9 +1,9 @@
 use crate::embeddings::{Embeddings, EmbeddingsError, GenerateEmbeddings};
 use bioma_actor::prelude::*;
-use bloomfilter::Bloom;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
+use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -73,6 +73,12 @@ pub struct ChunkMetadata {
     pub chunk_number: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SourceEmbeddings {
+    pub source: String,
+    pub embeddings: Vec<RecordId>,
+}
+
 impl Message<IndexGlobs> for Indexer {
     type Response = IndexedGlobs;
 
@@ -92,19 +98,36 @@ impl Message<IndexGlobs> for Indexer {
                 warn!("Skipping glob: {}", &glob);
                 continue;
             };
-            for path in paths {
-                let Ok(path) = path else {
-                    warn!("Skipping path: {:?}", path);
+            for pathbuf in paths {
+                let Ok(pathbuf) = pathbuf else {
+                    warn!("Skipping path: {:?}", pathbuf);
                     continue;
                 };
-                if self.indexed.check(&path) {
-                    debug!("Path already indexed: {}", path.display());
+
+                let path = pathbuf.to_string_lossy().to_string();
+
+                let source_embeddings = ctx
+                    .engine()
+                    .db()
+                    .query(
+                        "SELECT source, ->source_embeddings.out as embeddings FROM source:{source:$source, tag:$tag}",
+                    )
+                    .bind(("source", path.clone()))
+                    .bind(("tag", self.tag.clone()))
+                    .await;
+                let Ok(mut source_embeddings) = source_embeddings else {
+                    error!("Failed to query source embeddings: {}", path);
+                    continue;
+                };
+                let source_embeddings: Vec<SourceEmbeddings> =
+                    source_embeddings.take(0).map_err(SystemActorError::from)?;
+                if source_embeddings.len() > 0 {
+                    debug!("Path already indexed: {}", path);
                     cached += 1;
                     continue;
                 }
-                self.indexed.set(&path);
 
-                let ext = path.extension().and_then(|ext| ext.to_str());
+                let ext = pathbuf.extension().and_then(|ext| ext.to_str());
                 let text_type = match ext {
                     Some("md") => TextType::Markdown,
                     Some("rs") => TextType::Code(CodeLanguage::Rust),
@@ -116,10 +139,10 @@ impl Message<IndexGlobs> for Indexer {
                     _ => TextType::Text,
                 };
 
-                info!("Indexing path: {}", &path.display());
-                let content = tokio::fs::read_to_string(&path).await;
+                info!("Indexing path: {}", &pathbuf.display());
+                let content = tokio::fs::read_to_string(&pathbuf).await;
                 let Ok(content) = content else {
-                    error!("Failed to index file: {}", path.display());
+                    error!("Failed to index file: {}", pathbuf.display());
                     continue;
                 };
 
@@ -192,12 +215,12 @@ impl Message<IndexGlobs> for Indexer {
                 };
 
                 let start_time = std::time::Instant::now();
-                let file_name = path.to_string_lossy().to_string();
+
                 let chunks = chunks.iter().map(|c| c.to_string()).collect::<Vec<String>>();
                 let metadata = chunks
                     .iter()
                     .enumerate()
-                    .map(|(i, _)| ChunkMetadata { source: Source::File(path.clone()), chunk_number: i })
+                    .map(|(i, _)| ChunkMetadata { source: Source::File(pathbuf.clone()), chunk_number: i })
                     .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
                     .collect::<Vec<Value>>();
                 let chunks_time = start_time.elapsed();
@@ -207,13 +230,15 @@ impl Message<IndexGlobs> for Indexer {
 
                 let chunk_batches = chunks.chunks(10);
                 let metadata_batches = metadata.chunks(10);
+                let mut embeddings_count = 0;
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
                         .send::<Embeddings, GenerateEmbeddings>(
                             GenerateEmbeddings {
+                                source: path.clone(),
                                 texts: chunk_batch.to_vec(),
                                 metadata: Some(metadata_batch.to_vec()),
-                                tag: Some("indexer_content".to_string()),
+                                tag: Some(self.tag.clone()),
                             },
                             &self.embeddings_actor,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -221,13 +246,17 @@ impl Message<IndexGlobs> for Indexer {
                         .await;
                     match result {
                         Ok(_result) => {
-                            indexed += 1;
+                            embeddings_count += 1;
                             self.save(ctx).await?;
                         }
                         Err(e) => {
-                            error!("Failed to generate embeddings: {} {}", e, file_name);
+                            error!("Failed to generate embeddings: {} {}", e, path);
                         }
                     }
+                }
+
+                if embeddings_count > 0 {
+                    indexed += 1;
                 }
                 let embeddings_time = start_time.elapsed();
                 debug!("Generated embeddings in {:?}", embeddings_time);
@@ -240,17 +269,14 @@ impl Message<IndexGlobs> for Indexer {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Indexer {
+    pub tag: String,
     pub embeddings_actor: ActorId,
-    pub indexed: Bloom<PathBuf>,
 }
 
 impl Default for Indexer {
     fn default() -> Self {
-        let false_positive_rate = 0.01;
-        let num_elements = 100_000;
-        let bloom = Bloom::new_for_fp_rate(num_elements, false_positive_rate);
         let embeddings_actor_id = ActorId::of::<Embeddings>("/indexer/embeddings");
-        Self { embeddings_actor: embeddings_actor_id.clone(), indexed: bloom }
+        Self { tag: "indexer_content".to_string(), embeddings_actor: embeddings_actor_id.clone() }
     }
 }
 

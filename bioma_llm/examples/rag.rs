@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context_content = context.to_markdown();
     tokio::fs::write(output_dir.join("rag_context.md"), &context_content).await?;
 
-    // Add context to history as a system message
+    // Add context to conversation as a system message
     let context_message = ChatMessage::system(
         "You are a helpful programming assistant. Use the following context to answer the user's query: \n\n"
             .to_string()
@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     conversation.push(context_message);
 
-    // Add user's query to history
+    // Add user's query to conversation
     let user_query = ChatMessage::user(query.to_string());
     conversation.push(user_query);
 
