@@ -30,6 +30,7 @@ services:
 
   init-volume:
     image: busybox
+    container_name: bioma-init-volume
     volumes:
       - surreal_data:/data
     command: chown -R 1000:1000 /data

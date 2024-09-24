@@ -98,3 +98,35 @@ source .bioma/bin/activate
 pip install torch transformers flask
 python assets/scripts/rerank_server.py
 ```
+
+## RAG server example
+
+### Launch the server:
+
+```bash
+cargo run --release -p bioma_llm --example rag_server
+```
+
+### Reset the engine:
+
+```bash
+curl -X POST http://localhost:8080/reset
+```
+
+### Index some files:
+
+```bash
+curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+```
+
+### Retrieve context:
+
+```bash
+curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10}'
+```
+
+### Ask a question:
+
+```bash
+curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
+```
