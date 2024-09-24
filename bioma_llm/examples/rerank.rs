@@ -81,5 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     rerank_handle.abort();
 
+    // Export the database for debugging
+    dbg_export_db!(engine);
+
     Ok(())
 }

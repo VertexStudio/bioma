@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 import threading
 
 # Load the tokenizer and model
-model_name = "BAAI/bge-reranker-base"
+model_name = "BAAI/bge-reranker-v2-m3"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
 model.eval()  # Set the model to evaluation mode
