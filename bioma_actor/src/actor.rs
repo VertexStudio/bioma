@@ -760,7 +760,7 @@ impl<T: Actor> ActorContext<T> {
 
         let reply = FrameReply {
             id: reply_id.clone(),
-            name: request.name.clone(),
+            name: std::any::type_name::<M::Response>().into(),
             tx: request.rx.clone(),
             rx: request.tx.clone(),
             msg: msg_value.clone(),

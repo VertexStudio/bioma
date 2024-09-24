@@ -1,7 +1,7 @@
 services:
   ollama:
     image: ollama/ollama
-    container_name: ollama
+    container_name: bioma-ollama
     deploy:
       resources:
         reservations:
@@ -18,7 +18,7 @@ services:
 
   surrealdb:
     image: surrealdb/surrealdb:v2.0.1
-    container_name: surrealdb
+    container_name: bioma-surrealdb
     command: start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://data/bioma.db
     user: "1000:1000"
     volumes:
@@ -36,8 +36,9 @@ services:
 
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:1.5
-    container_name: reranker
-    command: --model-id BAAI/bge-reranker-base --max-client-batch-size 256
+    container_name: bioma-reranker
+    command: --model-id BAAI/bge-reranker-base --max-client-batch-size 256 --auto-truncate --dtype float16
+    # command: --model-id BAAI/bge-reranker-v2-m3 --max-client-batch-size 256 --auto-truncate --dtype float16
     deploy:
       resources:
         reservations:
