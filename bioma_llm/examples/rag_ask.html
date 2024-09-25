@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Bioma Rag Ask Interface with Markdown and Mermaid</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
+        <style>
+            body { 
+                font-family: Arial, sans-serif; 
+                max-width: 800px; 
+                margin: 0 auto; 
+                padding: 20px; 
+                padding-bottom: 80px;
+            }
+            #chat-container { 
+                margin-bottom: 10px; 
+                display: flex;
+                flex-direction: column;
+            }
+            #input-container {
+                max-width: 800px;
+                position: fixed;
+                bottom: 0;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 20px;
+                background-color: white;
+                box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+                width: 100%;
+                box-sizing: border-box;
+                border-radius: 10px 10px 0 0;
+            }
+            #query-input { 
+                width: 100%; 
+                padding: 10px; 
+                box-sizing: border-box;
+                border-radius: 5px;
+                border: 1px solid #ccc;
+                resize: none;
+                min-height: 40px;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            .message { 
+                margin-bottom: 10px; 
+                padding: 10px; 
+                border-radius: 10px; 
+                max-width: 80%; 
+            }
+            .user-message { 
+                background-color: #d1e8ff; 
+                align-self: flex-end; 
+                margin-left: auto; 
+                border-radius: 10px;
+            }
+            .bot-message { 
+                background-color: #dbdbdb; 
+                align-self: flex-start; 
+            }
+            .system-message { 
+                background-color: #ffeeee; 
+                align-self: flex-start; 
+            }
+        </style>
+    </head>
+<body>
+    <div id="chat-container"></div>
+    <div id="input-container">
+        <textarea id="query-input" placeholder="Enter your question here" rows="1"></textarea>
+    </div>
+
+    <script>
+        const md = window.markdownit();
+        const chatContainer = document.getElementById('chat-container');
+        const queryInput = document.getElementById('query-input');
+
+        mermaid.initialize({ startOnLoad: true });
+
+        // Custom renderer for code blocks
+        md.renderer.rules.fence = function(tokens, idx, options, env, self) {
+            const token = tokens[idx];
+            const code = token.content.trim();
+            if (token.info.trim() === 'mermaid') {
+                return '<div class="mermaid">' + code + '</div>';
+            }
+            return '<pre><code>' + md.utils.escapeHtml(code) + '</code></pre>';
+        };
+
+        function appendMessage(sender, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender.toLowerCase()}-message`;
+            const renderedContent = sender === 'Bot' ? md.render(content) : md.render(md.utils.escapeHtml(content));
+            messageDiv.innerHTML = renderedContent;
+            chatContainer.appendChild(messageDiv);
+            window.scrollTo(0, document.body.scrollHeight);
+
+            // Re-run Mermaid rendering
+            mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+        }
+
+        async function sendQuery() {
+            const queryText = queryInput.value.trim();
+            if (!queryText) return;
+
+            appendMessage('User', queryText);
+            queryInput.value = '';
+            resizeTextarea();
+
+            const queryObject = { query: queryText };
+
+            try {
+                const response = await fetch('http://localhost:8080/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(queryObject),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.response && data.response.message && data.response.message.content) {
+                    appendMessage('Bot', data.response.message.content);
+                } else {
+                    appendMessage('System', 'Received an empty or invalid response from the server.');
+                }
+
+                if (data.response.done && data.response.final_data) {
+                    console.log('Final data:', data.response.final_data);
+                    // You can display or use the final data as needed
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                appendMessage('System', 'An error occurred while fetching the response.');
+            }
+        }
+
+        function resizeTextarea() {
+            queryInput.style.height = 'auto';
+            queryInput.style.height = (queryInput.scrollHeight) + 'px';
+        }
+
+        queryInput.addEventListener('input', resizeTextarea);
+
+        queryInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendQuery();
+            } else if (e.key === 'Enter' && e.shiftKey) {
+                resizeTextarea();
+            }
+        });
+    </script>
+</body>
+</html>

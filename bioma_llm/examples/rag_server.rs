@@ -117,6 +117,97 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
 }
 
 #[derive(Deserialize)]
+struct ChatQuery {
+    messages: Vec<ChatMessage>,
+}
+async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+    // Build query from all user messages
+    let query = body
+        .messages
+        .iter()
+        .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
+        .map(|message| message.content.clone())
+        .collect::<Vec<String>>()
+        .join("\n");
+    info!("Received ask query: {:#?}", query);
+
+    let retrieve_context = RetrieveContext { query: query.clone(), limit: 5, threshold: 0.0 };
+    let retriever_actor_id = data.retriever_actor_id.clone();
+
+    // Try to lock the retriever_relay_ctx without waiting
+    let retriever_relay_ctx = match data.retriever_relay_ctx.try_lock() {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            error!("Resource busy: could not acquire lock on retriever_relay_ctx");
+            return HttpResponse::ServiceUnavailable().body("Retriever resource busy");
+        }
+    };
+
+    // Try to lock the chat_relay_ctx without waiting
+    let chat_relay_ctx = match data.chat_relay_ctx.try_lock() {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            error!("Resource busy: could not acquire lock on chat_relay_ctx");
+            return HttpResponse::ServiceUnavailable().body("Chat resource busy");
+        }
+    };
+
+    info!("Sending message to retriever actor");
+    let response = retriever_relay_ctx
+        .send::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &retriever_actor_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+        )
+        .await;
+
+    match response {
+        Ok(context) => {
+            info!("Context fetched: {:#?}", context);
+            let context_content = context.to_markdown();
+
+            // Create chat conversation with all messages
+            let mut conversation = body.messages.clone();
+
+            // Insert context to conversation as a system message, at one position before the last message
+            let context_message = ChatMessage::system(
+                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
+                    .to_string()
+                    + &context_content,
+            );
+            if conversation.len() > 0 {
+                conversation.insert(conversation.len() - 1, context_message);
+            } else {
+                conversation.push(context_message);
+            }
+
+            info!("Sending context to chat actor");
+            let chat_response = chat_relay_ctx
+                .send::<Chat, ChatMessages>(
+                    ChatMessages { messages: conversation.clone(), restart: true },
+                    &data.chat_actor_id,
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                )
+                .await;
+            match chat_response {
+                Ok(response) => {
+                    info!("Chat response: {:#?}", response);
+                    HttpResponse::Ok().json(response)
+                }
+                Err(e) => {
+                    error!("Error fetching chat response: {:?}", e);
+                    HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Error fetching context: {:?}", e);
+            HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
+        }
+    }
+}
+
+#[derive(Deserialize)]
 struct AskQuery {
     query: String,
 }
@@ -312,6 +403,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             error!("Chat actor error: {}", e);
         }
     });
+
     // Spawn a relay actor to send messages to chat
     let chat_relay_id = ActorId::of::<Relay>("/relay/chat");
     let (chat_relay_ctx, _chat_relay_actor) = Actor::spawn(
@@ -347,6 +439,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(ask))
+            .route("/chat", web::post().to(self::chat))
     })
     .bind("0.0.0.0:8080")?
     .run()

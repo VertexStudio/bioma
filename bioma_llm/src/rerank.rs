@@ -1,6 +1,6 @@
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use url::Url;
 
 /// Enumerates the types of errors that can occur in LLM
@@ -37,6 +37,10 @@ impl Message<RankTexts> for Rerank {
         _ctx: &mut ActorContext<Self>,
         rank_texts: &RankTexts,
     ) -> Result<Vec<RankedText>, RerankError> {
+        if rank_texts.texts.is_empty() {
+            warn!("No texts to rerank");
+            return Ok(vec![]);
+        }
         let client = reqwest::Client::new();
         let res = client.post(self.url.clone()).json(&rank_texts).send().await?;
         if !res.status().is_success() {
