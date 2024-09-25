@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Markdown Chat Interface with Mermaid</title>
+        <title>Bioma Rag Chat Interface with Markdown and Mermaid</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
         <style>
@@ -55,7 +55,7 @@
                 margin-left: auto; 
                 border-radius: 10px;
             }
-            .bot-message { 
+            .assistant-message { 
                 background-color: #dbdbdb; 
                 align-self: flex-start; 
             }
@@ -68,13 +68,14 @@
 <body>
     <div id="chat-container"></div>
     <div id="input-container">
-        <textarea id="query-input" placeholder="Enter your question here" rows="1"></textarea>
+        <textarea id="query-input" placeholder="Enter your message here" rows="1"></textarea>
     </div>
 
     <script>
         const md = window.markdownit();
         const chatContainer = document.getElementById('chat-container');
         const queryInput = document.getElementById('query-input');
+        let chatHistory = [];
 
         mermaid.initialize({ startOnLoad: true });
 
@@ -88,10 +89,10 @@
             return '<pre><code>' + md.utils.escapeHtml(code) + '</code></pre>';
         };
 
-        function appendMessage(sender, content) {
+        function appendMessage(role, content) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender.toLowerCase()}-message`;
-            const renderedContent = sender === 'Bot' ? md.render(content) : md.render(md.utils.escapeHtml(content));
+            messageDiv.className = `message ${role}-message`;
+            const renderedContent = role === 'assistant' ? md.render(content) : md.render(md.utils.escapeHtml(content));
             messageDiv.innerHTML = renderedContent;
             chatContainer.appendChild(messageDiv);
             window.scrollTo(0, document.body.scrollHeight);
@@ -104,19 +105,22 @@
             const queryText = queryInput.value.trim();
             if (!queryText) return;
 
-            appendMessage('User', queryText);
+            appendMessage('user', queryText);
+            chatHistory.push({ role: 'user', content: queryText });
             queryInput.value = '';
             resizeTextarea();
 
-            const queryObject = { query: queryText };
-
             try {
-                const response = await fetch('http://localhost:8080/ask', {
+                const response = await fetch('http://localhost:8080/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(queryObject),
+                    body: JSON.stringify({
+                        model: 'llama2',
+                        messages: chatHistory,
+                        stream: false
+                    }),
                 });
 
                 if (!response.ok) {
@@ -125,19 +129,15 @@
 
                 const data = await response.json();
 
-                if (data.response && data.response.message && data.response.message.content) {
-                    appendMessage('Bot', data.response.message.content);
+                if (data.message && data.message.content) {
+                    appendMessage('assistant', data.message.content);
+                    chatHistory.push({ role: 'assistant', content: data.message.content });
                 } else {
-                    appendMessage('System', 'Received an empty or invalid response from the server.');
-                }
-
-                if (data.response.done && data.response.final_data) {
-                    console.log('Final data:', data.response.final_data);
-                    // You can display or use the final data as needed
+                    appendMessage('system', 'Received an empty or invalid response from the server.');
                 }
             } catch (error) {
                 console.error('Error:', error);
-                appendMessage('System', 'An error occurred while fetching the response.');
+                appendMessage('system', 'An error occurred while fetching the response.');
             }
         }
 
