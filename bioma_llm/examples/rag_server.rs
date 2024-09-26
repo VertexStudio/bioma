@@ -381,7 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    let chat = Chat::builder().model_name("llama3.1".to_string()).messages_number_limit(10).history(vec![]).build();
+    let chat = Chat::builder().model_name("llama3.2".to_string()).messages_number_limit(10).history(vec![]).build();
 
     let chat_actor_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(

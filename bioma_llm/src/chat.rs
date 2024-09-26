@@ -36,7 +36,7 @@ pub struct Chat {
 impl Default for Chat {
     fn default() -> Self {
         Self {
-            model_name: "llama3.1".to_string(),
+            model_name: "llama3.2".to_string(),
             generation_options: None,
             messages_number_limit: 10,
             history: Vec::new(),
