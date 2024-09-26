@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use surrealdb::value::RecordId;
 use tracing::{error, info};
+use url::Url;
 
 #[derive(thiserror::Error, Debug)]
 pub enum EmbeddingsError {
@@ -79,6 +80,7 @@ pub struct Similarity {
 pub struct Embeddings {
     pub model_name: String,
     pub generation_options: Option<GenerationOptions>,
+    pub endpoint: Url,
     #[serde(skip)]
     pub ollama: Ollama,
     #[serde(skip)]
@@ -90,6 +92,7 @@ impl Default for Embeddings {
         Self {
             model_name: "nomic-embed-text".to_string(),
             generation_options: None,
+            endpoint: Url::parse("http://localhost:11434").unwrap(),
             ollama: Ollama::default(),
             embedding_length: 768,
         }
@@ -191,6 +194,9 @@ impl Actor for Embeddings {
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
+
+        // Connect to ollama
+        self.ollama = Ollama::from_url(self.endpoint.clone());
 
         if self.embedding_length != 768 {
             panic!("Embedding length must be 768");

@@ -42,7 +42,7 @@ impl Message<RankTexts> for Rerank {
             return Ok(vec![]);
         }
         let client = reqwest::Client::new();
-        let res = client.post(self.url.clone()).json(&rank_texts).send().await?;
+        let res = client.post(self.endpoint.clone()).json(&rank_texts).send().await?;
         if !res.status().is_success() {
             return Err(RerankError::RerankResponse(res.text().await?));
         }
@@ -53,12 +53,12 @@ impl Message<RankTexts> for Rerank {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rerank {
-    pub url: Url,
+    pub endpoint: Url,
 }
 
 impl Default for Rerank {
     fn default() -> Self {
-        Self { url: Url::parse("http://localhost:9124/rerank").unwrap() }
+        Self { endpoint: Url::parse("http://localhost:9124/rerank").unwrap() }
     }
 }
 

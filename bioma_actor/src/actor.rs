@@ -233,6 +233,7 @@ impl Default for SendOptions {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActorId {
     id: RecordId,
+    name: Cow<'static, str>,
     kind: Cow<'static, str>,
 }
 
@@ -259,12 +260,17 @@ impl ActorId {
     ///
     /// Returns a new `ActorId` instance with the generated id and the type name of the actor.
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
-        let id = RecordId::from_table_key(DB_TABLE_ACTOR, uid.into().to_string());
-        Self { id, kind: type_name::<T>().into() }
+        let name = uid.into();
+        let id = RecordId::from_table_key(DB_TABLE_ACTOR, name.as_ref());
+        Self { id, kind: type_name::<T>().into(), name }
     }
 
     pub fn kind(&self) -> &str {
         &self.kind
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 

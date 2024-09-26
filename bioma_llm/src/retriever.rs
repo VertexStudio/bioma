@@ -4,7 +4,6 @@ use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
-use url::Url;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RetrieverError {
@@ -24,6 +23,10 @@ pub enum RetrieverError {
     ComputingSimilarity(String),
     #[error("Rerank error: {0}")]
     ComputingRerank(String),
+    #[error("Embeddings ID not found")]
+    EmbeddingsIdNotFound,
+    #[error("Rerank ID not found")]
+    RerankIdNotFound,
 }
 
 impl ActorError for RetrieverError {}
@@ -83,6 +86,13 @@ impl Message<RetrieveContext> for Retriever {
         ctx: &mut ActorContext<Self>,
         message: &RetrieveContext,
     ) -> Result<RetrievedContext, RetrieverError> {
+        let Some(embeddings_id) = &self.embeddings_id else {
+            return Err(RetrieverError::EmbeddingsIdNotFound);
+        };
+        let Some(rerank_id) = &self.rerank_id else {
+            return Err(RetrieverError::RerankIdNotFound);
+        };
+
         info!("Fetching context for query: {}", message.query);
         let embeddings_req = embeddings::TopK {
             query: embeddings::Query::Text(message.query.clone()),
@@ -91,16 +101,15 @@ impl Message<RetrieveContext> for Retriever {
             tag: Some(self.tag.clone()),
         };
         info!("Searching for texts similarities");
-        let similarities = match ctx
-            .send::<Embeddings, embeddings::TopK>(embeddings_req, &self.embeddings_actor, SendOptions::default())
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Failed to get similarities: {}", e);
-                return Err(RetrieverError::ComputingSimilarity(e.to_string()));
-            }
-        };
+        let similarities =
+            match ctx.send::<Embeddings, embeddings::TopK>(embeddings_req, embeddings_id, SendOptions::default()).await
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    error!("Failed to get similarities: {}", e);
+                    return Err(RetrieverError::ComputingSimilarity(e.to_string()));
+                }
+            };
         // Rank the embeddings
         info!("Ranking similarity texts");
         let rerank_req = RankTexts {
@@ -108,14 +117,13 @@ impl Message<RetrieveContext> for Retriever {
             texts: similarities.iter().map(|s| s.text.clone()).collect(),
             raw_scores: false,
         };
-        let ranked_texts =
-            match ctx.send::<Rerank, RankTexts>(rerank_req, &self.rerank_actor, SendOptions::default()).await {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Failed to rank texts: {}", e);
-                    return Err(RetrieverError::ComputingRerank(e.to_string()));
-                }
-            };
+        let ranked_texts = match ctx.send::<Rerank, RankTexts>(rerank_req, rerank_id, SendOptions::default()).await {
+            Ok(result) => result,
+            Err(e) => {
+                error!("Failed to rank texts: {}", e);
+                return Err(RetrieverError::ComputingRerank(e.to_string()));
+            }
+        };
         // Get the context from the ranked texts
         info!("Getting context from ranked texts");
         let context = if ranked_texts.len() > 0 {
@@ -139,21 +147,21 @@ impl Message<RetrieveContext> for Retriever {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Retriever {
-    pub embeddings_actor: ActorId,
-    pub rerank_actor: ActorId,
-    pub rerank_endpoint: Url,
+    pub embeddings: Embeddings,
+    pub rerank: Rerank,
     pub tag: String,
+    embeddings_id: Option<ActorId>,
+    rerank_id: Option<ActorId>,
 }
 
 impl Default for Retriever {
     fn default() -> Self {
-        let embeddings_actor_id = ActorId::of::<Embeddings>("/retriever/embeddings");
-        let rerank_actor_id = ActorId::of::<Rerank>("/retriever/rerank");
         Self {
-            embeddings_actor: embeddings_actor_id.clone(),
-            rerank_actor: rerank_actor_id.clone(),
-            rerank_endpoint: Url::parse("http://localhost:9124/rerank").unwrap(),
+            embeddings: Embeddings::default(),
+            rerank: Rerank::default(),
             tag: "indexer_content".to_string(),
+            embeddings_id: None,
+            rerank_id: None,
         }
     }
 }
@@ -162,17 +170,24 @@ impl Actor for Retriever {
     type Error = RetrieverError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), RetrieverError> {
+        let self_id = ctx.id().clone();
+        let embeddings_id = ActorId::of::<Embeddings>(format!("{}/embeddings", self_id.name()));
+        let rerank_id = ActorId::of::<Rerank>(format!("{}/rerank", self_id.name()));
+
+        self.embeddings_id = Some(embeddings_id.clone());
+        self.rerank_id = Some(rerank_id.clone());
+
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
             ctx.engine().clone(),
-            self.embeddings_actor.clone(),
-            Embeddings { model_name: "nomic-embed-text".to_string(), ..Default::default() },
+            embeddings_id.clone(),
+            self.embeddings.clone(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
         let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
             ctx.engine().clone(),
-            self.rerank_actor.clone(),
-            Rerank { url: self.rerank_endpoint.clone() },
+            rerank_id.clone(),
+            self.rerank.clone(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
