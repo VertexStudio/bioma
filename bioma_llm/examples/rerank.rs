@@ -16,13 +16,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rerank_id = ActorId::of::<Rerank>("/rerank");
 
     // Spawn and start the rerank actor
-    let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
-        engine.clone(),
-        rerank_id.clone(),
-        Rerank::default(),
-        SpawnOptions::default(),
-    )
-    .await?;
+    let (mut rerank_ctx, mut rerank_actor) =
+        Actor::spawn(engine.clone(), rerank_id.clone(), Rerank::default(), SpawnOptions::default()).await?;
     let rerank_handle = tokio::spawn(async move {
         if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
             error!("Rerank actor error: {}", e);

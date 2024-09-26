@@ -1,7 +1,6 @@
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
-
 /// A relay actor for sending messages to another actor from outside the actor system
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Relay;

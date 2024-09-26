@@ -76,15 +76,15 @@ pub struct Similarity {
     pub metadata: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Embeddings {
     pub model_name: String,
     pub generation_options: Option<GenerationOptions>,
     pub endpoint: Url,
     #[serde(skip)]
-    pub ollama: Ollama,
+    ollama: Ollama,
     #[serde(skip)]
-    pub embedding_length: usize,
+    embedding_length: usize,
 }
 
 impl Default for Embeddings {

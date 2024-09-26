@@ -44,14 +44,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create chat conversation
     let mut conversation = vec![];
 
-    // Create chat actor
-    let chat = Chat {
-        model_name: "llama3.1".to_string(),
-        generation_options: Default::default(),
-        messages_number_limit: 10,
-        history: conversation.clone(),
-        ollama: None,
-    };
+    let chat = Chat::builder()
+        .model_name("llama3.1".to_string())
+        .messages_number_limit(10)
+        .history(conversation.clone())
+        .build();
 
     let chat_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) =

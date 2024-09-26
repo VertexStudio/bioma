@@ -884,6 +884,7 @@ dependencies = [
  "actix-web",
  "bioma_actor",
  "bioma_derive",
+ "bon",
  "clap",
  "color-backtrace",
  "derive_more",

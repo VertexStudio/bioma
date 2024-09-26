@@ -51,7 +51,7 @@ impl Message<RankTexts> for Rerank {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Rerank {
     pub endpoint: Url,
 }

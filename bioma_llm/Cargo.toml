@@ -21,6 +21,7 @@ tracing = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
 glob = { workspace = true }
+bon = { workspace = true }
 ollama-rs = { version = "0.2.1", features = ["function-calling"] }
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
