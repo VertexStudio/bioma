@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use url::Url;
 
+const DEFAULT_RERANK_ENDPOINT: &str = "http://localhost:9124/rerank";
+
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
 pub enum RerankError {
@@ -53,12 +55,13 @@ impl Message<RankTexts> for Rerank {
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Rerank {
+    #[builder(default = Url::parse(DEFAULT_RERANK_ENDPOINT).unwrap())]
     pub endpoint: Url,
 }
 
 impl Default for Rerank {
     fn default() -> Self {
-        Self { endpoint: Url::parse("http://localhost:9124/rerank").unwrap() }
+        Self { endpoint: Url::parse(DEFAULT_RERANK_ENDPOINT).unwrap() }
     }
 }
 

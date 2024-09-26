@@ -8,7 +8,13 @@ use ollama_rs::{
     Ollama,
 };
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use tracing::{error, info};
+use url::Url;
+
+const DEFAULT_MODEL_NAME: &str = "llama3.2";
+const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
+const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
 
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
@@ -25,22 +31,29 @@ impl ActorError for ChatError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Chat {
-    pub model_name: String,
+    #[builder(default = DEFAULT_MODEL_NAME.into())]
+    pub model: Cow<'static, str>,
     pub generation_options: Option<GenerationOptions>,
+    #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
+    pub endpoint: Url,
+    #[builder(default = DEFAULT_MESSAGES_NUMBER_LIMIT)]
     pub messages_number_limit: usize,
+    #[builder(default)]
     pub history: Vec<ChatMessage>,
     #[serde(skip)]
-    ollama: Option<Ollama>,
+    #[builder(default)]
+    ollama: Ollama,
 }
 
 impl Default for Chat {
     fn default() -> Self {
         Self {
-            model_name: "llama3.2".to_string(),
+            model: DEFAULT_MODEL_NAME.into(),
             generation_options: None,
-            messages_number_limit: 10,
+            endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
+            messages_number_limit: DEFAULT_MESSAGES_NUMBER_LIMIT,
             history: Vec::new(),
-            ollama: None,
+            ollama: Ollama::default(),
         }
     }
 }
@@ -59,11 +72,6 @@ impl Message<ChatMessages> for Chat {
         _ctx: &mut ActorContext<Self>,
         messages: &ChatMessages,
     ) -> Result<ChatMessageResponse, ChatError> {
-        // Check if the ollama client is initialized
-        let Some(ollama) = &self.ollama else {
-            return Err(ChatError::OllamaNotInitialized);
-        };
-
         if messages.restart {
             self.history.clear();
         }
@@ -78,13 +86,13 @@ impl Message<ChatMessages> for Chat {
             }
         }
 
-        let mut chat_message_request = ChatMessageRequest::new(self.model_name.clone(), self.history.clone());
+        let mut chat_message_request = ChatMessageRequest::new(self.model.to_string(), self.history.clone());
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
         }
 
         // Send the messages to the ollama client
-        let result = ollama.send_chat_messages(chat_message_request).await?;
+        let result = self.ollama.send_chat_messages(chat_message_request).await?;
 
         // Add the assistant's message to the history
         if let Some(message) = &result.message {
@@ -101,7 +109,7 @@ impl Actor for Chat {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ChatError> {
         info!("{} Started", ctx.id());
 
-        self.ollama = Some(Ollama::default());
+        self.ollama = Ollama::from_url(self.endpoint.clone());
 
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {

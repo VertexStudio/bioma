@@ -3,7 +3,12 @@ use crate::indexer::{ChunkMetadata, Source};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use tracing::{error, info};
+
+const DEFAULT_RETRIEVER_TAG: &str = "indexer_content";
+const DEFAULT_RETRIEVER_LIMIT: usize = 10;
+const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RetrieverError {
@@ -31,11 +36,23 @@ pub enum RetrieverError {
 
 impl ActorError for RetrieverError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveContext {
     pub query: String,
+    #[builder(default = DEFAULT_RETRIEVER_LIMIT)]
+    #[serde(default = "default_retriever_limit")]
     pub limit: usize,
+    #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
+    #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
+}
+
+fn default_retriever_limit() -> usize {
+    DEFAULT_RETRIEVER_LIMIT
+}
+
+fn default_retriever_threshold() -> f32 {
+    DEFAULT_RETRIEVER_THRESHOLD
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,7 +115,7 @@ impl Message<RetrieveContext> for Retriever {
             query: embeddings::Query::Text(message.query.clone()),
             k: message.limit * 2,
             threshold: message.threshold,
-            tag: Some(self.tag.clone()),
+            tag: Some(self.tag.clone().to_string()),
         };
         info!("Searching for texts similarities");
         let similarities =
@@ -147,9 +164,12 @@ impl Message<RetrieveContext> for Retriever {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Retriever {
+    #[builder(default)]
     pub embeddings: Embeddings,
+    #[builder(default)]
     pub rerank: Rerank,
-    pub tag: String,
+    #[builder(default = DEFAULT_RETRIEVER_TAG.into())]
+    pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
     rerank_id: Option<ActorId>,
 }
@@ -159,7 +179,7 @@ impl Default for Retriever {
         Self {
             embeddings: Embeddings::default(),
             rerank: Rerank::default(),
-            tag: "indexer_content".to_string(),
+            tag: DEFAULT_RETRIEVER_TAG.into(),
             embeddings_id: None,
             rerank_id: None,
         }
