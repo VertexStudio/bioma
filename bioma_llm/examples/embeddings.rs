@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
         engine.clone(),
         embeddings_id.clone(),
-        Embeddings { model_name: "nomic-embed-text".to_string(), ..Default::default() },
+        Embeddings::default(),
         SpawnOptions::default(),
     )
     .await?;

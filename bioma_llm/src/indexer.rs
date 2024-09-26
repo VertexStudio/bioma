@@ -24,6 +24,8 @@ pub enum IndexerError {
     ComputingSimilarity(String),
     #[error("Chunk config error: {0}")]
     ChunkConfig(#[from] text_splitter::ChunkConfigError),
+    #[error("Embeddings actor not found")]
+    EmbeddingsActorNotFound,
 }
 
 impl ActorError for IndexerError {}
@@ -87,6 +89,10 @@ impl Message<IndexGlobs> for Indexer {
         ctx: &mut ActorContext<Self>,
         message: &IndexGlobs,
     ) -> Result<IndexedGlobs, IndexerError> {
+        let Some(embeddings_id) = &self.embeddings_id else {
+            return Err(IndexerError::EmbeddingsActorNotFound);
+        };
+
         let total_index_globs_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
@@ -240,7 +246,7 @@ impl Message<IndexGlobs> for Indexer {
                                 metadata: Some(metadata_batch.to_vec()),
                                 tag: Some(self.tag.clone()),
                             },
-                            &self.embeddings_actor,
+                            embeddings_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                         )
                         .await;
@@ -269,14 +275,14 @@ impl Message<IndexGlobs> for Indexer {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Indexer {
+    pub embeddings: Embeddings,
     pub tag: String,
-    pub embeddings_actor: ActorId,
+    embeddings_id: Option<ActorId>,
 }
 
 impl Default for Indexer {
     fn default() -> Self {
-        let embeddings_actor_id = ActorId::of::<Embeddings>("/indexer/embeddings");
-        Self { tag: "indexer_content".to_string(), embeddings_actor: embeddings_actor_id.clone() }
+        Self { embeddings: Embeddings::default(), tag: "indexer_content".to_string(), embeddings_id: None }
     }
 }
 
@@ -284,10 +290,14 @@ impl Actor for Indexer {
     type Error = IndexerError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
+        let self_id = ctx.id().clone();
+        let embeddings_id = ActorId::of::<Embeddings>(format!("{}/embeddings", self_id.name()));
+        self.embeddings_id = Some(embeddings_id.clone());
+
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
             ctx.engine().clone(),
-            self.embeddings_actor.clone(),
-            Embeddings { model_name: "nomic-embed-text".to_string(), ..Default::default() },
+            embeddings_id.clone(),
+            self.embeddings.clone(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;

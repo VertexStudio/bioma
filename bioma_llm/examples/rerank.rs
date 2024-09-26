@@ -1,7 +1,6 @@
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use tracing::{error, info};
-use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
         engine.clone(),
         rerank_id.clone(),
-        Rerank { url: Url::parse("http://localhost:9124/rerank").unwrap() },
+        Rerank::default(),
         SpawnOptions::default(),
     )
     .await?;
