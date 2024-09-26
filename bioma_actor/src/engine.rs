@@ -2,12 +2,15 @@ use crate::actor::SystemActorError;
 use derive_more::Display;
 use object_store::local::LocalFileSystem;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use surrealdb::{
     engine::any::{Any, IntoEndpoint},
     opt::auth::Root,
     value::RecordId,
     Surreal,
 };
+use tokio::time::sleep;
+use tracing::warn;
 
 #[macro_export]
 macro_rules! dbg_export_db {
@@ -81,13 +84,32 @@ impl Engine {
         &self.db
     }
 
-    pub async fn connect(address: impl IntoEndpoint, options: EngineOptions) -> Result<Engine, SystemActorError> {
+    pub async fn connect(
+        address: impl IntoEndpoint + Clone,
+        options: EngineOptions,
+    ) -> Result<Engine, SystemActorError> {
+        let mut retry_delay = Duration::from_secs(1);
+        let max_delay = Duration::from_secs(10);
+
+        loop {
+            match Self::attempt_connect(address.clone(), &options).await {
+                Ok(engine) => return Ok(engine),
+                Err(e) => {
+                    warn!("Failed to connect: {}. Retrying in {:?}...", e, retry_delay);
+                    sleep(retry_delay).await;
+                    retry_delay = std::cmp::min(retry_delay * 2, max_delay);
+                }
+            }
+        }
+    }
+
+    async fn attempt_connect(address: impl IntoEndpoint, options: &EngineOptions) -> Result<Engine, SystemActorError> {
         let db: Surreal<Any> = Surreal::init();
         db.connect(address).await?;
         db.signin(Root { username: &options.username, password: &options.password }).await?;
         db.use_ns(&options.namespace).use_db(&options.database).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db), options })
+        Ok(Engine { db: Box::new(db), options: options.clone() })
     }
 
     pub async fn test() -> Result<Engine, SystemActorError> {
