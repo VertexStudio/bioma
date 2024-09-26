@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conversation = vec![];
 
     let chat = Chat::builder()
-        .model_name("llama3.1".to_string())
+        .model_name("llama3.2".to_string())
         .messages_number_limit(10)
         .history(conversation.clone())
         .build();
