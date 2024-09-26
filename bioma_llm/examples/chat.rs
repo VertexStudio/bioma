@@ -14,12 +14,7 @@ impl Actor for MainActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
         let chat_id = ActorId::of::<Chat>("/llm");
 
-        let chat = Chat::builder()
-            .model_name("llama3.2".to_string())
-            .generation_options(Default::default())
-            .messages_number_limit(10)
-            .history(Default::default())
-            .build();
+        let chat = Chat::builder().model("llama3.2".into()).build();
 
         // Spawn the chat actor
         let (mut chat_ctx, mut chat_actor) =

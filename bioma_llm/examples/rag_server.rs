@@ -15,10 +15,10 @@ use tracing::{error, info, warn};
 /// curl -X POST http://localhost:8080/reset
 ///
 /// Index some files:
-/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
 ///
 /// Retrieve context:
-/// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10}'
+/// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
 ///
 /// Ask a question:
 /// curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
@@ -381,7 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    let chat = Chat::builder().model_name("llama3.2".to_string()).messages_number_limit(10).history(vec![]).build();
+    let chat = Chat::builder().model("llama3.2".into()).build();
 
     let chat_actor_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(

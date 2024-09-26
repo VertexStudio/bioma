@@ -2,11 +2,16 @@ use crate::embeddings::{Embeddings, EmbeddingsError, GenerateEmbeddings};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::path::PathBuf;
 use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
 use url::Url;
+
+const DEFAULT_INDEXER_TAG: &str = "indexer_content";
+const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
+const DEFAULT_CHUNK_OVERLAP: usize = 200;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IndexerError {
@@ -30,16 +35,28 @@ pub enum IndexerError {
 
 impl ActorError for IndexerError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
     pub globs: Vec<String>,
+    #[builder(default = DEFAULT_CHUNK_CAPACITY)]
+    #[serde(default = "default_chunk_capacity")]
     pub chunk_capacity: std::ops::Range<usize>,
+    #[builder(default = DEFAULT_CHUNK_OVERLAP)]
+    #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+}
+
+fn default_chunk_capacity() -> std::ops::Range<usize> {
+    DEFAULT_CHUNK_CAPACITY
+}
+
+fn default_chunk_overlap() -> usize {
+    DEFAULT_CHUNK_OVERLAP
 }
 
 impl Default for IndexGlobs {
     fn default() -> Self {
-        Self { globs: vec![], chunk_capacity: 500..2000, chunk_overlap: 200 }
+        Self { globs: vec![], chunk_capacity: DEFAULT_CHUNK_CAPACITY, chunk_overlap: DEFAULT_CHUNK_OVERLAP }
     }
 }
 
@@ -244,7 +261,7 @@ impl Message<IndexGlobs> for Indexer {
                                 source: path.clone(),
                                 texts: chunk_batch.to_vec(),
                                 metadata: Some(metadata_batch.to_vec()),
-                                tag: Some(self.tag.clone()),
+                                tag: Some(self.tag.clone().to_string()),
                             },
                             embeddings_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -276,13 +293,14 @@ impl Message<IndexGlobs> for Indexer {
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
-    pub tag: String,
+    #[builder(default = DEFAULT_INDEXER_TAG.into())]
+    pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
 }
 
 impl Default for Indexer {
     fn default() -> Self {
-        Self { embeddings: Embeddings::default(), tag: "indexer_content".to_string(), embeddings_id: None }
+        Self { embeddings: Embeddings::default(), tag: DEFAULT_INDEXER_TAG.into(), embeddings_id: None }
     }
 }
 
@@ -306,6 +324,7 @@ impl Actor for Indexer {
                 error!("Embeddings actor error: {}", e);
             }
         });
+
         info!("Indexer ready");
         // Start the message stream
         let mut stream = ctx.recv().await?;

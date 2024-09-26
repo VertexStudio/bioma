@@ -9,9 +9,14 @@ use ollama_rs::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use surrealdb::value::RecordId;
 use tracing::{error, info};
 use url::Url;
+
+const DEFAULT_MODEL_NAME: &str = "nomic-embed-text";
+const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
+const DEFAULT_EMBEDDING_LENGTH: usize = 768;
 
 #[derive(thiserror::Error, Debug)]
 pub enum EmbeddingsError {
@@ -25,6 +30,8 @@ pub enum EmbeddingsError {
     Url(#[from] url::ParseError),
     #[error("No embeddings generated")]
     NoEmbeddingsGenerated,
+    #[error("Model name not set")]
+    ModelNameNotSet,
 }
 
 impl ActorError for EmbeddingsError {}
@@ -78,23 +85,26 @@ pub struct Similarity {
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Embeddings {
-    pub model_name: String,
+    #[builder(default = DEFAULT_MODEL_NAME.into())]
+    pub model: Cow<'static, str>,
     pub generation_options: Option<GenerationOptions>,
+    #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
     pub endpoint: Url,
     #[serde(skip)]
+    #[builder(default)]
     ollama: Ollama,
-    #[serde(skip)]
+    #[builder(default = DEFAULT_EMBEDDING_LENGTH)]
     embedding_length: usize,
 }
 
 impl Default for Embeddings {
     fn default() -> Self {
         Self {
-            model_name: "nomic-embed-text".to_string(),
+            model: DEFAULT_MODEL_NAME.into(),
             generation_options: None,
-            endpoint: Url::parse("http://localhost:11434").unwrap(),
+            endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
             ollama: Ollama::default(),
-            embedding_length: 768,
+            embedding_length: DEFAULT_EMBEDDING_LENGTH,
         }
     }
 }
@@ -112,7 +122,7 @@ impl Message<TopK> for Embeddings {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
                 let input = EmbeddingsInput::Single(text.to_string());
-                let request = GenerateEmbeddingsRequest::new(self.model_name.clone(), input);
+                let request = GenerateEmbeddingsRequest::new(self.model.to_string(), input);
                 let result = self.ollama.generate_embeddings(request).await?;
                 if result.embeddings.is_empty() {
                     return Err(EmbeddingsError::NoEmbeddingsGenerated);
@@ -147,7 +157,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
     ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
         let input = EmbeddingsInput::Multiple(message.texts.clone());
 
-        let request = GenerateEmbeddingsRequest::new(self.model_name.clone(), input);
+        let request = GenerateEmbeddingsRequest::new(self.model.to_string(), input);
 
         let result = self.ollama.generate_embeddings(request).await?;
 
@@ -166,7 +176,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
             for (i, text) in message.texts.iter().enumerate() {
                 let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
                 let embedding = result.embeddings[i].clone();
-                let model_id = RecordId::from_table_key("model", self.model_name.clone());
+                let model_id = RecordId::from_table_key("model", self.model.to_string());
                 db.query(emb_query)
                     .bind(("tag", tag.to_string()))
                     .bind(("text", text.to_string()))
@@ -198,7 +208,7 @@ impl Actor for Embeddings {
         // Connect to ollama
         self.ollama = Ollama::from_url(self.endpoint.clone());
 
-        if self.embedding_length != 768 {
+        if self.embedding_length != DEFAULT_EMBEDDING_LENGTH {
             panic!("Embedding length must be 768");
         }
 
@@ -208,12 +218,13 @@ impl Actor for Embeddings {
         db.query(def).await.map_err(SystemActorError::from)?;
 
         // Store model in database if not already present
-        let model_info: ollama_rs::models::ModelInfo = self.ollama.show_model_info(self.model_name.clone()).await?;
-        let model = Model { name: self.model_name.clone(), info: model_info };
+        let model_name = self.model.to_string();
+        let model_info: ollama_rs::models::ModelInfo = self.ollama.show_model_info(model_name.clone()).await?;
+        let model = Model { name: model_name.clone(), info: model_info };
         let model: Result<Option<Record>, _> =
-            db.create(("model", self.model_name.clone())).content(model).await.map_err(SystemActorError::from);
+            db.create(("model", model_name.clone())).content(model).await.map_err(SystemActorError::from);
         if let Ok(Some(model)) = model {
-            info!("Model {} stored with id: {}", self.model_name, model.id);
+            info!("Model {} stored with id: {}", model_name, model.id);
         }
 
         // Start the message stream
