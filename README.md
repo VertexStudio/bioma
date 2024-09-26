@@ -101,6 +101,8 @@ python assets/scripts/rerank_server.py
 
 ## RAG server example
 
+[Agentic RAG Server](bioma_llm/examples/rag_server.md)
+
 ### Launch the server:
 
 ```bash
