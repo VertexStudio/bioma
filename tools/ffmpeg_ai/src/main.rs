@@ -30,9 +30,7 @@ async fn main() {
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 
     color_backtrace::install();
-    color_backtrace::BacktracePrinter::new()
-        .message("BOOM! 💥")
-        .install(color_backtrace::default_output_stream());
+    color_backtrace::BacktracePrinter::new().message("BOOM! 💥").install(color_backtrace::default_output_stream());
 
     // Parse the CLI arguments
     let args = Cli::parse();
@@ -40,9 +38,7 @@ async fn main() {
     info!("Source: {:?}", source);
 
     // Render the template
-    let template = FfmpegTemplate {
-        input_source: &source.to_str().unwrap(),
-    };
+    let template = FfmpegTemplate { input_source: &source.to_str().unwrap() };
     let rendered = template.render().unwrap();
     info!("{}", rendered);
 
@@ -107,16 +103,11 @@ async fn main() {
                     // Convert the image to a JPEG-encoded byte array
                     let mut jpeg_bytes: Vec<u8> = Vec::new();
                     let jpeg_cursor = Cursor::new(&mut jpeg_bytes);
-                    let mut jpeg_enc =
-                        image::codecs::jpeg::JpegEncoder::new_with_quality(jpeg_cursor, 85);
-                    jpeg_enc
-                        .encode(&image_data, width, height, image::ExtendedColorType::Rgb8)
-                        .unwrap();
+                    let mut jpeg_enc = image::codecs::jpeg::JpegEncoder::new_with_quality(jpeg_cursor, 85);
+                    jpeg_enc.encode(&image_data, width, height, image::ExtendedColorType::Rgb8).unwrap();
 
                     // Save a copy to file
-                    let image =
-                        image::load_from_memory_with_format(&jpeg_bytes, image::ImageFormat::Jpeg)
-                            .unwrap();
+                    let image = image::load_from_memory_with_format(&jpeg_bytes, image::ImageFormat::Jpeg).unwrap();
                     image.save(frame_path).unwrap();
                     info!("Saved frame: {}", frame_name);
 

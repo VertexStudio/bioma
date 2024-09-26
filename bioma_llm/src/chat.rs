@@ -23,14 +23,26 @@ pub enum ChatError {
 
 impl ActorError for ChatError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Chat {
     pub model_name: String,
     pub generation_options: Option<GenerationOptions>,
     pub messages_number_limit: usize,
     pub history: Vec<ChatMessage>,
     #[serde(skip)]
-    pub ollama: Option<Ollama>,
+    ollama: Option<Ollama>,
+}
+
+impl Default for Chat {
+    fn default() -> Self {
+        Self {
+            model_name: "llama3.1".to_string(),
+            generation_options: None,
+            messages_number_limit: 10,
+            history: Vec::new(),
+            ollama: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

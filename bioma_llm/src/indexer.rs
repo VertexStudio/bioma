@@ -273,7 +273,7 @@ impl Message<IndexGlobs> for Indexer {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
     pub tag: String,

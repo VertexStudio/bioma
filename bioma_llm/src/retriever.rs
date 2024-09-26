@@ -145,7 +145,7 @@ impl Message<RetrieveContext> for Retriever {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Retriever {
     pub embeddings: Embeddings,
     pub rerank: Rerank,

@@ -16,13 +16,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
 
     // Spawn and start the embeddings actor
-    let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
-        engine.clone(),
-        embeddings_id.clone(),
-        Embeddings::default(),
-        SpawnOptions::default(),
-    )
-    .await?;
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {

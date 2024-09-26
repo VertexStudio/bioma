@@ -14,20 +14,16 @@ impl Actor for MainActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
         let chat_id = ActorId::of::<Chat>("/llm");
 
+        let chat = Chat::builder()
+            .model_name("llama3.1".to_string())
+            .generation_options(Default::default())
+            .messages_number_limit(10)
+            .history(Default::default())
+            .build();
+
         // Spawn the chat actor
-        let (mut chat_ctx, mut chat_actor) = Actor::spawn(
-            ctx.engine().clone(),
-            chat_id.clone(),
-            Chat {
-                model_name: "llama3.1".to_string(),
-                generation_options: Default::default(),
-                messages_number_limit: 10,
-                history: Vec::new(),
-                ollama: None,
-            },
-            SpawnOptions::default(),
-        )
-        .await?;
+        let (mut chat_ctx, mut chat_actor) =
+            Actor::spawn(ctx.engine().clone(), chat_id.clone(), chat, SpawnOptions::default()).await?;
 
         info!("{} Starting conversation with LLM", ctx.id());
 
