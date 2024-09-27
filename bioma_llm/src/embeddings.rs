@@ -6,9 +6,7 @@ use surrealdb::value::RecordId;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use url::Url;
 
-const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_EMBEDDING_LENGTH: usize = 768;
 
 #[derive(thiserror::Error, Debug)]
@@ -89,26 +87,19 @@ pub struct Similarity {
 pub struct Embeddings {
     #[builder(default = Model::NomicEmbedTextV15)]
     pub model: Model,
-    // pub generation_options: Option<GenerationOptions>,
-    #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
-    pub endpoint: Url,
     #[serde(skip)]
     text_embedding_task: Option<(mpsc::Sender<TextEmbeddingRequest>, JoinHandle<Result<(), fastembed::Error>>)>,
 }
 
 impl Clone for Embeddings {
     fn clone(&self) -> Self {
-        Self { model: self.model.clone(), endpoint: self.endpoint.clone(), text_embedding_task: None }
+        Self { model: self.model.clone(), text_embedding_task: None }
     }
 }
 
 impl Default for Embeddings {
     fn default() -> Self {
-        Self {
-            model: Model::NomicEmbedTextV15,
-            endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
-            text_embedding_task: None,
-        }
+        Self { model: Model::NomicEmbedTextV15, text_embedding_task: None }
     }
 }
 
