@@ -1,19 +1,23 @@
 use bioma_actor::prelude::*;
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use url::Url;
-
-const DEFAULT_RERANK_ENDPOINT: &str = "http://localhost:9124/rerank";
 
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
 pub enum RerankError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
-    #[error("Rerank requesterror: {0}")]
-    RerankRequest(#[from] reqwest::Error),
-    #[error("Rerank response error: {0}")]
-    RerankResponse(String),
+    #[error("Fastembed error: {0}")]
+    Fastembed(#[from] fastembed::Error),
+    #[error("Rerank not initialized")]
+    RerankNotInitialized,
+    #[error("Error sending rerank request: {0}")]
+    SendRerankRequest(#[from] mpsc::error::SendError<RerankRequest>),
+    #[error("Error receiving rerank response: {0}")]
+    RecvRerankResponse(#[from] oneshot::error::RecvError),
 }
 
 impl ActorError for RerankError {}
@@ -22,7 +26,6 @@ impl ActorError for RerankError {}
 pub struct RankTexts {
     pub query: String,
     pub texts: Vec<String>,
-    pub raw_scores: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,26 +46,64 @@ impl Message<RankTexts> for Rerank {
             warn!("No texts to rerank");
             return Ok(vec![]);
         }
-        let client = reqwest::Client::new();
-        let res = client.post(self.endpoint.clone()).json(&rank_texts).send().await?;
-        if !res.status().is_success() {
-            return Err(RerankError::RerankResponse(res.text().await?));
-        }
-        let ranked_texts: Vec<RankedText> = res.json().await?;
-        Ok(ranked_texts)
+
+        let Some((rerank_tx, _)) = self.rerank_task.as_ref() else {
+            return Err(RerankError::RerankNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        rerank_tx
+            .send(RerankRequest { sender: tx, query: rank_texts.query.clone(), texts: rank_texts.texts.clone() })
+            .await?;
+
+        Ok(rx.await??)
     }
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct RerankRequest {
+    sender: oneshot::Sender<Result<Vec<RankedText>, fastembed::Error>>,
+    query: String,
+    texts: Vec<String>,
+}
+
+#[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Rerank {
-    #[builder(default = Url::parse(DEFAULT_RERANK_ENDPOINT).unwrap())]
-    pub endpoint: Url,
+    #[builder(default = Model::JINARerankerV2BaseMultiligual)]
+    pub model: Model,
+    #[serde(skip)]
+    rerank_task: Option<(mpsc::Sender<RerankRequest>, JoinHandle<Result<(), fastembed::Error>>)>,
 }
 
 impl Default for Rerank {
     fn default() -> Self {
-        Self { endpoint: Url::parse(DEFAULT_RERANK_ENDPOINT).unwrap() }
+        Self { model: Model::JINARerankerV2BaseMultiligual, rerank_task: None }
     }
+}
+
+impl Clone for Rerank {
+    fn clone(&self) -> Self {
+        Self { model: self.model.clone(), rerank_task: None }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+pub enum Model {
+    JINARerankerV2BaseMultiligual,
+}
+
+fn get_fastembed_model(model: &Model) -> fastembed::RerankerModel {
+    match model {
+        Model::JINARerankerV2BaseMultiligual => fastembed::RerankerModel::JINARerankerV2BaseMultiligual,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub name: Model,
+    pub dim: usize,
+    pub description: String,
+    pub model_code: String,
+    pub model_file: String,
 }
 
 impl Actor for Rerank {
@@ -70,6 +111,27 @@ impl Actor for Rerank {
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), RerankError> {
         info!("{} Started", ctx.id());
+
+        // Spawn the rerank task
+        let model = self.model.clone();
+        let (tx, mut rx) = mpsc::channel::<RerankRequest>(100);
+        let rerank_task: JoinHandle<Result<(), fastembed::Error>> = tokio::task::spawn_blocking(move || {
+            let reranker = fastembed::TextRerank::try_new(
+                fastembed::RerankInitOptions::new(get_fastembed_model(&model)).with_show_download_progress(true),
+            )?;
+            while let Some(request) = rx.blocking_recv() {
+                let texts = request.texts.iter().map(|text| text).collect::<Vec<&String>>();
+                let results = reranker.rerank(&request.query, texts, false, None)?;
+                let ranked_texts =
+                    results.into_iter().map(|result| RankedText { index: result.index, score: result.score }).collect();
+                let _ = request.sender.send(Ok(ranked_texts));
+            }
+            Ok(())
+        });
+
+        self.rerank_task = Some((tx, rerank_task));
+
+        // Start the message stream
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(rank_texts) = frame.is::<RankTexts>() {

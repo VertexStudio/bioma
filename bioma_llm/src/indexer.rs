@@ -1,4 +1,4 @@
-use crate::embeddings::{Embeddings, EmbeddingsError, GenerateEmbeddings};
+use crate::embeddings::{Embeddings, EmbeddingsError, GenerateTextEmbeddings};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -256,8 +256,8 @@ impl Message<IndexGlobs> for Indexer {
                 let mut embeddings_count = 0;
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
-                        .send::<Embeddings, GenerateEmbeddings>(
-                            GenerateEmbeddings {
+                        .send::<Embeddings, GenerateTextEmbeddings>(
+                            GenerateTextEmbeddings {
                                 source: path.clone(),
                                 texts: chunk_batch.to_vec(),
                                 metadata: Some(metadata_batch.to_vec()),

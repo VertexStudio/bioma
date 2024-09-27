@@ -48,8 +48,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send the texts to the embeddings actor
     let embeddings = relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings {
+        .send::<Embeddings, GenerateTextEmbeddings>(
+            GenerateTextEmbeddings {
                 source: "test".to_string(),
                 texts: texts.clone(),
                 metadata: None,
