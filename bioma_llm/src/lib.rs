@@ -6,7 +6,7 @@ pub mod retriever;
 
 pub mod prelude {
     pub use crate::chat::{self, Chat, ChatError, ChatMessages};
-    pub use crate::embeddings::{self, Embeddings, EmbeddingsError, GenerateEmbeddings};
+    pub use crate::embeddings::{self, Embeddings, EmbeddingsError, GenerateTextEmbeddings};
     pub use crate::indexer::{self, IndexGlobs, Indexer, IndexerError};
     pub use crate::rerank::{self, RankTexts, RankedText, Rerank, RerankError};
     pub use crate::retriever::{self, RetrieveContext, Retriever, RetrieverError};

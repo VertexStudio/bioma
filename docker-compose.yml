@@ -10,7 +10,7 @@ services:
               count: all
               capabilities: [ gpu ]
     volumes:
-      - ollama_data:/root/.ollama
+      - bioma-ollama_data:/root/.ollama
     ports:
       - "11434:11434"
     networks:
@@ -22,7 +22,7 @@ services:
     command: start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://data/bioma.db
     user: "1000:1000"
     volumes:
-      - surreal_data:/data
+      - bioma-surreal_data:/data
     ports:
       - "9123:9123"
     networks:
@@ -32,34 +32,12 @@ services:
     image: busybox
     container_name: bioma-init-volume
     volumes:
-      - surreal_data:/data
+      - bioma-surreal_data:/data
     command: chown -R 1000:1000 /data
 
-  reranker:
-    image: ghcr.io/huggingface/text-embeddings-inference:1.5
-    container_name: bioma-reranker
-    command: --model-id BAAI/bge-reranker-base --max-client-batch-size 256 --auto-truncate --dtype float16
-    # command: --model-id BAAI/bge-reranker-v2-m3 --max-client-batch-size 256 --auto-truncate --dtype float16
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
-    volumes:
-      - reranker_data:/data
-    ports:
-      - "9124:80"
-    networks:
-      - bioma-network
-
 volumes:
-  ollama_data:
-  surreal_data:
-  veoveo_data:
-  reranker_data:
-  text_embeddings_data:
+  bioma-ollama_data:
+  bioma-surreal_data:
 
 networks:
   bioma-network:

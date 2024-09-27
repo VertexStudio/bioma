@@ -129,11 +129,8 @@ impl Message<RetrieveContext> for Retriever {
             };
         // Rank the embeddings
         info!("Ranking similarity texts");
-        let rerank_req = RankTexts {
-            query: message.query.clone(),
-            texts: similarities.iter().map(|s| s.text.clone()).collect(),
-            raw_scores: false,
-        };
+        let rerank_req =
+            RankTexts { query: message.query.clone(), texts: similarities.iter().map(|s| s.text.clone()).collect() };
         let ranked_texts = match ctx.send::<Rerank, RankTexts>(rerank_req, rerank_id, SendOptions::default()).await {
             Ok(result) => result,
             Err(e) => {

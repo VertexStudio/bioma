@@ -1,20 +1,13 @@
 use bioma_actor::prelude::*;
-use ollama_rs::{
-    error::OllamaError,
-    generation::{
-        embeddings::request::{EmbeddingsInput, GenerateEmbeddingsRequest},
-        options::GenerationOptions,
-    },
-    Ollama,
-};
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::borrow::Cow;
 use surrealdb::value::RecordId;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 use url::Url;
 
-const DEFAULT_MODEL_NAME: &str = "nomic-embed-text";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_EMBEDDING_LENGTH: usize = 768;
 
@@ -22,23 +15,32 @@ const DEFAULT_EMBEDDING_LENGTH: usize = 768;
 pub enum EmbeddingsError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
-    #[error("Ollama error: {0}")]
-    Ollama(#[from] OllamaError),
-    #[error("Ollama not initialized")]
-    OllamaNotInitialized,
     #[error("Url error: {0}")]
     Url(#[from] url::ParseError),
     #[error("No embeddings generated")]
     NoEmbeddingsGenerated,
     #[error("Model name not set")]
     ModelNameNotSet,
+    #[error("Fastembed error: {0}")]
+    Fastembed(#[from] fastembed::Error),
+    #[error("Text embedding not initialized")]
+    TextEmbeddingNotInitialized,
+    #[error("Error sending text embeddings: {0}")]
+    SendTextEmbeddings(#[from] mpsc::error::SendError<TextEmbeddingRequest>),
+    #[error("Error receiving text embeddings: {0}")]
+    RecvTextEmbeddings(#[from] oneshot::error::RecvError),
+}
+
+pub struct TextEmbeddingRequest {
+    sender: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
+    texts: Vec<String>,
 }
 
 impl ActorError for EmbeddingsError {}
 
 /// Generate embeddings for a set of texts
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateEmbeddings {
+pub struct GenerateTextEmbeddings {
     /// Source of the embeddings
     pub source: String,
     /// The texts to embed
@@ -51,7 +53,7 @@ pub struct GenerateEmbeddings {
 
 /// The generated embeddings
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeneratedEmbeddings {
+pub struct GeneratedTextEmbeddings {
     pub embeddings: Vec<Vec<f32>>,
 }
 
@@ -83,28 +85,29 @@ pub struct Similarity {
     pub metadata: Option<Value>,
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = DEFAULT_MODEL_NAME.into())]
-    pub model: Cow<'static, str>,
-    pub generation_options: Option<GenerationOptions>,
+    #[builder(default = Model::NomicEmbedTextV15)]
+    pub model: Model,
+    // pub generation_options: Option<GenerationOptions>,
     #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
     pub endpoint: Url,
     #[serde(skip)]
-    #[builder(default)]
-    ollama: Ollama,
-    #[builder(default = DEFAULT_EMBEDDING_LENGTH)]
-    embedding_length: usize,
+    text_embedding_task: Option<(mpsc::Sender<TextEmbeddingRequest>, JoinHandle<Result<(), fastembed::Error>>)>,
+}
+
+impl Clone for Embeddings {
+    fn clone(&self) -> Self {
+        Self { model: self.model.clone(), endpoint: self.endpoint.clone(), text_embedding_task: None }
+    }
 }
 
 impl Default for Embeddings {
     fn default() -> Self {
         Self {
-            model: DEFAULT_MODEL_NAME.into(),
-            generation_options: None,
+            model: Model::NomicEmbedTextV15,
             endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
-            ollama: Ollama::default(),
-            embedding_length: DEFAULT_EMBEDDING_LENGTH,
+            text_embedding_task: None,
         }
     }
 }
@@ -117,17 +120,17 @@ impl Message<TopK> for Embeddings {
         _ctx: &mut ActorContext<Self>,
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
+        let Some((text_embedding_tx, _)) = self.text_embedding_task.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
         // Generate embedding for query if not already an embedding
         let query_embedding = match &message.query {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
-                let input = EmbeddingsInput::Single(text.to_string());
-                let request = GenerateEmbeddingsRequest::new(self.model.to_string(), input);
-                let result = self.ollama.generate_embeddings(request).await?;
-                if result.embeddings.is_empty() {
-                    return Err(EmbeddingsError::NoEmbeddingsGenerated);
-                }
-                result.embeddings[0].clone()
+                let (tx, rx) = oneshot::channel();
+                text_embedding_tx.send(TextEmbeddingRequest { sender: tx, texts: vec![text.to_string()] }).await?;
+                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
         };
 
@@ -147,19 +150,21 @@ impl Message<TopK> for Embeddings {
     }
 }
 
-impl Message<GenerateEmbeddings> for Embeddings {
-    type Response = GeneratedEmbeddings;
+impl Message<GenerateTextEmbeddings> for Embeddings {
+    type Response = GeneratedTextEmbeddings;
 
     async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
-        message: &GenerateEmbeddings,
-    ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
-        let input = EmbeddingsInput::Multiple(message.texts.clone());
+        message: &GenerateTextEmbeddings,
+    ) -> Result<GeneratedTextEmbeddings, EmbeddingsError> {
+        let Some((text_embedding_tx, _)) = self.text_embedding_task.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
 
-        let request = GenerateEmbeddingsRequest::new(self.model.to_string(), input);
-
-        let result = self.ollama.generate_embeddings(request).await?;
+        let (tx, rx) = oneshot::channel();
+        text_embedding_tx.send(TextEmbeddingRequest { sender: tx, texts: message.texts.clone() }).await?;
+        let embeddings = rx.await??;
 
         if let Some(tag) = &message.tag {
             let db = _ctx.engine().db();
@@ -175,7 +180,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
             // Store embeddings
             for (i, text) in message.texts.iter().enumerate() {
                 let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
-                let embedding = result.embeddings[i].clone();
+                let embedding = embeddings[i].clone();
                 let model_id = RecordId::from_table_key("model", self.model.to_string());
                 db.query(emb_query)
                     .bind(("tag", tag.to_string()))
@@ -189,14 +194,28 @@ impl Message<GenerateEmbeddings> for Embeddings {
             }
         }
 
-        Ok(GeneratedEmbeddings { embeddings: result.embeddings })
+        Ok(GeneratedTextEmbeddings { embeddings })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+pub enum Model {
+    NomicEmbedTextV15,
+}
+
+fn get_fastembed_model(model: &Model) -> fastembed::EmbeddingModel {
+    match model {
+        Model::NomicEmbedTextV15 => fastembed::EmbeddingModel::NomicEmbedTextV15,
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Model {
-    pub name: String,
-    pub info: ollama_rs::models::ModelInfo,
+pub struct ModelInfo {
+    pub name: Model,
+    pub dim: usize,
+    pub description: String,
+    pub model_code: String,
+    pub model_file: String,
 }
 
 impl Actor for Embeddings {
@@ -205,10 +224,34 @@ impl Actor for Embeddings {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
 
-        // Connect to ollama
-        self.ollama = Ollama::from_url(self.endpoint.clone());
+        // Spawn the text embedding task
+        let model = self.model.clone();
+        let (tx, mut rx) = mpsc::channel::<TextEmbeddingRequest>(100);
+        let text_embedding_task: JoinHandle<Result<(), fastembed::Error>> = tokio::task::spawn_blocking(move || {
+            let text_embedding = fastembed::TextEmbedding::try_new(
+                fastembed::InitOptions::new(get_fastembed_model(&model)).with_show_download_progress(true),
+            )?;
+            while let Some(request) = rx.blocking_recv() {
+                let embeddings = text_embedding.embed(request.texts, None);
+                let _ = request.sender.send(embeddings);
+            }
+            Ok(())
+        });
 
-        if self.embedding_length != DEFAULT_EMBEDDING_LENGTH {
+        self.text_embedding_task = Some((tx, text_embedding_task));
+
+        let fastembed_model = get_fastembed_model(&self.model);
+        let model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
+        let model_info = ModelInfo {
+            name: self.model.clone(),
+            dim: model_info.dim,
+            description: model_info.description.clone(),
+            model_code: model_info.model_code.clone(),
+            model_file: model_info.model_file.clone(),
+        };
+
+        // Assert embedding length
+        if model_info.dim != DEFAULT_EMBEDDING_LENGTH {
             panic!("Embedding length must be 768");
         }
 
@@ -218,19 +261,16 @@ impl Actor for Embeddings {
         db.query(def).await.map_err(SystemActorError::from)?;
 
         // Store model in database if not already present
-        let model_name = self.model.to_string();
-        let model_info: ollama_rs::models::ModelInfo = self.ollama.show_model_info(model_name.clone()).await?;
-        let model = Model { name: model_name.clone(), info: model_info };
         let model: Result<Option<Record>, _> =
-            db.create(("model", model_name.clone())).content(model).await.map_err(SystemActorError::from);
-        if let Ok(Some(model)) = model {
-            info!("Model {} stored with id: {}", model_name, model.id);
+            db.create(("model", self.model.to_string())).content(model_info).await.map_err(SystemActorError::from);
+        if let Ok(Some(model)) = &model {
+            info!("Model {:?} stored with id: {}", self.model, model.id);
         }
 
         // Start the message stream
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<GenerateEmbeddings>() {
+            if let Some(input) = frame.is::<GenerateTextEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);

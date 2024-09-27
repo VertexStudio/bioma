@@ -57,6 +57,8 @@ pub enum SystemActorError {
     PathError(#[from] object_store::path::Error),
     #[error("Url error: {0}")]
     UrlError(#[from] url::ParseError),
+    #[error("Join handle error: {0}")]
+    JoinHandle(#[from] tokio::task::JoinError),
 }
 
 impl ActorError for SystemActorError {}
