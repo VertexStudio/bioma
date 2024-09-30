@@ -25,7 +25,11 @@ bon = { workspace = true }
 ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "a40ea0c3980b85aeba28b077e1673dfba1a4be36", features = [
     "function-calling",
 ] }
-fastembed = "4"
+hf-hub = "0.3.2"
+# fastembed = "4"
+# fastembed = { path = "../../fastembed-rs" }
+fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "fix/ort-2.0.0-rc.6" }
+lazy_static = "1.5.0"
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
@@ -37,6 +41,15 @@ tree-sitter-cpp = "0.23.0"
 tree-sitter-cue = { git = "https://github.com/rozgo/tree-sitter-cue.git", branch = "main" }
 tree-sitter-csv = { git = "https://github.com/rozgo/tree-sitter-csv.git", branch = "master" }
 mdka = "1.2"
+
+ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+    "ndarray",
+] }
+[target.'cfg(target_os = "macos")'.dependencies]
+ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+    "ndarray",
+    "coreml",
+] }
 
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }

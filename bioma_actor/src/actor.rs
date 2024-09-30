@@ -47,8 +47,8 @@ pub enum SystemActorError {
     // Message reply error
     #[error("Message reply error: {0}")]
     MessageReply(Cow<'static, str>),
-    #[error("Message timeout after {0:?}")]
-    MessageTimeout(std::time::Duration),
+    #[error("Message timeout {0} {1:?}")]
+    MessageTimeout(Cow<'static, str>, std::time::Duration),
     #[error("Tasked timeout after {0:?}")]
     TaskTimeout(std::time::Duration),
     #[error("Object store error: {0}")]
@@ -698,7 +698,7 @@ impl<T: Actor> ActorContext<T> {
 
         let notification = tokio::time::timeout(options.timeout, stream.next())
             .await
-            .map_err(|_| SystemActorError::MessageTimeout(options.timeout))?
+            .map_err(|_| SystemActorError::MessageTimeout(type_name::<RT>().into(), options.timeout))?
             .ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
 
         let notification: Notification<FrameReply> = notification?;

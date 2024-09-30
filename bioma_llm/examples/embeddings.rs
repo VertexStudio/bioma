@@ -47,9 +47,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .collect::<Vec<String>>();
 
     // Send the texts to the embeddings actor
-    let embeddings = relay_ctx
-        .send::<Embeddings, GenerateTextEmbeddings>(
-            GenerateTextEmbeddings {
+    let embeddings_lentghs = relay_ctx
+        .send::<Embeddings, StoreTextEmbeddings>(
+            StoreTextEmbeddings {
                 source: "test".to_string(),
                 texts: texts.clone(),
                 metadata: None,
@@ -60,8 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    for (idx, text) in texts.iter().enumerate() {
-        info!("Generated embeddings for text: {}   {:?} ...", text, &embeddings.embeddings[idx][0..5]);
+    for (i, length) in embeddings_lentghs.lengths.iter().enumerate() {
+        info!("Stored embeddings for text: {} with length: {}", texts[i], length);
     }
 
     // Get similarities

@@ -1,4 +1,4 @@
-use crate::embeddings::{Embeddings, EmbeddingsError, GenerateTextEmbeddings};
+use crate::embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -256,8 +256,8 @@ impl Message<IndexGlobs> for Indexer {
                 let mut embeddings_count = 0;
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
-                        .send::<Embeddings, GenerateTextEmbeddings>(
-                            GenerateTextEmbeddings {
+                        .send::<Embeddings, StoreTextEmbeddings>(
+                            StoreTextEmbeddings {
                                 source: path.clone(),
                                 texts: chunk_batch.to_vec(),
                                 metadata: Some(metadata_batch.to_vec()),
@@ -312,6 +312,7 @@ impl Actor for Indexer {
         let embeddings_id = ActorId::of::<Embeddings>(format!("{}/embeddings", self_id.name()));
         self.embeddings_id = Some(embeddings_id.clone());
 
+        // Spawn the embeddings actor
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
             ctx.engine().clone(),
             embeddings_id.clone(),
@@ -319,6 +320,8 @@ impl Actor for Indexer {
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
+
+        // Start the embeddings actor
         let embeddings_handle = tokio::spawn(async move {
             if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
                 error!("Embeddings actor error: {}", e);
@@ -326,6 +329,7 @@ impl Actor for Indexer {
         });
 
         info!("Indexer ready");
+
         // Start the message stream
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {

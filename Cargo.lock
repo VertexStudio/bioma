@@ -897,12 +897,15 @@ dependencies = [
  "fastembed",
  "futures",
  "glob",
+ "hf-hub",
  "humantime",
  "humantime-serde",
  "indexmap 2.5.0",
  "jsonpath-rust",
+ "lazy_static",
  "mdka",
  "ollama-rs",
+ "ort",
  "rand",
  "reqwest",
  "serde",
@@ -1952,8 +1955,7 @@ dependencies = [
 [[package]]
 name = "fastembed"
 version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84a81d28bee2f1ee11d420cb3e5e73321c21b9b9455bd19ffc173a7f7f00acf1"
+source = "git+https://github.com/rozgo/fastembed-rs?branch=fix/ort-2.0.0-rc.6#c5fcb8a5dee9a4c736119bf80986aeea3146e711"
 dependencies = [
  "anyhow",
  "hf-hub",
@@ -3662,13 +3664,12 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ort"
-version = "2.0.0-rc.5"
+version = "2.0.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45e45a172e6c0fb7d640e92c7740f4ea476bfc49ef5c52ea9c73e9fae32b09fe"
+checksum = "a5f95fe501e1cb81dec2f66ee3129025759b602817aa2c77ff421390c418cc34"
 dependencies = [
  "ndarray 0.16.1",
  "ort-sys",
- "thiserror",
  "tracing",
 ]
 

@@ -7,14 +7,14 @@ use tracing::{error, info};
 
 // Custom error type for test actors
 #[derive(Debug, thiserror::Error)]
-enum TestActorError {
+enum TestError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
-    #[error("Custom error: {0}")]
-    Custom(String),
+    #[error("Fake error")]
+    FakeError,
 }
 
-impl ActorError for TestActorError {}
+impl ActorError for TestError {}
 
 // Test message types
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -37,11 +37,7 @@ struct TestActor {
 impl Message<TestMessage> for TestActor {
     type Response = TestResponse;
 
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        msg: &TestMessage,
-    ) -> Result<Self::Response, TestActorError> {
+    async fn handle(&mut self, _ctx: &mut ActorContext<Self>, msg: &TestMessage) -> Result<Self::Response, TestError> {
         self.count += 1;
         let response = TestResponse { content: format!("Received: {}", msg.content), count: self.count };
         Ok(response)
@@ -49,9 +45,9 @@ impl Message<TestMessage> for TestActor {
 }
 
 impl Actor for TestActor {
-    type Error = TestActorError;
+    type Error = TestError;
 
-    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestActorError> {
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestError> {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(msg) = frame.is::<TestMessage>() {
@@ -72,15 +68,15 @@ struct TriggerError;
 impl Message<TriggerError> for ErrorActor {
     type Response = ();
 
-    async fn handle(&mut self, _ctx: &mut ActorContext<Self>, _: &TriggerError) -> Result<(), TestActorError> {
-        Err(TestActorError::Custom("Simulated error".to_string()))
+    async fn handle(&mut self, _ctx: &mut ActorContext<Self>, _: &TriggerError) -> Result<(), TestError> {
+        Err(TestError::FakeError)
     }
 }
 
 impl Actor for ErrorActor {
-    type Error = TestActorError;
+    type Error = TestError;
 
-    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestActorError> {
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestError> {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(trigger) = frame.is::<TriggerError>() {
@@ -92,7 +88,7 @@ impl Actor for ErrorActor {
 }
 
 #[test(tokio::test)]
-async fn test_actor_health() -> Result<(), TestActorError> {
+async fn test_actor_health() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let test_actor_id = ActorId::of::<TestActor>("/test");
@@ -110,7 +106,7 @@ async fn test_actor_health() -> Result<(), TestActorError> {
 }
 
 #[test(tokio::test)]
-async fn test_actor_message_handling() -> Result<(), TestActorError> {
+async fn test_actor_message_handling() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let test_actor_id = ActorId::of::<TestActor>("/test");
@@ -145,7 +141,7 @@ async fn test_actor_message_handling() -> Result<(), TestActorError> {
 }
 
 #[test(tokio::test)]
-async fn test_actor_multiple_messages() -> Result<(), TestActorError> {
+async fn test_actor_multiple_messages() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let test_actor_id = ActorId::of::<TestActor>("/test");
@@ -181,7 +177,7 @@ async fn test_actor_multiple_messages() -> Result<(), TestActorError> {
 }
 
 #[test(tokio::test)]
-async fn test_actor_lifecycle() -> Result<(), TestActorError> {
+async fn test_actor_lifecycle() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let test_actor_id = ActorId::of::<TestActor>("/test");
@@ -223,7 +219,7 @@ async fn test_actor_lifecycle() -> Result<(), TestActorError> {
 }
 
 #[test(tokio::test)]
-async fn test_actor_error_handling() -> Result<(), TestActorError> {
+async fn test_actor_error_handling() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let error_actor_id = ActorId::of::<ErrorActor>("/error_actor");
@@ -294,7 +290,7 @@ impl Message<IncrementCount> for StatefulActor {
 struct IncrementCount;
 
 #[test(tokio::test)]
-async fn test_actor_state_persistence() -> Result<(), SystemActorError> {
+async fn test_actor_state_persistence() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let actor_id = ActorId::of::<StatefulActor>("/stateful_actor");
@@ -376,7 +372,7 @@ impl Message<LargeMessage> for StatefulActor {
 
 #[test(tokio::test)]
 #[ignore = "This test uses large messages and should only be run explicitly"]
-async fn test_large_message_mem_db() -> Result<(), SystemActorError> {
+async fn test_large_message_mem_db() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     // Create a large message (5MB of random data)
@@ -420,7 +416,7 @@ async fn test_large_message_mem_db() -> Result<(), SystemActorError> {
 
 #[test(tokio::test)]
 #[ignore = "This test uses large messages and should only be run explicitly"]
-async fn test_large_message_db() -> Result<(), SystemActorError> {
+async fn test_large_message_db() -> Result<(), TestError> {
     let engine = Engine::connect("ws://localhost:9123", EngineOptions::default()).await?;
 
     let msg_size = 200_000;
