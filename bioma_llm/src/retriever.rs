@@ -117,32 +117,53 @@ impl Message<RetrieveContext> for Retriever {
             threshold: message.threshold,
             tag: Some(self.tag.clone().to_string()),
         };
+
         info!("Searching for texts similarities");
-        let similarities =
-            match ctx.send::<Embeddings, embeddings::TopK>(embeddings_req, embeddings_id, SendOptions::default()).await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Failed to get similarities: {}", e);
-                    return Err(RetrieverError::ComputingSimilarity(e.to_string()));
-                }
-            };
+        let start = std::time::Instant::now();
+        let similarities = match ctx
+            .send::<Embeddings, embeddings::TopK>(
+                embeddings_req,
+                embeddings_id,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                error!("Failed to get similarities: {}", e);
+                return Err(RetrieverError::ComputingSimilarity(e.to_string()));
+            }
+        };
+        info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
+
         // Rank the embeddings
         info!("Ranking similarity texts");
+        let start = std::time::Instant::now();
         let rerank_req =
             RankTexts { query: message.query.clone(), texts: similarities.iter().map(|s| s.text.clone()).collect() };
-        let ranked_texts = match ctx.send::<Rerank, RankTexts>(rerank_req, rerank_id, SendOptions::default()).await {
+        let ranked_texts = match ctx
+            .send::<Rerank, RankTexts>(
+                rerank_req,
+                rerank_id,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+            )
+            .await
+        {
             Ok(result) => result,
             Err(e) => {
                 error!("Failed to rank texts: {}", e);
                 return Err(RetrieverError::ComputingRerank(e.to_string()));
             }
         };
+        info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
+
         // Get the context from the ranked texts
         info!("Getting context from ranked texts");
-        let context = if ranked_texts.len() > 0 {
+        let start = std::time::Instant::now();
+        let context = if ranked_texts.texts.len() > 0 {
             ranked_texts
-                .iter()
+                .texts
+                .into_iter()
                 .map(|t| Context {
                     text: similarities[t.index].text.clone(),
                     metadata: similarities[t.index]
@@ -155,6 +176,8 @@ impl Message<RetrieveContext> for Retriever {
         } else {
             vec![Context { text: "No context found".to_string(), metadata: None }]
         };
+        info!("Context: {} in {:?}", context.len(), start.elapsed());
+
         Ok(RetrievedContext { context })
     }
 }
@@ -194,6 +217,7 @@ impl Actor for Retriever {
         self.embeddings_id = Some(embeddings_id.clone());
         self.rerank_id = Some(rerank_id.clone());
 
+        // Spawn the embeddings actor
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
             ctx.engine().clone(),
             embeddings_id.clone(),
@@ -201,6 +225,8 @@ impl Actor for Retriever {
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
+
+        // Spawn the rerank actor
         let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
             ctx.engine().clone(),
             rerank_id.clone(),
@@ -208,16 +234,21 @@ impl Actor for Retriever {
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
+
+        // Start the embeddings actor
         let embeddings_handle = tokio::spawn(async move {
             if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
                 error!("Embeddings actor error: {}", e);
             }
         });
+
+        // Start the rerank actor
         let rerank_handle = tokio::spawn(async move {
             if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
                 error!("Rerank actor error: {}", e);
             }
         });
+
         info!("Retriever ready");
 
         // Start the message stream

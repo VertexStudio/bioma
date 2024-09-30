@@ -41,6 +41,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "What's the temperature in Tokyo right now?".to_string(),
         "Tokyo experiences four distinct seasons.".to_string(),
         "Is it raining in Tokyo at the moment?".to_string(),
+        "Tokyo's weather forecast for the week".to_string(),
+        "The best time to visit Tokyo for good weather".to_string(),
+        "How does Tokyo's weather compare to other cities?".to_string(),
+        "Tokyo's average temperature by month".to_string(),
+        "Does it snow in Tokyo?".to_string(),
+        "Tokyo's humidity levels throughout the year".to_string(),
+        "The impact of typhoons on Tokyo's weather".to_string(),
+        "Tokyo's air quality and weather conditions".to_string(),
+        "How climate change affects Tokyo's weather patterns".to_string(),
+        "Tokyo's record high and low temperatures".to_string(),
+        "The best outdoor activities in Tokyo based on weather".to_string(),
+        "Tokyo's weather during cherry blossom season".to_string(),
+        "How to dress for Tokyo's weather in different seasons".to_string(),
+        "Tokyo's rainfall patterns and monsoon season".to_string(),
+        "The effect of urban heat islands on Tokyo's weather".to_string(),
+        "Tokyo's weather-related natural disasters".to_string(),
+        "How Tokyo's weather affects public transportation".to_string(),
+        "The influence of Mount Fuji on Tokyo's weather".to_string(),
+        "Tokyo's weather forecasting technology and accuracy".to_string(),
+        "How Tokyo's weather impacts energy consumption".to_string(),
     ];
 
     // Query to use for reranking
@@ -61,10 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sorted_texts = ranked_texts.clone();
 
     // Sort the texts by score in descending order
-    sorted_texts.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    sorted_texts.texts.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     println!("Query: {}", query);
-    for ranked_text in sorted_texts {
+    for ranked_text in sorted_texts.texts {
         println!("{:>2}: {:>6.2} {}", ranked_text.index, ranked_text.score, &texts[ranked_text.index]);
     }
 

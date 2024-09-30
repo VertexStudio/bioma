@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Prepare globs
     let globs = if args.globs.is_empty() {
-        vec![format!("{}/**/*.toml", workspace_root)]
+        vec![format!("{}/bioma_*/**/*.toml", workspace_root)]
     } else {
         args.globs.into_iter().map(|glob| format!("{}/{}", workspace_root, glob)).collect()
     };
@@ -105,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         )
         .await?;
-    info!("Number of chunks: {}", context.context.len());
+    info!("Number of documents: {}", context.context.len());
 
     // Save context to file for debugging
     let context_content = context.to_markdown();

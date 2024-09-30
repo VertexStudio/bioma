@@ -1,13 +1,25 @@
+// use crate::ORT_EXIT_MUTEX;
 use bioma_actor::prelude::*;
-use derive_more::Display;
+use derive_more::{Deref, Display};
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::{Arc, Weak};
 use surrealdb::value::RecordId;
+use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-const DEFAULT_EMBEDDING_LENGTH: usize = 768;
+pub const DEFAULT_EMBEDDING_LENGTH: usize = 768;
+
+lazy_static! {
+    static ref SHARED_EMBEDDING: Arc<Mutex<Weak<SharedEmbedding>>> = Arc::new(Mutex::new(Weak::new()));
+}
+
+struct SharedEmbedding {
+    text_embedding_tx: mpsc::Sender<TextEmbeddingRequest>,
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum EmbeddingsError {
@@ -30,7 +42,7 @@ pub enum EmbeddingsError {
 }
 
 pub struct TextEmbeddingRequest {
-    sender: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
+    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
     texts: Vec<String>,
 }
 
@@ -38,7 +50,7 @@ impl ActorError for EmbeddingsError {}
 
 /// Generate embeddings for a set of texts
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateTextEmbeddings {
+pub struct StoreTextEmbeddings {
     /// Source of the embeddings
     pub source: String,
     /// The texts to embed
@@ -47,6 +59,18 @@ pub struct GenerateTextEmbeddings {
     pub metadata: Option<Vec<Value>>,
     /// The tag to store the embeddings with
     pub tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredTextEmbeddings {
+    pub lengths: Vec<usize>,
+}
+
+/// Generate embeddings for a set of texts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateTextEmbeddings {
+    /// The texts to embed
+    pub texts: Vec<String>,
 }
 
 /// The generated embeddings
@@ -88,18 +112,29 @@ pub struct Embeddings {
     #[builder(default = Model::NomicEmbedTextV15)]
     pub model: Model,
     #[serde(skip)]
-    text_embedding_task: Option<(mpsc::Sender<TextEmbeddingRequest>, JoinHandle<Result<(), fastembed::Error>>)>,
+    text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
+    #[serde(skip)]
+    shared_embedding: Option<StrongSharedEmbedding>,
+}
+
+#[derive(Deref)]
+struct StrongSharedEmbedding(Arc<SharedEmbedding>);
+
+impl std::fmt::Debug for StrongSharedEmbedding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StrongSharedEmbedding")
+    }
 }
 
 impl Clone for Embeddings {
     fn clone(&self) -> Self {
-        Self { model: self.model.clone(), text_embedding_task: None }
+        Self { model: self.model.clone(), text_embedding_tx: None, shared_embedding: None }
     }
 }
 
 impl Default for Embeddings {
     fn default() -> Self {
-        Self { model: Model::NomicEmbedTextV15, text_embedding_task: None }
+        Self { model: Model::NomicEmbedTextV15, text_embedding_tx: None, shared_embedding: None }
     }
 }
 
@@ -111,7 +146,7 @@ impl Message<TopK> for Embeddings {
         _ctx: &mut ActorContext<Self>,
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
-        let Some((text_embedding_tx, _)) = self.text_embedding_task.as_ref() else {
+        let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
 
@@ -120,7 +155,7 @@ impl Message<TopK> for Embeddings {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
                 let (tx, rx) = oneshot::channel();
-                text_embedding_tx.send(TextEmbeddingRequest { sender: tx, texts: vec![text.to_string()] }).await?;
+                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] }).await?;
                 rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
         };
@@ -141,6 +176,52 @@ impl Message<TopK> for Embeddings {
     }
 }
 
+impl Message<StoreTextEmbeddings> for Embeddings {
+    type Response = StoredTextEmbeddings;
+
+    async fn handle(
+        &mut self,
+        _ctx: &mut ActorContext<Self>,
+        message: &StoreTextEmbeddings,
+    ) -> Result<StoredTextEmbeddings, EmbeddingsError> {
+        let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: message.texts.clone() }).await?;
+        let embeddings = rx.await??;
+
+        let db = _ctx.engine().db();
+        let emb_query = include_str!("../sql/embeddings.surql");
+
+        // Check if metadata is same length as texts
+        if let Some(metadata) = &message.metadata {
+            if metadata.len() != message.texts.len() {
+                error!("Metadata length does not match texts length");
+            }
+        }
+
+        // Store embeddings
+        for (i, text) in message.texts.iter().enumerate() {
+            let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
+            let embedding = embeddings[i].clone();
+            let model_id = RecordId::from_table_key("model", self.model.to_string());
+            db.query(emb_query)
+                .bind(("tag", message.tag.clone()))
+                .bind(("text", text.to_string()))
+                .bind(("embedding", embedding))
+                .bind(("metadata", metadata))
+                .bind(("model_id", model_id))
+                .bind(("source", message.source.clone()))
+                .await
+                .map_err(SystemActorError::from)?;
+        }
+
+        Ok(StoredTextEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+    }
+}
+
 impl Message<GenerateTextEmbeddings> for Embeddings {
     type Response = GeneratedTextEmbeddings;
 
@@ -149,41 +230,13 @@ impl Message<GenerateTextEmbeddings> for Embeddings {
         _ctx: &mut ActorContext<Self>,
         message: &GenerateTextEmbeddings,
     ) -> Result<GeneratedTextEmbeddings, EmbeddingsError> {
-        let Some((text_embedding_tx, _)) = self.text_embedding_task.as_ref() else {
+        let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
 
         let (tx, rx) = oneshot::channel();
-        text_embedding_tx.send(TextEmbeddingRequest { sender: tx, texts: message.texts.clone() }).await?;
+        text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: message.texts.clone() }).await?;
         let embeddings = rx.await??;
-
-        if let Some(tag) = &message.tag {
-            let db = _ctx.engine().db();
-            let emb_query = include_str!("../sql/embeddings.surql");
-
-            // Check if metadata is same length as texts
-            if let Some(metadata) = &message.metadata {
-                if metadata.len() != message.texts.len() {
-                    error!("Metadata length does not match texts length");
-                }
-            }
-
-            // Store embeddings
-            for (i, text) in message.texts.iter().enumerate() {
-                let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
-                let embedding = embeddings[i].clone();
-                let model_id = RecordId::from_table_key("model", self.model.to_string());
-                db.query(emb_query)
-                    .bind(("tag", tag.to_string()))
-                    .bind(("text", text.to_string()))
-                    .bind(("embedding", embedding))
-                    .bind(("metadata", metadata))
-                    .bind(("model_id", model_id))
-                    .bind(("source", message.source.clone()))
-                    .await
-                    .map_err(SystemActorError::from)?;
-            }
-        }
 
         Ok(GeneratedTextEmbeddings { embeddings })
     }
@@ -215,53 +268,91 @@ impl Actor for Embeddings {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
 
-        // Spawn the text embedding task
-        let model = self.model.clone();
-        let (tx, mut rx) = mpsc::channel::<TextEmbeddingRequest>(100);
-        let text_embedding_task: JoinHandle<Result<(), fastembed::Error>> = tokio::task::spawn_blocking(move || {
-            let text_embedding = fastembed::TextEmbedding::try_new(
-                fastembed::InitOptions::new(get_fastembed_model(&model)).with_show_download_progress(true),
-            )?;
-            while let Some(request) = rx.blocking_recv() {
-                let embeddings = text_embedding.embed(request.texts, None);
-                let _ = request.sender.send(embeddings);
+        // Manage a shared embedding task
+        let shared_embedding = {
+            let mut weak_ref = SHARED_EMBEDDING.lock().await;
+            if let Some(strong_ref) = weak_ref.upgrade() {
+                // Return the existing shared embedding
+                Some(strong_ref)
+            } else {
+                let ctx_id = ctx.id().clone();
+                // Get model info
+                let fastembed_model = get_fastembed_model(&self.model);
+                let model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
+                let model_info = ModelInfo {
+                    name: self.model.clone(),
+                    dim: model_info.dim,
+                    description: model_info.description.clone(),
+                    model_code: model_info.model_code.clone(),
+                    model_file: model_info.model_file.clone(),
+                };
+
+                // Assert embedding length
+                if model_info.dim != DEFAULT_EMBEDDING_LENGTH {
+                    panic!("Embedding length must be 768");
+                }
+
+                // Define the schema
+                let def = include_str!("../sql/def.surql");
+                let db = ctx.engine().db();
+                db.query(def).await.map_err(SystemActorError::from)?;
+
+                // Store model in database if not already present
+                let model: Result<Option<Record>, _> = db
+                    .create(("model", self.model.to_string()))
+                    .content(model_info)
+                    .await
+                    .map_err(SystemActorError::from);
+                if let Ok(Some(model)) = &model {
+                    info!("Model {:?} stored with id: {}", self.model, model.id);
+                }
+
+                // Create a new shared embedding
+                let model = self.model.clone();
+                let cache_dir = ctx.engine().huggingface_cache_dir()?;
+                let (text_embedding_tx, mut text_embedding_rx) = mpsc::channel::<TextEmbeddingRequest>(100);
+                let _text_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
+                    tokio::task::spawn_blocking(move || {
+                        let mut options =
+                            fastembed::InitOptions::new(get_fastembed_model(&model)).with_cache_dir(cache_dir);
+
+                        #[cfg(target_os = "macos")]
+                        {
+                            options =
+                                options.with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
+                        }
+
+                        let text_embedding = fastembed::TextEmbedding::try_new(options)?;
+                        while let Some(request) = text_embedding_rx.blocking_recv() {
+                            let embeddings = text_embedding.embed(request.texts, None);
+                            let _ = request.response_tx.send(embeddings);
+                        }
+
+                        info!("{} text embedding finished", ctx_id);
+                        drop(text_embedding);
+
+                        Ok(())
+                    });
+
+                // Store the shared embedding
+                let shared_embedding = Arc::new(SharedEmbedding { text_embedding_tx });
+                *weak_ref = Arc::downgrade(&shared_embedding);
+                Some(shared_embedding)
             }
-            Ok(())
-        });
-
-        self.text_embedding_task = Some((tx, text_embedding_task));
-
-        let fastembed_model = get_fastembed_model(&self.model);
-        let model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
-        let model_info = ModelInfo {
-            name: self.model.clone(),
-            dim: model_info.dim,
-            description: model_info.description.clone(),
-            model_code: model_info.model_code.clone(),
-            model_file: model_info.model_file.clone(),
         };
 
-        // Assert embedding length
-        if model_info.dim != DEFAULT_EMBEDDING_LENGTH {
-            panic!("Embedding length must be 768");
-        }
-
-        // Define the schema
-        let def = include_str!("../sql/def.surql");
-        let db = ctx.engine().db();
-        db.query(def).await.map_err(SystemActorError::from)?;
-
-        // Store model in database if not already present
-        let model: Result<Option<Record>, _> =
-            db.create(("model", self.model.to_string())).content(model_info).await.map_err(SystemActorError::from);
-        if let Ok(Some(model)) = &model {
-            info!("Model {:?} stored with id: {}", self.model, model.id);
-        }
+        self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
+        self.text_embedding_tx = self.shared_embedding.as_ref().map(|se| se.text_embedding_tx.clone());
 
         // Start the message stream
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<GenerateTextEmbeddings>() {
+            if let Some(input) = frame.is::<StoreTextEmbeddings>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<GenerateTextEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);

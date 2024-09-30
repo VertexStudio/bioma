@@ -159,6 +159,17 @@ impl Engine {
         Ok(output_dir)
     }
 
+    pub fn huggingface_cache_dir(&self) -> Result<std::path::PathBuf, SystemActorError> {
+        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
+            .map(std::path::PathBuf::from)
+            .ok()
+            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let cache_dir = workspace_root.join(".cache").join("huggingface").join("hub");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        Ok(cache_dir)
+    }
+
     pub fn options(&self) -> &EngineOptions {
         &self.options
     }
