@@ -228,7 +228,7 @@ async fn test_actor_error_handling() -> Result<(), TestError> {
 
     let error_handle = tokio::spawn(async move {
         if let Err(e) = error_actor.start(&mut error_actor_ctx).await {
-            assert!(e.to_string().contains("Simulated error"));
+            assert!(e.to_string().contains("Fake error"));
         }
     });
 
