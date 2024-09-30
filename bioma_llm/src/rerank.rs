@@ -166,6 +166,11 @@ impl Actor for Rerank {
                             options.with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
                     }
 
+                    #[cfg(target_os = "linux")]
+                    {
+                        options = options.with_execution_providers(vec![ort::CUDAExecutionProvider::default().build()]);
+                    }
+
                     let reranker = fastembed::TextRerank::try_new(options)?;
 
                     while let Some(request) = rerank_rx.blocking_recv() {

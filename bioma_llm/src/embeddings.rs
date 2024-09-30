@@ -322,6 +322,12 @@ impl Actor for Embeddings {
                                 options.with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
                         }
 
+                        #[cfg(target_os = "linux")]
+                        {
+                            options =
+                                options.with_execution_providers(vec![ort::CUDAExecutionProvider::default().build()]);
+                        }
+
                         let text_embedding = fastembed::TextEmbedding::try_new(options)?;
                         while let Some(request) = text_embedding_rx.blocking_recv() {
                             let embeddings = text_embedding.embed(request.texts, None);
