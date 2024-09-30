@@ -55,6 +55,12 @@ ort = { version = "=2.0.0-rc.6", default-features = false, features = [
     "coreml",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+    "ndarray",
+    "cuda",
+] }
+
 [dev-dependencies]
 test-log = { version = "0.2", default-features = false, features = [
     "trace",
