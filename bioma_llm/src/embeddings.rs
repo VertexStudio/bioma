@@ -330,8 +330,25 @@ impl Actor for Embeddings {
 
                         let text_embedding = fastembed::TextEmbedding::try_new(options)?;
                         while let Some(request) = text_embedding_rx.blocking_recv() {
-                            let embeddings = text_embedding.embed(request.texts, None);
-                            let _ = request.response_tx.send(embeddings);
+                            let start = std::time::Instant::now();
+                            let avg_text_len = request.texts.iter().map(|text| text.len() as f32).sum::<f32>()
+                                / request.texts.len() as f32;
+                            let text_count = request.texts.len();
+                            match text_embedding.embed(request.texts, None) {
+                                Ok(embeddings) => {
+                                    info!(
+                                        "Generated {} embeddings (avg. {:.1} chars) in {:?}",
+                                        text_count,
+                                        avg_text_len,
+                                        start.elapsed()
+                                    );
+                                    let _ = request.response_tx.send(Ok(embeddings));
+                                }
+                                Err(err) => {
+                                    error!("Failed to generate embeddings: {}", err);
+                                    let _ = request.response_tx.send(Err(err));
+                                }
+                            }
                         }
 
                         info!("{} text embedding finished", ctx_id);

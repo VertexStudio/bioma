@@ -176,29 +176,30 @@ impl Actor for Rerank {
                     while let Some(request) = rerank_rx.blocking_recv() {
                         let start = std::time::Instant::now();
                         let texts = request.texts.iter().map(|text| text).collect::<Vec<&String>>();
-                        let results = reranker.rerank(&request.query, texts, false, None);
-                        if let Err(err) = results {
-                            error!("Rerank failed: {}", err);
-                            let _ = request.sender.send(Err(err));
-                            continue;
-                        };
-                        // compute average text length
-                        let avg_text_len = request.texts.iter().map(|text| text.len() as f32).sum::<f32>()
-                            / request.texts.len() as f32;
-                        info!(
-                            "Ranked {} texts (avg. {:.1} chars) in {:?}",
-                            request.texts.len(),
-                            avg_text_len,
-                            start.elapsed()
-                        );
-                        let results = results.unwrap();
-                        let ranked_texts = RankedTexts {
-                            texts: results
-                                .into_iter()
-                                .map(|result| RankedText { index: result.index, score: result.score })
-                                .collect(),
-                        };
-                        let _ = request.sender.send(Ok(ranked_texts));
+                        match reranker.rerank(&request.query, texts, false, None) {
+                            Ok(results) => {
+                                // compute average text length
+                                let avg_text_len = request.texts.iter().map(|text| text.len() as f32).sum::<f32>()
+                                    / request.texts.len() as f32;
+                                info!(
+                                    "Ranked {} texts (avg. {:.1} chars) in {:?}",
+                                    request.texts.len(),
+                                    avg_text_len,
+                                    start.elapsed()
+                                );
+                                let ranked_texts = RankedTexts {
+                                    texts: results
+                                        .into_iter()
+                                        .map(|result| RankedText { index: result.index, score: result.score })
+                                        .collect(),
+                                };
+                                let _ = request.sender.send(Ok(ranked_texts));
+                            }
+                            Err(err) => {
+                                error!("Rerank failed: {}", err);
+                                let _ = request.sender.send(Err(err));
+                            }
+                        }
                     }
 
                     info!("{} rerank finished", ctx_id);
