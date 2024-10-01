@@ -12,6 +12,7 @@ use url::Url;
 const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
+const DEFAULT_CHUNK_BATCH_SIZE: usize = 256;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IndexerError {
@@ -251,8 +252,8 @@ impl Message<IndexGlobs> for Indexer {
 
                 let start_time = std::time::Instant::now();
 
-                let chunk_batches = chunks.chunks(10);
-                let metadata_batches = metadata.chunks(10);
+                let chunk_batches = chunks.chunks(DEFAULT_CHUNK_BATCH_SIZE);
+                let metadata_batches = metadata.chunks(DEFAULT_CHUNK_BATCH_SIZE);
                 let mut embeddings_count = 0;
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
