@@ -111,6 +111,127 @@ struct SourceEmbeddings {
     pub embeddings: Vec<RecordId>,
 }
 
+#[derive(Debug)]
+enum IndexResult {
+    Indexed(usize),
+    Cached,
+    Failed,
+}
+
+impl Indexer {
+    async fn index_text(
+        &self,
+        ctx: &mut ActorContext<Self>,
+        source: String,
+        content: String,
+        text_type: TextType,
+        pathbuf: PathBuf,
+        chunk_capacity: std::ops::Range<usize>,
+        chunk_overlap: usize,
+        chunk_batch_size: usize,
+        embeddings_id: &ActorId,
+    ) -> Result<IndexResult, IndexerError> {
+        // Check if source is already indexed
+        let source_embeddings = ctx
+            .engine()
+            .db()
+            .query("SELECT source, ->source_embeddings.out as embeddings FROM source:{source:$source, tag:$tag}")
+            .bind(("source", source.clone()))
+            .bind(("tag", self.tag.clone()))
+            .await;
+        let Ok(mut source_embeddings) = source_embeddings else {
+            error!("Failed to query source embeddings: {}", source);
+            return Ok(IndexResult::Failed);
+        };
+        let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
+        if source_embeddings.len() > 0 {
+            debug!("Source already indexed: {}", source);
+            return Ok(IndexResult::Cached);
+        }
+
+        // Convert html to markdown
+        let (text_type, content) = match text_type {
+            TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
+            _ => (text_type, content),
+        };
+
+        let chunks = match text_type {
+            TextType::Text => {
+                let splitter = TextSplitter::new(
+                    ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                );
+                splitter.chunks(&content).collect::<Vec<&str>>()
+            }
+            TextType::Markdown => {
+                let splitter = MarkdownSplitter::new(
+                    ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                );
+                splitter.chunks(&content).collect::<Vec<&str>>()
+            }
+            TextType::Code(language) => {
+                let language = match language {
+                    CodeLanguage::Rust => tree_sitter_rust::LANGUAGE,
+                    CodeLanguage::Python => tree_sitter_python::LANGUAGE,
+                    CodeLanguage::Cue => tree_sitter_cue::LANGUAGE,
+                    CodeLanguage::Cpp => tree_sitter_cpp::LANGUAGE,
+                    CodeLanguage::Html => panic!("Should have been converted to markdown"),
+                };
+                let splitter = CodeSplitter::new(
+                    language,
+                    ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                )
+                .expect("Invalid tree-sitter language");
+                splitter.chunks(&content).collect::<Vec<&str>>()
+            }
+        };
+
+        let start_time = std::time::Instant::now();
+
+        let chunks = chunks.iter().map(|c| c.to_string()).collect::<Vec<String>>();
+        let metadata = chunks
+            .iter()
+            .enumerate()
+            .map(|(i, _)| ChunkMetadata { source: Source::File(pathbuf.clone()), chunk_number: i })
+            .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
+            .collect::<Vec<Value>>();
+        let chunks_time = start_time.elapsed();
+        debug!("Generated {} chunks in {:?}", chunks.len(), chunks_time);
+
+        let start_time = std::time::Instant::now();
+
+        let chunk_batches = chunks.chunks(chunk_batch_size);
+        let metadata_batches = metadata.chunks(chunk_batch_size);
+        let mut embeddings_count = 0;
+        for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
+            let result = ctx
+                .send::<Embeddings, StoreTextEmbeddings>(
+                    StoreTextEmbeddings {
+                        source: source.clone(),
+                        texts: chunk_batch.to_vec(),
+                        metadata: Some(metadata_batch.to_vec()),
+                        tag: Some(self.tag.clone().to_string()),
+                    },
+                    embeddings_id,
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                )
+                .await;
+            match result {
+                Ok(_result) => {
+                    embeddings_count += 1;
+                }
+                Err(e) => {
+                    error!("Failed to generate embeddings: {} {}", e, source);
+                }
+            }
+        }
+
+        let embeddings_time = start_time.elapsed();
+        debug!("Generated embeddings in {:?}", embeddings_time);
+
+        Ok(IndexResult::Indexed(embeddings_count))
+    }
+}
+
 impl Message<IndexGlobs> for Indexer {
     type Response = IndexedGlobs;
 
@@ -140,28 +261,13 @@ impl Message<IndexGlobs> for Indexer {
                     continue;
                 };
 
-                let path = pathbuf.to_string_lossy().to_string();
-
-                let source_embeddings = ctx
-                    .engine()
-                    .db()
-                    .query(
-                        "SELECT source, ->source_embeddings.out as embeddings FROM source:{source:$source, tag:$tag}",
-                    )
-                    .bind(("source", path.clone()))
-                    .bind(("tag", self.tag.clone()))
-                    .await;
-                let Ok(mut source_embeddings) = source_embeddings else {
-                    error!("Failed to query source embeddings: {}", path);
+                info!("Indexing path: {}", &pathbuf.display());
+                let content = tokio::fs::read_to_string(&pathbuf).await;
+                let Ok(content) = content else {
+                    error!("Failed to index file: {}", pathbuf.display());
                     continue;
                 };
-                let source_embeddings: Vec<SourceEmbeddings> =
-                    source_embeddings.take(0).map_err(SystemActorError::from)?;
-                if source_embeddings.len() > 0 {
-                    debug!("Path already indexed: {}", path);
-                    cached += 1;
-                    continue;
-                }
+                let source = pathbuf.to_string_lossy().to_string();
 
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
                 let text_type = match ext {
@@ -175,127 +281,28 @@ impl Message<IndexGlobs> for Indexer {
                     _ => TextType::Text,
                 };
 
-                info!("Indexing path: {}", &pathbuf.display());
-                let content = tokio::fs::read_to_string(&pathbuf).await;
-                let Ok(content) = content else {
-                    error!("Failed to index file: {}", pathbuf.display());
-                    continue;
-                };
-
-                // Convert html to markdown
-                let (text_type, content) = match text_type {
-                    TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
-                    _ => (text_type, content),
-                };
-
-                let chunks = match text_type {
-                    TextType::Text => {
-                        let splitter = TextSplitter::new(
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        );
-                        splitter.chunks(&content).collect::<Vec<&str>>()
-                    }
-                    TextType::Markdown => {
-                        let splitter = MarkdownSplitter::new(
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        );
-                        splitter.chunks(&content).collect::<Vec<&str>>()
-                    }
-                    TextType::Code(CodeLanguage::Rust) => {
-                        let splitter = CodeSplitter::new(
-                            tree_sitter_rust::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        )
-                        .expect("Invalid tree-sitter language");
-                        splitter.chunks(&content).collect::<Vec<&str>>()
-                    }
-                    TextType::Code(CodeLanguage::Python) => {
-                        let splitter = CodeSplitter::new(
-                            tree_sitter_python::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        )
-                        .expect("Invalid tree-sitter language");
-                        splitter.chunks(&content).collect::<Vec<&str>>()
-                    }
-                    TextType::Code(CodeLanguage::Cue) => {
-                        let splitter = CodeSplitter::new(
-                            tree_sitter_cue::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        )
-                        .expect("Invalid tree-sitter language");
-                        splitter.chunks(&content).collect::<Vec<&str>>()
-                    }
-                    TextType::Code(CodeLanguage::Cpp) => {
-                        let splitter = CodeSplitter::new(
-                            tree_sitter_cpp::LANGUAGE,
-                            ChunkConfig::new(message.chunk_capacity.clone())
-                                .with_trim(false)
-                                .with_overlap(message.chunk_overlap)?,
-                        )
-                        .expect("Invalid tree-sitter language");
-                        splitter.chunks(&content).collect::<Vec<&str>>()
-                    }
-                    TextType::Code(CodeLanguage::Html) => {
-                        panic!("Should have been converted to markdown");
-                    }
-                };
-
-                let start_time = std::time::Instant::now();
-
-                let chunks = chunks.iter().map(|c| c.to_string()).collect::<Vec<String>>();
-                let metadata = chunks
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| ChunkMetadata { source: Source::File(pathbuf.clone()), chunk_number: i })
-                    .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
-                    .collect::<Vec<Value>>();
-                let chunks_time = start_time.elapsed();
-                debug!("Generated {} chunks in {:?}", chunks.len(), chunks_time);
-
-                let start_time = std::time::Instant::now();
-
-                let chunk_batches = chunks.chunks(message.chunk_batch_size);
-                let metadata_batches = metadata.chunks(message.chunk_batch_size);
-                let mut embeddings_count = 0;
-                for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
-                    let result = ctx
-                        .send::<Embeddings, StoreTextEmbeddings>(
-                            StoreTextEmbeddings {
-                                source: path.clone(),
-                                texts: chunk_batch.to_vec(),
-                                metadata: Some(metadata_batch.to_vec()),
-                                tag: Some(self.tag.clone().to_string()),
-                            },
-                            embeddings_id,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                        )
-                        .await;
-                    match result {
-                        Ok(_result) => {
-                            embeddings_count += 1;
-                            self.save(ctx).await?;
-                        }
-                        Err(e) => {
-                            error!("Failed to generate embeddings: {} {}", e, path);
+                match self
+                    .index_text(
+                        ctx,
+                        source,
+                        content,
+                        text_type,
+                        pathbuf,
+                        message.chunk_capacity.clone(),
+                        message.chunk_overlap,
+                        message.chunk_batch_size,
+                        embeddings_id,
+                    )
+                    .await?
+                {
+                    IndexResult::Indexed(count) => {
+                        if count > 0 {
+                            indexed += 1;
                         }
                     }
+                    IndexResult::Cached => cached += 1,
+                    IndexResult::Failed => continue,
                 }
-
-                if embeddings_count > 0 {
-                    indexed += 1;
-                }
-                let embeddings_time = start_time.elapsed();
-                debug!("Generated embeddings in {:?}", embeddings_time);
             }
         }
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
