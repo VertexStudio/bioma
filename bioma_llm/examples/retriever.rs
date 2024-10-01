@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send globs to the indexer actor
     info!("Indexing");
-    let index_globs = IndexGlobs { globs, ..Default::default() };
+    let index_globs = IndexGlobs::builder().globs(globs).build();
     let _indexer = relay_ctx
         .send::<Indexer, IndexGlobs>(
             index_globs,
@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Save context to file for debugging
     let context_content = context.to_markdown();
-    tokio::fs::write(output_dir.join("retriever_context.md"), context_content).await?;
+    tokio::fs::write(output_dir.join("debug").join("retriever_context.md"), context_content).await?;
 
     indexer_handle.abort();
     retriever_handle.abort();

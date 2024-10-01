@@ -1,5 +1,5 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
-use crate::indexer::{ChunkMetadata, Source};
+use crate::indexer::ChunkMetadata;
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -73,11 +73,8 @@ impl RetrievedContext {
         for (index, context) in self.context.iter().enumerate() {
             // Add source information
             if let Some(metadata) = &context.metadata {
-                context_content.push_str("Source: ");
-                match &metadata.source {
-                    Source::File(path) => context_content.push_str(&format!("File - {}\n", path.display())),
-                    Source::Url(url) => context_content.push_str(&format!("URL - {}\n", url)),
-                }
+                context_content.push_str(&format!("Source: {}\n", metadata.source));
+                context_content.push_str(&format!("Type: {}\n", metadata.text_type));
                 context_content.push_str(&format!("Chunk: {}\n\n", metadata.chunk_number));
             }
 
