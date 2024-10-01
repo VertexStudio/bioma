@@ -417,7 +417,8 @@ async fn test_large_message_mem_db() -> Result<(), TestError> {
 #[test(tokio::test)]
 #[ignore = "This test uses large messages and should only be run explicitly"]
 async fn test_large_message_db() -> Result<(), TestError> {
-    let engine = Engine::connect("ws://localhost:9123", EngineOptions::default()).await?;
+    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
+    let engine = Engine::connect(engine_options).await?;
 
     let msg_size = 200_000;
 

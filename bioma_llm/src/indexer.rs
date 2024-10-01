@@ -12,7 +12,7 @@ use url::Url;
 const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
-const DEFAULT_CHUNK_BATCH_SIZE: usize = 256;
+const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IndexerError {
@@ -45,6 +45,9 @@ pub struct IndexGlobs {
     #[builder(default = DEFAULT_CHUNK_OVERLAP)]
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+    #[builder(default = DEFAULT_CHUNK_BATCH_SIZE)]
+    #[serde(default = "default_chunk_batch_size")]
+    pub chunk_batch_size: usize,
 }
 
 fn default_chunk_capacity() -> std::ops::Range<usize> {
@@ -55,9 +58,18 @@ fn default_chunk_overlap() -> usize {
     DEFAULT_CHUNK_OVERLAP
 }
 
+fn default_chunk_batch_size() -> usize {
+    DEFAULT_CHUNK_BATCH_SIZE
+}
+
 impl Default for IndexGlobs {
     fn default() -> Self {
-        Self { globs: vec![], chunk_capacity: DEFAULT_CHUNK_CAPACITY, chunk_overlap: DEFAULT_CHUNK_OVERLAP }
+        Self {
+            globs: vec![],
+            chunk_capacity: DEFAULT_CHUNK_CAPACITY,
+            chunk_overlap: DEFAULT_CHUNK_OVERLAP,
+            chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
+        }
     }
 }
 
@@ -252,8 +264,8 @@ impl Message<IndexGlobs> for Indexer {
 
                 let start_time = std::time::Instant::now();
 
-                let chunk_batches = chunks.chunks(DEFAULT_CHUNK_BATCH_SIZE);
-                let metadata_batches = metadata.chunks(DEFAULT_CHUNK_BATCH_SIZE);
+                let chunk_batches = chunks.chunks(message.chunk_batch_size);
+                let metadata_batches = metadata.chunks(message.chunk_batch_size);
                 let mut embeddings_count = 0;
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx

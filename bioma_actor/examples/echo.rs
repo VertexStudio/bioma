@@ -75,7 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // Initialize the actor system
-    let engine = Engine::connect("ws://localhost:9123", EngineOptions::default()).await?;
+    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
+    let engine = Engine::connect(engine_options).await?;
 
     // Create echo ID
     let echo_id = ActorId::of::<Echo>("/echo");
