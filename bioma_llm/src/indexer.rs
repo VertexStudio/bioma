@@ -1,13 +1,12 @@
 use crate::embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings};
 use bioma_actor::prelude::*;
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
-use std::path::PathBuf;
 use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
-use url::Url;
 
 const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
@@ -30,22 +29,43 @@ pub enum IndexerError {
     ComputingSimilarity(String),
     #[error("Chunk config error: {0}")]
     ChunkConfig(#[from] text_splitter::ChunkConfigError),
-    #[error("Embeddings actor not found")]
-    EmbeddingsActorNotFound,
+    #[error("Embeddings actor not initialized")]
+    EmbeddingsActorNotInitialized,
 }
 
 impl ActorError for IndexerError {}
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourcedText {
+    pub source: String,
+    pub text: String,
+    pub text_type: TextType,
+}
+
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct IndexTexts {
+    pub texts: Vec<SourcedText>,
+    #[builder(default = default_chunk_capacity())]
+    #[serde(default = "default_chunk_capacity")]
+    pub chunk_capacity: std::ops::Range<usize>,
+    #[builder(default = default_chunk_overlap())]
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: usize,
+    #[builder(default = default_chunk_batch_size())]
+    #[serde(default = "default_chunk_batch_size")]
+    pub chunk_batch_size: usize,
+}
+
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
     pub globs: Vec<String>,
-    #[builder(default = DEFAULT_CHUNK_CAPACITY)]
+    #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
     pub chunk_capacity: std::ops::Range<usize>,
-    #[builder(default = DEFAULT_CHUNK_OVERLAP)]
+    #[builder(default = default_chunk_overlap())]
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
-    #[builder(default = DEFAULT_CHUNK_BATCH_SIZE)]
+    #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
 }
@@ -62,23 +82,13 @@ fn default_chunk_batch_size() -> usize {
     DEFAULT_CHUNK_BATCH_SIZE
 }
 
-impl Default for IndexGlobs {
-    fn default() -> Self {
-        Self {
-            globs: vec![],
-            chunk_capacity: DEFAULT_CHUNK_CAPACITY,
-            chunk_overlap: DEFAULT_CHUNK_OVERLAP,
-            chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexedGlobs {
+pub struct Indexed {
     pub indexed: usize,
     pub cached: usize,
 }
 
+#[derive(Display, Debug, Clone, Serialize, Deserialize)]
 pub enum CodeLanguage {
     Rust,
     Python,
@@ -87,6 +97,7 @@ pub enum CodeLanguage {
     Html,
 }
 
+#[derive(Display, Debug, Clone, Serialize, Deserialize)]
 pub enum TextType {
     Markdown,
     Code(CodeLanguage),
@@ -94,14 +105,9 @@ pub enum TextType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Source {
-    File(PathBuf),
-    Url(Url),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkMetadata {
-    pub source: Source,
+    pub source: String,
+    pub text_type: TextType,
     pub chunk_number: usize,
 }
 
@@ -125,7 +131,6 @@ impl Indexer {
         source: String,
         content: String,
         text_type: TextType,
-        pathbuf: PathBuf,
         chunk_capacity: std::ops::Range<usize>,
         chunk_overlap: usize,
         chunk_batch_size: usize,
@@ -155,7 +160,7 @@ impl Indexer {
             _ => (text_type, content),
         };
 
-        let chunks = match text_type {
+        let chunks = match &text_type {
             TextType::Text => {
                 let splitter = TextSplitter::new(
                     ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
@@ -191,7 +196,7 @@ impl Indexer {
         let metadata = chunks
             .iter()
             .enumerate()
-            .map(|(i, _)| ChunkMetadata { source: Source::File(pathbuf.clone()), chunk_number: i })
+            .map(|(i, _)| ChunkMetadata { source: source.clone(), text_type: text_type.clone(), chunk_number: i })
             .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
             .collect::<Vec<Value>>();
         let chunks_time = start_time.elapsed();
@@ -232,16 +237,53 @@ impl Indexer {
     }
 }
 
-impl Message<IndexGlobs> for Indexer {
-    type Response = IndexedGlobs;
+impl Message<IndexTexts> for Indexer {
+    type Response = Indexed;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &IndexGlobs,
-    ) -> Result<IndexedGlobs, IndexerError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexTexts) -> Result<Indexed, IndexerError> {
         let Some(embeddings_id) = &self.embeddings_id else {
-            return Err(IndexerError::EmbeddingsActorNotFound);
+            return Err(IndexerError::EmbeddingsActorNotInitialized);
+        };
+
+        let total_index_texts_time = std::time::Instant::now();
+        let mut indexed = 0;
+        let mut cached = 0;
+
+        for SourcedText { source, text, text_type } in message.texts.iter() {
+            match self
+                .index_text(
+                    ctx,
+                    source.clone(),
+                    text.clone(),
+                    text_type.clone(),
+                    message.chunk_capacity.clone(),
+                    message.chunk_overlap,
+                    message.chunk_batch_size,
+                    embeddings_id,
+                )
+                .await?
+            {
+                IndexResult::Indexed(count) => {
+                    if count > 0 {
+                        indexed += 1;
+                    }
+                }
+                IndexResult::Cached => cached += 1,
+                IndexResult::Failed => continue,
+            }
+        }
+
+        info!("Indexed {} texts, cached {} paths, in {:?}", indexed, cached, total_index_texts_time.elapsed());
+        Ok(Indexed { indexed, cached })
+    }
+}
+
+impl Message<IndexGlobs> for Indexer {
+    type Response = Indexed;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexGlobs) -> Result<Indexed, IndexerError> {
+        let Some(embeddings_id) = &self.embeddings_id else {
+            return Err(IndexerError::EmbeddingsActorNotInitialized);
         };
 
         let total_index_globs_time = std::time::Instant::now();
@@ -287,7 +329,6 @@ impl Message<IndexGlobs> for Indexer {
                         source,
                         content,
                         text_type,
-                        pathbuf,
                         message.chunk_capacity.clone(),
                         message.chunk_overlap,
                         message.chunk_batch_size,
@@ -306,7 +347,7 @@ impl Message<IndexGlobs> for Indexer {
             }
         }
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
-        Ok(IndexedGlobs { indexed, cached })
+        Ok(Indexed { indexed, cached })
     }
 }
 

@@ -74,13 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send globs to the indexer actor
     info!("Indexing");
-    let index_globs = IndexGlobs {
-        globs: vec![
+    let index_globs = IndexGlobs::builder()
+        .globs(vec![
             // workspace_root.clone() + "/**/*.surql",
             workspace_root.clone() + "/**/*.toml",
-        ],
-        ..Default::default()
-    };
+        ])
+        .build();
     let _indexer = relay_ctx
         .send::<Indexer, IndexGlobs>(
             index_globs,
@@ -103,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Save context to file for debugging
     let context_content = context.to_markdown();
-    tokio::fs::write(output_dir.join("rag_context.md"), &context_content).await?;
+    tokio::fs::write(output_dir.join("debug").join("rag_context.md"), &context_content).await?;
 
     // Add context to conversation as a system message
     let context_message = ChatMessage::system(
@@ -135,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let response = chat_response.message.unwrap();
     chat_content.push_str(&format!("{:?}: {}\n\n", &response.role, &response.content));
-    tokio::fs::write(output_dir.join("rag_chat.md"), chat_content).await?;
+    tokio::fs::write(output_dir.join("debug").join("rag_chat.md"), chat_content).await?;
 
     indexer_handle.abort();
     retriever_handle.abort();
