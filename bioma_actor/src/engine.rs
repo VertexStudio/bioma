@@ -1,7 +1,10 @@
 use crate::actor::SystemActorError;
+use crate::util::find_project_root;
 use derive_more::Display;
 use object_store::local::LocalFileSystem;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::path::PathBuf;
 use std::time::Duration;
 use surrealdb::{
     engine::any::{Any, IntoEndpoint},
@@ -10,23 +13,15 @@ use surrealdb::{
     Surreal,
 };
 use tokio::time::sleep;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[macro_export]
 macro_rules! dbg_export_db {
     ($engine:expr) => {{
-        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
-            .map(std::path::PathBuf::from)
-            .ok()
-            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-
-        let output_dir = workspace_root.join("output").join("debug");
+        let output_dir = $engine.output_dir().join("debug");
         std::fs::create_dir_all(&output_dir).unwrap();
-
         let file_name = format!("dbg_{}_{}", file!().replace("/", "_").replace(".", "_"), line!());
         let file_path = output_dir.join(format!("{}.surql", file_name));
-
         $engine.db().export(file_path.to_str().unwrap()).await.unwrap();
     }};
 }
@@ -40,34 +35,56 @@ pub struct Record {
 /// Configuration options for the Engine.
 #[derive(Clone, Debug, Serialize, Deserialize, bon::Builder)]
 pub struct EngineOptions {
+    /// Database endpoint
+    #[builder(default = "memory".into())]
+    pub endpoint: Cow<'static, str>,
     /// The namespace to use in the database.
-    pub namespace: String,
+    #[builder(default = "dev".into())]
+    pub namespace: Cow<'static, str>,
     /// The name of the database to connect to.
-    pub database: String,
+    #[builder(default = "bioma".into())]
+    pub database: Cow<'static, str>,
     /// The username for database authentication.
-    pub username: String,
+    #[builder(default = "root".into())]
+    pub username: Cow<'static, str>,
     /// The password for database authentication.
-    pub password: String,
+    #[builder(default = "root".into())]
+    pub password: Cow<'static, str>,
+    /// Output directory for artifacts.
+    #[builder(default = default_output_dir())]
+    pub output_dir: PathBuf,
     /// The local file system path for object store.
-    pub local_store: std::path::PathBuf,
+    #[builder(default = default_local_store())]
+    pub local_store: PathBuf,
+    /// The HuggingFace cache directory.
+    #[builder(default = default_hf_cache_dir())]
+    pub hf_cache_dir: PathBuf,
+}
+
+fn default_output_dir() -> PathBuf {
+    let project_root = find_project_root();
+    project_root.join("output")
+}
+
+fn default_local_store() -> PathBuf {
+    let output_dir = default_output_dir();
+    output_dir.join("store")
+}
+
+fn default_hf_cache_dir() -> PathBuf {
+    let project_root = find_project_root();
+    project_root.join(".cache").join("huggingface").join("hub")
 }
 
 impl Default for EngineOptions {
     fn default() -> Self {
-        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
-            .map(std::path::PathBuf::from)
-            .ok()
-            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let local_store = workspace_root.join("output").join("store");
-        std::fs::create_dir_all(&local_store).unwrap();
-        EngineOptions {
-            namespace: "dev".to_string(),
-            database: "bioma".to_string(),
-            username: "root".to_string(),
-            password: "root".to_string(),
-            local_store,
-        }
+        EngineOptions::builder().build()
+    }
+}
+
+impl EngineOptions {
+    pub fn info(&self) {
+        info!("Engine: {}, ns: {}, db: {}, user: {}", self.endpoint, self.namespace, self.database, self.username);
     }
 }
 
@@ -84,15 +101,14 @@ impl Engine {
         &self.db
     }
 
-    pub async fn connect(
-        address: impl IntoEndpoint + Clone,
-        options: EngineOptions,
-    ) -> Result<Engine, SystemActorError> {
+    pub async fn connect(options: EngineOptions) -> Result<Engine, SystemActorError> {
+        options.info();
+
         let mut retry_delay = Duration::from_secs(1);
         let max_delay = Duration::from_secs(10);
 
         loop {
-            match Self::attempt_connect(address.clone(), &options).await {
+            match Self::attempt_connect(options.endpoint.to_string(), &options).await {
                 Ok(engine) => return Ok(engine),
                 Err(e) => {
                     warn!("Failed to connect: {}. Retrying in {:?}...", e, retry_delay);
@@ -107,16 +123,17 @@ impl Engine {
         let db: Surreal<Any> = Surreal::init();
         db.connect(address).await?;
         db.signin(Root { username: &options.username, password: &options.password }).await?;
-        db.use_ns(&options.namespace).use_db(&options.database).await?;
+        db.use_ns(options.namespace.clone()).use_db(options.database.clone()).await?;
         Engine::define(&db).await?;
         Ok(Engine { db: Box::new(db), options: options.clone() })
     }
 
     pub async fn test() -> Result<Engine, SystemActorError> {
         let options = EngineOptions::default();
+        options.info();
         let db: Surreal<Any> = Surreal::init();
         db.connect("memory").await?;
-        db.use_ns(&options.namespace).use_db(&options.database).await?;
+        db.use_ns(options.namespace.clone()).use_db(options.database.clone()).await?;
         Engine::define(&db).await?;
         Ok(Engine { db: Box::new(db), options })
     }
@@ -126,7 +143,7 @@ impl Engine {
         let db_name = self.options.database.clone();
         db.use_db("test").await?;
         db.query(format!("REMOVE DATABASE `{}`;", db_name)).await?;
-        db.use_ns(&self.options.namespace).use_db(db_name.clone()).await?;
+        db.use_ns(self.options.namespace.clone()).use_db(db_name.clone()).await?;
         Engine::define(&db).await?;
         Ok(())
     }
@@ -148,30 +165,20 @@ impl Engine {
         Ok(store)
     }
 
-    pub fn debug_output_dir(&self) -> Result<std::path::PathBuf, SystemActorError> {
-        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
-            .map(std::path::PathBuf::from)
-            .ok()
-            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let output_dir = workspace_root.join("output").join("debug");
-        std::fs::create_dir_all(&output_dir).unwrap();
-        Ok(output_dir)
+    pub fn output_dir(&self) -> &PathBuf {
+        &self.options.output_dir
     }
 
-    pub fn huggingface_cache_dir(&self) -> Result<std::path::PathBuf, SystemActorError> {
-        let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
-            .map(std::path::PathBuf::from)
-            .ok()
-            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let cache_dir = workspace_root.join(".cache").join("huggingface").join("hub");
-        std::fs::create_dir_all(&cache_dir).unwrap();
-        Ok(cache_dir)
+    pub fn huggingface_cache_dir(&self) -> &PathBuf {
+        &self.options.hf_cache_dir
     }
 
     pub fn options(&self) -> &EngineOptions {
         &self.options
+    }
+
+    pub fn info(&self) {
+        info!("ns: {}, db: {}, user: {}", self.options.namespace, self.options.database, self.options.username);
     }
 }
 

@@ -134,7 +134,7 @@ impl Clone for Embeddings {
 
 impl Default for Embeddings {
     fn default() -> Self {
-        Self { model: Model::NomicEmbedTextV15, text_embedding_tx: None, shared_embedding: None }
+        Embeddings::builder().build()
     }
 }
 
@@ -309,7 +309,7 @@ impl Actor for Embeddings {
 
                 // Create a new shared embedding
                 let model = self.model.clone();
-                let cache_dir = ctx.engine().huggingface_cache_dir()?;
+                let cache_dir = ctx.engine().huggingface_cache_dir().clone();
                 let (text_embedding_tx, mut text_embedding_rx) = mpsc::channel::<TextEmbeddingRequest>(100);
                 let _text_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
                     tokio::task::spawn_blocking(move || {

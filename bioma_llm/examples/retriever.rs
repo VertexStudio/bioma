@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the actor system
     let engine = Engine::test().await?;
-    let output_dir = engine.debug_output_dir()?;
+    let output_dir = engine.output_dir();
 
     // Create indexer actor ID
     let indexer_id = ActorId::of::<Indexer>("/indexer");

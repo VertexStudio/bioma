@@ -104,7 +104,7 @@ pub struct Rerank {
 
 impl Default for Rerank {
     fn default() -> Self {
-        Self { model: Model::BGERerankerV2M3, rerank_tx: None, shared_rerank: None }
+        Rerank::builder().build()
     }
 }
 
@@ -151,7 +151,7 @@ impl Actor for Rerank {
                 // Create a new shared rerank
                 let model = self.model.clone();
                 let ctx_id = ctx.id().clone();
-                let cache_dir = ctx.engine().huggingface_cache_dir()?;
+                let cache_dir = ctx.engine().huggingface_cache_dir().clone();
                 let (rerank_tx, mut rerank_rx) = mpsc::channel::<RerankRequest>(100);
                 let _rerank_task: JoinHandle<Result<(), fastembed::Error>> = tokio::task::spawn_blocking(move || {
                     // Get the reranker model

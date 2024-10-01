@@ -305,7 +305,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     color_backtrace::BacktracePrinter::new().message("BOOM! 💥").install(color_backtrace::default_output_stream());
 
     // Initialize the actor system
-    let engine = Engine::connect("ws://localhost:9123", EngineOptions::default()).await?;
+    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
+    let engine = Engine::connect(engine_options).await?;
 
     // Spawn the indexer actor, if it already exists, restore it, otherwise reset it
     let indexer_actor_id = ActorId::of::<Indexer>("/indexer");
