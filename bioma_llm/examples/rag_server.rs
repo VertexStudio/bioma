@@ -83,10 +83,7 @@ struct Uploaded {
 }
 
 async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
-    let output_dir = data.engine.output_dir().clone();
-
-    // All files are uploaded to the "uploads" directory
-    let output_dir = output_dir.join("uploads");
+    let output_dir = data.engine.local_store_dir().clone();
 
     // If bucket is provided, add it to the output directory
     let output_dir = match &form.metadata.bucket {

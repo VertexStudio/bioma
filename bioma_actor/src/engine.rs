@@ -54,8 +54,8 @@ pub struct EngineOptions {
     #[builder(default = default_output_dir())]
     pub output_dir: PathBuf,
     /// The local file system path for object store.
-    #[builder(default = default_local_store())]
-    pub local_store: PathBuf,
+    #[builder(default = default_local_store_dir())]
+    pub local_store_dir: PathBuf,
     /// The HuggingFace cache directory.
     #[builder(default = default_hf_cache_dir())]
     pub hf_cache_dir: PathBuf,
@@ -63,17 +63,17 @@ pub struct EngineOptions {
 
 fn default_output_dir() -> PathBuf {
     let project_root = find_project_root();
-    project_root.join("output")
+    project_root.join(".output")
 }
 
-fn default_local_store() -> PathBuf {
+fn default_local_store_dir() -> PathBuf {
     let output_dir = default_output_dir();
     output_dir.join("store")
 }
 
 fn default_hf_cache_dir() -> PathBuf {
-    let project_root = find_project_root();
-    project_root.join(".cache").join("huggingface").join("hub")
+    let output_dir = default_output_dir();
+    output_dir.join("cache").join("huggingface").join("hub")
 }
 
 impl Default for EngineOptions {
@@ -161,8 +161,12 @@ impl Engine {
     }
 
     pub fn local_store(&self) -> Result<LocalFileSystem, SystemActorError> {
-        let store = LocalFileSystem::new_with_prefix(self.options.local_store.clone())?;
+        let store = LocalFileSystem::new_with_prefix(self.options.local_store_dir.clone())?;
         Ok(store)
+    }
+
+    pub fn local_store_dir(&self) -> &PathBuf {
+        &self.options.local_store_dir
     }
 
     pub fn output_dir(&self) -> &PathBuf {
