@@ -1,8 +1,9 @@
 use actix_cors::Cors;
+use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -22,6 +23,9 @@ use tracing::{error, info, warn};
 ///
 /// Ask a question:
 /// curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
+///
+/// Upload a file:
+/// curl -X POST http://localhost:8080/upload -F 'file=@/Users/rozgo/BiomaAI/bioma/README.md' -F 'metadata={"path": "temp0/temp1/README.md"};type=application/json'
 
 struct AppState {
     engine: Engine,
@@ -53,6 +57,72 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
         Err(e) => {
             error!("Error resetting engine: {:?}", e);
             HttpResponse::InternalServerError().body(e.to_string())
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Metadata {
+    bucket: Option<String>,
+    path: std::path::PathBuf,
+}
+
+#[derive(Debug, MultipartForm)]
+struct Upload {
+    #[multipart(limit = "100MB")]
+    file: TempFile,
+    #[multipart(rename = "metadata")]
+    metadata: MpJson<Metadata>,
+}
+
+#[derive(Debug, Serialize)]
+struct Uploaded {
+    message: String,
+    path: std::path::PathBuf,
+    size: usize,
+}
+
+async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
+    let output_dir = data.engine.output_dir().clone();
+
+    // All files are uploaded to the "uploads" directory
+    let output_dir = output_dir.join("uploads");
+
+    // If bucket is provided, add it to the output directory
+    let output_dir = match &form.metadata.bucket {
+        Some(bucket) => output_dir.join(bucket),
+        None => output_dir,
+    };
+
+    // Final file destination
+    let file_path = output_dir.join(&form.metadata.path);
+    let file_dir = file_path.parent().expect("Failed to get file directory");
+
+    // Ensure the file_path directory exists
+    match tokio::fs::create_dir_all(file_dir).await {
+        Ok(_) => (),
+        Err(e) => {
+            error!("Failed to create file path directory: {}", e);
+            return HttpResponse::InternalServerError().json(json!({
+                "error": "Failed to create file path directory",
+                "details": e.to_string()
+            }));
+        }
+    }
+
+    match form.file.file.persist(&file_path) {
+        Ok(_) => {
+            info!("File uploaded successfully: {}", file_path.display());
+            let uploaded =
+                Uploaded { message: "File uploaded successfully".to_string(), path: file_path, size: form.file.size };
+            HttpResponse::Ok().json(uploaded)
+        }
+        Err(e) => {
+            error!("Error saving file: {:?}", e);
+            HttpResponse::InternalServerError().json(json!({
+                "error": "Failed to save uploaded file",
+                "details": e.to_string()
+            }))
         }
     }
 }
@@ -435,6 +505,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(ask))
             .route("/chat", web::post().to(self::chat))
+            .route("/upload", web::post().to(upload))
     })
     .bind("0.0.0.0:8080")?
     .run()

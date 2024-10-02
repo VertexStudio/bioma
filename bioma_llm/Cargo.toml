@@ -73,3 +73,5 @@ rand = "0.8"
 clap = { version = "4.5", features = ["derive"] }
 actix-web = "4.9.0"
 actix-cors = "0.7.0"
+actix-multipart = "0.7.2"
+anyhow = "1.0"
