@@ -8,6 +8,10 @@ DEFINE FIELD text ON embedding TYPE string PERMISSIONS FULL;
 DEFINE FIELD embedding ON embedding TYPE array<number> PERMISSIONS FULL;
 DEFINE INDEX embedding_index ON TABLE embedding FIELDS embedding MTREE DIMENSION 768 DIST EUCLIDEAN;
 
+-- Add Full-Text Search index for the embedding text field
+DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
+DEFINE INDEX embedding_text_search ON embedding FIELDS text SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
+
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
