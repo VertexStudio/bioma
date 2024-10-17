@@ -1,3 +1,5 @@
-mod selector;
+mod fallback;
+mod sequence;
 
-pub use selector::Selector;
+pub use fallback::Fallback;
+pub use sequence::Sequence;

@@ -1,14 +1,11 @@
-use std::borrow::Cow;
+use bioma_actor::{ActorError, SystemActorError};
 
 /// Enumerates the types of errors that can occur within a behavior tree,
 /// such as node type mismatches, tree structure issues, and lifecycle problems.
 #[derive(thiserror::Error, Debug)]
 pub enum BehaviorError {
-    #[error("Runtime not initialize")]
-    RuntimeNotInitialized,
-    #[error("Invalid blackboard channel: {0}")]
-    InvalidBlackboardChannel(Cow<'static, str>),
-    #[error("Behavior tree parse error: {0}")]
-    ParseError(Cow<'static, str>),
+    #[error("System error: {0}")]
+    System(#[from] SystemActorError),
 }
 
+impl ActorError for BehaviorError {}
