@@ -1,23 +1,26 @@
 use bioma_actor::prelude::*;
 use bioma_behavior::prelude::*;
-use derive_more::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use test_log::test;
+use std::io::Write;
+// use test_log::test;
 use tracing::info;
+use tracing_subscriber::{fmt::MakeWriter, layer::SubscriberExt, Layer};
 
 // MockAction behavior
 #[derive(Serialize, Deserialize, Debug)]
 struct MockAction {
     fact: String,
+    node: behavior::Action,
 }
 
-impl Behavior for MockAction {}
+impl Behavior for MockAction {
+    fn node(&self) -> behavior::Node {
+        behavior::Node::Action(&self.node)
+    }
+}
 
-#[derive(Deref, DerefMut, Debug, Serialize, Deserialize)]
-struct MockActionBehavior(ActionBehavior<MockAction>);
-
-impl Message<BehaviorTick> for MockActionBehavior {
+impl Message<BehaviorTick> for MockAction {
     type Response = BehaviorStatus;
 
     async fn handle(
@@ -25,15 +28,16 @@ impl Message<BehaviorTick> for MockActionBehavior {
         ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        info!("{} {}", ctx.id(), self.node.fact);
+        info!("Handle {} {}", ctx.id(), self.fact);
         Ok(BehaviorStatus::Success)
     }
 }
 
-impl Actor for MockActionBehavior {
+impl Actor for MockAction {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("Start {} {:?}", ctx.id(), self.node().node_type());
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
@@ -46,14 +50,17 @@ impl Actor for MockActionBehavior {
 
 // MockDecorator behavior
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct MockDecorator;
+struct MockDecorator {
+    pub node: behavior::Decorator,
+}
 
-impl Behavior for MockDecorator {}
+impl Behavior for MockDecorator {
+    fn node(&self) -> behavior::Node {
+        behavior::Node::Decorator(&self.node)
+    }
+}
 
-#[derive(Deref, DerefMut, Debug, Serialize, Deserialize)]
-struct MockDecoratorBehavior(DecoratorBehavior<MockDecorator>);
-
-impl Message<BehaviorTick> for MockDecoratorBehavior {
+impl Message<BehaviorTick> for MockDecorator {
     type Response = BehaviorStatus;
 
     async fn handle(
@@ -61,16 +68,18 @@ impl Message<BehaviorTick> for MockDecoratorBehavior {
         ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        info!("{} {:?}", ctx.id(), self.node);
-        let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.child, SendOptions::default()).await?;
+        info!("Handle {} {:?}", ctx.id(), self.node().node_type());
+        let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.node.child, SendOptions::default()).await?;
+        info!("Status {} {:?}", ctx.id(), status);
         Ok(status)
     }
 }
 
-impl Actor for MockDecoratorBehavior {
+impl Actor for MockDecorator {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("Start {} {:?}", ctx.id(), self.node().node_type());
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
@@ -83,14 +92,17 @@ impl Actor for MockDecoratorBehavior {
 
 // MockComposite behavior
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct MockComposite;
+struct MockComposite {
+    pub node: behavior::Composite,
+}
 
-impl Behavior for MockComposite {}
+impl Behavior for MockComposite {
+    fn node(&self) -> behavior::Node {
+        behavior::Node::Composite(&self.node)
+    }
+}
 
-#[derive(Deref, DerefMut, Debug, Serialize, Deserialize)]
-struct MockCompositeBehavior(CompositeBehavior<MockComposite>);
-
-impl Message<BehaviorTick> for MockCompositeBehavior {
+impl Message<BehaviorTick> for MockComposite {
     type Response = BehaviorStatus;
 
     async fn handle(
@@ -98,18 +110,20 @@ impl Message<BehaviorTick> for MockCompositeBehavior {
         ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        for child in &self.children {
+        info!("Handle {} {:?}", ctx.id(), self.node().node_type());
+        for child in &self.node.children {
             let status: BehaviorStatus = ctx.send_as(BehaviorTick, child, SendOptions::default()).await?;
-            info!("{} {} {:?}", ctx.id(), child, status);
+            info!("Status {} {} {:?}", ctx.id(), child, status);
         }
         Ok(BehaviorStatus::Success)
     }
 }
 
-impl Actor for MockCompositeBehavior {
+impl Actor for MockComposite {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("Start {} {:?}", ctx.id(), self.node().node_type());
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
@@ -129,86 +143,58 @@ impl Actor for MainActor {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("Start {}", ctx.id());
         let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.root, SendOptions::default()).await?;
-        info!("{} {:?}", ctx.id(), status);
+        info!("Status {} {:?}", ctx.id(), status);
         Ok(())
     }
 }
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn test_behavior_mock() -> Result<(), SystemActorError> {
     // Initialize the engine
     let engine = Engine::test().await?;
 
-    let mock_action_id_0 = ActorId::of::<MockActionBehavior>("mock_action_0");
-    let mock_action_id_1 = ActorId::of::<MockActionBehavior>("mock_action_1");
-    let mock_action_id_2 = ActorId::of::<MockActionBehavior>("mock_action_2");
-    let mock_action_id_3 = ActorId::of::<MockActionBehavior>("mock_action_3");
+    let mock_action_id_0 = ActorId::of::<MockAction>("mock_action_0");
+    let mock_action_id_1 = ActorId::of::<MockAction>("mock_action_1");
+    let mock_action_id_2 = ActorId::of::<MockAction>("mock_action_2");
+    let mock_action_id_3 = ActorId::of::<MockAction>("mock_action_3");
 
-    let mock_decorator_id = ActorId::of::<MockDecoratorBehavior>("mock_decorator");
+    let mock_decorator_id = ActorId::of::<MockDecorator>("mock_decorator");
 
-    let mock_composite_id = ActorId::of::<MockCompositeBehavior>("mock_composite");
+    let mock_composite_id = ActorId::of::<MockComposite>("mock_composite");
 
-    let mock_action_0 = ActionBehavior::<MockAction> { node: MockAction { fact: "0".to_string() } };
-    let mock_action_1 = ActionBehavior::<MockAction> { node: MockAction { fact: "1".to_string() } };
-    let mock_action_2 = ActionBehavior::<MockAction> { node: MockAction { fact: "2".to_string() } };
-    let mock_action_3 = ActionBehavior::<MockAction> { node: MockAction { fact: "3".to_string() } };
+    let mock_action_0 = MockAction { fact: "0".to_string(), node: behavior::Action {} };
+    let mock_action_1 = MockAction { fact: "1".to_string(), node: behavior::Action {} };
+    let mock_action_2 = MockAction { fact: "2".to_string(), node: behavior::Action {} };
+    let mock_action_3 = MockAction { fact: "3".to_string(), node: behavior::Action {} };
 
-    let mock_composite = CompositeBehavior::<MockComposite> {
-        node: MockComposite,
-        children: vec![
-            mock_action_id_0.clone(),
-            mock_action_id_1.clone(),
-            mock_action_id_2.clone(),
-            mock_action_id_3.clone(),
-        ],
+    let mock_composite = MockComposite {
+        node: behavior::Composite {
+            children: vec![
+                mock_action_id_0.clone(),
+                mock_action_id_1.clone(),
+                mock_action_id_2.clone(),
+                mock_action_id_3.clone(),
+            ],
+        },
     };
 
-    let mock_decorator = DecoratorBehavior::<MockDecorator> { node: MockDecorator, child: mock_composite_id.clone() };
+    let mock_decorator = MockDecorator { node: behavior::Decorator { child: mock_composite_id.clone() } };
 
     // Spawn the actors
-    let (mut mock_action_0_ctx, mut mock_action_0) = Actor::spawn(
-        engine.clone(),
-        mock_action_id_0.clone(),
-        MockActionBehavior(mock_action_0),
-        SpawnOptions::default(),
-    )
-    .await?;
-    let (mut mock_action_1_ctx, mut mock_action_1) = Actor::spawn(
-        engine.clone(),
-        mock_action_id_1.clone(),
-        MockActionBehavior(mock_action_1),
-        SpawnOptions::default(),
-    )
-    .await?;
-    let (mut mock_action_2_ctx, mut mock_action_2) = Actor::spawn(
-        engine.clone(),
-        mock_action_id_2.clone(),
-        MockActionBehavior(mock_action_2),
-        SpawnOptions::default(),
-    )
-    .await?;
-    let (mut mock_action_3_ctx, mut mock_action_3) = Actor::spawn(
-        engine.clone(),
-        mock_action_id_3.clone(),
-        MockActionBehavior(mock_action_3),
-        SpawnOptions::default(),
-    )
-    .await?;
-    let (mut mock_composite_ctx, mut mock_composite) = Actor::spawn(
-        engine.clone(),
-        mock_composite_id.clone(),
-        MockCompositeBehavior(mock_composite),
-        SpawnOptions::default(),
-    )
-    .await?;
-    let (mut mock_decorator_ctx, mut mock_decorator) = Actor::spawn(
-        engine.clone(),
-        mock_decorator_id.clone(),
-        MockDecoratorBehavior(mock_decorator),
-        SpawnOptions::default(),
-    )
-    .await?;
+    let (mut mock_action_0_ctx, mut mock_action_0) =
+        Actor::spawn(engine.clone(), mock_action_id_0.clone(), mock_action_0, SpawnOptions::default()).await?;
+    let (mut mock_action_1_ctx, mut mock_action_1) =
+        Actor::spawn(engine.clone(), mock_action_id_1.clone(), mock_action_1, SpawnOptions::default()).await?;
+    let (mut mock_action_2_ctx, mut mock_action_2) =
+        Actor::spawn(engine.clone(), mock_action_id_2.clone(), mock_action_2, SpawnOptions::default()).await?;
+    let (mut mock_action_3_ctx, mut mock_action_3) =
+        Actor::spawn(engine.clone(), mock_action_id_3.clone(), mock_action_3, SpawnOptions::default()).await?;
+    let (mut mock_composite_ctx, mut mock_composite) =
+        Actor::spawn(engine.clone(), mock_composite_id.clone(), mock_composite, SpawnOptions::default()).await?;
+    let (mut mock_decorator_ctx, mut mock_decorator) =
+        Actor::spawn(engine.clone(), mock_decorator_id.clone(), mock_decorator, SpawnOptions::default()).await?;
 
     // Start the actors
     tokio::spawn(async move { mock_action_0.start(&mut mock_action_0_ctx).await.unwrap() });
@@ -220,15 +206,86 @@ async fn test_behavior_mock() -> Result<(), SystemActorError> {
 
     tokio::time::sleep(std::time::Duration::from_secs(0)).await;
 
+    // Create a channel for log messages
+    let (log_sender, mut log_receiver) = tokio::sync::mpsc::channel::<String>(100);
+
+    // Set up a custom layer that captures log messages
+    let layer = tracing_subscriber::fmt::layer()
+        .with_writer(move || TestWriter(log_sender.clone()))
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+
+    // Use a scoped tracing subscriber
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
+
     // Main actor
     let main_actor_id = ActorId::of::<MainActor>("main");
     let main_actor = MainActor { root: mock_decorator_id };
     let (mut main_ctx, mut main_actor) =
         Actor::spawn(engine.clone(), main_actor_id.clone(), main_actor, SpawnOptions::default()).await?;
+
+    // Start the main actor
     main_actor.start(&mut main_ctx).await?;
+
+    // Small delay to ensure all log messages are processed
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Collect log messages
+    let mut log_messages = Vec::new();
+    while let Ok(message) = log_receiver.try_recv() {
+        log_messages.push(message);
+    }
+
+    // Print log messages
+    // for log in &log_messages {
+    //     println!("{}", log);
+    // }
+
+    assert_eq!(log_messages.len(), 13, "Expected 13 log messages");
+
+    assert!(log_messages[0].contains("actor:main"));
+    assert!(log_messages[1].contains("actor:mock_decorator Decorator"));
+    assert!(log_messages[2].contains("actor:mock_composite Composite"));
+    assert!(log_messages[3].contains("actor:mock_action_0 0"));
+    assert!(log_messages[4].contains("actor:mock_composite actor:mock_action_0 Success"));
+    assert!(log_messages[5].contains("actor:mock_action_1 1"));
+    assert!(log_messages[6].contains("actor:mock_composite actor:mock_action_1 Success"));
+    assert!(log_messages[7].contains("actor:mock_action_2 2"));
+    assert!(log_messages[8].contains("actor:mock_composite actor:mock_action_2 Success"));
+    assert!(log_messages[9].contains("actor:mock_action_3 3"));
+    assert!(log_messages[10].contains("actor:mock_composite actor:mock_action_3 Success"));
+    assert!(log_messages[11].contains("actor:mock_decorator Success"));
+    assert!(log_messages[12].contains("actor:main Success"));
 
     // Export the database for debugging
     dbg_export_db!(engine);
 
     Ok(())
+}
+
+struct TestWriter(tokio::sync::mpsc::Sender<String>);
+
+impl Write for TestWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let message = String::from_utf8_lossy(buf).to_string();
+        let _ = self.0.try_send(message);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for TestWriter {
+    type Writer = Self;
+
+    fn make_writer(&self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+impl Clone for TestWriter {
+    fn clone(&self) -> Self {
+        TestWriter(self.0.clone())
+    }
 }

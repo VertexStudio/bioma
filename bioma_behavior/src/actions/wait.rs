@@ -11,11 +11,16 @@ use std::time::Duration;
 pub struct Wait {
     #[serde(with = "humantime_serde")]
     pub duration: Duration,
+    pub node: behavior::Action,
 }
 
-impl Behavior for Wait {}
+impl Behavior for Wait {
+    fn node(&self) -> behavior::Node {
+        behavior::Node::Action(&self.node)
+    }
+}
 
-impl Message<BehaviorTick> for ActionBehavior<Wait> {
+impl Message<BehaviorTick> for Wait {
     type Response = BehaviorStatus;
 
     async fn handle(
@@ -23,12 +28,12 @@ impl Message<BehaviorTick> for ActionBehavior<Wait> {
         _ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        tokio::time::sleep(self.node.duration).await;
+        tokio::time::sleep(self.duration).await;
         Ok(BehaviorStatus::Success)
     }
 }
 
-impl Actor for ActionBehavior<Wait> {
+impl Actor for Wait {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
