@@ -8,11 +8,17 @@ use serde::{Deserialize, Serialize};
 /// all child nodes succeed. If a child fails, the `Sequence` node immediately fails. If a child
 /// returns running, the `Sequence` node also returns running.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Sequence;
+pub struct Sequence {
+    pub node: behavior::Composite,
+}
 
-impl Behavior for Sequence {}
+impl Behavior for Sequence {
+    fn node(&self) -> behavior::Node {
+        behavior::Node::Composite(&self.node)
+    }
+}
 
-impl Message<BehaviorTick> for CompositeBehavior<Sequence> {
+impl Message<BehaviorTick> for Sequence {
     type Response = BehaviorStatus;
 
     async fn handle(
@@ -20,7 +26,7 @@ impl Message<BehaviorTick> for CompositeBehavior<Sequence> {
         ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        for child in &self.children {
+        for child in &self.node.children {
             let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
             match status {
                 Ok(BehaviorStatus::Success) => continue,
@@ -32,7 +38,7 @@ impl Message<BehaviorTick> for CompositeBehavior<Sequence> {
     }
 }
 
-impl Actor for CompositeBehavior<Sequence> {
+impl Actor for Sequence {
     type Error = BehaviorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {

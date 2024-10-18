@@ -8,11 +8,17 @@ use serde::{Deserialize, Serialize};
 /// child node succeeds. If a child fails, it proceeds to the next one. If all children fail,
 /// then the `Fallback` node fails.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Fallback;
+pub struct Fallback {
+    pub node: behavior::Composite,
+}
 
-impl Behavior for Fallback {}
+impl Behavior for Fallback {
+    fn node(&self) -> behavior::Node {
+        behavior::Node::Composite(&self.node)
+    }
+}
 
-impl Message<BehaviorTick> for CompositeBehavior<Fallback> {
+impl Message<BehaviorTick> for Fallback {
     type Response = BehaviorStatus;
 
     async fn handle(
@@ -20,7 +26,7 @@ impl Message<BehaviorTick> for CompositeBehavior<Fallback> {
         ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        for child in &self.children {
+        for child in &self.node.children {
             let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
             match status {
                 Ok(BehaviorStatus::Success) => return Ok(BehaviorStatus::Success),
@@ -32,7 +38,7 @@ impl Message<BehaviorTick> for CompositeBehavior<Fallback> {
     }
 }
 
-impl Actor for CompositeBehavior<Fallback> {
+impl Actor for Fallback {
     type Error = BehaviorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
