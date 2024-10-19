@@ -154,6 +154,7 @@ impl Actor for MainActor {
 async fn test_behavior_mock() -> Result<(), SystemActorError> {
     // Initialize the engine
     let engine = Engine::test().await?;
+    let output_dir = engine.output_dir();
 
     let mock_action_id_0 = ActorId::of::<MockAction>("mock_action_0");
     let mock_action_id_1 = ActorId::of::<MockAction>("mock_action_1");
@@ -181,6 +182,13 @@ async fn test_behavior_mock() -> Result<(), SystemActorError> {
     };
 
     let mock_decorator = MockDecorator { node: behavior::Decorator { child: mock_composite_id.clone() } };
+
+    // Save behavior tree to output debug
+    let tree = serde_json::to_string_pretty(&mock_decorator).unwrap();
+    tokio::fs::write(
+        output_dir.join("debug").join("test_behavior_mock.json"),
+        tree
+    ).await?;
 
     // Spawn the actors
     let (mut mock_action_0_ctx, mut mock_action_0) =
@@ -242,19 +250,19 @@ async fn test_behavior_mock() -> Result<(), SystemActorError> {
 
     assert_eq!(log_messages.len(), 13, "Expected 13 log messages");
 
-    assert!(log_messages[0].contains("actor:main"));
-    assert!(log_messages[1].contains("actor:mock_decorator Decorator"));
-    assert!(log_messages[2].contains("actor:mock_composite Composite"));
-    assert!(log_messages[3].contains("actor:mock_action_0 0"));
-    assert!(log_messages[4].contains("actor:mock_composite actor:mock_action_0 Success"));
-    assert!(log_messages[5].contains("actor:mock_action_1 1"));
-    assert!(log_messages[6].contains("actor:mock_composite actor:mock_action_1 Success"));
-    assert!(log_messages[7].contains("actor:mock_action_2 2"));
-    assert!(log_messages[8].contains("actor:mock_composite actor:mock_action_2 Success"));
-    assert!(log_messages[9].contains("actor:mock_action_3 3"));
-    assert!(log_messages[10].contains("actor:mock_composite actor:mock_action_3 Success"));
-    assert!(log_messages[11].contains("actor:mock_decorator Success"));
-    assert!(log_messages[12].contains("actor:main Success"));
+    assert!(log_messages[0].contains("Start main:behavior::MainActor"));
+    assert!(log_messages[1].contains("Handle mock_decorator:behavior::MockDecorator Decorator"));
+    assert!(log_messages[2].contains("Handle mock_composite:behavior::MockComposite Composite"));
+    assert!(log_messages[3].contains("Handle mock_action_0:behavior::MockAction 0"));
+    assert!(log_messages[4].contains("Status mock_composite:behavior::MockComposite mock_action_0:behavior::MockAction Success"));
+    assert!(log_messages[5].contains("Handle mock_action_1:behavior::MockAction 1"));
+    assert!(log_messages[6].contains("Status mock_composite:behavior::MockComposite mock_action_1:behavior::MockAction Success"));
+    assert!(log_messages[7].contains("Handle mock_action_2:behavior::MockAction 2"));
+    assert!(log_messages[8].contains("Status mock_composite:behavior::MockComposite mock_action_2:behavior::MockAction Success"));
+    assert!(log_messages[9].contains("Handle mock_action_3:behavior::MockAction 3"));
+    assert!(log_messages[10].contains("Status mock_composite:behavior::MockComposite mock_action_3:behavior::MockAction Success"));
+    assert!(log_messages[11].contains("Status mock_decorator:behavior::MockDecorator Success"));
+    assert!(log_messages[12].contains("Status main:behavior::MainActor Success"));
 
     // Export the database for debugging
     dbg_export_db!(engine);

@@ -236,14 +236,13 @@ impl Default for SendOptions {
 /// A unique identifier for a distributed actor
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActorId {
-    id: RecordId,
     name: Cow<'static, str>,
     kind: Cow<'static, str>,
 }
 
 impl std::fmt::Display for ActorId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.id)
+        write!(f, "{}:{}", &self.name, &self.kind)
     }
 }
 
@@ -265,8 +264,11 @@ impl ActorId {
     /// Returns a new `ActorId` instance with the generated id and the type name of the actor.
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
         let name = uid.into();
-        let id = RecordId::from_table_key(DB_TABLE_ACTOR, name.as_ref());
-        Self { id, kind: type_name::<T>().into(), name }
+        Self { kind: type_name::<T>().into(), name }
+    }
+
+    pub fn record_id(&self) -> RecordId {
+        RecordId::from_table_key(DB_TABLE_ACTOR, self.name.as_ref())
     }
 
     pub fn kind(&self) -> &str {
@@ -360,7 +362,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             }
 
             // Check if the actor already exists
-            let actor_record: Option<ActorRecord> = engine.db().select(&id.id).await.map_err(SystemActorError::from)?;
+            let actor_record: Option<ActorRecord> =
+                engine.db().select(&id.record_id()).await.map_err(SystemActorError::from)?;
 
             if let Some(actor_record) = actor_record {
                 // Actor exists, apply options
@@ -368,7 +371,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     SpawnExistsOptions::Reset => {
                         // Reset the actor by deleting its record
                         let _: Option<ActorRecord> =
-                            engine.db().delete(&id.id).await.map_err(SystemActorError::from)?;
+                            engine.db().delete(&id.record_id()).await.map_err(SystemActorError::from)?;
                         // We'll create a new record below
                     }
                     SpawnExistsOptions::Error => {
@@ -391,7 +394,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
 
             // Create or update actor record in the database
-            let content = ActorRecord { id: id.id.clone(), kind: type_name::<Self>().into(), state: actor_state };
+            let content = ActorRecord { id: id.record_id(), kind: type_name::<Self>().into(), state: actor_state };
             let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
@@ -442,7 +445,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             // Serialize actor properties
             let actor_state = serde_json::to_value(self).map_err(SystemActorError::from)?;
 
-            let record_id = ctx.id().id.clone();
+            let record_id = ctx.id().record_id();
 
             // Update actor record in the database
             let content = ActorRecord { id: record_id.clone(), kind: type_name::<Self>().into(), state: actor_state };
@@ -474,7 +477,7 @@ pub struct ActorContext<T: Actor> {
 impl<T: Actor> ActorContext<T> {
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
         let query = include_str!("../sql/unreplied_messages.surql");
-        let mut res = self.engine().db().query(query).bind(("rx", self.id.id.clone())).await?;
+        let mut res = self.engine().db().query(query).bind(("rx", self.id.record_id())).await?;
         let existing_messages: Vec<FrameMessage> = res.take(0)?;
         trace!("unreplied_messages: {:?}", existing_messages);
         Ok(existing_messages)
@@ -494,7 +497,7 @@ impl<T: Actor> ActorContext<T> {
     pub async fn health(&self) -> bool {
         // Check if the actor is still in the database
         let record: Result<Option<ActorRecord>, SystemActorError> =
-            self.engine().db().select(&self.id.id).await.map_err(SystemActorError::from);
+            self.engine().db().select(&self.id.record_id()).await.map_err(SystemActorError::from);
         if let Ok(Some(_)) = record {
             true
         } else {
@@ -504,7 +507,8 @@ impl<T: Actor> ActorContext<T> {
 
     /// Kill the actor
     pub async fn kill(&self) -> Result<(), SystemActorError> {
-        let _: Option<ActorRecord> = self.engine().db().delete(&self.id.id).await.map_err(SystemActorError::from)?;
+        let _: Option<ActorRecord> =
+            self.engine().db().delete(&self.id.record_id()).await.map_err(SystemActorError::from)?;
         Ok(())
     }
 
@@ -526,12 +530,12 @@ impl<T: Actor> ActorContext<T> {
         let request = FrameMessage {
             id: request_id.clone(),
             name: name.into(),
-            tx: self.id().id.clone(),
-            rx: to.id.clone(),
+            tx: self.id().record_id(),
+            rx: to.record_id(),
             msg: msg_value.clone(),
         };
 
-        debug!("[{}] msg-send {} {} {} {}", &self.id().id, name, &request.id, &to.id, &msg_value);
+        debug!("[{}] msg-send {} {} {} {}", &self.id().record_id(), name, &request.id, &to.record_id(), &msg_value);
 
         let db = self.engine().db().clone();
 
@@ -707,7 +711,7 @@ impl<T: Actor> ActorContext<T> {
         let response = match notification.action {
             Action::Create => {
                 let data = &notification.data;
-                debug!("[{}] msg-done {} {} {} {}", &self.id().id, &data.name, &data.id, &data.rx, &data.msg);
+                debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
                 Ok(data.clone())
             }
             _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
@@ -764,8 +768,8 @@ impl<T: Actor> ActorContext<T> {
         let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
 
         // Assert request.rx == self, can only reply to messages sent to us
-        if request.rx != self.id().id {
-            return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().id.clone()));
+        if request.rx != self.id().record_id() {
+            return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().record_id()));
         }
 
         let reply = FrameReply {
@@ -777,7 +781,7 @@ impl<T: Actor> ActorContext<T> {
             err: err_value.clone(),
         };
 
-        debug!("[{}] msg-rply {} {} {} {}", &self.id().id, &reply.name, &reply_id, &reply.tx, &msg_value);
+        debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &msg_value);
 
         let reply_query = include_str!("../sql/reply.surql");
 
@@ -817,8 +821,8 @@ impl<T: Actor> ActorContext<T> {
         let unreplied_messages = self.unreplied_messages().await?;
         let unreplied_stream = futures::stream::iter(unreplied_messages).map(Ok);
 
-        let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().id);
-        debug!("[{}] msg-live {}", &self.id().id, &query);
+        let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().record_id());
+        debug!("[{}] msg-live {}", &self.id().record_id(), &query);
         let mut res = self.engine().db().query(&query).await?;
         let live_query = res.stream::<Notification<FrameMessage>>(0)?;
         let self_id = self.id().clone();
@@ -838,10 +842,15 @@ impl<T: Actor> ActorContext<T> {
                 Ok(frame) => {
                     debug!(
                         "[{}] msg-recv {} {} {} -> {} {}",
-                        &self_id.id, &frame.name, &frame.id, &frame.tx, &frame.rx, &frame.msg
+                        &self_id.record_id(),
+                        &frame.name,
+                        &frame.id,
+                        &frame.tx,
+                        &frame.rx,
+                        &frame.msg
                     );
                 }
-                Err(error) => debug!("msg-recv {} {:?}", self_id.id, error),
+                Err(error) => debug!("msg-recv {} {:?}", self_id.record_id(), error),
             });
 
         let chained_stream = unreplied_stream.chain(live_query);
