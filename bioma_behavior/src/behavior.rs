@@ -27,6 +27,9 @@ pub trait Behavior: Sized + Message<BehaviorTick> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BehaviorTick;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BehaviorCancel;
+
 /// Represents the final status of a behavior after execution.
 ///
 /// Due to the asynchronous nature of behavior execution, behaviors that haven't
@@ -65,13 +68,13 @@ pub enum Node<'a> {
 /// Represents an Action node in a behavior tree.
 ///
 /// Action nodes are leaf nodes that perform specific tasks when executed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Action {}
 
 /// Represents a Decorator node in a behavior tree.
 ///
 /// Decorator nodes have a single child and can modify the behavior of their child node.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Decorator {
     /// The ActorId of the child node.
     pub child: ActorId,
@@ -80,7 +83,7 @@ pub struct Decorator {
 /// Represents a Composite node in a behavior tree.
 ///
 /// Composite nodes can have multiple children and define how these children are executed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Composite {
     /// A vector of ActorIds representing the children of this composite node.
     pub children: Vec<ActorId>,

@@ -1,3 +1,3 @@
 mod wait;
 
-pub use wait::Wait;
+pub use wait::{Wait, WaitFactory};

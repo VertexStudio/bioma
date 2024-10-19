@@ -59,6 +59,8 @@ pub enum SystemActorError {
     UrlError(#[from] url::ParseError),
     #[error("Join handle error: {0}")]
     JoinHandle(#[from] tokio::task::JoinError),
+    #[error("Actor tag already registered: {0}")]
+    ActorTagAlreadyRegistered(Cow<'static, str>),
 }
 
 impl ActorError for SystemActorError {}
@@ -970,13 +972,13 @@ mod tests {
         // Spawn the ping and pong actors
         let (mut ping_ctx, mut ping_actor) = Actor::spawn(
             engine.clone(),
-            ping_id,
+            ping_id.clone(),
             PingActor { pong_id: pong_id.clone(), max_attempts: 5 },
             SpawnOptions::default(),
         )
         .await?;
         let (mut pong_ctx, mut pong_actor) =
-            Actor::spawn(engine.clone(), pong_id, PongActor { times: 3 }, SpawnOptions::default()).await?;
+            Actor::spawn(engine.clone(), pong_id.clone(), PongActor { times: 3 }, SpawnOptions::default()).await?;
 
         // Check health of the actors
         let ping_health = ping_ctx.health().await;

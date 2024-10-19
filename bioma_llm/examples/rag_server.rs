@@ -232,7 +232,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         Ok(mut context) => {
             // Reverse context to put most important last
             context.context.reverse();
-            
+
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
