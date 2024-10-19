@@ -20,6 +20,20 @@ impl Behavior for Wait {
     }
 }
 
+pub struct WaitFactory;
+
+impl ActorFactory for WaitFactory {
+    fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
+        let engine = engine.clone();
+        let config: Wait = serde_json::from_value(config.clone())?;
+        Ok(tokio::spawn(async move {
+            let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
+            actor.start(&mut ctx).await?;
+            Ok(())
+        }))
+    }
+}
+
 impl Message<BehaviorTick> for Wait {
     type Response = BehaviorStatus;
 

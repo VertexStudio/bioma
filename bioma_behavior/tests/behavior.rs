@@ -49,7 +49,7 @@ impl Actor for MockAction {
 }
 
 // MockDecorator behavior
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MockDecorator {
     pub node: behavior::Decorator,
 }
@@ -91,7 +91,7 @@ impl Actor for MockDecorator {
 }
 
 // MockComposite behavior
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MockComposite {
     pub node: behavior::Composite,
 }

@@ -1,5 +1,6 @@
 mod actor;
 mod engine;
+mod factory;
 mod util;
 
 pub use crate::actor::{
@@ -7,6 +8,7 @@ pub use crate::actor::{
     SpawnOptions, SystemActorError,
 };
 pub use crate::engine::{Engine, EngineOptions, Record};
+pub use crate::factory::{ActorFactory, ActorHandle, ActorTagRegistry};
 pub use crate::util::Relay;
 pub use futures::{Future, StreamExt};
 

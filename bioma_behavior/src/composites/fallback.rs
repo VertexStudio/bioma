@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// The `Fallback` composite node processes its children one by one in order. It returns success as soon as one
 /// child node succeeds. If a child fails, it proceeds to the next one. If all children fail,
 /// then the `Fallback` node fails.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Fallback {
     pub node: behavior::Composite,
 }

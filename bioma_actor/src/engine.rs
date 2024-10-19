@@ -1,4 +1,5 @@
 use crate::actor::SystemActorError;
+use crate::factory::{ActorFactory, ActorTagRegistry};
 use crate::util::find_project_root;
 use derive_more::Display;
 use object_store::local::LocalFileSystem;
@@ -94,6 +95,7 @@ impl EngineOptions {
 pub struct Engine {
     db: Box<Surreal<Any>>,
     options: EngineOptions,
+    registry: ActorTagRegistry,
 }
 
 impl Engine {
@@ -125,7 +127,7 @@ impl Engine {
         db.signin(Root { username: &options.username, password: &options.password }).await?;
         db.use_ns(options.namespace.clone()).use_db(options.database.clone()).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db), options: options.clone() })
+        Ok(Engine { db: Box::new(db), options: options.clone(), registry: ActorTagRegistry::default() })
     }
 
     pub async fn test() -> Result<Engine, SystemActorError> {
@@ -135,7 +137,7 @@ impl Engine {
         db.connect("memory").await?;
         db.use_ns(options.namespace.clone()).use_db(options.database.clone()).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db), options })
+        Ok(Engine { db: Box::new(db), options, registry: ActorTagRegistry::default() })
     }
 
     pub async fn reset(&self) -> Result<(), SystemActorError> {
@@ -183,6 +185,10 @@ impl Engine {
 
     pub fn info(&self) {
         info!("ns: {}, db: {}, user: {}", self.options.namespace, self.options.database, self.options.username);
+    }
+
+    pub fn registry(&self) -> &ActorTagRegistry {
+        &self.registry
     }
 }
 

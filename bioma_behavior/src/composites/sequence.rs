@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// The `Sequence` composite node processes its children one by one in order. It returns success only if
 /// all child nodes succeed. If a child fails, the `Sequence` node immediately fails. If a child
 /// returns running, the `Sequence` node also returns running.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Sequence {
     pub node: behavior::Composite,
 }
