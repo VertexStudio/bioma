@@ -14,7 +14,21 @@ pub struct Fallback {
 
 impl Behavior for Fallback {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(&self.node)
+        behavior::Node::Composite(self.node.clone())
+    }
+}
+
+pub struct FallbackFactory;
+
+impl ActorFactory for FallbackFactory {
+    fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
+        let engine = engine.clone();
+        let config: Fallback = serde_json::from_value(config.clone())?;
+        Ok(tokio::spawn(async move {
+            let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
+            actor.start(&mut ctx).await?;
+            Ok(())
+        }))
     }
 }
 
@@ -39,7 +53,7 @@ impl Message<BehaviorTick> for Fallback {
 }
 
 impl Actor for Fallback {
-    type Error = BehaviorError;
+    type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
         let mut stream = ctx.recv().await?;

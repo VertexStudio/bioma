@@ -16,7 +16,7 @@ struct MockAction {
 
 impl Behavior for MockAction {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Action(&self.node)
+        behavior::Node::Action(self.node.clone())
     }
 }
 
@@ -56,7 +56,7 @@ struct MockDecorator {
 
 impl Behavior for MockDecorator {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Decorator(&self.node)
+        behavior::Node::Decorator(self.node.clone())
     }
 }
 
@@ -98,7 +98,7 @@ struct MockComposite {
 
 impl Behavior for MockComposite {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(&self.node)
+        behavior::Node::Composite(self.node.clone())
     }
 }
 
@@ -185,10 +185,8 @@ async fn test_behavior_mock() -> Result<(), SystemActorError> {
 
     // Save behavior tree to output debug
     let tree = serde_json::to_string_pretty(&mock_decorator).unwrap();
-    tokio::fs::write(
-        output_dir.join("debug").join("test_behavior_mock.json"),
-        tree
-    ).await?;
+    tokio::fs::write(output_dir.join("debug").join("test_behavior_mock.json"), &tree).await?;
+    println!("{:#?}", &mock_decorator);
 
     // Spawn the actors
     let (mut mock_action_0_ctx, mut mock_action_0) =
@@ -254,13 +252,17 @@ async fn test_behavior_mock() -> Result<(), SystemActorError> {
     assert!(log_messages[1].contains("Handle mock_decorator:behavior::MockDecorator Decorator"));
     assert!(log_messages[2].contains("Handle mock_composite:behavior::MockComposite Composite"));
     assert!(log_messages[3].contains("Handle mock_action_0:behavior::MockAction 0"));
-    assert!(log_messages[4].contains("Status mock_composite:behavior::MockComposite mock_action_0:behavior::MockAction Success"));
+    assert!(log_messages[4]
+        .contains("Status mock_composite:behavior::MockComposite mock_action_0:behavior::MockAction Success"));
     assert!(log_messages[5].contains("Handle mock_action_1:behavior::MockAction 1"));
-    assert!(log_messages[6].contains("Status mock_composite:behavior::MockComposite mock_action_1:behavior::MockAction Success"));
+    assert!(log_messages[6]
+        .contains("Status mock_composite:behavior::MockComposite mock_action_1:behavior::MockAction Success"));
     assert!(log_messages[7].contains("Handle mock_action_2:behavior::MockAction 2"));
-    assert!(log_messages[8].contains("Status mock_composite:behavior::MockComposite mock_action_2:behavior::MockAction Success"));
+    assert!(log_messages[8]
+        .contains("Status mock_composite:behavior::MockComposite mock_action_2:behavior::MockAction Success"));
     assert!(log_messages[9].contains("Handle mock_action_3:behavior::MockAction 3"));
-    assert!(log_messages[10].contains("Status mock_composite:behavior::MockComposite mock_action_3:behavior::MockAction Success"));
+    assert!(log_messages[10]
+        .contains("Status mock_composite:behavior::MockComposite mock_action_3:behavior::MockAction Success"));
     assert!(log_messages[11].contains("Status mock_decorator:behavior::MockDecorator Success"));
     assert!(log_messages[12].contains("Status main:behavior::MainActor Success"));
 
