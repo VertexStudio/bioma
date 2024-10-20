@@ -4,31 +4,30 @@ use bon::Builder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// Waits for a specified duration, then succeeds.
+/// Delays execution before proceeding with its child node.
 ///
-/// The `Wait` action pauses for the given duration when ticked and always returns success after the
-/// delay period has elapsed.
+/// The `Delay` decorator node pauses for a specified duration before executing its child node. It returns the result
+/// of the child node's execution.
 #[derive(Builder, Debug, Serialize, Deserialize)]
-pub struct Wait {
+pub struct Delay {
     #[serde(with = "humantime_serde")]
     pub duration: Duration,
     #[serde(skip)]
     #[builder(skip)]
-    pub node: behavior::Action,
+    pub node: behavior::Decorator,
 }
 
-impl Behavior for Wait {
+impl Behavior for Delay {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Action(&self.node)
+        behavior::Node::Decorator(&self.node)
     }
 }
 
-pub struct WaitFactory;
+pub struct DelayFactory;
 
-impl ActorFactory for WaitFactory {
+impl ActorFactory for DelayFactory {
     fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
-        let engine = engine.clone();
-        let config: Wait = serde_json::from_value(config.clone())?;
+        let config: Delay = serde_json::from_value(config.clone())?;
         Ok(tokio::spawn(async move {
             let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
             actor.start(&mut ctx).await?;
@@ -37,28 +36,33 @@ impl ActorFactory for WaitFactory {
     }
 }
 
-impl Message<BehaviorTick> for Wait {
+impl Message<BehaviorTick> for Delay {
     type Response = BehaviorStatus;
 
     async fn handle(
         &mut self,
-        _ctx: &mut ActorContext<Self>,
+        ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
         tokio::time::sleep(self.duration).await;
-        Ok(BehaviorStatus::Success)
+        let Some(child) = &self.node.child else {
+            return Ok(BehaviorStatus::Success);
+        };
+        let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
+        match status {
+            Ok(status) => Ok(status),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
-impl Actor for Wait {
+impl Actor for Delay {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
-                self.reply(ctx, &BehaviorTick, &frame).await?;
-            }
+            self.reply(ctx, &BehaviorTick, &frame).await?;
         }
         Ok(())
     }

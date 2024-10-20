@@ -2,31 +2,39 @@ use crate::prelude::*;
 use bioma_actor::prelude::*;
 use bon::Builder;
 use serde::{Deserialize, Serialize};
+use tracing::{error, info, warn};
 
-/// Executes child nodes sequentially until one fails or all succeed.
+/// Logs a message at the specified level.
 ///
-/// The `Sequence` composite node processes its children one by one in order. It returns success only if
-/// all child nodes succeed. If a child fails, the `Sequence` node immediately fails. If a child
-/// returns running, the `Sequence` node also returns running.
+/// The `Log` action logs a message when ticked and always returns success.
 #[derive(Builder, Debug, Serialize, Deserialize)]
-pub struct Sequence {
+pub struct Log {
+    pub level: LogLevel,
+    pub text: String,
     #[serde(skip)]
     #[builder(skip)]
-    pub node: behavior::Composite,
+    pub node: behavior::Action,
 }
 
-impl Behavior for Sequence {
+#[derive(Debug, Serialize, Deserialize)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+}
+
+impl Behavior for Log {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(&self.node)
+        behavior::Node::Action(&self.node)
     }
 }
 
-pub struct SequenceFactory;
+pub struct LogFactory;
 
-impl ActorFactory for SequenceFactory {
+impl ActorFactory for LogFactory {
     fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
         let engine = engine.clone();
-        let config: Sequence = serde_json::from_value(config.clone())?;
+        let config: Log = serde_json::from_value(config.clone())?;
         Ok(tokio::spawn(async move {
             let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
             actor.start(&mut ctx).await?;
@@ -35,27 +43,24 @@ impl ActorFactory for SequenceFactory {
     }
 }
 
-impl Message<BehaviorTick> for Sequence {
+impl Message<BehaviorTick> for Log {
     type Response = BehaviorStatus;
 
     async fn handle(
         &mut self,
-        ctx: &mut ActorContext<Self>,
+        _ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        for child in &self.node.children {
-            let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
-            match status {
-                Ok(BehaviorStatus::Success) => continue,
-                Ok(BehaviorStatus::Failure) => return Ok(BehaviorStatus::Failure),
-                Err(_e) => return Ok(BehaviorStatus::Failure),
-            }
+        match self.level {
+            LogLevel::Error => error!("{}", self.text),
+            LogLevel::Warn => warn!("{}", self.text),
+            LogLevel::Info => info!("{}", self.text),
         }
         Ok(BehaviorStatus::Success)
     }
 }
 
-impl Actor for Sequence {
+impl Actor for Log {
     type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
