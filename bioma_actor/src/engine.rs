@@ -1,5 +1,5 @@
 use crate::actor::SystemActorError;
-use crate::factory::{ActorFactory, ActorTagRegistry};
+use crate::factory::ActorTagRegistry;
 use crate::util::find_project_root;
 use derive_more::Display;
 use object_store::local::LocalFileSystem;

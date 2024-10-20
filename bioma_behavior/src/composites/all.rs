@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use bioma_actor::prelude::*;
+use bon::Builder;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -8,14 +9,16 @@ use serde::{Deserialize, Serialize};
 /// The `All` composite node runs each of its child nodes concurrently. If any child node fails, the `All` node
 /// immediately fails and all other child nodes are interrupted; otherwise, it succeeds once all
 /// child nodes have successfully completed.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Builder, Debug, Serialize, Deserialize)]
 pub struct All {
+    #[serde(skip)]
+    #[builder(skip)]
     pub node: behavior::Composite,
 }
 
 impl Behavior for All {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(self.node.clone())
+        behavior::Node::Composite(&self.node)
     }
 }
 

@@ -11,12 +11,13 @@ use tracing_subscriber::{fmt::MakeWriter, layer::SubscriberExt, Layer};
 #[derive(Serialize, Deserialize, Debug)]
 struct MockAction {
     fact: String,
+    #[serde(skip)]
     node: behavior::Action,
 }
 
 impl Behavior for MockAction {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Action(self.node.clone())
+        behavior::Node::Action(&self.node)
     }
 }
 
@@ -51,12 +52,13 @@ impl Actor for MockAction {
 // MockDecorator behavior
 #[derive(Debug, Serialize, Deserialize)]
 struct MockDecorator {
+    #[serde(skip)]
     pub node: behavior::Decorator,
 }
 
 impl Behavior for MockDecorator {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Decorator(self.node.clone())
+        behavior::Node::Decorator(&self.node)
     }
 }
 
@@ -69,7 +71,8 @@ impl Message<BehaviorTick> for MockDecorator {
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
         info!("Handle {} {:?}", ctx.id(), self.node().node_type());
-        let status: BehaviorStatus = ctx.send_as(BehaviorTick, &self.node.child, SendOptions::default()).await?;
+        let status: BehaviorStatus =
+            ctx.send_as(BehaviorTick, &self.node.child.as_ref().unwrap(), SendOptions::default()).await?;
         info!("Status {} {:?}", ctx.id(), status);
         Ok(status)
     }
@@ -93,12 +96,13 @@ impl Actor for MockDecorator {
 // MockComposite behavior
 #[derive(Debug, Serialize, Deserialize)]
 struct MockComposite {
+    #[serde(skip)]
     pub node: behavior::Composite,
 }
 
 impl Behavior for MockComposite {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(self.node.clone())
+        behavior::Node::Composite(&self.node)
     }
 }
 
@@ -181,7 +185,7 @@ async fn test_behavior_mock() -> Result<(), SystemActorError> {
         },
     };
 
-    let mock_decorator = MockDecorator { node: behavior::Decorator { child: mock_composite_id.clone() } };
+    let mock_decorator = MockDecorator { node: behavior::Decorator { child: Some(mock_composite_id.clone()) } };
 
     // Save behavior tree to output debug
     let tree = serde_json::to_string_pretty(&mock_decorator).unwrap();

@@ -51,40 +51,39 @@ pub enum BehaviorStatus {
 ///
 /// This enum defines the three types of nodes that can exist in a behavior tree:
 /// Action, Decorator, and Composite.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Node {
+pub enum Node<'a> {
     /// An Action node, which represents a leaf node in the behavior tree.
     /// Actions are responsible for performing specific tasks.
-    Action(Action),
+    Action(&'a Action),
 
     /// A Decorator node, which has a single child and can modify the behavior
     /// of its child node in some way.
-    Decorator(Decorator),
+    Decorator(&'a Decorator),
 
     /// A Composite node, which can have multiple children and defines how
     /// these children are executed (e.g., in sequence or in parallel).
-    Composite(Composite),
+    Composite(&'a Composite),
 }
 
 /// Represents an Action node in a behavior tree.
 ///
 /// Action nodes are leaf nodes that perform specific tasks when executed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug)]
 pub struct Action {}
 
 /// Represents a Decorator node in a behavior tree.
 ///
 /// Decorator nodes have a single child and can modify the behavior of their child node.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug)]
 pub struct Decorator {
     /// The ActorId of the child node.
-    pub child: ActorId,
+    pub child: Option<ActorId>,
 }
 
 /// Represents a Composite node in a behavior tree.
 ///
 /// Composite nodes can have multiple children and define how these children are executed.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug)]
 pub struct Composite {
     /// A vector of ActorIds representing the children of this composite node.
     pub children: Vec<ActorId>,
@@ -97,7 +96,7 @@ pub enum NodeType {
     Composite,
 }
 
-impl Node {
+impl<'a> Node<'a> {
     pub fn node_type(&self) -> NodeType {
         match self {
             Node::Action(_) => NodeType::Action,

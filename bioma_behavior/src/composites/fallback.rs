@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use bioma_actor::prelude::*;
+use bon::Builder;
 use serde::{Deserialize, Serialize};
 
 /// Executes child nodes sequentially until one succeeds or all fail.
@@ -7,14 +8,16 @@ use serde::{Deserialize, Serialize};
 /// The `Fallback` composite node processes its children one by one in order. It returns success as soon as one
 /// child node succeeds. If a child fails, it proceeds to the next one. If all children fail,
 /// then the `Fallback` node fails.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Builder, Debug, Serialize, Deserialize)]
 pub struct Fallback {
+    #[serde(skip)]
+    #[builder(skip)]
     pub node: behavior::Composite,
 }
 
 impl Behavior for Fallback {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(self.node.clone())
+        behavior::Node::Composite(&self.node)
     }
 }
 
