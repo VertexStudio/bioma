@@ -15,5 +15,9 @@ pub mod prelude {
 
 pub async fn register_behaviors(registry: &bioma_actor::ActorTagRegistry) -> Result<(), bioma_actor::SystemActorError> {
     registry.add("Wait", actions::WaitFactory).await?;
+    registry.add("All", composites::AllFactory).await?;
+    registry.add("Any", composites::AnyFactory).await?;
+    registry.add("Fallback", composites::FallbackFactory).await?;
+    registry.add("Sequence", composites::SequenceFactory).await?;
     Ok(())
 }

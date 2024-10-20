@@ -2,7 +2,6 @@ use crate::prelude::*;
 use bioma_actor::prelude::*;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
 
 /// Executes all child nodes in parallel and succeeds only if all succeed.
 ///
@@ -16,7 +15,21 @@ pub struct All {
 
 impl Behavior for All {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Composite(&self.node)
+        behavior::Node::Composite(self.node.clone())
+    }
+}
+
+pub struct AllFactory;
+
+impl ActorFactory for AllFactory {
+    fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
+        let engine = engine.clone();
+        let config: All = serde_json::from_value(config.clone())?;
+        Ok(tokio::spawn(async move {
+            let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
+            actor.start(&mut ctx).await?;
+            Ok(())
+        }))
     }
 }
 
@@ -48,35 +61,15 @@ impl Message<BehaviorTick> for All {
 }
 
 impl Actor for All {
-    type Error = BehaviorError;
+    type Error = SystemActorError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
-        let (tx, mut rx) = mpsc::channel(100); // Create a channel for the message queue
-
         let mut stream = ctx.recv().await?;
-
-        loop {
-            tokio::select! {
-                Some(Ok(frame)) = stream.next() => {
-                    if let Some(BehaviorCancel) = frame.is::<BehaviorCancel>() {
-                        // Empty the queue and break the loop if BehaviorCancel is received
-                        while rx.try_recv().is_ok() {}
-                        break;
-                    } else {
-                        // Add other messages to the queue
-                        tx.send(frame).await.map_err(|_| BehaviorError::MessageQueue)?;
-                    }
-                }
-                Some(frame) = rx.recv() => {
-                    if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
-                        // Process BehaviorTick messages
-                        self.reply(ctx, &BehaviorTick, &frame).await?;
-                    }
-                }
-                else => break,
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
+                self.reply(ctx, &BehaviorTick, &frame).await?;
             }
         }
-
         Ok(())
     }
 }

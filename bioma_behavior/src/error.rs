@@ -6,8 +6,6 @@ use bioma_actor::{ActorError, SystemActorError};
 pub enum BehaviorError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
-    #[error("Message queue error")]
-    MessageQueue,
 }
 
 impl ActorError for BehaviorError {}

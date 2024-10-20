@@ -1,13 +1,13 @@
-use crate::error::BehaviorError;
+use crate::{behavior::Node, error::BehaviorError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Node {
+struct TreeNode {
     tag: Cow<'static, str>,
     uid: Cow<'static, str>,
-    children: Vec<ActorId>,
+    node: Node,
     #[serde(skip)]
     start_handle: Option<ActorHandle>,
 }

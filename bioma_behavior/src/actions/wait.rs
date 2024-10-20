@@ -16,7 +16,7 @@ pub struct Wait {
 
 impl Behavior for Wait {
     fn node(&self) -> behavior::Node {
-        behavior::Node::Action(&self.node)
+        behavior::Node::Action(self.node.clone())
     }
 }
 

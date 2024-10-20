@@ -3,7 +3,7 @@ mod any;
 mod fallback;
 mod sequence;
 
-pub use all::All;
-pub use any::Any;
-pub use fallback::Fallback;
-pub use sequence::Sequence;
+pub use all::{All, AllFactory};
+pub use any::{Any, AnyFactory};
+pub use fallback::{Fallback, FallbackFactory};
+pub use sequence::{Sequence, SequenceFactory};
