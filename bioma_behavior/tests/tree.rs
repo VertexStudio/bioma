@@ -17,20 +17,31 @@ async fn test_tree_roundtrip() -> Result<(), SystemActorError> {
     let output_dir = engine.output_dir().join("debug").join("test_tree_roundtrip");
     std::fs::create_dir_all(&output_dir).unwrap();
 
+    // ASCII diagram of the behavior tree:
+    //
+    //               Sequence (all_0)
+    //            /      |      |     \
+    //           /       |      |      \
+    //        Wait    Log_0   Log_1   Delay
+    //     (wait_0)  (log_0) (log_1) (delay_0)
+    //                                  |
+    //                                Log_2
+    //                               (log_2)
+
     let wait_0 = actions::Wait::builder().duration(Duration::from_secs(1)).build();
     let log_0 = actions::Log::builder().level(Info).text("Log 0".to_string()).build();
     let log_1 = actions::Log::builder().level(Info).text("Log 1".to_string()).build();
     let log_2 = actions::Log::builder().level(Info).text("Log 2".to_string()).build();
     let delay_0 = decorators::Delay::builder().duration(Duration::from_secs(1)).build();
 
-    let wait_0 = Node::action("Wait", "wait", &wait_0);
+    let wait_0 = Node::action("Wait", "wait_0", &wait_0);
     let log_0 = Node::action("Log", "log_0", &log_0);
     let log_1 = Node::action("Log", "log_1", &log_1);
     let log_2 = Node::action("Log", "log_2", &log_2);
-    let delay_0 = Node::decorator("Delay", "delay", &delay_0, log_2);
+    let delay_0 = Node::decorator("Delay", "delay_0", &delay_0, log_2);
 
     let all_0 = composites::Sequence::builder().build();
-    let all_0 = Node::composite("Sequence", "all", &all_0, vec![wait_0, log_0, log_1, delay_0]);
+    let all_0 = Node::composite("Sequence", "all_0", &all_0, vec![wait_0, log_0, log_1, delay_0]);
 
     let tree = BehaviorTree { root: Some(all_0), handles: Default::default() };
 
