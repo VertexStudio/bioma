@@ -347,7 +347,11 @@ impl Message<IndexGlobs> for Indexer {
                     _ => TextType::Text,
                 };
 
-                let content = tokio::fs::read_to_string(&pathbuf).await;
+                let content = match text_type {
+                    TextType::MarkdownFromPdf(ref content) => Ok(content.clone()),
+                    _ => tokio::fs::read_to_string(&pathbuf).await,
+                };
+
                 let Ok(content) = content else {
                     error!("Failed to index file: {}", pathbuf.display());
                     continue;
