@@ -3,6 +3,7 @@ pub mod embeddings;
 pub mod indexer;
 pub mod rerank;
 pub mod retriever;
+pub mod pdf_to_md;
 
 pub mod prelude {
     pub use crate::chat::{self, Chat, ChatError, ChatMessages};
