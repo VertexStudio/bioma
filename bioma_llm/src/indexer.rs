@@ -1,4 +1,7 @@
-use crate::{embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings}, pdf_to_md::{ConvertToMarkdown, PdfToMarkdown}};
+use crate::{
+    embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings},
+    pdf_to_md::{ConvertToMarkdown, PdfToMarkdown},
+};
 use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -100,7 +103,13 @@ pub enum CodeLanguage {
 }
 
 #[derive(Display, Debug, Clone, Serialize, Deserialize)]
+pub struct MarkdownFromPdf {
+    content: String,
+}
+
+#[derive(Display, Debug, Clone, Serialize, Deserialize)]
 pub enum TextType {
+    MarkdownFromPdf(String),
     Markdown,
     Code(CodeLanguage),
     Text,
@@ -159,6 +168,7 @@ impl Indexer {
         // Convert html to markdown
         let (text_type, content) = match text_type {
             TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
+            TextType::MarkdownFromPdf(pdf) => (TextType::Markdown, pdf),
             _ => (text_type, content),
         };
 
@@ -190,6 +200,7 @@ impl Indexer {
                 .expect("Invalid tree-sitter language");
                 splitter.chunks(&content).collect::<Vec<&str>>()
             }
+            _ => panic!("Invalid text type"),
         };
 
         let start_time = std::time::Instant::now();
@@ -314,44 +325,38 @@ impl Message<IndexGlobs> for Indexer {
                 info!("ext: {:?}", ext);
                 let source = pathbuf.to_string_lossy().to_string();
 
-                let (content, text_type) = if ext != Some("pdf") {
-                    let content_result = tokio::fs::read_to_string(&pathbuf).await;
-                    let Ok(file_content) = content_result else {
-                        error!("Failed to index file: {}", pathbuf.display());
-                        continue;
-                    };
-    
-                    let text_type = match ext {
-                        Some("md") => TextType::Markdown,
-                        Some("rs") => TextType::Code(CodeLanguage::Rust),
-                        Some("py") => TextType::Code(CodeLanguage::Python),
-                        Some("cue") => TextType::Code(CodeLanguage::Cue),
-                        Some("html") => TextType::Code(CodeLanguage::Html),
-                        Some("cpp") => TextType::Code(CodeLanguage::Cpp),
-                        Some("h") => TextType::Text,
-                        _ => TextType::Text,
-                    };
+                let text_type = match ext {
+                    Some("md") => TextType::Markdown,
+                    Some("rs") => TextType::Code(CodeLanguage::Rust),
+                    Some("py") => TextType::Code(CodeLanguage::Python),
+                    Some("cue") => TextType::Code(CodeLanguage::Cue),
+                    Some("html") => TextType::Code(CodeLanguage::Html),
+                    Some("cpp") => TextType::Code(CodeLanguage::Cpp),
+                    Some("h") => TextType::Text,
+                    Some("pdf") => {
+                        let result = ctx
+                            .send::<PdfToMarkdown, ConvertToMarkdown>(
+                                ConvertToMarkdown { file_path: source.clone() },
+                                jsontomarkdown_id,
+                                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                            )
+                            .await;
 
-                    (file_content, text_type)
-                } else {
-                    let result = ctx
-                        .send::<PdfToMarkdown, ConvertToMarkdown>(
-                            ConvertToMarkdown {
-                                file_path: source.clone()
-                            },
-                            jsontomarkdown_id,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                        )
-                        .await;
+                        let Ok(file_content) = result else {
+                            error!("Failed to index file: {}", pathbuf.display());
+                            continue;
+                        };
 
-                    let Ok(file_content) = result else {
-                        error!("Failed to index file: {}", pathbuf.display());
-                        continue;
-                    };
-
-                    (file_content, TextType::Markdown)
+                        TextType::MarkdownFromPdf(file_content)
+                    }
+                    _ => TextType::Text,
                 };
 
+                let content = tokio::fs::read_to_string(&pathbuf).await;
+                let Ok(content) = content else {
+                    error!("Failed to index file: {}", pathbuf.display());
+                    continue;
+                };
 
                 match self
                     .index_text(
@@ -393,7 +398,13 @@ pub struct Indexer {
 
 impl Default for Indexer {
     fn default() -> Self {
-        Self { embeddings: Embeddings::default(), jsontomarkdown: PdfToMarkdown {}, tag: DEFAULT_INDEXER_TAG.into(), embeddings_id: None, jsontomarkdown_id: None }
+        Self {
+            embeddings: Embeddings::default(),
+            jsontomarkdown: PdfToMarkdown {},
+            tag: DEFAULT_INDEXER_TAG.into(),
+            embeddings_id: None,
+            jsontomarkdown_id: None,
+        }
     }
 }
 
@@ -412,7 +423,8 @@ impl Actor for Indexer {
             self.jsontomarkdown.clone(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
-        .await.expect("error init to markdown");
+        .await
+        .expect("error init to markdown");
 
         // Start the jsontomarkdown actor
         let to_markdown_handle = tokio::spawn(async move {
