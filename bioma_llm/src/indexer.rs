@@ -1,4 +1,4 @@
-use crate::embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings};
+use crate::{embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings}, pdf_to_md::{ConvertToMarkdown, PdfToMarkdown}};
 use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,8 @@ pub enum IndexerError {
     ChunkConfig(#[from] text_splitter::ChunkConfigError),
     #[error("Embeddings actor not initialized")]
     EmbeddingsActorNotInitialized,
+    #[error("JsonToMarkdown actor not initialized")]
+    JsonToMarkdownActorNotInitialized,
 }
 
 impl ActorError for IndexerError {}
@@ -285,6 +287,9 @@ impl Message<IndexGlobs> for Indexer {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(IndexerError::EmbeddingsActorNotInitialized);
         };
+        let Some(jsontomarkdown_id) = &self.jsontomarkdown_id else {
+            return Err(IndexerError::JsonToMarkdownActorNotInitialized);
+        };
 
         let total_index_globs_time = std::time::Instant::now();
         let mut indexed = 0;
@@ -304,24 +309,49 @@ impl Message<IndexGlobs> for Indexer {
                 };
 
                 info!("Indexing path: {}", &pathbuf.display());
-                let content = tokio::fs::read_to_string(&pathbuf).await;
-                let Ok(content) = content else {
-                    error!("Failed to index file: {}", pathbuf.display());
-                    continue;
-                };
+                let ext = pathbuf.extension().and_then(|ext| ext.to_str());
+
+                info!("ext: {:?}", ext);
                 let source = pathbuf.to_string_lossy().to_string();
 
-                let ext = pathbuf.extension().and_then(|ext| ext.to_str());
-                let text_type = match ext {
-                    Some("md") => TextType::Markdown,
-                    Some("rs") => TextType::Code(CodeLanguage::Rust),
-                    Some("py") => TextType::Code(CodeLanguage::Python),
-                    Some("cue") => TextType::Code(CodeLanguage::Cue),
-                    Some("html") => TextType::Code(CodeLanguage::Html),
-                    Some("cpp") => TextType::Code(CodeLanguage::Cpp),
-                    Some("h") => TextType::Text,
-                    _ => TextType::Text,
+                let (content, text_type) = if ext != Some("pdf") {
+                    let content_result = tokio::fs::read_to_string(&pathbuf).await;
+                    let Ok(file_content) = content_result else {
+                        error!("Failed to index file: {}", pathbuf.display());
+                        continue;
+                    };
+    
+                    let text_type = match ext {
+                        Some("md") => TextType::Markdown,
+                        Some("rs") => TextType::Code(CodeLanguage::Rust),
+                        Some("py") => TextType::Code(CodeLanguage::Python),
+                        Some("cue") => TextType::Code(CodeLanguage::Cue),
+                        Some("html") => TextType::Code(CodeLanguage::Html),
+                        Some("cpp") => TextType::Code(CodeLanguage::Cpp),
+                        Some("h") => TextType::Text,
+                        _ => TextType::Text,
+                    };
+
+                    (file_content, text_type)
+                } else {
+                    let result = ctx
+                        .send::<PdfToMarkdown, ConvertToMarkdown>(
+                            ConvertToMarkdown {
+                                file_path: source.clone()
+                            },
+                            jsontomarkdown_id,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        )
+                        .await;
+
+                    let Ok(file_content) = result else {
+                        error!("Failed to index file: {}", pathbuf.display());
+                        continue;
+                    };
+
+                    (file_content, TextType::Markdown)
                 };
+
 
                 match self
                     .index_text(
@@ -354,14 +384,16 @@ impl Message<IndexGlobs> for Indexer {
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
+    pub jsontomarkdown: PdfToMarkdown,
     #[builder(default = DEFAULT_INDEXER_TAG.into())]
     pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
+    jsontomarkdown_id: Option<ActorId>,
 }
 
 impl Default for Indexer {
     fn default() -> Self {
-        Self { embeddings: Embeddings::default(), tag: DEFAULT_INDEXER_TAG.into(), embeddings_id: None }
+        Self { embeddings: Embeddings::default(), jsontomarkdown: PdfToMarkdown {}, tag: DEFAULT_INDEXER_TAG.into(), embeddings_id: None, jsontomarkdown_id: None }
     }
 }
 
@@ -370,6 +402,25 @@ impl Actor for Indexer {
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
         let self_id = ctx.id().clone();
+        let to_markdown_id = ActorId::of::<PdfToMarkdown>("/jsontomarkdown");
+        self.jsontomarkdown_id = Some(to_markdown_id.clone());
+
+        // Spawn the jsontomarkdown actor
+        let (mut to_markdown_ctx, mut to_markdown_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            to_markdown_id.clone(),
+            self.jsontomarkdown.clone(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await.expect("error init to markdown");
+
+        // Start the jsontomarkdown actor
+        let to_markdown_handle = tokio::spawn(async move {
+            if let Err(e) = to_markdown_actor.start(&mut to_markdown_ctx).await {
+                error!("JsonToMarkdown actor error: {}", e);
+            }
+        });
+
         let embeddings_id = ActorId::of::<Embeddings>(format!("{}/embeddings", self_id.name()));
         self.embeddings_id = Some(embeddings_id.clone());
 
@@ -402,6 +453,7 @@ impl Actor for Indexer {
             }
         }
         embeddings_handle.abort();
+        to_markdown_handle.abort();
         Ok(())
     }
 }
