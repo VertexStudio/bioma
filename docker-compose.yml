@@ -35,6 +35,23 @@ services:
       - bioma-surreal_data:/data
     command: chown -R 1000:1000 /data
 
+  pdf-analyzer:
+    image: huridocs/pdf-document-layout-analysis:v0.0.14.1
+    container_name: pdf-analyzer
+    ports:
+      - "5060:5060"
+    entrypoint: ["./start.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+    restart: always
+
 volumes:
   bioma-ollama_data:
   bioma-surreal_data:
