@@ -103,11 +103,6 @@ pub enum CodeLanguage {
 }
 
 #[derive(Display, Debug, Clone, Serialize, Deserialize)]
-pub struct MarkdownFromPdf {
-    content: String,
-}
-
-#[derive(Display, Debug, Clone, Serialize, Deserialize)]
 pub enum TextType {
     MarkdownFromPdf(String),
     Markdown,
