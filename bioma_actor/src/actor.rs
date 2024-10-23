@@ -226,7 +226,7 @@ where
 #[derive(bon::Builder)]
 pub struct SendOptions {
     /// The maximum duration to wait for a reply before timing out.
-    timeout: std::time::Duration,
+    pub timeout: std::time::Duration,
 }
 
 impl Default for SendOptions {
