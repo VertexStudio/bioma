@@ -337,9 +337,12 @@ impl Message<IndexGlobs> for Indexer {
                             )
                             .await;
 
-                        let Ok(file_content) = result else {
-                            error!("Failed to index file: {}", pathbuf.display());
-                            continue;
+                        let file_content = match result {
+                            Ok(content) => content,
+                            Err(e) => {
+                                error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                                continue;
+                            }
                         };
 
                         TextType::MarkdownFromPdf(file_content)
@@ -347,8 +350,8 @@ impl Message<IndexGlobs> for Indexer {
                     _ => TextType::Text,
                 };
 
-                let content = match text_type {
-                    TextType::MarkdownFromPdf(ref content) => Ok(content.clone()),
+                let content = match &text_type {
+                    TextType::MarkdownFromPdf(content) => Ok(content.clone()),
                     _ => tokio::fs::read_to_string(&pathbuf).await,
                 };
 
