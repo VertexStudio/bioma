@@ -1,0 +1,53 @@
+{
+  "root": {
+    "type": "Composite",
+    "tag": "Sequence",
+    "uid": "all_0",
+    "config": {},
+    "children": [
+      {
+        "type": "Action",
+        "tag": "Wait",
+        "uid": "wait_0",
+        "config": {
+          "duration": "1s"
+        }
+      },
+      {
+        "type": "Action",
+        "tag": "Log",
+        "uid": "log_0",
+        "config": {
+          "level": "Info",
+          "text": "Log 0"
+        }
+      },
+      {
+        "type": "Action",
+        "tag": "Log",
+        "uid": "log_1",
+        "config": {
+          "level": "Info",
+          "text": "Log 1"
+        }
+      },
+      {
+        "type": "Decorator",
+        "tag": "Delay",
+        "uid": "delay_0",
+        "config": {
+          "duration": "1s"
+        },
+        "child": {
+          "type": "Action",
+          "tag": "Log",
+          "uid": "log_2",
+          "config": {
+            "level": "Info",
+            "text": "Log 2"
+          }
+        }
+      }
+    ]
+  }
+}

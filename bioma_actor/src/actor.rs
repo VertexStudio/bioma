@@ -2,7 +2,7 @@ use crate::engine::{Engine, Record};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::any::type_name;
+// use std::any::type_name;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::future::Future;
@@ -39,8 +39,8 @@ pub enum SystemActorError {
     // Id mismatch a and b
     #[error("Id mismatch: {0:?} {1:?}")]
     IdMismatch(RecordId, RecordId),
-    #[error("Actor kind mismatch: {0} {1}")]
-    ActorKindMismatch(Cow<'static, str>, Cow<'static, str>),
+    #[error("Actor tag mismatch: {0} {1}")]
+    ActorTagMismatch(Cow<'static, str>, Cow<'static, str>),
     // Actor already exists
     #[error("Actor already exists: {0}")]
     ActorAlreadyExists(ActorId),
@@ -61,6 +61,8 @@ pub enum SystemActorError {
     JoinHandle(#[from] tokio::task::JoinError),
     #[error("Actor tag already registered: {0}")]
     ActorTagAlreadyRegistered(Cow<'static, str>),
+    #[error("Actor tag not found: {0}")]
+    ActorTagNotFound(Cow<'static, str>),
 }
 
 impl ActorError for SystemActorError {}
@@ -96,7 +98,7 @@ impl FrameMessage {
     where
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
     {
-        if self.name == type_name::<M>() {
+        if self.name == std::any::type_name::<M>() {
             serde_json::from_value(self.msg.clone()).ok()
         } else {
             None
@@ -234,15 +236,15 @@ impl Default for SendOptions {
 }
 
 /// A unique identifier for a distributed actor
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash, Eq)]
 pub struct ActorId {
     name: Cow<'static, str>,
-    kind: Cow<'static, str>,
+    tag: Cow<'static, str>,
 }
 
 impl std::fmt::Display for ActorId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", &self.name, &self.kind)
+        write!(f, "{}:{}", &self.name, &self.tag)
     }
 }
 
@@ -264,15 +266,19 @@ impl ActorId {
     /// Returns a new `ActorId` instance with the generated id and the type name of the actor.
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
         let name = uid.into();
-        Self { kind: type_name::<T>().into(), name }
+        Self { tag: std::any::type_name::<T>().into(), name }
+    }
+
+    pub fn with_tag(name: impl Into<Cow<'static, str>>, tag: impl Into<Cow<'static, str>>) -> Self {
+        Self { tag: tag.into(), name: name.into() }
     }
 
     pub fn record_id(&self) -> RecordId {
         RecordId::from_table_key(DB_TABLE_ACTOR, self.name.as_ref())
     }
 
-    pub fn kind(&self) -> &str {
-        &self.kind
+    pub fn tag(&self) -> &str {
+        &self.tag
     }
 
     pub fn name(&self) -> &str {
@@ -283,7 +289,7 @@ impl ActorId {
 /// Options for spawning an actor.
 ///
 /// Configuration options for the actor spawning process.
-#[derive(bon::Builder)]
+#[derive(bon::Builder, Clone)]
 pub struct SpawnOptions {
     /// Specifies how to handle the case when an actor with the same ID already exists.
     ///
@@ -299,6 +305,7 @@ impl Default for SpawnOptions {
 }
 
 /// Options for handling existing actors during spawn.
+#[derive(Clone)]
 pub enum SpawnExistsOptions {
     /// Reset the actor if it already exists.
     ///
@@ -341,7 +348,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
     /// # Errors
     ///
     /// This function will return an error if:
-    /// - The actor kind in the `id` doesn't match the actual actor type.
+    /// - The actor tag in the `id` doesn't match the actual actor type.
     /// - Serialization of the actor state fails.
     /// - Creating or updating the actor record in the database fails.
     /// - The actor already exists and `SpawnOptions::Error` is specified.
@@ -353,14 +360,6 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
         options: SpawnOptions,
     ) -> impl Future<Output = Result<(ActorContext<Self>, Self), Self::Error>> {
         async move {
-            // Check if the actor kind matches
-            if id.kind != type_name::<Self>() {
-                return Err(Self::Error::from(SystemActorError::ActorKindMismatch(
-                    id.kind.clone(),
-                    type_name::<Self>().into(),
-                )));
-            }
-
             // Check if the actor already exists
             let actor_record: Option<ActorRecord> =
                 engine.db().select(&id.record_id()).await.map_err(SystemActorError::from)?;
@@ -394,7 +393,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
 
             // Create or update actor record in the database
-            let content = ActorRecord { id: id.record_id(), kind: type_name::<Self>().into(), state: actor_state };
+            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: actor_state };
             let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
@@ -448,7 +447,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let record_id = ctx.id().record_id();
 
             // Update actor record in the database
-            let content = ActorRecord { id: record_id.clone(), kind: type_name::<Self>().into(), state: actor_state };
+            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: actor_state };
 
             let _record: Option<Record> =
                 ctx.engine().db().update(&record_id).content(content).await.map_err(SystemActorError::from)?;
@@ -462,7 +461,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActorRecord {
     id: RecordId,
-    kind: Cow<'static, str>,
+    tag: Cow<'static, str>,
     state: Value,
 }
 
@@ -522,7 +521,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
     {
         let msg_value = serde_json::to_value(&message)?;
-        let name = type_name::<MT>();
+        let name = std::any::type_name::<MT>();
         let msg_id = Id::ulid();
         let request_id = RecordId::from_table_key(DB_TABLE_MESSAGE, msg_id.to_string());
         let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, msg_id.to_string());
@@ -686,12 +685,12 @@ impl<T: Actor> ActorContext<T> {
     /// A `Result` containing either:
     /// - `Ok(RT)`: The successfully received reply of type `RT`.
     /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
-    pub async fn send_as<MT, RT>(&self, message: MT, to: &ActorId, options: SendOptions) -> Result<RT, SystemActorError>
+    pub async fn send_as<MT, RT>(&self, message: MT, to: ActorId, options: SendOptions) -> Result<RT, SystemActorError>
     where
         MT: MessageType,
         RT: MessageType,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to).await?;
         self.wait_for_reply::<RT>(&reply_id, options).await
     }
 
@@ -704,7 +703,7 @@ impl<T: Actor> ActorContext<T> {
 
         let notification = tokio::time::timeout(options.timeout, stream.next())
             .await
-            .map_err(|_| SystemActorError::MessageTimeout(type_name::<RT>().into(), options.timeout))?
+            .map_err(|_| SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout))?
             .ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
 
         let notification: Notification<FrameReply> = notification?;
