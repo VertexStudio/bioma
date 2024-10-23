@@ -2,6 +2,7 @@ use crate::prelude::*;
 use bioma_actor::prelude::*;
 use bon::Builder;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 /// Executes child nodes sequentially until one fails or all succeed.
 ///
@@ -24,12 +25,22 @@ impl Behavior for Sequence {
 pub struct SequenceFactory;
 
 impl ActorFactory for SequenceFactory {
-    fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
+    fn spawn(
+        &self,
+        engine: Engine,
+        config: serde_json::Value,
+        id: ActorId,
+        options: SpawnOptions,
+    ) -> Result<ActorHandle, SystemActorError> {
         let engine = engine.clone();
-        let config: Sequence = serde_json::from_value(config.clone())?;
+        let node: tree::CompositeNode = serde_json::from_value(config.clone()).unwrap();
+        let mut config: Sequence = serde_json::from_value(node.data.config.clone())?;
+        config.node.copy_children(&node);
         Ok(tokio::spawn(async move {
             let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
+            debug!("SequenceFactory::spawn: start {}", ctx.id());
             actor.start(&mut ctx).await?;
+            debug!("SequenceFactory::spawn: end {}", ctx.id());
             Ok(())
         }))
     }
@@ -43,7 +54,8 @@ impl Message<BehaviorTick> for Sequence {
         ctx: &mut ActorContext<Self>,
         _msg: &BehaviorTick,
     ) -> Result<BehaviorStatus, Self::Error> {
-        for child in &self.node.children {
+        // Iterate over all children until one fails
+        for child in self.node.children(ctx, SpawnOptions::default()).await? {
             let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
             match status {
                 Ok(BehaviorStatus::Success) => continue,
@@ -63,6 +75,7 @@ impl Actor for Sequence {
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
                 self.reply(ctx, &BehaviorTick, &frame).await?;
+                break;
             }
         }
         Ok(())

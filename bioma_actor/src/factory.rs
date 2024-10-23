@@ -5,10 +5,16 @@ use std::sync::Arc;
 use tokio::{sync::RwLock, task::JoinHandle};
 use tracing::error;
 
-pub type ActorHandle = Result<JoinHandle<Result<(), SystemActorError>>, SystemActorError>;
+pub type ActorHandle = JoinHandle<Result<(), SystemActorError>>;
 
 pub trait ActorFactory: Send + Sync {
-    fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle;
+    fn spawn(
+        &self,
+        engine: Engine,
+        config: serde_json::Value,
+        id: ActorId,
+        options: SpawnOptions,
+    ) -> Result<ActorHandle, SystemActorError>;
 }
 
 #[derive(Default, Clone)]
@@ -29,6 +35,24 @@ impl ActorTagRegistry {
         }
         map.insert(tag, Box::new(factory));
         Ok(())
+    }
+
+    pub async fn spawn(
+        &self,
+        tag: impl Into<Cow<'static, str>>,
+        engine: Engine,
+        config: serde_json::Value,
+        id: ActorId,
+        options: SpawnOptions,
+    ) -> Result<ActorHandle, SystemActorError> {
+        let tag = tag.into();
+        let factory = self.map.read().await;
+        let factory = factory.get(&tag).ok_or(SystemActorError::ActorTagNotFound(tag))?;
+        let res = factory.spawn(engine, config, id, options);
+        if let Err(e) = &res {
+            panic!("Error spawning actor: {:?}", e);
+        }
+        res
     }
 }
 

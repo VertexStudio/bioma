@@ -3,6 +3,7 @@ use bioma_actor::prelude::*;
 use bon::Builder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tracing::debug;
 
 /// Waits for a specified duration, then succeeds.
 ///
@@ -26,12 +27,21 @@ impl Behavior for Wait {
 pub struct WaitFactory;
 
 impl ActorFactory for WaitFactory {
-    fn spawn(&self, engine: Engine, config: serde_json::Value, id: ActorId, options: SpawnOptions) -> ActorHandle {
+    fn spawn(
+        &self,
+        engine: Engine,
+        config: serde_json::Value,
+        id: ActorId,
+        options: SpawnOptions,
+    ) -> Result<ActorHandle, SystemActorError> {
         let engine = engine.clone();
-        let config: Wait = serde_json::from_value(config.clone())?;
+        let node: tree::ActionNode = serde_json::from_value(config.clone()).unwrap();
+        let config: Wait = serde_json::from_value(node.data.config.clone())?;
         Ok(tokio::spawn(async move {
             let (mut ctx, mut actor) = Actor::spawn(engine, id, config, options).await?;
+            debug!("WaitFactory::spawn: start {}", ctx.id());
             actor.start(&mut ctx).await?;
+            debug!("WaitFactory::spawn: end {}", ctx.id());
             Ok(())
         }))
     }
@@ -58,6 +68,7 @@ impl Actor for Wait {
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(BehaviorTick) = frame.is::<BehaviorTick>() {
                 self.reply(ctx, &BehaviorTick, &frame).await?;
+                break;
             }
         }
         Ok(())
