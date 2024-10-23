@@ -40,7 +40,11 @@ async fn test_tree_roundtrip() -> Result<(), SystemActorError> {
     let delay_0 = Node::from("delay_0", delay_0, vec![log_2]).unwrap();
     let all_0 = Node::from("all_0", all_0, vec![wait_0, log_0, log_1, delay_0]).unwrap();
 
-    let tree = BehaviorTree { root: all_0, root_handle: None };
+    let tree = BehaviorTree {
+        root: all_0,
+        logs: vec!["Log 0".to_string(), "Log 1".to_string(), "Log 2".to_string()],
+        root_handle: None,
+    };
 
     let tree_json = serde_json::to_string_pretty(&tree).unwrap();
     let tree_file = output_dir.join("tree.json");
@@ -64,6 +68,7 @@ async fn test_tree_from_file() -> Result<(), Box<dyn std::error::Error>> {
     let tree_json = include_str!("../../assets/behaviors/tree.json");
 
     let tree: BehaviorTree = serde_json::from_str(&tree_json).unwrap();
+    let expected_logs = tree.logs.clone();
 
     let tree_id = ActorId::of::<BehaviorTree>("tree_0");
     let (mut tree_ctx, mut tree_actor) =
@@ -89,9 +94,7 @@ async fn test_tree_from_file() -> Result<(), Box<dyn std::error::Error>> {
         log_messages.push(message);
     }
 
-    let expected_messages = vec!["Log 0", "Log 1", "Log 2"];
-
-    for (i, expected) in expected_messages.iter().enumerate() {
+    for (i, expected) in expected_logs.iter().enumerate() {
         assert!(log_messages[i].contains(expected), "Log message {} does not contain expected text: {}", i, expected);
     }
 

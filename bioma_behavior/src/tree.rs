@@ -172,6 +172,7 @@ impl Node {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BehaviorTree {
     pub root: Node,
+    pub logs: Vec<String>,
     #[serde(skip)]
     pub root_handle: Option<ActorHandle>,
 }
