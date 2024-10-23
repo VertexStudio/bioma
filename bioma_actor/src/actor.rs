@@ -231,7 +231,7 @@ pub struct SendOptions {
 
 impl Default for SendOptions {
     fn default() -> Self {
-        Self { timeout: std::time::Duration::from_secs(10) }
+        Self { timeout: std::time::Duration::from_secs(30) }
     }
 }
 
