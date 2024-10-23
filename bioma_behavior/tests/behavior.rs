@@ -5,11 +5,12 @@ use tracing_subscriber::{fmt::MakeWriter, layer::SubscriberExt, Layer};
 
 #[tokio::test]
 async fn test_behavior_basic() -> Result<(), Box<dyn std::error::Error>> {
-    run_behavior_tree_from_json(include_str!("../../assets/behaviors/tree.json")).await?;
+    let engine = run_behavior_tree_from_json(include_str!("../../assets/behaviors/tree.json")).await?;
+    dbg_export_db!(engine);
     Ok(())
 }
 
-async fn run_behavior_tree_from_json(tree_json: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_behavior_tree_from_json(tree_json: &str) -> Result<Engine, Box<dyn std::error::Error>> {
     let engine = Engine::test().await?;
     bioma_behavior::register_behaviors(&engine.registry()).await?;
 
@@ -40,7 +41,7 @@ async fn run_behavior_tree_from_json(tree_json: &str) -> Result<(), Box<dyn std:
         assert!(log_messages[i].contains(expected), "Log message {} does not contain expected text: {}", i, expected);
     }
 
-    Ok(())
+    Ok(engine)
 }
 
 struct TestWriter(tokio::sync::mpsc::Sender<String>);
