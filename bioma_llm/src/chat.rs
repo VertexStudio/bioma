@@ -101,7 +101,20 @@ impl Message<ChatMessages> for Chat {
         }
 
         if messages.persist {
-            self.save(ctx).await?;
+            // Filter out system messages before saving
+            let filtered_history: Vec<ChatMessage> = self
+                .history
+                .iter()
+                .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
+                .cloned()
+                .collect();
+
+            // Temporarily replace history, save, then restore
+            let original_history = std::mem::replace(&mut self.history, filtered_history);
+            let save_result = self.save(ctx).await;
+            self.history = original_history;
+
+            save_result?;
         }
 
         Ok(result)
