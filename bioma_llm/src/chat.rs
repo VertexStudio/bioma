@@ -62,6 +62,7 @@ impl Default for Chat {
 pub struct ChatMessages {
     pub messages: Vec<ChatMessage>,
     pub restart: bool,
+    pub persist: bool,
 }
 
 impl Message<ChatMessages> for Chat {
@@ -69,7 +70,7 @@ impl Message<ChatMessages> for Chat {
 
     async fn handle(
         &mut self,
-        _ctx: &mut ActorContext<Self>,
+        ctx: &mut ActorContext<Self>,
         messages: &ChatMessages,
     ) -> Result<ChatMessageResponse, ChatError> {
         if messages.restart {
@@ -97,6 +98,10 @@ impl Message<ChatMessages> for Chat {
         // Add the assistant's message to the history
         if let Some(message) = &result.message {
             self.history.push(ChatMessage::assistant(message.content.clone()));
+        }
+
+        if messages.persist {
+            self.save(ctx).await?;
         }
 
         Ok(result)
