@@ -132,3 +132,13 @@ curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" 
 ```bash
 curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
 ```
+
+### Connect to examples DB:
+```
+surreal sql -e ws://localhost:9123 -u root -p root --namespace dev --database bioma
+```
+
+Clean DB:
+```
+REMOVE DATABASE bioma;
+```
