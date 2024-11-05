@@ -1,6 +1,6 @@
 use crate::{
     embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings},
-    pdf_to_md::{ConvertToMarkdown, PdfToMarkdown},
+    pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
 use derive_more::Display;
@@ -22,6 +22,8 @@ pub enum IndexerError {
     System(#[from] SystemActorError),
     #[error("Embeddings error: {0}")]
     Embeddings(#[from] EmbeddingsError),
+    #[error("PdfAnalyzer error: {0}")]
+    PdfAnalyzer(#[from] PdfAnalyzerError),
     #[error("Glob error: {0}")]
     Glob(#[from] glob::GlobError),
     #[error("Pattern error: {0}")]
@@ -34,8 +36,8 @@ pub enum IndexerError {
     ChunkConfig(#[from] text_splitter::ChunkConfigError),
     #[error("Embeddings actor not initialized")]
     EmbeddingsActorNotInitialized,
-    #[error("JsonToMarkdown actor not initialized")]
-    JsonToMarkdownActorNotInitialized,
+    #[error("PdfAnalyzer actor not initialized")]
+    PdfAnalyzerActorNotInitialized,
 }
 
 impl ActorError for IndexerError {}
@@ -293,8 +295,8 @@ impl Message<IndexGlobs> for Indexer {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(IndexerError::EmbeddingsActorNotInitialized);
         };
-        let Some(jsontomarkdown_id) = &self.jsontomarkdown_id else {
-            return Err(IndexerError::JsonToMarkdownActorNotInitialized);
+        let Some(pdf_analyzer_id) = &self.pdf_analyzer_id else {
+            return Err(IndexerError::PdfAnalyzerActorNotInitialized);
         };
 
         let total_index_globs_time = std::time::Instant::now();
@@ -330,9 +332,9 @@ impl Message<IndexGlobs> for Indexer {
                     Some("h") => TextType::Text,
                     Some("pdf") => {
                         let result = ctx
-                            .send::<PdfToMarkdown, ConvertToMarkdown>(
-                                ConvertToMarkdown { file_path: source.clone() },
-                                jsontomarkdown_id,
+                            .send::<PdfAnalyzer, AnalyzePdf>(
+                                AnalyzePdf { file_path: source.clone().into() },
+                                pdf_analyzer_id,
                                 SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                             )
                             .await;
@@ -391,21 +393,21 @@ impl Message<IndexGlobs> for Indexer {
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
-    pub jsontomarkdown: PdfToMarkdown,
+    pub pdf_analyzer: PdfAnalyzer,
     #[builder(default = DEFAULT_INDEXER_TAG.into())]
     pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
-    jsontomarkdown_id: Option<ActorId>,
+    pdf_analyzer_id: Option<ActorId>,
 }
 
 impl Default for Indexer {
     fn default() -> Self {
         Self {
             embeddings: Embeddings::default(),
-            jsontomarkdown: PdfToMarkdown {},
+            pdf_analyzer: PdfAnalyzer::default(),
             tag: DEFAULT_INDEXER_TAG.into(),
             embeddings_id: None,
-            jsontomarkdown_id: None,
+            pdf_analyzer_id: None,
         }
     }
 }
@@ -414,27 +416,30 @@ impl Actor for Indexer {
     type Error = IndexerError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
+        // Used to namespace child actors
         let self_id = ctx.id().clone();
-        let to_markdown_id = ActorId::of::<PdfToMarkdown>("/jsontomarkdown");
-        self.jsontomarkdown_id = Some(to_markdown_id.clone());
 
-        // Spawn the jsontomarkdown actor
-        let (mut to_markdown_ctx, mut to_markdown_actor) = Actor::spawn(
+        // Generate child id for pdf-analyzer
+        let pdf_analyzer_id = ActorId::of::<PdfAnalyzer>(format!("{}/pdf-analyzer", self_id.name()));
+        self.pdf_analyzer_id = Some(pdf_analyzer_id.clone());
+
+        // Spawn the pdf-analyzer actor
+        let (mut pdf_analyzer_ctx, mut pdf_analyzer_actor) = Actor::spawn(
             ctx.engine().clone(),
-            to_markdown_id.clone(),
-            self.jsontomarkdown.clone(),
+            pdf_analyzer_id.clone(),
+            self.pdf_analyzer.clone(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
-        .await
-        .expect("error init to markdown");
+        .await?;
 
-        // Start the jsontomarkdown actor
-        let to_markdown_handle = tokio::spawn(async move {
-            if let Err(e) = to_markdown_actor.start(&mut to_markdown_ctx).await {
-                error!("JsonToMarkdown actor error: {}", e);
+        // Start the pdf-analyzer actor
+        let pdf_analyzer_handle = tokio::spawn(async move {
+            if let Err(e) = pdf_analyzer_actor.start(&mut pdf_analyzer_ctx).await {
+                error!("PdfAnalyzer actor error: {}", e);
             }
         });
 
+        // Generate child id for embeddings
         let embeddings_id = ActorId::of::<Embeddings>(format!("{}/embeddings", self_id.name()));
         self.embeddings_id = Some(embeddings_id.clone());
 
@@ -466,8 +471,9 @@ impl Actor for Indexer {
                 }
             }
         }
+
         embeddings_handle.abort();
-        to_markdown_handle.abort();
+        pdf_analyzer_handle.abort();
         Ok(())
     }
 }
