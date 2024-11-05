@@ -36,21 +36,22 @@ services:
     command: chown -R 1000:1000 /data
 
   pdf-analyzer:
-    image: huridocs/pdf-document-layout-analysis:v0.0.14.1
-    container_name: pdf-analyzer
+    build:
+      context: ../pdf-document-layout-analysis
+      dockerfile: Dockerfile
+    container_name: pdf-document-layout-analysis
+    entrypoint: [ "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--chdir", "./src", "app:app", "--bind", "0.0.0.0:5060", "--timeout", "10000"]
+    init: true
+    restart: unless-stopped
     ports:
       - "5060:5060"
-    entrypoint: ["./start.sh"]
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [ gpu ]
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=0
-    restart: always
 
 volumes:
   bioma-ollama_data:
