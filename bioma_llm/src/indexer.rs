@@ -106,7 +106,7 @@ pub enum CodeLanguage {
 
 #[derive(Display, Debug, Clone, Serialize, Deserialize)]
 pub enum TextType {
-    MarkdownFromPdf(String),
+    Pdf,
     Markdown,
     Code(CodeLanguage),
     Text,
@@ -162,10 +162,12 @@ impl Indexer {
             return Ok(IndexResult::Cached);
         }
 
-        // Convert html to markdown
+        // Map types if needed
         let (text_type, content) = match text_type {
+            // Convert html to markdown
             TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
-            TextType::MarkdownFromPdf(pdf) => (TextType::Markdown, pdf),
+            // PDF is already markdown
+            TextType::Pdf => (TextType::Markdown, content),
             _ => (text_type, content),
         };
 
@@ -330,7 +332,12 @@ impl Message<IndexGlobs> for Indexer {
                     Some("html") => TextType::Code(CodeLanguage::Html),
                     Some("cpp") => TextType::Code(CodeLanguage::Cpp),
                     Some("h") => TextType::Text,
-                    Some("pdf") => {
+                    Some("pdf") => TextType::Pdf,
+                    _ => TextType::Text,
+                };
+
+                let content = match &text_type {
+                    TextType::Pdf => {
                         let result = ctx
                             .send::<PdfAnalyzer, AnalyzePdf>(
                                 AnalyzePdf { file_path: source.clone().into() },
@@ -347,13 +354,8 @@ impl Message<IndexGlobs> for Indexer {
                             }
                         };
 
-                        TextType::MarkdownFromPdf(file_content)
+                        Ok(file_content)
                     }
-                    _ => TextType::Text,
-                };
-
-                let content = match &text_type {
-                    TextType::MarkdownFromPdf(content) => Ok(content.clone()),
                     _ => tokio::fs::read_to_string(&pathbuf).await,
                 };
 
