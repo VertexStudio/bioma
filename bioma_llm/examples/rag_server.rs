@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use walkdir::WalkDir;
+use zip::ZipArchive;
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
@@ -78,7 +80,7 @@ struct Upload {
 #[derive(Debug, Serialize)]
 struct Uploaded {
     message: String,
-    path: std::path::PathBuf,
+    paths: Vec<std::path::PathBuf>,
     size: usize,
 }
 
@@ -110,9 +112,60 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     match form.file.file.persist(&file_path) {
         Ok(_) => {
             info!("File uploaded successfully: {}", file_path.display());
-            let uploaded =
-                Uploaded { message: "File uploaded successfully".to_string(), path: file_path, size: form.file.size };
-            HttpResponse::Ok().json(uploaded)
+
+            let (message, paths) = if file_path.extension().map_or(false, |ext| ext == "zip") {
+                let file = match std::fs::File::open(&file_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        error!("Error opening zip file: {:?}", e);
+                        return HttpResponse::InternalServerError().json(json!({
+                            "error": "Failed to open zip file",
+                            "details": e.to_string()
+                        }));
+                    }
+                };
+
+                let mut archive = match ZipArchive::new(file) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        error!("Error creating zip archive: {:?}", e);
+                        return HttpResponse::InternalServerError().json(json!({
+                            "error": "Failed to read zip archive",
+                            "details": e.to_string()
+                        }));
+                    }
+                };
+
+                if let Err(e) = archive.extract(&output_dir) {
+                    error!("Error extracting zip archive: {:?}", e);
+                    return HttpResponse::InternalServerError().json(json!({
+                        "error": "Failed to extract zip archive",
+                        "details": e.to_string()
+                    }));
+                }
+
+                let mut files = Vec::new();
+                for entry in WalkDir::new(&output_dir).into_iter().filter_map(|e| e.ok()) {
+                    if entry.file_type().is_file() {
+                        files.push(entry.path().to_path_buf());
+                    }
+                }
+
+                // Delete the zip file after extraction
+                if let Err(e) = std::fs::remove_file(&file_path) {
+                    error!("Error removing zip file: {:?}", e);
+                    return HttpResponse::InternalServerError().json(json!({
+                        "error": "Failed to cleanup zip file",
+                        "details": e.to_string()
+                    }));
+                }
+
+                (format!("Zip file extracted {} files successfully", files.len()), files)
+            } else {
+                ("File uploaded successfully".to_string(), vec![file_path])
+            };
+
+            HttpResponse::Ok().json(Uploaded { message, paths, size: form.file.size })
         }
         Err(e) => {
             error!("Error saving file: {:?}", e);
