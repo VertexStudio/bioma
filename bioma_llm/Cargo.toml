@@ -23,6 +23,8 @@ url = { workspace = true }
 glob = { workspace = true }
 bon = { workspace = true }
 lazy_static = "1.5.0"
+walkdir = { workspace = true }
+zip = { workspace = true }
 
 ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "a40ea0c3980b85aeba28b077e1673dfba1a4be36", features = [
     "function-calling",
