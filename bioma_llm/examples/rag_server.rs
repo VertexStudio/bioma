@@ -137,8 +137,7 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                 };
 
                 // Extract to the parent directory of the zip file
-                let extract_path = file_dir;
-                if let Err(e) = archive.extract(extract_path) {
+                if let Err(e) = archive.extract(file_dir) {
                     error!("Error extracting zip archive: {:?}", e);
                     return HttpResponse::InternalServerError().json(json!({
                         "error": "Failed to extract zip archive",
@@ -147,7 +146,7 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                 }
 
                 let mut files = Vec::new();
-                for entry in WalkDir::new(extract_path).into_iter().filter_map(|e| e.ok()) {
+                for entry in WalkDir::new(file_dir).into_iter().filter_map(|e| e.ok()) {
                     if entry.file_type().is_file() {
                         files.push(entry.path().to_path_buf());
                     }
