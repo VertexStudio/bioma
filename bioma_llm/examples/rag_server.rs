@@ -145,8 +145,13 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                     }));
                 }
 
+                // Get the name of the zip file without extension to find its extracted contents
+                let zip_stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("extracted");
+                let extracted_dir = file_dir.join(zip_stem);
+
                 let mut files = Vec::new();
-                for entry in WalkDir::new(file_dir).into_iter().filter_map(|e| e.ok()) {
+                // Only walk through the specific extracted directory
+                for entry in WalkDir::new(&extracted_dir).into_iter().filter_map(|e| e.ok()) {
                     if entry.file_type().is_file() {
                         files.push(entry.path().to_path_buf());
                     }
