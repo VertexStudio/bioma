@@ -70,28 +70,29 @@ cargo run --release -p bioma_llm --example embeddings
 ```
 
 ```bash
-cargo run --release -p bioma_llm --example indexer -- --root /path/to/custom/root --globs "**/*.rs" --globs "**/*.toml"  
+cargo run --release -p bioma_llm --example indexer -- --root /path/to/custom/root --globs "**/*.rs" --globs "**/*.toml"
 ```
 
 ```bash
-cargo run --release -p bioma_llm --example retriever -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"  
+cargo run --release -p bioma_llm --example retriever -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"
 ```
 
 ```bash
 cargo run --release -p bioma_llm --example rag -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"
 ```
 
-
 ```bash
 cargo run --release -p bioma_actor --example object_store
 ```
 
 If manually launching surrealdb:
+
 ```
 surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://output/bioma.db
 ```
 
 Rerank for OSX (or non docker):
+
 ```
 python3 -m venv .bioma
 source .bioma/bin/activate
@@ -115,10 +116,18 @@ cargo run --release -p bioma_llm --example rag_server
 curl -X POST http://localhost:8080/reset
 ```
 
+### Upload some files:
+
+```bash
+curl -X POST http://localhost:8080/upload -H "Content-Type: multipart/form-data" -F "file=@/path/to/file.zip" -F 'metadata={"path":"relative/to/store/path"};type=application/json'
+```
+
 ### Index some files:
 
 ```bash
 curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+# or
+curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
@@ -133,12 +142,22 @@ curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" 
 curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
 ```
 
+### Delete indexed source:
+
+```bash
+curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"source": "/absolute/path/to/source"}'
+# or
+curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"source": "relative/to/store/path"}'
+```
+
 ### Connect to examples DB:
+
 ```
 surreal sql -e ws://localhost:9123 -u root -p root --namespace dev --database bioma
 ```
 
 Clean DB:
+
 ```
 REMOVE DATABASE bioma;
 ```

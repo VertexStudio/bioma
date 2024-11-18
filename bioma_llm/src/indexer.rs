@@ -7,9 +7,9 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
-use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
+use walkdir::WalkDir;
 
 const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
@@ -117,12 +117,13 @@ pub struct ChunkMetadata {
     pub source: String,
     pub text_type: TextType,
     pub chunk_number: usize,
+    pub uri: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceEmbeddings {
     pub source: String,
-    pub embeddings: Vec<RecordId>,
+    pub uris: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -132,11 +133,23 @@ enum IndexResult {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteSource {
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletedSource {
+    pub deleted_embeddings: usize,
+    pub source_existed: bool,
+}
+
 impl Indexer {
     async fn index_text(
         &self,
         ctx: &mut ActorContext<Self>,
         source: String,
+        uri: String,
         content: String,
         text_type: TextType,
         chunk_capacity: std::ops::Range<usize>,
@@ -144,21 +157,24 @@ impl Indexer {
         chunk_batch_size: usize,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        // Check if source is already indexed
+        // TODO: This query is twice slow compared to the previous one. Guess it's because we're ->source_embeddings.out.metadata.uri twice. Not sure.
         let source_embeddings = ctx
             .engine()
             .db()
-            .query("SELECT source, ->source_embeddings.out as embeddings FROM source:{source:$source, tag:$tag}")
+            .query("SELECT source, ->source_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_embeddings.out.metadata.uri CONTAINS $uri")
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
+            .bind(("uri", uri.clone()))
             .await;
+
         let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {}", source);
+            error!("Failed to query source embeddings: {} {}", source, uri);
             return Ok(IndexResult::Failed);
         };
+
         let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
-        if source_embeddings.len() > 0 {
-            debug!("Source already indexed: {}", source);
+        if !source_embeddings.is_empty() {
+            debug!("Source already indexed with URI: {} {}", source, uri);
             return Ok(IndexResult::Cached);
         }
 
@@ -208,7 +224,12 @@ impl Indexer {
         let metadata = chunks
             .iter()
             .enumerate()
-            .map(|(i, _)| ChunkMetadata { source: source.clone(), text_type: text_type.clone(), chunk_number: i })
+            .map(|(i, _)| ChunkMetadata {
+                source: source.clone(),
+                text_type: text_type.clone(),
+                chunk_number: i,
+                uri: uri.clone(),
+            })
             .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
             .collect::<Vec<Value>>();
         let chunks_time = start_time.elapsed();
@@ -219,6 +240,7 @@ impl Indexer {
         let chunk_batches = chunks.chunks(chunk_batch_size);
         let metadata_batches = metadata.chunks(chunk_batch_size);
         let mut embeddings_count = 0;
+
         for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
             let result = ctx
                 .send::<Embeddings, StoreTextEmbeddings>(
@@ -266,6 +288,7 @@ impl Message<IndexTexts> for Indexer {
                 .index_text(
                     ctx,
                     source.clone(),
+                    String::new(),
                     text.clone(),
                     text_type.clone(),
                     message.chunk_capacity.clone(),
@@ -305,24 +328,53 @@ impl Message<IndexGlobs> for Indexer {
         let mut indexed = 0;
         let mut cached = 0;
         for glob in message.globs.iter() {
-            info!("Indexing glob: {}", &glob);
-            let task_glob = glob.clone();
-            let paths = tokio::task::spawn_blocking(move || glob::glob(&task_glob)).await;
-            let Ok(Ok(paths)) = paths else {
+            let local_store_dir = ctx.engine().local_store_dir();
+
+            // If glob is not absolute, make it relative to local_store_dir
+            let full_glob = if std::path::Path::new(glob).is_absolute() {
+                glob.clone()
+            } else {
+                local_store_dir.join(glob).to_string_lossy().into_owned()
+            };
+
+            info!("Indexing glob: {}", &full_glob);
+            let task_glob = full_glob.clone();
+
+            // Use the modified glob path in the spawn_blocking task
+            let paths = tokio::task::spawn_blocking(move || {
+                let mut paths = Vec::new();
+                for entry in glob::glob(&task_glob).unwrap().flatten() {
+                    if entry.is_file() {
+                        paths.push(entry);
+                    } else if entry.is_dir() {
+                        // Use WalkDir to recursively collect all files
+                        for entry in WalkDir::new(entry)
+                            .follow_links(true)
+                            .into_iter()
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.file_type().is_file())
+                        {
+                            paths.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+                paths
+            })
+            .await;
+
+            let Ok(paths) = paths else {
                 warn!("Skipping glob: {}", &glob);
                 continue;
             };
-            for pathbuf in paths {
-                let Ok(pathbuf) = pathbuf else {
-                    warn!("Skipping path: {:?}", pathbuf);
-                    continue;
-                };
 
+            for pathbuf in paths {
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
 
-                info!("ext: {:?}", ext);
-                let source = pathbuf.to_string_lossy().to_string();
+                // Use the full_glob as the source instead of the original glob
+                let source = full_glob.clone();
+                // Use the full path as the URI
+                let uri = pathbuf.to_string_lossy().to_string();
 
                 let text_type = match ext {
                     Some("md") => TextType::Markdown,
@@ -340,7 +392,7 @@ impl Message<IndexGlobs> for Indexer {
                     TextType::Pdf => {
                         let result = ctx
                             .send::<PdfAnalyzer, AnalyzePdf>(
-                                AnalyzePdf { file_path: source.clone().into() },
+                                AnalyzePdf { file_path: pathbuf.clone() },
                                 pdf_analyzer_id,
                                 SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                             )
@@ -368,6 +420,7 @@ impl Message<IndexGlobs> for Indexer {
                     .index_text(
                         ctx,
                         source,
+                        uri,
                         content,
                         text_type,
                         message.chunk_capacity.clone(),
@@ -389,6 +442,52 @@ impl Message<IndexGlobs> for Indexer {
         }
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
         Ok(Indexed { indexed, cached })
+    }
+}
+
+impl Message<DeleteSource> for Indexer {
+    type Response = DeletedSource;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &DeleteSource,
+    ) -> Result<DeletedSource, IndexerError> {
+        let query = include_str!("../sql/del_source.surql");
+        let local_store_dir = ctx.engine().local_store_dir();
+
+        // If source is not absolute, make it relative to local_store_dir
+        let full_source = if std::path::Path::new(&message.source).is_absolute() {
+            message.source.clone()
+        } else {
+            local_store_dir.join(&message.source).to_string_lossy().into_owned()
+        };
+
+        let db = ctx.engine().db();
+
+        // First check if source exists in database
+        let mut results = db
+            .query(query)
+            .bind(("source", full_source.clone()))
+            .bind(("tag", self.tag.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
+
+        let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
+
+        // Check if file/directory exists before attempting deletion
+        let source_path = std::path::Path::new(&full_source);
+        let source_existed = source_path.exists();
+        if source_existed {
+            // Handle both files and directories
+            if source_path.is_dir() {
+                tokio::fs::remove_dir_all(source_path).await.ok();
+            } else {
+                tokio::fs::remove_file(source_path).await.ok();
+            }
+        }
+
+        Ok(DeletedSource { deleted_embeddings: deleted_count, source_existed })
     }
 }
 
@@ -467,6 +566,11 @@ impl Actor for Indexer {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(input) = frame.is::<IndexGlobs>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<DeleteSource>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
