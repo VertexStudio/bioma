@@ -7,7 +7,6 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
-use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
@@ -124,7 +123,7 @@ pub struct ChunkMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceEmbeddings {
     pub source: String,
-    pub embeddings: Vec<RecordId>,
+    pub uris: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -157,21 +156,24 @@ impl Indexer {
         chunk_batch_size: usize,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        // Check if source is already indexed
+        // TODO: This query is twice as slow as the previous one. Guess it's because we're ->source_embeddings.out.metadata.uri twice. Not sure.
         let source_embeddings = ctx
             .engine()
             .db()
-            .query("SELECT source, ->source_embeddings.out as embeddings FROM source:{source:$source, tag:$tag}")
+            .query("SELECT source, ->source_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_embeddings.out.metadata.uri CONTAINS $uri")
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
+            .bind(("uri", uri.clone()))
             .await;
+
         let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {}", source);
+            error!("Failed to query source embeddings: {} {}", source, uri);
             return Ok(IndexResult::Failed);
         };
+
         let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
-        if source_embeddings.len() > 0 {
-            debug!("Source already indexed: {}", source);
+        if !source_embeddings.is_empty() {
+            debug!("Source already indexed with URI: {} {}", source, uri);
             return Ok(IndexResult::Cached);
         }
 
@@ -237,6 +239,7 @@ impl Indexer {
         let chunk_batches = chunks.chunks(chunk_batch_size);
         let metadata_batches = metadata.chunks(chunk_batch_size);
         let mut embeddings_count = 0;
+
         for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
             let result = ctx
                 .send::<Embeddings, StoreTextEmbeddings>(
@@ -332,13 +335,12 @@ impl Message<IndexGlobs> for Indexer {
                     if entry.is_file() {
                         paths.push(entry);
                     } else if entry.is_dir() {
-                        // Only collect files from directory
-                        for entry in walkdir::WalkDir::new(entry)
+                        // Use WalkDir to recursively collect all files
+                        for entry in WalkDir::new(entry)
                             .follow_links(true)
                             .into_iter()
                             .filter_map(|e| e.ok())
                             .filter(|e| e.file_type().is_file())
-                        // Only process files
                         {
                             paths.push(entry.path().to_path_buf());
                         }
@@ -352,6 +354,11 @@ impl Message<IndexGlobs> for Indexer {
                 warn!("Skipping glob: {}", &glob);
                 continue;
             };
+
+            info!("Found {} paths to process for glob: {}", paths.len(), &glob);
+            for path in &paths {
+                debug!("Found file: {}", path.display());
+            }
 
             for pathbuf in paths {
                 if !pathbuf.is_file() {
