@@ -157,7 +157,7 @@ impl Indexer {
         chunk_batch_size: usize,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        // TODO: This query is twice as slow as the previous one. Guess it's because we're ->source_embeddings.out.metadata.uri twice. Not sure.
+        // TODO: This query is twice slow compared to the previous one. Guess it's because we're ->source_embeddings.out.metadata.uri twice. Not sure.
         let source_embeddings = ctx
             .engine()
             .db()
