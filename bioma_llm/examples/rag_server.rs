@@ -65,7 +65,6 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
 
 #[derive(Debug, Deserialize)]
 struct Metadata {
-    bucket: Option<String>,
     path: std::path::PathBuf,
 }
 
@@ -86,12 +85,6 @@ struct Uploaded {
 
 async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
-
-    // If bucket is provided, add it to the output directory
-    let output_dir = match &form.metadata.bucket {
-        Some(bucket) => output_dir.join(bucket),
-        None => output_dir,
-    };
 
     // Get the target directory from the metadata path
     let file_path = output_dir.join(&form.metadata.path);
