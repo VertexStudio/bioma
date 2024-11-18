@@ -453,7 +453,7 @@ impl Message<DeleteSource> for Indexer {
         ctx: &mut ActorContext<Self>,
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
-        let query = include_str!("../sql/del_context.surql");
+        let query = include_str!("../sql/del_source.surql");
         let local_store_dir = ctx.engine().local_store_dir();
 
         // If source is not absolute, make it relative to local_store_dir
