@@ -65,7 +65,6 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
 
 #[derive(Debug, Deserialize)]
 struct Metadata {
-    bucket: Option<String>,
     path: std::path::PathBuf,
 }
 
@@ -86,35 +85,38 @@ struct Uploaded {
 
 async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
+    let target_dir = form.metadata.path.clone();
 
-    // If bucket is provided, add it to the output directory
-    let output_dir = match &form.metadata.bucket {
-        Some(bucket) => output_dir.join(bucket),
-        None => output_dir,
+    // If uploading a zip file but target doesn't end in .zip, append original filename
+    let temp_file_path = if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
+        if target_dir.extension().map_or(false, |ext| ext == "zip") {
+            // If target ends in .zip, use it directly
+            output_dir.join(&target_dir)
+        } else {
+            // If target is a directory, append the original filename
+            let original_name =
+                form.file.file_name.as_ref().map(|name| name.to_string()).unwrap_or_else(|| "uploaded.zip".to_string());
+            output_dir.join(&target_dir).join(original_name)
+        }
+    } else {
+        output_dir.join(&target_dir)
     };
 
-    // Get the target directory from the metadata path
-    let file_path = output_dir.join(&form.metadata.path);
-    let file_dir = file_path.parent().expect("Failed to get file directory");
-
-    // Ensure the file_path directory exists
-    match tokio::fs::create_dir_all(file_dir).await {
-        Ok(_) => (),
-        Err(e) => {
-            error!("Failed to create file path directory: {}", e);
-            return HttpResponse::InternalServerError().json(json!({
-                "error": "Failed to create file path directory",
-                "details": e.to_string()
-            }));
-        }
+    // Create parent directory if it doesn't exist
+    if let Err(e) = tokio::fs::create_dir_all(temp_file_path.parent().unwrap_or(&temp_file_path)).await {
+        error!("Failed to create target directory: {}", e);
+        return HttpResponse::InternalServerError().json(json!({
+            "error": "Failed to create target directory",
+            "details": e.to_string()
+        }));
     }
 
-    match form.file.file.persist(&file_path) {
+    match form.file.file.persist(&temp_file_path) {
         Ok(_) => {
-            info!("File uploaded successfully: {}", file_path.display());
+            info!("File uploaded successfully to temporary location");
 
-            let (message, paths) = if file_path.extension().map_or(false, |ext| ext == "zip") {
-                let file = match std::fs::File::open(&file_path) {
+            let (message, paths) = if temp_file_path.extension().map_or(false, |ext| ext == "zip") {
+                let file = match std::fs::File::open(&temp_file_path) {
                     Ok(f) => f,
                     Err(e) => {
                         error!("Error opening zip file: {:?}", e);
@@ -137,7 +139,8 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                 };
 
                 // Extract to the parent directory of the zip file
-                if let Err(e) = archive.extract(file_dir) {
+                let extract_to = temp_file_path.parent().unwrap_or(&temp_file_path);
+                if let Err(e) = archive.extract(extract_to) {
                     error!("Error extracting zip archive: {:?}", e);
                     return HttpResponse::InternalServerError().json(json!({
                         "error": "Failed to extract zip archive",
@@ -145,30 +148,22 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                     }));
                 }
 
-                // Get the name of the zip file without extension to find its extracted contents
-                let zip_stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("extracted");
-                let extracted_dir = file_dir.join(zip_stem);
-
                 let mut files = Vec::new();
-                // Only walk through the specific extracted directory
-                for entry in WalkDir::new(&extracted_dir).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() {
+                // Walk through the extracted directory
+                for entry in WalkDir::new(extract_to).into_iter().filter_map(|e| e.ok()) {
+                    if entry.file_type().is_file() && entry.path() != temp_file_path {
                         files.push(entry.path().to_path_buf());
                     }
                 }
 
-                // Delete the zip file after extraction
-                if let Err(e) = std::fs::remove_file(&file_path) {
-                    error!("Error removing zip file: {:?}", e);
-                    return HttpResponse::InternalServerError().json(json!({
-                        "error": "Failed to cleanup zip file",
-                        "details": e.to_string()
-                    }));
+                // Delete the temporary zip file after extraction
+                if let Err(e) = std::fs::remove_file(&temp_file_path) {
+                    warn!("Error removing temporary zip file: {:?}", e);
                 }
 
                 (format!("Zip file extracted {} files successfully", files.len()), files)
             } else {
-                ("File uploaded successfully".to_string(), vec![file_path])
+                ("File uploaded successfully".to_string(), vec![temp_file_path])
             };
 
             HttpResponse::Ok().json(Uploaded { message, paths, size: form.file.size })
@@ -422,6 +417,39 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     }
 }
 
+async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
+    let indexer_actor_id = data.indexer_actor_id.clone();
+
+    // Try to lock the indexer_relay_ctx without waiting
+    let relay_ctx = match data.indexer_relay_ctx.try_lock() {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            error!("Resource busy: could not acquire lock on indexer_relay_ctx");
+            return HttpResponse::ServiceUnavailable().body("Indexer resource busy");
+        }
+    };
+
+    info!("Sending delete message to indexer actor for source: {}", body.source);
+    let response = relay_ctx
+        .send::<Indexer, DeleteSource>(
+            body.clone(),
+            &indexer_actor_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
+
+    match response {
+        Ok(result) => {
+            info!("Deleted {} embeddings for source: {}", result.deleted_embeddings, body.source);
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => {
+            error!("Error deleting source: {:?}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -565,6 +593,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/ask", web::post().to(ask))
             .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
+            .route("/delete_source", web::post().to(delete_source))
     })
     .bind("0.0.0.0:8080")?
     .run()
