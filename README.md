@@ -116,10 +116,18 @@ cargo run --release -p bioma_llm --example rag_server
 curl -X POST http://localhost:8080/reset
 ```
 
+### Upload some files:
+
+```bash
+curl -X POST http://localhost:8080/upload -H "Content-Type: multipart/form-data" -F "file=@/path/to/file.zip" -F 'metadata={"path":"relative/to/store/path"};type=application/json'
+```
+
 ### Index some files:
 
 ```bash
 curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+# or
+curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
@@ -137,7 +145,9 @@ curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{
 ### Delete indexed source:
 
 ```bash
-curl -X POST http://localhost:8080/delete -H "Content-Type: application/json" -d '{"source": "/path/to/source"}'
+curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"source": "/absolute/path/to/source"}'
+# or
+curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"source": "relative/to/store/path"}'
 ```
 
 ### Connect to examples DB:
