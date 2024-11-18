@@ -416,6 +416,39 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     }
 }
 
+async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
+    let indexer_actor_id = data.indexer_actor_id.clone();
+
+    // Try to lock the indexer_relay_ctx without waiting
+    let relay_ctx = match data.indexer_relay_ctx.try_lock() {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            error!("Resource busy: could not acquire lock on indexer_relay_ctx");
+            return HttpResponse::ServiceUnavailable().body("Indexer resource busy");
+        }
+    };
+
+    info!("Sending delete message to indexer actor for source: {}", body.source);
+    let response = relay_ctx
+        .send::<Indexer, DeleteSource>(
+            body.clone(),
+            &indexer_actor_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
+
+    match response {
+        Ok(result) => {
+            info!("Deleted {} embeddings for source: {}", result.deleted_embeddings, body.source);
+            HttpResponse::Ok().json(result)
+        }
+        Err(e) => {
+            error!("Error deleting source: {:?}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -559,6 +592,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/ask", web::post().to(ask))
             .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
+            .route("/delete", web::post().to(delete_source))
     })
     .bind("0.0.0.0:8080")?
     .run()

@@ -132,6 +132,16 @@ enum IndexResult {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteSource {
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletedSource {
+    pub deleted_embeddings: usize,
+}
+
 impl Indexer {
     async fn index_text(
         &self,
@@ -392,6 +402,30 @@ impl Message<IndexGlobs> for Indexer {
     }
 }
 
+impl Message<DeleteSource> for Indexer {
+    type Response = DeletedSource;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &DeleteSource,
+    ) -> Result<DeletedSource, IndexerError> {
+        let query = include_str!("../sql/del_context.surql");
+        let db = ctx.engine().db();
+        let mut results = db
+            .query(query)
+            .bind(("source", message.source.clone()))
+            .bind(("tag", self.tag.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
+
+        println!("results: {:?}", results);
+
+        let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
+        Ok(DeletedSource { deleted_embeddings: deleted_count })
+    }
+}
+
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
@@ -467,6 +501,11 @@ impl Actor for Indexer {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(input) = frame.is::<IndexGlobs>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<DeleteSource>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
