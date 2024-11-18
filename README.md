@@ -70,28 +70,29 @@ cargo run --release -p bioma_llm --example embeddings
 ```
 
 ```bash
-cargo run --release -p bioma_llm --example indexer -- --root /path/to/custom/root --globs "**/*.rs" --globs "**/*.toml"  
+cargo run --release -p bioma_llm --example indexer -- --root /path/to/custom/root --globs "**/*.rs" --globs "**/*.toml"
 ```
 
 ```bash
-cargo run --release -p bioma_llm --example retriever -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"  
+cargo run --release -p bioma_llm --example retriever -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"
 ```
 
 ```bash
 cargo run --release -p bioma_llm --example rag -- --query "What is the meaning of life?" --root /path/to/custom/root --globs "**/*.md"
 ```
 
-
 ```bash
 cargo run --release -p bioma_actor --example object_store
 ```
 
 If manually launching surrealdb:
+
 ```
 surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://output/bioma.db
 ```
 
 Rerank for OSX (or non docker):
+
 ```
 python3 -m venv .bioma
 source .bioma/bin/activate
@@ -133,12 +134,20 @@ curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" 
 curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
 ```
 
+### Delete indexed source:
+
+```bash
+curl -X POST http://localhost:8080/delete -H "Content-Type: application/json" -d '{"source": "/path/to/source"}'
+```
+
 ### Connect to examples DB:
+
 ```
 surreal sql -e ws://localhost:9123 -u root -p root --namespace dev --database bioma
 ```
 
 Clean DB:
+
 ```
 REMOVE DATABASE bioma;
 ```
