@@ -141,6 +141,7 @@ pub struct DeleteSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
+    pub source_existed: bool,
 }
 
 impl Indexer {
@@ -327,8 +328,19 @@ impl Message<IndexGlobs> for Indexer {
         let mut indexed = 0;
         let mut cached = 0;
         for glob in message.globs.iter() {
-            info!("Indexing glob: {}", &glob);
-            let task_glob = glob.clone();
+            let local_store_dir = ctx.engine().local_store_dir();
+
+            // If glob is not absolute, make it relative to local_store_dir
+            let full_glob = if std::path::Path::new(glob).is_absolute() {
+                glob.clone()
+            } else {
+                local_store_dir.join(glob).to_string_lossy().into_owned()
+            };
+
+            info!("Indexing glob: {}", &full_glob);
+            let task_glob = full_glob.clone();
+
+            // Use the modified glob path in the spawn_blocking task
             let paths = tokio::task::spawn_blocking(move || {
                 let mut paths = Vec::new();
                 for entry in glob::glob(&task_glob).unwrap().flatten() {
@@ -355,16 +367,7 @@ impl Message<IndexGlobs> for Indexer {
                 continue;
             };
 
-            info!("Found {} paths to process for glob: {}", paths.len(), &glob);
-            for path in &paths {
-                debug!("Found file: {}", path.display());
-            }
-
             for pathbuf in paths {
-                if !pathbuf.is_file() {
-                    continue; // Skip if not a file (extra safety check)
-                }
-
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
 
@@ -453,6 +456,8 @@ impl Message<DeleteSource> for Indexer {
         let query = include_str!("../sql/del_context.surql");
         let source_path = ctx.engine().local_store_dir().join(&message.source);
         let db = ctx.engine().db();
+
+        // First check if source exists in database
         let mut results = db
             .query(query)
             .bind(("source", source_path.to_string_lossy().to_string()))
@@ -462,10 +467,18 @@ impl Message<DeleteSource> for Indexer {
 
         let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
 
-        // Delete the actual source from local store
-        tokio::fs::remove_file(&source_path).await.map_err(SystemActorError::from)?;
+        // Check if file/directory exists before attempting deletion
+        let source_existed = source_path.exists();
+        if source_existed {
+            // Handle both files and directories
+            if source_path.is_dir() {
+                tokio::fs::remove_dir_all(&source_path).await.ok();
+            } else {
+                tokio::fs::remove_file(&source_path).await.ok();
+            }
+        }
 
-        Ok(DeletedSource { deleted_embeddings: deleted_count })
+        Ok(DeletedSource { deleted_embeddings: deleted_count, source_existed })
     }
 }
 
