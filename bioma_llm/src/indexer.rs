@@ -371,8 +371,8 @@ impl Message<IndexGlobs> for Indexer {
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
 
-                // Use the glob as the source (root folder)
-                let source = glob.clone();
+                // Use the full_glob as the source instead of the original glob
+                let source = full_glob.clone();
                 // Use the full path as the URI
                 let uri = pathbuf.to_string_lossy().to_string();
 
@@ -454,13 +454,21 @@ impl Message<DeleteSource> for Indexer {
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
         let query = include_str!("../sql/del_context.surql");
-        let source_path = ctx.engine().local_store_dir().join(&message.source);
+        let local_store_dir = ctx.engine().local_store_dir();
+
+        // If source is not absolute, make it relative to local_store_dir
+        let full_source = if std::path::Path::new(&message.source).is_absolute() {
+            message.source.clone()
+        } else {
+            local_store_dir.join(&message.source).to_string_lossy().into_owned()
+        };
+
         let db = ctx.engine().db();
 
         // First check if source exists in database
         let mut results = db
             .query(query)
-            .bind(("source", source_path.to_string_lossy().to_string()))
+            .bind(("source", full_source.clone()))
             .bind(("tag", self.tag.clone()))
             .await
             .map_err(SystemActorError::from)?;
@@ -468,13 +476,14 @@ impl Message<DeleteSource> for Indexer {
         let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
 
         // Check if file/directory exists before attempting deletion
+        let source_path = std::path::Path::new(&full_source);
         let source_existed = source_path.exists();
         if source_existed {
             // Handle both files and directories
             if source_path.is_dir() {
-                tokio::fs::remove_dir_all(&source_path).await.ok();
+                tokio::fs::remove_dir_all(source_path).await.ok();
             } else {
-                tokio::fs::remove_file(&source_path).await.ok();
+                tokio::fs::remove_file(source_path).await.ok();
             }
         }
 

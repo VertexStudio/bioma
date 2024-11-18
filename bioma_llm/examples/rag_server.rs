@@ -593,7 +593,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/ask", web::post().to(ask))
             .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
-            .route("/delete", web::post().to(delete_source))
+            .route("/delete_source", web::post().to(delete_source))
     })
     .bind("0.0.0.0:8080")?
     .run()
