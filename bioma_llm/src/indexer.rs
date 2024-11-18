@@ -411,17 +411,20 @@ impl Message<DeleteSource> for Indexer {
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
         let query = include_str!("../sql/del_context.surql");
+        let source_path = ctx.engine().local_store_dir().join(&message.source);
         let db = ctx.engine().db();
         let mut results = db
             .query(query)
-            .bind(("source", message.source.clone()))
+            .bind(("source", source_path.to_string_lossy().to_string()))
             .bind(("tag", self.tag.clone()))
             .await
             .map_err(SystemActorError::from)?;
 
-        println!("results: {:?}", results);
-
         let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
+
+        // Delete the actual source from local store
+        tokio::fs::remove_file(&source_path).await.map_err(SystemActorError::from)?;
+
         Ok(DeletedSource { deleted_embeddings: deleted_count })
     }
 }
