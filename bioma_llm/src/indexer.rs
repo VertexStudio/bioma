@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
+use walkdir::WalkDir;
 
 const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
@@ -117,6 +118,7 @@ pub struct ChunkMetadata {
     pub source: String,
     pub text_type: TextType,
     pub chunk_number: usize,
+    pub uri: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +149,7 @@ impl Indexer {
         &self,
         ctx: &mut ActorContext<Self>,
         source: String,
+        uri: String,
         content: String,
         text_type: TextType,
         chunk_capacity: std::ops::Range<usize>,
@@ -218,7 +221,12 @@ impl Indexer {
         let metadata = chunks
             .iter()
             .enumerate()
-            .map(|(i, _)| ChunkMetadata { source: source.clone(), text_type: text_type.clone(), chunk_number: i })
+            .map(|(i, _)| ChunkMetadata {
+                source: source.clone(),
+                text_type: text_type.clone(),
+                chunk_number: i,
+                uri: uri.clone(),
+            })
             .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
             .collect::<Vec<Value>>();
         let chunks_time = start_time.elapsed();
@@ -276,6 +284,7 @@ impl Message<IndexTexts> for Indexer {
                 .index_text(
                     ctx,
                     source.clone(),
+                    String::new(),
                     text.clone(),
                     text_type.clone(),
                     message.chunk_capacity.clone(),
@@ -317,22 +326,45 @@ impl Message<IndexGlobs> for Indexer {
         for glob in message.globs.iter() {
             info!("Indexing glob: {}", &glob);
             let task_glob = glob.clone();
-            let paths = tokio::task::spawn_blocking(move || glob::glob(&task_glob)).await;
-            let Ok(Ok(paths)) = paths else {
+            let paths = tokio::task::spawn_blocking(move || {
+                let mut paths = Vec::new();
+                for entry in glob::glob(&task_glob).unwrap().flatten() {
+                    if entry.is_file() {
+                        paths.push(entry);
+                    } else if entry.is_dir() {
+                        // Only collect files from directory
+                        for entry in walkdir::WalkDir::new(entry)
+                            .follow_links(true)
+                            .into_iter()
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.file_type().is_file())
+                        // Only process files
+                        {
+                            paths.push(entry.path().to_path_buf());
+                        }
+                    }
+                }
+                paths
+            })
+            .await;
+
+            let Ok(paths) = paths else {
                 warn!("Skipping glob: {}", &glob);
                 continue;
             };
+
             for pathbuf in paths {
-                let Ok(pathbuf) = pathbuf else {
-                    warn!("Skipping path: {:?}", pathbuf);
-                    continue;
-                };
+                if !pathbuf.is_file() {
+                    continue; // Skip if not a file (extra safety check)
+                }
 
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
 
-                info!("ext: {:?}", ext);
-                let source = pathbuf.to_string_lossy().to_string();
+                // Use the glob as the source (root folder)
+                let source = glob.clone();
+                // Use the full path as the URI
+                let uri = pathbuf.to_string_lossy().to_string();
 
                 let text_type = match ext {
                     Some("md") => TextType::Markdown,
@@ -350,7 +382,7 @@ impl Message<IndexGlobs> for Indexer {
                     TextType::Pdf => {
                         let result = ctx
                             .send::<PdfAnalyzer, AnalyzePdf>(
-                                AnalyzePdf { file_path: source.clone().into() },
+                                AnalyzePdf { file_path: pathbuf.clone() },
                                 pdf_analyzer_id,
                                 SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                             )
@@ -378,6 +410,7 @@ impl Message<IndexGlobs> for Indexer {
                     .index_text(
                         ctx,
                         source,
+                        uri,
                         content,
                         text_type,
                         message.chunk_capacity.clone(),
