@@ -135,13 +135,14 @@ enum IndexResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSource {
-    pub source: String,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
-    pub source_existed: bool,
+    pub deleted_sources: Vec<String>,
+    pub not_found_sources: Vec<String>,
 }
 
 impl Indexer {
@@ -455,39 +456,47 @@ impl Message<DeleteSource> for Indexer {
     ) -> Result<DeletedSource, IndexerError> {
         let query = include_str!("../sql/del_source.surql");
         let local_store_dir = ctx.engine().local_store_dir();
-
-        // If source is not absolute, make it relative to local_store_dir
-        let full_source = if std::path::Path::new(&message.source).is_absolute() {
-            message.source.clone()
-        } else {
-            local_store_dir.join(&message.source).to_string_lossy().into_owned()
-        };
-
         let db = ctx.engine().db();
 
-        // First check if source exists in database
-        let mut results = db
-            .query(query)
-            .bind(("source", full_source.clone()))
-            .bind(("tag", self.tag.clone()))
-            .await
-            .map_err(SystemActorError::from)?;
+        let mut total_deleted = 0;
+        let mut deleted_sources = Vec::new();
+        let mut not_found_sources = Vec::new();
 
-        let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
-
-        // Check if file/directory exists before attempting deletion
-        let source_path = std::path::Path::new(&full_source);
-        let source_existed = source_path.exists();
-        if source_existed {
-            // Handle both files and directories
-            if source_path.is_dir() {
-                tokio::fs::remove_dir_all(source_path).await.ok();
+        for source in &message.sources {
+            // If source is not absolute, make it relative to local_store_dir
+            let full_source = if std::path::Path::new(source).is_absolute() {
+                source.clone()
             } else {
-                tokio::fs::remove_file(source_path).await.ok();
+                local_store_dir.join(source).to_string_lossy().into_owned()
+            };
+
+            // Delete from database
+            let mut results = db
+                .query(query)
+                .bind(("source", full_source.clone()))
+                .bind(("tag", self.tag.clone()))
+                .await
+                .map_err(SystemActorError::from)?;
+
+            let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
+            total_deleted += deleted_count;
+
+            // Check if file/directory exists before attempting deletion
+            let source_path = std::path::Path::new(&full_source);
+            if source_path.exists() {
+                // Handle both files and directories
+                if source_path.is_dir() {
+                    tokio::fs::remove_dir_all(source_path).await.ok();
+                } else {
+                    tokio::fs::remove_file(source_path).await.ok();
+                }
+                deleted_sources.push(source.clone());
+            } else {
+                not_found_sources.push(source.clone());
             }
         }
 
-        Ok(DeletedSource { deleted_embeddings: deleted_count, source_existed })
+        Ok(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources })
     }
 }
 
