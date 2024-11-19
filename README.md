@@ -145,9 +145,9 @@ curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{
 ### Delete indexed source:
 
 ```bash
-curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"source": "/absolute/path/to/source"}'
+curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"sources": ["/absolute/path/to/source1", "/absolute/path/to/source2"]}'
 # or
-curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"source": "relative/to/store/path"}'
+curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"sources": ["relative/to/store/path1", "relative/to/store/path2"]}'
 ```
 
 ### Connect to examples DB:
