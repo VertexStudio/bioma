@@ -429,7 +429,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
         }
     };
 
-    info!("Sending delete message to indexer actor for source: {}", body.source);
+    info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
     let response = relay_ctx
         .send::<Indexer, DeleteSource>(
             body.clone(),
@@ -440,11 +440,14 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
 
     match response {
         Ok(result) => {
-            info!("Deleted {} embeddings for source: {}", result.deleted_embeddings, body.source);
+            info!(
+                "Deleted {} embeddings. Successfully deleted sources: {:?}. Not found sources: {:?}",
+                result.deleted_embeddings, result.deleted_sources, result.not_found_sources
+            );
             HttpResponse::Ok().json(result)
         }
         Err(e) => {
-            error!("Error deleting source: {:?}", e);
+            error!("Error deleting sources: {:?}", e);
             HttpResponse::InternalServerError().body(e.to_string())
         }
     }
