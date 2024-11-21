@@ -40,6 +40,8 @@ pub enum EmbeddingsError {
     SendTextEmbeddings(#[from] mpsc::error::SendError<TextEmbeddingRequest>),
     #[error("Error receiving text embeddings: {0}")]
     RecvTextEmbeddings(#[from] oneshot::error::RecvError),
+    #[error("Error sending image embeddings: {0}")]
+    SendImageEmbeddings(#[from] mpsc::error::SendError<ImageEmbeddingRequest>),
 }
 
 pub struct TextEmbeddingRequest {
@@ -61,6 +63,19 @@ pub struct StoreTextEmbeddings {
     pub source: String,
     /// The texts to embed
     pub texts: Vec<String>,
+    /// Metadata to store with the embeddings
+    pub metadata: Option<Vec<Value>>,
+    /// The tag to store the embeddings with
+    pub tag: Option<String>,
+}
+
+/// Generate embeddings for a set of images
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreImageEmbeddings {
+    /// Source of the embeddings
+    pub source: String,
+    /// The image paths to embed
+    pub image_paths: Vec<String>,
     /// Metadata to store with the embeddings
     pub metadata: Option<Vec<Value>>,
     /// The tag to store the embeddings with
@@ -140,6 +155,7 @@ impl Clone for Embeddings {
     fn clone(&self) -> Self {
         Self {
             text_model: self.text_model.clone(),
+            image_model: self.image_model.clone(),
             text_embedding_tx: None,
             image_embedding_tx: None,
             shared_embedding: None,
@@ -440,19 +456,16 @@ impl Actor for Embeddings {
 
                 let _image_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
                     tokio::task::spawn_blocking(move || {
-                        let mut options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
+                        let options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
                             .with_cache_dir(cache_dir);
 
                         let image_embedding = fastembed::ImageEmbedding::try_new(options)?;
                         while let Some(request) = image_embedding_rx.blocking_recv() {
                             let start = std::time::Instant::now();
+                            let path_count = request.image_paths.len();
                             match image_embedding.embed(request.image_paths, None) {
                                 Ok(embeddings) => {
-                                    info!(
-                                        "Generated {} image embeddings in {:?}",
-                                        request.image_paths.len(),
-                                        start.elapsed()
-                                    );
+                                    info!("Generated {} image embeddings in {:?}", path_count, start.elapsed());
                                     let _ = request.response_tx.send(Ok(embeddings));
                                 }
                                 Err(err) => {
