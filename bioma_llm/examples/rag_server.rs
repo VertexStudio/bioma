@@ -246,8 +246,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     let query = body
         .messages
         .iter()
-        .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
-        .map(|message| message.content.clone())
+        .filter(|message| message.role == TextMessageRole::User)
+        .map(|message| message.content.clone().into())
         .collect::<Vec<String>>()
         .join("\n");
     info!("Received ask query: {:#?}", query);
@@ -307,8 +307,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             info!("Sending context to chat actor");
             let chat_response = chat_relay_ctx
-                .send::<Chat, ChatMessages>(
-                    ChatMessages { messages: conversation.clone(), restart: false, persist: true },
+                .send::<Chat, ChatRequest>(
+                    ChatRequest { messages: conversation.clone(), restart: false, persist: true },
                     &data.chat_actor_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
@@ -391,8 +391,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             // Sending context and user query to chat actor
             info!("Sending context to chat actor");
             let chat_response = chat_relay_ctx
-                .send::<Chat, ChatMessages>(
-                    ChatMessages { messages: conversation.clone(), restart: true, persist: false },
+                .send::<Chat, ChatRequest>(
+                    ChatRequest { messages: conversation.clone(), restart: true, persist: false },
                     &data.chat_actor_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
@@ -542,7 +542,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    let chat = Chat::builder().model("llama3.2".into()).build();
+    let chat = Chat::builder().build();
 
     let chat_actor_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(

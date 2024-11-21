@@ -25,6 +25,7 @@ bon = { workspace = true }
 lazy_static = "1.5.0"
 walkdir = { workspace = true }
 zip = { workspace = true }
+anyhow = "1.0"
 
 ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "a40ea0c3980b85aeba28b077e1673dfba1a4be36", features = [
     "function-calling",
@@ -62,6 +63,12 @@ ort = { version = "=2.0.0-rc.6", default-features = false, features = [
 ort = { version = "=2.0.0-rc.6", default-features = false, features = [
     "ndarray",
     "cuda",
+] }
+# mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", rev = "d4d9584fc33fd1e684c40fbf96efa5a9cc0bba3e", features = [
+mistralrs = { path = "../../mistral.rs/mistralrs", features = [
+    "cuda",
+    "cudnn",
+    "flash-attn",
 ] }
 
 [dev-dependencies]

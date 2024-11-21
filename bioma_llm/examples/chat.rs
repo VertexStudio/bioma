@@ -14,7 +14,7 @@ impl Actor for MainActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
         let chat_id = ActorId::of::<Chat>("/llm");
 
-        let chat = Chat::builder().model("llama3.2".into()).build();
+        let chat = Chat::builder().build();
 
         // Spawn the chat actor
         let (mut chat_ctx, mut chat_actor) =
@@ -43,16 +43,17 @@ impl Actor for MainActor {
 
             info!("{} Sending message: {}", ctx.id(), starter);
             let chat_message = ChatMessage::user(starter.to_string());
-            let response: ChatMessageResponse = ctx
-                .send::<Chat, ChatMessages>(
-                    ChatMessages { messages: vec![chat_message], restart: false, persist: false },
+            let response: ChatCompletionResponse = ctx
+                .send::<Chat, ChatRequest>(
+                    ChatRequest { messages: vec![chat_message], restart: false, persist: false },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
                 .await?;
 
-            if let Some(assistant_message) = response.message {
-                info!("{} Received response: {}", ctx.id(), assistant_message.content);
+            if let Some(assistant_message) = response.choices.first().and_then(|choice| choice.message.content.clone())
+            {
+                info!("{} Received response: {}", ctx.id(), assistant_message);
                 exchanges += 1;
             } else {
                 error!("{} No response received from LLM", ctx.id());

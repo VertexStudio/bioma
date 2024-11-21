@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create chat conversation
     let mut conversation = vec![];
 
-    let chat = Chat::builder().model("llama3.2".into()).messages_number_limit(10).history(conversation.clone()).build();
+    let chat = Chat::builder().messages_number_limit(10).history(conversation.clone()).build();
 
     let chat_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) =
@@ -119,8 +119,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the context to the chat actor
     info!("Sending context to chat actor");
     let chat_response = relay_ctx
-        .send::<Chat, ChatMessages>(
-            ChatMessages { messages: conversation.clone(), restart: false, persist: false },
+        .send::<Chat, ChatRequest>(
+            ChatRequest { messages: conversation.clone(), restart: false, persist: false },
             &chat_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )
@@ -132,8 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for message in &conversation {
         chat_content.push_str(&format!("{:?}: {}\n\n", message.role, message.content));
     }
-    let response = chat_response.message.unwrap();
-    chat_content.push_str(&format!("{:?}: {}\n\n", &response.role, &response.content));
+    let response_role = chat_response.choices.first().unwrap().message.role.clone();
+    let response_content = chat_response.choices.first().unwrap().message.content.as_ref().unwrap().clone();
+    chat_content.push_str(&format!("{:?}: {}\n\n", response_role, response_content));
     tokio::fs::write(output_dir.join("debug").join("rag_chat.md"), chat_content).await?;
 
     indexer_handle.abort();
