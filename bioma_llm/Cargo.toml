@@ -58,6 +58,7 @@ ort = { version = "=2.0.0-rc.6", default-features = false, features = [
     "ndarray",
     "coreml",
 ] }
+mistralrs = { path = "../../mistral.rs/mistralrs", features = ["metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ort = { version = "=2.0.0-rc.6", default-features = false, features = [
