@@ -71,7 +71,7 @@ pub struct StoreTextEmbeddings {
 
 /// Generate embeddings for a set of images
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoreImageEmbeddings {
+pub struct GenerateImageEmbeddings {
     /// Source of the embeddings
     pub source: String,
     /// The image paths to embed
@@ -273,13 +273,13 @@ impl Message<GenerateTextEmbeddings> for Embeddings {
     }
 }
 
-impl Message<StoreImageEmbeddings> for Embeddings {
+impl Message<GenerateImageEmbeddings> for Embeddings {
     type Response = StoredTextEmbeddings;
 
     async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
-        message: &StoreImageEmbeddings,
+        message: &GenerateImageEmbeddings,
     ) -> Result<StoredTextEmbeddings, EmbeddingsError> {
         let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
@@ -506,7 +506,7 @@ impl Actor for Embeddings {
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
                 }
-            } else if let Some(input) = frame.is::<StoreImageEmbeddings>() {
+            } else if let Some(input) = frame.is::<GenerateImageEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
