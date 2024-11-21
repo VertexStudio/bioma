@@ -19,6 +19,7 @@ lazy_static! {
 
 struct SharedEmbedding {
     text_embedding_tx: mpsc::Sender<TextEmbeddingRequest>,
+    image_embedding_tx: mpsc::Sender<ImageEmbeddingRequest>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -44,6 +45,11 @@ pub enum EmbeddingsError {
 pub struct TextEmbeddingRequest {
     response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
     texts: Vec<String>,
+}
+
+pub struct ImageEmbeddingRequest {
+    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
+    image_paths: Vec<String>,
 }
 
 impl ActorError for EmbeddingsError {}
@@ -110,9 +116,13 @@ pub struct Similarity {
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
     #[builder(default = Model::NomicEmbedTextV15)]
-    pub model: Model,
+    pub text_model: Model,
+    #[builder(default = ImageModel::ClipVitB32)]
+    pub image_model: ImageModel,
     #[serde(skip)]
     text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
+    #[serde(skip)]
+    image_embedding_tx: Option<mpsc::Sender<ImageEmbeddingRequest>>,
     #[serde(skip)]
     shared_embedding: Option<StrongSharedEmbedding>,
 }
@@ -128,7 +138,12 @@ impl std::fmt::Debug for StrongSharedEmbedding {
 
 impl Clone for Embeddings {
     fn clone(&self) -> Self {
-        Self { model: self.model.clone(), text_embedding_tx: None, shared_embedding: None }
+        Self {
+            text_model: self.text_model.clone(),
+            text_embedding_tx: None,
+            image_embedding_tx: None,
+            shared_embedding: None,
+        }
     }
 }
 
@@ -206,7 +221,7 @@ impl Message<StoreTextEmbeddings> for Embeddings {
         for (i, text) in message.texts.iter().enumerate() {
             let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
             let embedding = embeddings[i].clone();
-            let model_id = RecordId::from_table_key("model", self.model.to_string());
+            let model_id = RecordId::from_table_key("model", self.text_model.to_string());
             db.query(emb_query)
                 .bind(("tag", message.tag.clone()))
                 .bind(("text", text.to_string()))
@@ -242,6 +257,54 @@ impl Message<GenerateTextEmbeddings> for Embeddings {
     }
 }
 
+impl Message<StoreImageEmbeddings> for Embeddings {
+    type Response = StoredTextEmbeddings;
+
+    async fn handle(
+        &mut self,
+        _ctx: &mut ActorContext<Self>,
+        message: &StoreImageEmbeddings,
+    ) -> Result<StoredTextEmbeddings, EmbeddingsError> {
+        let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        image_embedding_tx
+            .send(ImageEmbeddingRequest { response_tx: tx, image_paths: message.image_paths.clone() })
+            .await?;
+        let embeddings = rx.await??;
+
+        let db = _ctx.engine().db();
+        let emb_query = include_str!("../sql/embeddings.surql");
+
+        // Check if metadata is same length as texts
+        if let Some(metadata) = &message.metadata {
+            if metadata.len() != message.image_paths.len() {
+                error!("Metadata length does not match texts length");
+            }
+        }
+
+        // Store embeddings
+        for (i, image_path) in message.image_paths.iter().enumerate() {
+            let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
+            let embedding = embeddings[i].clone();
+            let model_id = RecordId::from_table_key("model", self.image_model.to_string());
+            db.query(emb_query)
+                .bind(("tag", message.tag.clone()))
+                .bind(("text", image_path.to_string()))
+                .bind(("embedding", embedding))
+                .bind(("metadata", metadata))
+                .bind(("model_id", model_id))
+                .bind(("source", message.source.clone()))
+                .await
+                .map_err(SystemActorError::from)?;
+        }
+
+        Ok(StoredTextEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum Model {
     NomicEmbedTextV15,
@@ -250,6 +313,19 @@ pub enum Model {
 fn get_fastembed_model(model: &Model) -> fastembed::EmbeddingModel {
     match model {
         Model::NomicEmbedTextV15 => fastembed::EmbeddingModel::NomicEmbedTextV15,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+pub enum ImageModel {
+    ClipVitB32,
+    UnicomVitB32,
+}
+
+fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingModel {
+    match model {
+        ImageModel::ClipVitB32 => fastembed::ImageEmbeddingModel::ClipVitB32,
+        ImageModel::UnicomVitB32 => fastembed::ImageEmbeddingModel::UnicomVitB32,
     }
 }
 
@@ -277,10 +353,10 @@ impl Actor for Embeddings {
             } else {
                 let ctx_id = ctx.id().clone();
                 // Get model info
-                let fastembed_model = get_fastembed_model(&self.model);
+                let fastembed_model = get_fastembed_model(&self.text_model);
                 let model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
                 let model_info = ModelInfo {
-                    name: self.model.clone(),
+                    name: self.text_model.clone(),
                     dim: model_info.dim,
                     description: model_info.description.clone(),
                     model_code: model_info.model_code.clone(),
@@ -299,16 +375,16 @@ impl Actor for Embeddings {
 
                 // Store model in database if not already present
                 let model: Result<Option<Record>, _> = db
-                    .create(("model", self.model.to_string()))
+                    .create(("model", self.text_model.to_string()))
                     .content(model_info)
                     .await
                     .map_err(SystemActorError::from);
                 if let Ok(Some(model)) = &model {
-                    info!("Model {:?} stored with id: {}", self.model, model.id);
+                    info!("Model {:?} stored with id: {}", self.text_model, model.id);
                 }
 
                 // Create a new shared embedding
-                let model = self.model.clone();
+                let model = self.text_model.clone();
                 let cache_dir = ctx.engine().huggingface_cache_dir().clone();
                 let (text_embedding_tx, mut text_embedding_rx) = mpsc::channel::<TextEmbeddingRequest>(100);
                 let _text_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
@@ -357,8 +433,39 @@ impl Actor for Embeddings {
                         Ok(())
                     });
 
+                // Setup image embeddings
+                let (image_embedding_tx, mut image_embedding_rx) = mpsc::channel::<ImageEmbeddingRequest>(100);
+                let image_model = self.image_model.clone();
+                let cache_dir = ctx.engine().huggingface_cache_dir().clone();
+
+                let _image_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
+                    tokio::task::spawn_blocking(move || {
+                        let mut options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
+                            .with_cache_dir(cache_dir);
+
+                        let image_embedding = fastembed::ImageEmbedding::try_new(options)?;
+                        while let Some(request) = image_embedding_rx.blocking_recv() {
+                            let start = std::time::Instant::now();
+                            match image_embedding.embed(request.image_paths, None) {
+                                Ok(embeddings) => {
+                                    info!(
+                                        "Generated {} image embeddings in {:?}",
+                                        request.image_paths.len(),
+                                        start.elapsed()
+                                    );
+                                    let _ = request.response_tx.send(Ok(embeddings));
+                                }
+                                Err(err) => {
+                                    error!("Failed to generate image embeddings: {}", err);
+                                    let _ = request.response_tx.send(Err(err));
+                                }
+                            }
+                        }
+                        Ok(())
+                    });
+
                 // Store the shared embedding
-                let shared_embedding = Arc::new(SharedEmbedding { text_embedding_tx });
+                let shared_embedding = Arc::new(SharedEmbedding { text_embedding_tx, image_embedding_tx });
                 *weak_ref = Arc::downgrade(&shared_embedding);
                 Some(shared_embedding)
             }
@@ -366,6 +473,7 @@ impl Actor for Embeddings {
 
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
         self.text_embedding_tx = self.shared_embedding.as_ref().map(|se| se.text_embedding_tx.clone());
+        self.image_embedding_tx = self.shared_embedding.as_ref().map(|se| se.image_embedding_tx.clone());
 
         // Start the message stream
         let mut stream = ctx.recv().await?;
@@ -381,6 +489,11 @@ impl Actor for Embeddings {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<TopK>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<StoreImageEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
