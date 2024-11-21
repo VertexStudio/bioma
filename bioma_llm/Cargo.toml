@@ -31,9 +31,9 @@ ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "a40ea0c39
     "function-calling",
 ] }
 hf-hub = "0.3.2"
-# fastembed = "4"
+fastembed = "4.1.1"
 # fastembed = { path = "../../fastembed-rs" }
-fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "fix/ort-2.0.0-rc.6" }
+# fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "fix/ort-2.0.0-rc.6" }
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
@@ -49,19 +49,19 @@ mdka = "1.2"
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
 
-ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+ort = { version = "=2.0.0-rc.8", default-features = false, features = [
     "ndarray",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+ort = { version = "=2.0.0-rc.8", default-features = false, features = [
     "ndarray",
     "coreml",
 ] }
 mistralrs = { path = "../../mistral.rs/mistralrs", features = ["metal"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+ort = { version = "=2.0.0-rc.8", default-features = false, features = [
     "ndarray",
     "cuda",
 ] }
