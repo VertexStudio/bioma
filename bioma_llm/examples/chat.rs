@@ -45,7 +45,7 @@ impl Actor for MainActor {
             let chat_message = ChatMessage::user(starter.to_string());
             let response: ChatCompletionResponse = ctx
                 .send::<Chat, ChatRequest>(
-                    ChatRequest { messages: vec![chat_message], restart: false, persist: false },
+                    ChatRequest { messages: vec![chat_message], restart: false, persist: false, sampling_params: None },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
@@ -82,7 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn the main actor
     let (mut main_ctx, mut main_actor) =
-        Actor::spawn(engine.clone(), main_id.clone(), MainActor { max_exchanges: 3 }, SpawnOptions::default()).await.unwrap();
+        Actor::spawn(engine.clone(), main_id.clone(), MainActor { max_exchanges: 3 }, SpawnOptions::default())
+            .await
+            .unwrap();
 
     // Start the main actor
     main_actor.start(&mut main_ctx).await.unwrap();

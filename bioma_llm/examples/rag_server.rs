@@ -308,7 +308,12 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             info!("Sending context to chat actor");
             let chat_response = chat_relay_ctx
                 .send::<Chat, ChatRequest>(
-                    ChatRequest { messages: conversation.clone(), restart: false, persist: true },
+                    ChatRequest {
+                        messages: conversation.clone(),
+                        restart: false,
+                        persist: true,
+                        sampling_params: None,
+                    },
                     &data.chat_actor_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
@@ -392,7 +397,12 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             info!("Sending context to chat actor");
             let chat_response = chat_relay_ctx
                 .send::<Chat, ChatRequest>(
-                    ChatRequest { messages: conversation.clone(), restart: true, persist: false },
+                    ChatRequest {
+                        messages: conversation.clone(),
+                        restart: true,
+                        persist: false,
+                        sampling_params: None,
+                    },
                     &data.chat_actor_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )

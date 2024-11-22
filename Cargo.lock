@@ -443,9 +443,6 @@ name = "anyhow"
 version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c042108f3ed77fd83760a5fd79b53be043192bb3b9dba91d8c574c0ada7850c8"
-dependencies = [
- "backtrace",
-]
 
 [[package]]
 name = "approx"
@@ -1338,17 +1335,6 @@ dependencies = [
  "ug-metal",
  "yoke",
  "zip 1.1.4",
-]
-
-[[package]]
-name = "candle-flash-attn"
-version = "0.8.0"
-source = "git+https://github.com/EricLBuehler/candle.git?rev=e97177b#e97177bd21215968d28073ff7b805e51321230e4"
-dependencies = [
- "anyhow",
- "bindgen_cuda 0.1.5",
- "candle-core",
- "half",
 ]
 
 [[package]]
@@ -4032,7 +4018,6 @@ dependencies = [
  "bytemuck",
  "bytemuck_derive",
  "candle-core",
- "candle-flash-attn",
  "candle-nn",
  "cfgrammar",
  "chrono",

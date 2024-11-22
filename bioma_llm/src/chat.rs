@@ -1,7 +1,10 @@
 use bioma_actor::prelude::*;
 use derive_more::Deref;
 use lazy_static::lazy_static;
-use mistralrs::{ChatCompletionResponse, GgufModelBuilder, Model, TextMessageRole, TextMessages};
+use mistralrs::{
+    paged_attn_supported, ChatCompletionResponse, DrySamplingParams, GgufModelBuilder, MemoryGpuConfig,
+    PagedAttentionConfig, RequestBuilder, SamplingParams, TextMessageRole, TextMessages,
+};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::{Arc, Weak};
@@ -9,8 +12,8 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{error, info};
 
 const DEFAULT_MODEL_ID: &str = "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF";
-const DEFAULT_MODEL_FILES: [&str; 1] = ["Qwen2.5-Coder-3B-Instruct-Q6_K.gguf"];
-const DEFAULT_TOK_MODEL_ID: &str = "Qwen/Qwen2.5-Coder-3B-Instruct";
+const DEFAULT_MODEL_FILES: [&str; 1] = ["Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf"];
+const DEFAULT_MODEL_CONTEXT_SIZE: usize = 32768;
 const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
 
 lazy_static! {
@@ -19,12 +22,12 @@ lazy_static! {
 
 struct SharedModel {
     chat_tx: mpsc::Sender<ChatTextRequest>,
-    // model: Model,
 }
 
 pub struct ChatTextRequest {
     response_tx: oneshot::Sender<Result<ChatCompletionResponse, anyhow::Error>>,
     messages: TextMessages,
+    sampling_params: Option<SamplingParams>,
 }
 
 #[derive(Deref)]
@@ -68,11 +71,12 @@ impl ChatMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub restart: bool,
     pub persist: bool,
+    pub sampling_params: Option<SamplingParams>,
 }
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
@@ -81,8 +85,8 @@ pub struct Chat {
     pub model_id: Cow<'static, str>,
     #[builder(default = DEFAULT_MODEL_FILES.iter().map(|&s| s.into()).collect())]
     pub model_files: Vec<Cow<'static, str>>,
-    #[builder(default = DEFAULT_TOK_MODEL_ID.into())]
-    pub tok_model_id: Cow<'static, str>,
+    #[builder(default = DEFAULT_MODEL_CONTEXT_SIZE)]
+    pub model_context_size: usize,
     #[builder(default)]
     pub history: Vec<ChatMessage>,
     #[builder(default = DEFAULT_MESSAGES_NUMBER_LIMIT)]
@@ -98,7 +102,7 @@ impl Default for Chat {
         Self {
             model_id: DEFAULT_MODEL_ID.into(),
             model_files: DEFAULT_MODEL_FILES.iter().map(|&s| s.into()).collect(),
-            tok_model_id: DEFAULT_TOK_MODEL_ID.into(),
+            model_context_size: DEFAULT_MODEL_CONTEXT_SIZE,
             history: Vec::new(),
             messages_number_limit: DEFAULT_MESSAGES_NUMBER_LIMIT,
             chat_tx: None,
@@ -141,7 +145,13 @@ impl Message<ChatRequest> for Chat {
         info!("{} Handling chat request 2", ctx.id());
 
         let (tx, rx) = oneshot::channel();
-        chat_tx.send(ChatTextRequest { response_tx: tx, messages: mistral_request }).await?;
+        chat_tx
+            .send(ChatTextRequest {
+                response_tx: tx,
+                messages: mistral_request,
+                sampling_params: request.sampling_params.clone(),
+            })
+            .await?;
         let response = rx.await??;
 
         info!("{} Handling chat request 3", ctx.id());
@@ -181,22 +191,35 @@ impl Actor for Chat {
                 let ctx_id = ctx.id().clone();
                 let model_id = self.model_id.clone();
                 let model_files = self.model_files.clone();
-                let tok_model_id = self.tok_model_id.clone();
-
+                let model_context_size = self.model_context_size;
                 let (chat_tx, mut chat_rx) = mpsc::channel::<ChatTextRequest>(100);
 
                 let (shared_model_tx, shared_model_rx) = oneshot::channel();
                 std::thread::spawn(move || {
                     let runtime = tokio::runtime::Runtime::new().unwrap();
                     runtime.block_on(async move {
-                        let model = GgufModelBuilder::new(
+                        let mut model = GgufModelBuilder::new(
                             model_id.to_string(),
                             model_files.iter().map(|s| s.to_string()).collect(),
                         )
-                        .with_tok_model_id(tok_model_id.to_string())
-                        .build()
-                        .await
-                        .expect("Failed to initialize model");
+                        // .with_tok_model_id(tok_model_id.to_string())
+                        // .with_token_source(TokenSource::CacheToken)
+                        .with_max_num_seqs(32)
+                        .with_prefix_cache_n(Some(16));
+
+                        if paged_attn_supported() {
+                            model = model
+                                .with_paged_attn(|| {
+                                    Ok(PagedAttentionConfig::new(
+                                        None,
+                                        512,
+                                        MemoryGpuConfig::ContextSize(model_context_size),
+                                    )?)
+                                })
+                                .unwrap();
+                        }
+
+                        let model = model.build().await.expect("Failed to initialize model");
 
                         {
                             let shared_model = Arc::new(SharedModel { chat_tx });
@@ -208,16 +231,43 @@ impl Actor for Chat {
 
                         // Process messages
                         while let Some(request) = chat_rx.recv().await {
+                            let sampling_params = match request.sampling_params {
+                                Some(params) => params,
+                                None => SamplingParams {
+                                    temperature: Some(0.8),
+                                    top_k: Some(32),
+                                    top_p: Some(0.1),
+                                    min_p: Some(0.05),
+                                    top_n_logprobs: 0,
+                                    frequency_penalty: Some(1.5),
+                                    presence_penalty: Some(0.1),
+                                    stop_toks: None,
+                                    max_len: Some(4096),
+                                    logits_bias: None,
+                                    n_choices: 1,
+                                    dry_params: Some(DrySamplingParams {
+                                        sequence_breakers: vec![
+                                            "\n".to_string(),
+                                            ":".to_string(),
+                                            "\"".to_string(),
+                                            "*".to_string(),
+                                        ],
+                                        multiplier: 0.0,
+                                        base: 1.75,
+                                        allowed_length: 2,
+                                    }),
+                                },
+                            };
+
+                            info!("sampling_params: {:#?}", sampling_params);
+
+                            info!("request.messages: {:#?}", request.messages);
+
+                            let request_builder = RequestBuilder::from(request.messages).set_sampling(sampling_params);
+
                             let start = std::time::Instant::now();
 
-                            // let model = SHARED_MODEL.lock().await.upgrade();
-                            // let Some(model) = model else {
-                            //     error!("{} Model dropped", ctx_id);
-                            //     return;
-                            // };
-                            // let model = &model.model;
-
-                            match model.send_chat_request(request.messages).await {
+                            match model.send_chat_request(request_builder).await {
                                 Ok(response) => {
                                     info!("Generated chat response in {:?}", start.elapsed());
                                     let _ = request.response_tx.send(Ok(response));

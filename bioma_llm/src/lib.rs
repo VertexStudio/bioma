@@ -6,7 +6,7 @@ pub mod rerank;
 pub mod retriever;
 
 pub mod prelude {
-    pub use crate::chat::{self, Chat, ChatError, ChatRequest, ChatMessage};
+    pub use crate::chat::{self, Chat, ChatError, ChatMessage, ChatRequest};
     pub use crate::embeddings::{
         self, Embeddings, EmbeddingsError, GenerateTextEmbeddings, StoreTextEmbeddings, DEFAULT_EMBEDDING_LENGTH,
     };
