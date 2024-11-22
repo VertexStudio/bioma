@@ -954,6 +954,7 @@ dependencies = [
  "hf-hub",
  "humantime",
  "humantime-serde",
+ "image",
  "indexmap 2.6.0",
  "jsonpath-rust",
  "lazy_static",

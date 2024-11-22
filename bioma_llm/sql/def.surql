@@ -10,7 +10,7 @@ DEFINE INDEX text_embedding_index ON TABLE text_embedding FIELDS embedding MTREE
 
 -- Define the image_embedding table
 DEFINE TABLE image_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD caption ON image_embedding TYPE string PERMISSIONS FULL;
+DEFINE FIELD caption ON image_embedding TYPE option<string> PERMISSIONS FULL;
 DEFINE FIELD embedding ON image_embedding TYPE array<number> PERMISSIONS FULL;
 DEFINE INDEX image_embedding_index ON TABLE image_embedding FIELDS embedding MTREE DIMENSION 512 DIST EUCLIDEAN;
 

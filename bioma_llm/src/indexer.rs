@@ -5,6 +5,7 @@ use crate::{
 use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use serde_json::Value;
 use std::borrow::Cow;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
@@ -82,19 +83,7 @@ pub struct IndexGlobs {
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexImages {
     /// The images to index
-    pub images: Vec<ImageSource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageSource {
-    /// Source identifier for the image
-    pub source: String,
-    /// Path to the image file
-    pub path: String,
-    /// Optional caption for the image
-    pub caption: Option<String>,
-    /// Optional metadata for the image
-    pub metadata: Option<Value>,
+    pub images: Vec<Image>,
 }
 
 fn default_chunk_capacity() -> std::ops::Range<usize> {
@@ -294,12 +283,22 @@ impl Indexer {
     async fn index_image(
         &self,
         ctx: &mut ActorContext<Self>,
-        source: String,
-        path: String,
-        caption: Option<String>,
-        metadata: Option<Value>,
+        image: &Image,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
+        let local_store_dir = ctx.engine().local_store_dir().to_owned();
+
+        // If path is not absolute, make it relative to local_store_dir
+        let full_path = if std::path::Path::new(&image.path).is_absolute() {
+            image.path.clone()
+        } else {
+            local_store_dir.join(&image.path).to_string_lossy().into_owned()
+        };
+
+        // Infer source from the path
+        let source =
+            std::path::Path::new(&full_path).parent().and_then(|p| p.to_str()).unwrap_or(&full_path).to_string();
+
         // Check if image is already indexed
         let source_embeddings = ctx
             .engine()
@@ -307,37 +306,63 @@ impl Indexer {
             .query("SELECT source, ->source_image_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_image_embeddings.out.metadata.uri CONTAINS $uri")
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
-            .bind(("uri", path.clone()))
+            .bind(("uri", full_path.clone()))
             .await;
 
         let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {} {}", source, path);
+            error!("Failed to query source embeddings: {} {}", source, full_path);
             return Ok(IndexResult::Failed);
         };
 
         let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
         if !source_embeddings.is_empty() {
-            debug!("Image already indexed with URI: {} {}", source, path);
+            debug!("Image already indexed with URI: {} {}", source, full_path);
             return Ok(IndexResult::Cached);
         }
 
-        let start_time = std::time::Instant::now();
+        // Extract image metadata
+        let source_clone = source.clone();
+        let full_path_clone = full_path.clone();
+        let metadata = tokio::task::spawn_blocking(move || {
+            let file = std::fs::File::open(&full_path_clone).ok()?;
+            let reader = std::io::BufReader::new(file);
 
-        // Prepare metadata
-        let mut base_metadata = metadata.unwrap_or(Value::Null);
-        if let Value::Object(ref mut map) = base_metadata {
-            map.insert("uri".to_string(), Value::String(path.clone()));
-            map.insert("source".to_string(), Value::String(source.clone()));
-            map.insert("text_type".to_string(), Value::String("Image".to_string()));
-        }
+            // Get image format and dimensions
+            let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
+            let format_type = format.format();
+            let dimensions = match format_type {
+                Some(_) => format.into_dimensions().ok()?,
+                None => return None,
+            };
+
+            // Get file metadata
+            let file_metadata = std::fs::metadata(&full_path_clone).ok()?;
+
+            Some(json!({
+                "uri": full_path_clone,
+                "source": source_clone,
+                "format": format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown"),
+                "dimensions": {
+                    "width": dimensions.0,
+                    "height": dimensions.1
+                },
+                "size_bytes": file_metadata.len(),
+                "modified": file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
+                "created": file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
+            }))
+        })
+        .await
+        .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+        let start_time = std::time::Instant::now();
 
         // Create the image embedding request
         let result = ctx
             .send::<Embeddings, StoreImageEmbeddings>(
                 StoreImageEmbeddings {
                     source: source.clone(),
-                    images: vec![Image { path, caption }],
-                    metadata: Some(vec![base_metadata]),
+                    images: vec![Image { path: full_path, caption: image.caption.clone() }],
+                    metadata: metadata.map(|m| vec![m]), // Include extracted metadata
                     tag: Some(self.tag.clone().to_string()),
                 },
                 embeddings_id,
@@ -352,7 +377,7 @@ impl Indexer {
                 Ok(IndexResult::Indexed(1))
             }
             Err(e) => {
-                error!("Failed to generate image embedding: {} {}", e, source);
+                error!("Failed to generate image embedding: {}", e);
                 Ok(IndexResult::Failed)
             }
         }
@@ -600,17 +625,7 @@ impl Message<IndexImages> for Indexer {
         let mut cached = 0;
 
         for image in &message.images {
-            match self
-                .index_image(
-                    ctx,
-                    image.source.clone(),
-                    image.path.clone(),
-                    image.caption.clone(),
-                    image.metadata.clone(),
-                    embeddings_id,
-                )
-                .await?
-            {
+            match self.index_image(ctx, image, embeddings_id).await? {
                 IndexResult::Indexed(count) => {
                     if count > 0 {
                         indexed += 1;
