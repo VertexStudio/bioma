@@ -44,6 +44,7 @@ tree-sitter-cpp = "0.23.0"
 tree-sitter-cue = { git = "https://github.com/rozgo/tree-sitter-cue.git", branch = "main" }
 tree-sitter-csv = { git = "https://github.com/rozgo/tree-sitter-csv.git", branch = "master" }
 mdka = "1.2"
+image = "0.25"
 
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
