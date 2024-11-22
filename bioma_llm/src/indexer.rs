@@ -1,5 +1,5 @@
 use crate::{
-    embeddings::{Embeddings, EmbeddingsError, StoreTextEmbeddings},
+    embeddings::{Embeddings, EmbeddingsError, StoreImageEmbeddings, StoreTextEmbeddings},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
@@ -38,6 +38,8 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
+    #[error("Image embedding error: {0}")]
+    ImageEmbedding(String),
 }
 
 impl ActorError for IndexerError {}
@@ -110,6 +112,7 @@ pub enum TextType {
     Markdown,
     Code(CodeLanguage),
     Text,
+    Image,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +218,40 @@ impl Indexer {
                 )
                 .expect("Invalid tree-sitter language");
                 splitter.chunks(&content).collect::<Vec<&str>>()
+            }
+            TextType::Image => {
+                let start_time = std::time::Instant::now();
+                let metadata = vec![serde_json::to_value(ChunkMetadata {
+                    source: source.clone(),
+                    text_type: text_type.clone(),
+                    chunk_number: 0,
+                    uri: uri.clone(),
+                })
+                .unwrap_or_default()];
+
+                let result = ctx
+                    .send::<Embeddings, StoreImageEmbeddings>(
+                        StoreImageEmbeddings {
+                            source: source.clone(),
+                            image_paths: vec![uri.clone()],
+                            metadata: Some(metadata),
+                            tag: Some(self.tag.clone().to_string()),
+                        },
+                        embeddings_id,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                    )
+                    .await;
+
+                match result {
+                    Ok(_) => {
+                        debug!("Generated image embedding in {:?}", start_time.elapsed());
+                        return Ok(IndexResult::Indexed(1));
+                    }
+                    Err(e) => {
+                        error!("Failed to generate image embedding: {} {}", e, source);
+                        return Ok(IndexResult::Failed);
+                    }
+                }
             }
             _ => panic!("Invalid text type"),
         };
@@ -386,6 +423,7 @@ impl Message<IndexGlobs> for Indexer {
                     Some("cpp") => TextType::Code(CodeLanguage::Cpp),
                     Some("h") => TextType::Text,
                     Some("pdf") => TextType::Pdf,
+                    Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("webp") => TextType::Image,
                     _ => TextType::Text,
                 };
 
