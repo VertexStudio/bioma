@@ -11,8 +11,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-pub const DEFAULT_EMBEDDING_LENGTH: usize = 768;
-
+pub const DEFAULT_TEXT_EMBEDDING_LENGTH: usize = 768;
+pub const DEFAULT_IMAGE_EMBEDDING_LENGTH: usize = 512;
 lazy_static! {
     static ref SHARED_EMBEDDING: Arc<Mutex<Weak<SharedEmbedding>>> = Arc::new(Mutex::new(Weak::new()));
 }
@@ -458,11 +458,17 @@ impl Actor for Embeddings {
                 };
 
                 // Assert embedding lengths
-                if text_model_info.dim != DEFAULT_EMBEDDING_LENGTH {
-                    panic!("Text embedding length must be {}. Not {}", DEFAULT_EMBEDDING_LENGTH, text_model_info.dim);
+                if text_model_info.dim != DEFAULT_TEXT_EMBEDDING_LENGTH {
+                    panic!(
+                        "Text embedding length must be {}. Not {}",
+                        DEFAULT_TEXT_EMBEDDING_LENGTH, text_model_info.dim
+                    );
                 }
-                if image_model_info.dim != DEFAULT_EMBEDDING_LENGTH {
-                    panic!("Image embedding length must be {}. Not {}", DEFAULT_EMBEDDING_LENGTH, image_model_info.dim);
+                if image_model_info.dim != DEFAULT_IMAGE_EMBEDDING_LENGTH {
+                    panic!(
+                        "Image embedding length must be {}. Not {}",
+                        DEFAULT_IMAGE_EMBEDDING_LENGTH, image_model_info.dim
+                    );
                 }
 
                 // Define the schema
