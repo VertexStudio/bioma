@@ -367,18 +367,15 @@ impl Message<StoreImageEmbeddings> for Embeddings {
             let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
             let embedding = embeddings[i].clone();
             let model_id = RecordId::from_table_key("model", self.image_model.to_string());
-            let result = db
-                .query(emb_query)
+            db.query(emb_query)
                 .bind(("tag", message.tag.clone()))
-                .bind(("text", image.caption.clone()))
+                .bind(("caption", image.caption.clone()))
                 .bind(("embedding", embedding))
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
                 .bind(("source", message.source.clone()))
                 .await
                 .map_err(SystemActorError::from)?;
-
-            println!("{:?}", result);
         }
 
         Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
