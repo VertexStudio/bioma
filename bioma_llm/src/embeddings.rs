@@ -112,8 +112,10 @@ pub struct GeneratedTextEmbeddings {
 /// The query to search for
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Query {
-    Embedding(Vec<f32>),
+    TextEmbedding(Vec<f32>),
+    ImageEmbedding(Vec<f32>),
     Text(String),
+    Image(String),
 }
 
 /// Get the top k similar embeddings to a query, filtered by tag
@@ -183,29 +185,44 @@ impl Message<TopK> for Embeddings {
 
     async fn handle(
         &mut self,
-        _ctx: &mut ActorContext<Self>,
+        ctx: &mut ActorContext<Self>,
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
-        let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-        };
-
-        // Generate embedding for query if not already an embedding
         let query_embedding = match &message.query {
-            Query::Embedding(embedding) => embedding.clone(),
+            Query::TextEmbedding(embedding) => (embedding.clone(), true),
+            Query::ImageEmbedding(embedding) => (embedding.clone(), false),
             Query::Text(text) => {
+                let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+                };
                 let (tx, rx) = oneshot::channel();
                 text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] }).await?;
-                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                (rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?, true)
+            }
+            Query::Image(path) => {
+                let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
+                };
+                let (tx, rx) = oneshot::channel();
+                image_embedding_tx
+                    .send(ImageEmbeddingRequest { response_tx: tx, image_paths: vec![path.to_string()] })
+                    .await?;
+                (rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?, false)
             }
         };
 
-        // Get the similar embeddings
-        let query_sql = include_str!("../sql/similarities.surql");
-        let db = _ctx.engine().db();
+        // TODO: Queries are similar. See if we can use just one.
+        // Get the similar embeddings using the appropriate query
+        let query_sql = if query_embedding.1 {
+            include_str!("../sql/similarities/similarities_text.surql")
+        } else {
+            include_str!("../sql/similarities/similarities_image.surql")
+        };
+
+        let db = ctx.engine().db();
         let mut results = db
             .query(query_sql)
-            .bind(("query", query_embedding))
+            .bind(("query", query_embedding.0))
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
             .bind(("threshold", message.threshold))
@@ -221,7 +238,7 @@ impl Message<StoreTextEmbeddings> for Embeddings {
 
     async fn handle(
         &mut self,
-        _ctx: &mut ActorContext<Self>,
+        ctx: &mut ActorContext<Self>,
         message: &StoreTextEmbeddings,
     ) -> Result<StoredEmbeddings, EmbeddingsError> {
         let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
@@ -232,8 +249,8 @@ impl Message<StoreTextEmbeddings> for Embeddings {
         text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: message.texts.clone() }).await?;
         let embeddings = rx.await??;
 
-        let db = _ctx.engine().db();
-        let emb_query = include_str!("../sql/embeddings.surql");
+        let db = ctx.engine().db();
+        let emb_query = include_str!("../sql/embeddings/store_text_embedding.surql");
 
         // Check if metadata is same length as texts
         if let Some(metadata) = &message.metadata {
@@ -324,7 +341,7 @@ impl Message<StoreImageEmbeddings> for Embeddings {
         let embeddings = rx.await??;
 
         let db = ctx.engine().db();
-        let emb_query = include_str!("../sql/embeddings.surql");
+        let emb_query = include_str!("../sql/embeddings/store_image_embedding.surql");
 
         // Check if metadata is same length as image paths
         if let Some(metadata) = &message.metadata {
