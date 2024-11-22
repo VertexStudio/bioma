@@ -1,5 +1,5 @@
 use crate::{
-    embeddings::{Embeddings, EmbeddingsError, StoreImageEmbeddings, StoreTextEmbeddings},
+    embeddings::{Embeddings, EmbeddingsError, Image, StoreImageEmbeddings, StoreTextEmbeddings},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
@@ -79,6 +79,24 @@ pub struct IndexGlobs {
     pub chunk_batch_size: usize,
 }
 
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct IndexImages {
+    /// The images to index
+    pub images: Vec<ImageSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageSource {
+    /// Source identifier for the image
+    pub source: String,
+    /// Path to the image file
+    pub path: String,
+    /// Optional caption for the image
+    pub caption: Option<String>,
+    /// Optional metadata for the image
+    pub metadata: Option<Value>,
+}
+
 fn default_chunk_capacity() -> std::ops::Range<usize> {
     DEFAULT_CHUNK_CAPACITY
 }
@@ -112,7 +130,6 @@ pub enum TextType {
     Markdown,
     Code(CodeLanguage),
     Text,
-    Image,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,11 +178,11 @@ impl Indexer {
         chunk_batch_size: usize,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        // TODO: This query is twice slow compared to the previous one. Guess it's because we're ->source_embeddings.out.metadata.uri twice. Not sure.
+        // TODO: This query is twice slow compared to the previous one. Guess it's because we're ->source_text_embeddings.out.metadata.uri twice. Not sure.
         let source_embeddings = ctx
             .engine()
             .db()
-            .query("SELECT source, ->source_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_embeddings.out.metadata.uri CONTAINS $uri")
+            .query("SELECT source, ->source_text_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_text_embeddings.out.metadata.uri CONTAINS $uri")
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
             .bind(("uri", uri.clone()))
@@ -218,40 +235,6 @@ impl Indexer {
                 )
                 .expect("Invalid tree-sitter language");
                 splitter.chunks(&content).collect::<Vec<&str>>()
-            }
-            TextType::Image => {
-                let start_time = std::time::Instant::now();
-                let metadata = vec![serde_json::to_value(ChunkMetadata {
-                    source: source.clone(),
-                    text_type: text_type.clone(),
-                    chunk_number: 0,
-                    uri: uri.clone(),
-                })
-                .unwrap_or_default()];
-
-                let result = ctx
-                    .send::<Embeddings, StoreImageEmbeddings>(
-                        StoreImageEmbeddings {
-                            source: source.clone(),
-                            image_paths: vec![uri.clone()],
-                            metadata: Some(metadata),
-                            tag: Some(self.tag.clone().to_string()),
-                        },
-                        embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                    )
-                    .await;
-
-                match result {
-                    Ok(_) => {
-                        debug!("Generated image embedding in {:?}", start_time.elapsed());
-                        return Ok(IndexResult::Indexed(1));
-                    }
-                    Err(e) => {
-                        error!("Failed to generate image embedding: {} {}", e, source);
-                        return Ok(IndexResult::Failed);
-                    }
-                }
             }
             _ => panic!("Invalid text type"),
         };
@@ -306,6 +289,73 @@ impl Indexer {
         debug!("Generated embeddings in {:?}", embeddings_time);
 
         Ok(IndexResult::Indexed(embeddings_count))
+    }
+
+    async fn index_image(
+        &self,
+        ctx: &mut ActorContext<Self>,
+        source: String,
+        path: String,
+        caption: Option<String>,
+        metadata: Option<Value>,
+        embeddings_id: &ActorId,
+    ) -> Result<IndexResult, IndexerError> {
+        // Check if image is already indexed
+        let source_embeddings = ctx
+            .engine()
+            .db()
+            .query("SELECT source, ->source_image_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_image_embeddings.out.metadata.uri CONTAINS $uri")
+            .bind(("source", source.clone()))
+            .bind(("tag", self.tag.clone()))
+            .bind(("uri", path.clone()))
+            .await;
+
+        let Ok(mut source_embeddings) = source_embeddings else {
+            error!("Failed to query source embeddings: {} {}", source, path);
+            return Ok(IndexResult::Failed);
+        };
+
+        let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
+        if !source_embeddings.is_empty() {
+            debug!("Image already indexed with URI: {} {}", source, path);
+            return Ok(IndexResult::Cached);
+        }
+
+        let start_time = std::time::Instant::now();
+
+        // Prepare metadata
+        let mut base_metadata = metadata.unwrap_or(Value::Null);
+        if let Value::Object(ref mut map) = base_metadata {
+            map.insert("uri".to_string(), Value::String(path.clone()));
+            map.insert("source".to_string(), Value::String(source.clone()));
+            map.insert("text_type".to_string(), Value::String("Image".to_string()));
+        }
+
+        // Create the image embedding request
+        let result = ctx
+            .send::<Embeddings, StoreImageEmbeddings>(
+                StoreImageEmbeddings {
+                    source: source.clone(),
+                    images: vec![Image { path, caption }],
+                    metadata: Some(vec![base_metadata]),
+                    tag: Some(self.tag.clone().to_string()),
+                },
+                embeddings_id,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+            )
+            .await;
+
+        match result {
+            Ok(_) => {
+                let embeddings_time = start_time.elapsed();
+                debug!("Generated image embedding in {:?}", embeddings_time);
+                Ok(IndexResult::Indexed(1))
+            }
+            Err(e) => {
+                error!("Failed to generate image embedding: {} {}", e, source);
+                Ok(IndexResult::Failed)
+            }
+        }
     }
 }
 
@@ -423,15 +473,10 @@ impl Message<IndexGlobs> for Indexer {
                     Some("cpp") => TextType::Code(CodeLanguage::Cpp),
                     Some("h") => TextType::Text,
                     Some("pdf") => TextType::Pdf,
-                    Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("webp") => TextType::Image,
                     _ => TextType::Text,
                 };
 
                 let content = match &text_type {
-                    TextType::Image => {
-                        // For images, we don't need to read the content
-                        Ok(String::new())
-                    }
                     TextType::Pdf => {
                         let result = ctx
                             .send::<PdfAnalyzer, AnalyzePdf>(
@@ -542,6 +587,45 @@ impl Message<DeleteSource> for Indexer {
     }
 }
 
+impl Message<IndexImages> for Indexer {
+    type Response = Indexed;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexImages) -> Result<Indexed, IndexerError> {
+        let Some(embeddings_id) = &self.embeddings_id else {
+            return Err(IndexerError::EmbeddingsActorNotInitialized);
+        };
+
+        let total_index_images_time = std::time::Instant::now();
+        let mut indexed = 0;
+        let mut cached = 0;
+
+        for image in &message.images {
+            match self
+                .index_image(
+                    ctx,
+                    image.source.clone(),
+                    image.path.clone(),
+                    image.caption.clone(),
+                    image.metadata.clone(),
+                    embeddings_id,
+                )
+                .await?
+            {
+                IndexResult::Indexed(count) => {
+                    if count > 0 {
+                        indexed += 1;
+                    }
+                }
+                IndexResult::Cached => cached += 1,
+                IndexResult::Failed => continue,
+            }
+        }
+
+        info!("Indexed {} images, cached {} images, in {:?}", indexed, cached, total_index_images_time.elapsed());
+        Ok(Indexed { indexed, cached })
+    }
+}
+
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
@@ -622,6 +706,11 @@ impl Actor for Indexer {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<DeleteSource>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<IndexImages>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);

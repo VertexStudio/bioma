@@ -4,6 +4,7 @@ use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::Path;
 use std::sync::{Arc, Weak};
 use surrealdb::value::RecordId;
 use tokio::sync::Mutex;
@@ -53,7 +54,7 @@ pub struct TextEmbeddingRequest {
 
 pub struct ImageEmbeddingRequest {
     response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
-    image_paths: Vec<String>,
+    images: Vec<Image>,
 }
 
 impl ActorError for EmbeddingsError {}
@@ -76,8 +77,8 @@ pub struct StoreTextEmbeddings {
 pub struct StoreImageEmbeddings {
     /// Source of the embeddings
     pub source: String,
-    /// The image paths to embed
-    pub image_paths: Vec<String>,
+    /// The images to embed
+    pub images: Vec<Image>,
     /// Metadata to store with the embeddings
     pub metadata: Option<Vec<Value>>,
     /// The tag to store the embeddings with
@@ -87,8 +88,20 @@ pub struct StoreImageEmbeddings {
 /// Generate embeddings for a set of images
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateImageEmbeddings {
-    /// The image paths to embed
-    pub image_paths: Vec<String>,
+    /// The images to embed
+    pub images: Vec<Image>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Image {
+    pub path: String,
+    pub caption: Option<String>,
+}
+
+impl AsRef<Path> for Image {
+    fn as_ref(&self) -> &Path {
+        Path::new(&self.path)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,7 +128,7 @@ pub enum Query {
     TextEmbedding(Vec<f32>),
     ImageEmbedding(Vec<f32>),
     Text(String),
-    Image(String),
+    Image(String, Option<String>),
 }
 
 /// Get the top k similar embeddings to a query, filtered by tag
@@ -199,13 +212,16 @@ impl Message<TopK> for Embeddings {
                 text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] }).await?;
                 (rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?, true)
             }
-            Query::Image(path) => {
+            Query::Image(path, caption) => {
                 let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
                 };
                 let (tx, rx) = oneshot::channel();
                 image_embedding_tx
-                    .send(ImageEmbeddingRequest { response_tx: tx, image_paths: vec![path.to_string()] })
+                    .send(ImageEmbeddingRequest {
+                        response_tx: tx,
+                        images: vec![Image { path: path.to_string(), caption: caption.clone() }],
+                    })
                     .await?;
                 (rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?, false)
             }
@@ -312,9 +328,7 @@ impl Message<GenerateImageEmbeddings> for Embeddings {
         };
 
         let (tx, rx) = oneshot::channel();
-        image_embedding_tx
-            .send(ImageEmbeddingRequest { response_tx: tx, image_paths: message.image_paths.clone() })
-            .await?;
+        image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images: message.images.clone() }).await?;
         let embeddings = rx.await??;
 
         // Since this is just generate (not store), we just return the lengths
@@ -335,9 +349,7 @@ impl Message<StoreImageEmbeddings> for Embeddings {
         };
 
         let (tx, rx) = oneshot::channel();
-        image_embedding_tx
-            .send(ImageEmbeddingRequest { response_tx: tx, image_paths: message.image_paths.clone() })
-            .await?;
+        image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images: message.images.clone() }).await?;
         let embeddings = rx.await??;
 
         let db = ctx.engine().db();
@@ -345,20 +357,20 @@ impl Message<StoreImageEmbeddings> for Embeddings {
 
         // Check if metadata is same length as image paths
         if let Some(metadata) = &message.metadata {
-            if metadata.len() != message.image_paths.len() {
-                error!("Metadata length does not match image paths length");
+            if metadata.len() != message.images.len() {
+                error!("Metadata length does not match images length");
             }
         }
 
         // Store embeddings
-        for (i, image_path) in message.image_paths.iter().enumerate() {
+        for (i, image) in message.images.iter().enumerate() {
             let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
             let embedding = embeddings[i].clone();
             let model_id = RecordId::from_table_key("model", self.image_model.to_string());
             let result = db
                 .query(emb_query)
                 .bind(("tag", message.tag.clone()))
-                .bind(("text", image_path.to_string()))
+                .bind(("text", image.caption.clone()))
                 .bind(("embedding", embedding))
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
@@ -559,8 +571,8 @@ impl Actor for Embeddings {
                         let image_embedding = fastembed::ImageEmbedding::try_new(options)?;
                         while let Some(request) = image_embedding_rx.blocking_recv() {
                             let start = std::time::Instant::now();
-                            let path_count = request.image_paths.len();
-                            match image_embedding.embed(request.image_paths, None) {
+                            let path_count = request.images.len();
+                            match image_embedding.embed(request.images, None) {
                                 Ok(embeddings) => {
                                     info!("Generated {} image embeddings in {:?}", path_count, start.elapsed());
                                     let _ = request.response_tx.send(Ok(embeddings));

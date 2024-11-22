@@ -46,7 +46,7 @@ async fn test_embeddings_generate() -> Result<(), TestError> {
     // Check the results
     assert_eq!(embeddings.embeddings.len(), texts.len());
     for embedding in &embeddings.embeddings {
-        assert_eq!(embedding.len(), DEFAULT_EMBEDDING_LENGTH);
+        assert_eq!(embedding.len(), DEFAULT_TEXT_EMBEDDING_LENGTH);
     }
 
     // Additional assertions
@@ -343,7 +343,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
         let embeddings = embeddings_result?;
         assert!(!embeddings.lengths.is_empty());
         for length in &embeddings.lengths {
-            assert_eq!(*length, DEFAULT_EMBEDDING_LENGTH);
+            assert_eq!(*length, DEFAULT_TEXT_EMBEDDING_LENGTH);
         }
     }
 
