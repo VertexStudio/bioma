@@ -10,14 +10,14 @@ DEFINE INDEX text_embedding_index ON TABLE text_embedding FIELDS embedding MTREE
 
 -- Define the image_embedding table
 DEFINE TABLE image_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD text ON image_embedding TYPE string PERMISSIONS FULL;
+DEFINE FIELD caption ON image_embedding TYPE string PERMISSIONS FULL;
 DEFINE FIELD embedding ON image_embedding TYPE array<number> PERMISSIONS FULL;
 DEFINE INDEX image_embedding_index ON TABLE image_embedding FIELDS embedding MTREE DIMENSION 512 DIST EUCLIDEAN;
 
 -- Add Full-Text Search indices
 DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
 DEFINE INDEX text_embedding_text_search ON text_embedding FIELDS text SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX image_embedding_text_search ON image_embedding FIELDS text SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
+DEFINE INDEX image_embedding_caption_search ON image_embedding FIELDS caption SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
 
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;

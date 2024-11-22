@@ -338,7 +338,8 @@ impl Message<StoreImageEmbeddings> for Embeddings {
             let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
             let embedding = embeddings[i].clone();
             let model_id = RecordId::from_table_key("model", self.image_model.to_string());
-            db.query(emb_query)
+            let result = db
+                .query(emb_query)
                 .bind(("tag", message.tag.clone()))
                 .bind(("text", image_path.to_string()))
                 .bind(("embedding", embedding))
@@ -347,6 +348,8 @@ impl Message<StoreImageEmbeddings> for Embeddings {
                 .bind(("source", message.source.clone()))
                 .await
                 .map_err(SystemActorError::from)?;
+
+            println!("{:?}", result);
         }
 
         Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
@@ -367,12 +370,16 @@ fn get_fastembed_model(model: &Model) -> fastembed::EmbeddingModel {
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum ImageModel {
     ClipVitB32,
+    Resnet50,
+    UnicomVitB16,
     UnicomVitB32,
 }
 
 fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingModel {
     match model {
         ImageModel::ClipVitB32 => fastembed::ImageEmbeddingModel::ClipVitB32,
+        ImageModel::Resnet50 => fastembed::ImageEmbeddingModel::Resnet50,
+        ImageModel::UnicomVitB16 => fastembed::ImageEmbeddingModel::UnicomVitB16,
         ImageModel::UnicomVitB32 => fastembed::ImageEmbeddingModel::UnicomVitB32,
     }
 }
@@ -380,6 +387,16 @@ fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingMod
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub name: Model,
+    pub dim: usize,
+    pub description: String,
+    pub model_code: String,
+    pub model_file: String,
+}
+
+// Add this struct for image model info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageModelInfo {
+    pub name: ImageModel,
     pub dim: usize,
     pub description: String,
     pub model_code: String,
@@ -400,20 +417,35 @@ impl Actor for Embeddings {
                 Some(strong_ref)
             } else {
                 let ctx_id = ctx.id().clone();
-                // Get model info
+
+                // Get text model info
                 let fastembed_model = get_fastembed_model(&self.text_model);
-                let model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
-                let model_info = ModelInfo {
+                let text_model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
+                let text_model_info = ModelInfo {
                     name: self.text_model.clone(),
-                    dim: model_info.dim,
-                    description: model_info.description.clone(),
-                    model_code: model_info.model_code.clone(),
-                    model_file: model_info.model_file.clone(),
+                    dim: text_model_info.dim,
+                    description: text_model_info.description.clone(),
+                    model_code: text_model_info.model_code.clone(),
+                    model_file: text_model_info.model_file.clone(),
                 };
 
-                // Assert embedding length
-                if model_info.dim != DEFAULT_EMBEDDING_LENGTH {
-                    panic!("Embedding length must be 768");
+                // Get image model info
+                let fastembed_image_model = get_fastembed_image_model(&self.image_model);
+                let image_model_info = fastembed::ImageEmbedding::get_model_info(&fastembed_image_model);
+                let image_model_info = ImageModelInfo {
+                    name: self.image_model.clone(),
+                    dim: image_model_info.dim,
+                    description: image_model_info.description.clone(),
+                    model_code: image_model_info.model_code.clone(),
+                    model_file: image_model_info.model_file.clone(),
+                };
+
+                // Assert embedding lengths
+                if text_model_info.dim != DEFAULT_EMBEDDING_LENGTH {
+                    panic!("Text embedding length must be {}. Not {}", DEFAULT_EMBEDDING_LENGTH, text_model_info.dim);
+                }
+                if image_model_info.dim != DEFAULT_EMBEDDING_LENGTH {
+                    panic!("Image embedding length must be {}. Not {}", DEFAULT_EMBEDDING_LENGTH, image_model_info.dim);
                 }
 
                 // Define the schema
@@ -421,14 +453,24 @@ impl Actor for Embeddings {
                 let db = ctx.engine().db();
                 db.query(def).await.map_err(SystemActorError::from)?;
 
-                // Store model in database if not already present
+                // Store text model info in database if not already present
                 let model: Result<Option<Record>, _> = db
                     .create(("model", self.text_model.to_string()))
-                    .content(model_info)
+                    .content(text_model_info)
                     .await
                     .map_err(SystemActorError::from);
                 if let Ok(Some(model)) = &model {
                     info!("Model {:?} stored with id: {}", self.text_model, model.id);
+                }
+
+                // Store image model info in database if not already present
+                let model: Result<Option<Record>, _> = db
+                    .create(("model", self.image_model.to_string()))
+                    .content(image_model_info)
+                    .await
+                    .map_err(SystemActorError::from);
+                if let Ok(Some(model)) = &model {
+                    info!("Model {:?} stored with id: {}", self.image_model, model.id);
                 }
 
                 // Create a new shared embedding
