@@ -4,6 +4,7 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use indexer::IndexImages;
+use retriever::QueryType;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -253,7 +254,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         .join("\n");
     info!("Received ask query: {:#?}", query);
 
-    let retrieve_context = RetrieveContext { query: query.clone(), limit: 5, threshold: 0.0 };
+    let retrieve_context = RetrieveContext { query: QueryType::Text(query), limit: 5, threshold: 0.0 };
     let retriever_actor_id = data.retriever_actor_id.clone();
 
     // Try to lock the retriever_relay_ctx without waiting
@@ -339,7 +340,7 @@ struct AskQuery {
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     info!("Received ask query: {:#?}", body.query);
-    let retrieve_context = RetrieveContext { query: body.query.clone(), limit: 5, threshold: 0.0 };
+    let retrieve_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
     let retriever_actor_id = data.retriever_actor_id.clone();
 
     // Try to lock the retriever_relay_ctx without waiting
