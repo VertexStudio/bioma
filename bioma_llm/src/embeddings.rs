@@ -39,9 +39,11 @@ pub enum EmbeddingsError {
     #[error("Error sending text embeddings: {0}")]
     SendTextEmbeddings(#[from] mpsc::error::SendError<TextEmbeddingRequest>),
     #[error("Error receiving text embeddings: {0}")]
-    RecvTextEmbeddings(#[from] oneshot::error::RecvError),
+    RecvEmbeddings(#[from] oneshot::error::RecvError),
     #[error("Error sending image embeddings: {0}")]
     SendImageEmbeddings(#[from] mpsc::error::SendError<ImageEmbeddingRequest>),
+    #[error("Image embedding not initialized")]
+    ImageEmbeddingNotInitialized,
 }
 
 pub struct TextEmbeddingRequest {
