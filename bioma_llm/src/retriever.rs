@@ -38,13 +38,21 @@ impl ActorError for RetrieverError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveContext {
-    pub query: String,
+    #[serde(flatten)]
+    pub query: QueryType,
     #[builder(default = DEFAULT_RETRIEVER_LIMIT)]
     #[serde(default = "default_retriever_limit")]
     pub limit: usize,
     #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
     #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "content")]
+pub enum QueryType {
+    Text(String),
+    Image { path: String, caption: Option<String> },
 }
 
 fn default_retriever_limit() -> usize {
@@ -107,15 +115,26 @@ impl Message<RetrieveContext> for Retriever {
             return Err(RetrieverError::RerankIdNotFound);
         };
 
-        info!("Fetching context for query: {}", message.query);
+        // Convert the query type to embeddings::Query
+        let query = match &message.query {
+            QueryType::Text(text) => {
+                info!("Fetching context for text query: {}", text);
+                embeddings::Query::Text(text.clone())
+            }
+            QueryType::Image { path, caption } => {
+                info!("Fetching context for image query: {}", path);
+                embeddings::Query::Image(path.clone(), caption.clone())
+            }
+        };
+
         let embeddings_req = embeddings::TopK {
-            query: embeddings::Query::Text(message.query.clone()),
+            query,
             k: message.limit * 2,
             threshold: message.threshold,
             tag: Some(self.tag.clone().to_string()),
         };
 
-        info!("Searching for texts similarities");
+        info!("Searching for similarities");
         let start = std::time::Instant::now();
         let similarities = match ctx
             .send::<Embeddings, embeddings::TopK>(
@@ -133,47 +152,60 @@ impl Message<RetrieveContext> for Retriever {
         };
         info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
 
-        // Rank the embeddings
-        info!("Ranking similarity texts");
-        let start = std::time::Instant::now();
-        let rerank_req =
-            RankTexts { query: message.query.clone(), texts: similarities.iter().map(|s| s.text.clone()).collect() };
-        let ranked_texts = match ctx
-            .send::<Rerank, RankTexts>(
-                rerank_req,
-                rerank_id,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-            )
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Failed to rank texts: {}", e);
-                return Err(RetrieverError::ComputingRerank(e.to_string()));
+        // For text queries, we can use reranking. For image queries, we'll skip it
+        let context = match &message.query {
+            QueryType::Text(text) => {
+                // Rank the embeddings
+                info!("Ranking similarity texts");
+                let start = std::time::Instant::now();
+                let rerank_req =
+                    RankTexts { query: text.clone(), texts: similarities.iter().map(|s| s.text.clone()).collect() };
+                let ranked_texts = match ctx
+                    .send::<Rerank, RankTexts>(
+                        rerank_req,
+                        rerank_id,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                    )
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        error!("Failed to rank texts: {}", e);
+                        return Err(RetrieverError::ComputingRerank(e.to_string()));
+                    }
+                };
+                info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
+
+                // Get the context from the ranked texts
+                if ranked_texts.texts.len() > 0 {
+                    ranked_texts
+                        .texts
+                        .into_iter()
+                        .map(|t| Context {
+                            text: similarities[t.index].text.clone(),
+                            metadata: similarities[t.index]
+                                .metadata
+                                .as_ref()
+                                .and_then(|m| serde_json::from_value(m.clone()).ok()),
+                        })
+                        .take(message.limit)
+                        .collect()
+                } else {
+                    vec![Context { text: "No context found".to_string(), metadata: None }]
+                }
+            }
+            QueryType::Image { .. } => {
+                // For images, just use the similarities directly
+                similarities
+                    .into_iter()
+                    .take(message.limit)
+                    .map(|s| Context {
+                        text: s.text,
+                        metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
+                    })
+                    .collect()
             }
         };
-        info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
-
-        // Get the context from the ranked texts
-        info!("Getting context from ranked texts");
-        let start = std::time::Instant::now();
-        let context = if ranked_texts.texts.len() > 0 {
-            ranked_texts
-                .texts
-                .into_iter()
-                .map(|t| Context {
-                    text: similarities[t.index].text.clone(),
-                    metadata: similarities[t.index]
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| serde_json::from_value(m.clone()).ok()),
-                })
-                .take(message.limit)
-                .collect()
-        } else {
-            vec![Context { text: "No context found".to_string(), metadata: None }]
-        };
-        info!("Context: {} in {:?}", context.len(), start.elapsed());
 
         Ok(RetrievedContext { context })
     }
