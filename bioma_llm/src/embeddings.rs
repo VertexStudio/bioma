@@ -21,6 +21,20 @@ struct SharedEmbedding {
     text_embedding_tx: mpsc::Sender<TextEmbeddingRequest>,
 }
 
+pub struct TextEmbeddingRequest {
+    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
+    texts: Vec<String>,
+}
+
+#[derive(Deref)]
+struct StrongSharedEmbedding(Arc<SharedEmbedding>);
+
+impl std::fmt::Debug for StrongSharedEmbedding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StrongSharedEmbedding")
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum EmbeddingsError {
     #[error("System error: {0}")]
@@ -39,11 +53,6 @@ pub enum EmbeddingsError {
     SendTextEmbeddings(#[from] mpsc::error::SendError<TextEmbeddingRequest>),
     #[error("Error receiving text embeddings: {0}")]
     RecvTextEmbeddings(#[from] oneshot::error::RecvError),
-}
-
-pub struct TextEmbeddingRequest {
-    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
-    texts: Vec<String>,
 }
 
 impl ActorError for EmbeddingsError {}
@@ -115,15 +124,6 @@ pub struct Embeddings {
     text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
     #[serde(skip)]
     shared_embedding: Option<StrongSharedEmbedding>,
-}
-
-#[derive(Deref)]
-struct StrongSharedEmbedding(Arc<SharedEmbedding>);
-
-impl std::fmt::Debug for StrongSharedEmbedding {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "StrongSharedEmbedding")
-    }
 }
 
 impl Clone for Embeddings {

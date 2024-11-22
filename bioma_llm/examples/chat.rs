@@ -82,10 +82,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn the main actor
     let (mut main_ctx, mut main_actor) =
-        Actor::spawn(engine.clone(), main_id.clone(), MainActor { max_exchanges: 3 }, SpawnOptions::default()).await?;
+        Actor::spawn(engine.clone(), main_id.clone(), MainActor { max_exchanges: 3 }, SpawnOptions::default()).await.unwrap();
 
     // Start the main actor
-    main_actor.start(&mut main_ctx).await?;
+    main_actor.start(&mut main_ctx).await.unwrap();
 
     // Export the database for debugging
     dbg_export_db!(engine);
