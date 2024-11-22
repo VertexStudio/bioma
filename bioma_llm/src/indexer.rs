@@ -428,6 +428,10 @@ impl Message<IndexGlobs> for Indexer {
                 };
 
                 let content = match &text_type {
+                    TextType::Image => {
+                        // For images, we don't need to read the content
+                        Ok(String::new())
+                    }
                     TextType::Pdf => {
                         let result = ctx
                             .send::<PdfAnalyzer, AnalyzePdf>(
