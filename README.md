@@ -136,7 +136,6 @@ curl -X POST http://localhost:8080/index_files -H "Content-Type: application/jso
 curl -X POST http://localhost:8080/index_images -H "Content-Type: application/json" -d '{
   "images": [
     {
-      "source": "my_dataset",
       "path": "/path/to/image.jpg",
       "caption": "A beautiful
 ```

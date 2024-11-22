@@ -283,22 +283,11 @@ impl Indexer {
     async fn index_image(
         &self,
         ctx: &mut ActorContext<Self>,
-        image: &Image,
+        source: String,
+        full_path: String,
+        caption: Option<String>,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let local_store_dir = ctx.engine().local_store_dir().to_owned();
-
-        // If path is not absolute, make it relative to local_store_dir
-        let full_path = if std::path::Path::new(&image.path).is_absolute() {
-            image.path.clone()
-        } else {
-            local_store_dir.join(&image.path).to_string_lossy().into_owned()
-        };
-
-        // Infer source from the path
-        let source =
-            std::path::Path::new(&full_path).parent().and_then(|p| p.to_str()).unwrap_or(&full_path).to_string();
-
         // Check if image is already indexed
         let source_embeddings = ctx
             .engine()
@@ -361,8 +350,8 @@ impl Indexer {
             .send::<Embeddings, StoreImageEmbeddings>(
                 StoreImageEmbeddings {
                     source: source.clone(),
-                    images: vec![Image { path: full_path, caption: image.caption.clone() }],
-                    metadata: metadata.map(|m| vec![m]), // Include extracted metadata
+                    images: vec![Image { path: full_path, caption }],
+                    metadata: metadata.map(|m| vec![m]),
                     tag: Some(self.tag.clone().to_string()),
                 },
                 embeddings_id,
@@ -623,16 +612,36 @@ impl Message<IndexImages> for Indexer {
         let total_index_images_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
+        let local_store_dir = ctx.engine().local_store_dir().to_owned();
 
         for image in &message.images {
-            match self.index_image(ctx, image, embeddings_id).await? {
+            // If path is not absolute, make it relative to local_store_dir
+            let full_path = if std::path::Path::new(&image.path).is_absolute() {
+                image.path.clone()
+            } else {
+                local_store_dir.join(&image.path).to_string_lossy().into_owned()
+            };
+
+            info!("Indexing image: {}", &full_path);
+
+            // Infer source from the path
+            let source =
+                std::path::Path::new(&full_path).parent().and_then(|p| p.to_str()).unwrap_or(&full_path).to_string();
+
+            match self.index_image(ctx, source.clone(), full_path.clone(), image.caption.clone(), embeddings_id).await?
+            {
                 IndexResult::Indexed(count) => {
                     if count > 0 {
                         indexed += 1;
                     }
                 }
-                IndexResult::Cached => cached += 1,
-                IndexResult::Failed => continue,
+                IndexResult::Failed => {
+                    warn!("Failed to index image: {}", &image.path);
+                }
+                IndexResult::Cached => {
+                    cached += 1;
+                    debug!("Image already indexed: {}", &image.path);
+                }
             }
         }
 
