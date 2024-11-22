@@ -69,9 +69,9 @@ pub struct StoreTextEmbeddings {
     pub tag: Option<String>,
 }
 
-/// Generate embeddings for a set of images
+/// Store embeddings for a set of images
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateImageEmbeddings {
+pub struct StoreImageEmbeddings {
     /// Source of the embeddings
     pub source: String,
     /// The image paths to embed
@@ -82,8 +82,15 @@ pub struct GenerateImageEmbeddings {
     pub tag: Option<String>,
 }
 
+/// Generate embeddings for a set of images
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredTextEmbeddings {
+pub struct GenerateImageEmbeddings {
+    /// The image paths to embed
+    pub image_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredEmbeddings {
     pub lengths: Vec<usize>,
 }
 
@@ -208,13 +215,13 @@ impl Message<TopK> for Embeddings {
 }
 
 impl Message<StoreTextEmbeddings> for Embeddings {
-    type Response = StoredTextEmbeddings;
+    type Response = StoredEmbeddings;
 
     async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
         message: &StoreTextEmbeddings,
-    ) -> Result<StoredTextEmbeddings, EmbeddingsError> {
+    ) -> Result<StoredEmbeddings, EmbeddingsError> {
         let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
@@ -249,7 +256,7 @@ impl Message<StoreTextEmbeddings> for Embeddings {
                 .map_err(SystemActorError::from)?;
         }
 
-        Ok(StoredTextEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
     }
 }
 
@@ -274,13 +281,13 @@ impl Message<GenerateTextEmbeddings> for Embeddings {
 }
 
 impl Message<GenerateImageEmbeddings> for Embeddings {
-    type Response = StoredTextEmbeddings;
+    type Response = StoredEmbeddings;
 
     async fn handle(
         &mut self,
         _ctx: &mut ActorContext<Self>,
         message: &GenerateImageEmbeddings,
-    ) -> Result<StoredTextEmbeddings, EmbeddingsError> {
+    ) -> Result<StoredEmbeddings, EmbeddingsError> {
         let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
@@ -291,13 +298,36 @@ impl Message<GenerateImageEmbeddings> for Embeddings {
             .await?;
         let embeddings = rx.await??;
 
-        let db = _ctx.engine().db();
+        // Since this is just generate (not store), we just return the lengths
+        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+    }
+}
+
+impl Message<StoreImageEmbeddings> for Embeddings {
+    type Response = StoredEmbeddings;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &StoreImageEmbeddings,
+    ) -> Result<StoredEmbeddings, EmbeddingsError> {
+        let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        image_embedding_tx
+            .send(ImageEmbeddingRequest { response_tx: tx, image_paths: message.image_paths.clone() })
+            .await?;
+        let embeddings = rx.await??;
+
+        let db = ctx.engine().db();
         let emb_query = include_str!("../sql/embeddings.surql");
 
-        // Check if metadata is same length as texts
+        // Check if metadata is same length as image paths
         if let Some(metadata) = &message.metadata {
             if metadata.len() != message.image_paths.len() {
-                error!("Metadata length does not match texts length");
+                error!("Metadata length does not match image paths length");
             }
         }
 
@@ -317,7 +347,7 @@ impl Message<GenerateImageEmbeddings> for Embeddings {
                 .map_err(SystemActorError::from)?;
         }
 
-        Ok(StoredTextEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
     }
 }
 
@@ -507,6 +537,11 @@ impl Actor for Embeddings {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<GenerateImageEmbeddings>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<StoreImageEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
