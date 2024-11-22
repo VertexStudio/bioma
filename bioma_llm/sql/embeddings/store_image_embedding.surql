@@ -1,6 +1,6 @@
 LET $id = rand::ulid(time::now());
-LET $emb = CREATE ONLY embedding:{id: $id, tag: $tag} SET text = $text, embedding = $embedding, metadata = $metadata;
-RELATE $model_id->model_embeddings->($emb.id);
+LET $emb = CREATE ONLY image_embedding:{id: $id, tag: $tag} SET text = $text, embedding = $embedding, metadata = $metadata;
+RELATE $model_id->model_image_embeddings->($emb.id);
 
 LET $src = SELECT VALUE id FROM ONLY source:{source: $source, tag: $tag};
 LET $src_id = IF $src == NONE THEN 
@@ -9,4 +9,4 @@ ELSE
     $src
 END;
 
-RELATE $src_id->source_embeddings->($emb.id);
+RELATE $src_id->source_image_embeddings->($emb.id);
