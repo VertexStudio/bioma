@@ -141,6 +141,27 @@ impl Actor for Rerank {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), RerankError> {
         info!("{} Started", ctx.id());
 
+        self.init(ctx).await?;
+
+        // Start the message stream
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(rank_texts) = frame.is::<RankTexts>() {
+                let response = self.reply(ctx, &rank_texts, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+        info!("{} Finished", ctx.id());
+        Ok(())
+    }
+}
+
+impl Rerank {
+    pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), RerankError> {
+        info!("{} Started", ctx.id());
+
         // Manage a shared rerank task
         let shared_rerank = {
             let mut weak_ref = SHARED_RERANK.lock().await;
@@ -218,17 +239,6 @@ impl Actor for Rerank {
         self.shared_rerank = shared_rerank.map(StrongSharedRerank);
         self.rerank_tx = self.shared_rerank.as_ref().map(|sr| sr.rerank_tx.clone());
 
-        // Start the message stream
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(rank_texts) = frame.is::<RankTexts>() {
-                let response = self.reply(ctx, &rank_texts, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            }
-        }
-        info!("{} Finished", ctx.id());
         Ok(())
     }
 }
