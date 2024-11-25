@@ -1,6 +1,6 @@
 SELECT * FROM (
     SELECT
-        text,
+        caption AS text,
         vector::similarity::cosine(embedding, $query) AS similarity,
         metadata,
         id.tag AS tag

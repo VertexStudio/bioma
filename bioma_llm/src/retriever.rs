@@ -52,7 +52,7 @@ pub struct RetrieveContext {
 #[serde(tag = "type", content = "content")]
 pub enum QueryType {
     Text(String),
-    Image { path: String, caption: Option<String> },
+    Image(String),
 }
 
 fn default_retriever_limit() -> usize {
@@ -121,9 +121,9 @@ impl Message<RetrieveContext> for Retriever {
                 info!("Fetching context for text query: {}", text);
                 embeddings::Query::Text(text.clone())
             }
-            QueryType::Image { path, caption } => {
-                info!("Fetching context for image query: {}", path);
-                embeddings::Query::Image(path.clone(), caption.clone())
+            QueryType::Image(text) => {
+                info!("Fetching context for image query: {}", text);
+                embeddings::Query::Image(text.clone())
             }
         };
 

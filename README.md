@@ -137,7 +137,10 @@ curl -X POST http://localhost:8080/index_images -H "Content-Type: application/js
   "images": [
     {
       "path": "/path/to/image.jpg",
-      "caption": "A beautiful
+      "caption": "A beautiful image"
+    }
+  ]
+}'
 ```
 
 ### Retrieve context:
