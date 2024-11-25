@@ -4,7 +4,7 @@
 INSTALL_DIR="$HOME"  # Change this to "." for current directory if preferred
 
 # ONNX Runtime version
-ONNX_VERSION="1.19.0"
+ONNX_VERSION="1.20.0"
 
 # Download and install onnxruntime, if not already installed
 ONNX_DIR="$INSTALL_DIR/onnxruntime-linux-x64-gpu-$ONNX_VERSION"
