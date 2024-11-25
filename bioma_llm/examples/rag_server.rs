@@ -1,10 +1,11 @@
 use actix_cors::Cors;
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
+use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use indexer::IndexImages;
-use retriever::QueryType;
+use retriever::{ContextMetadata, QueryType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -318,13 +319,30 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             info!("Text context fetched: {:#?}", text_context);
             let context_content = text_context.to_markdown();
 
-            // Rest of the existing code remains exactly the same
-            let mut conversation = body.messages.clone();
-            let context_message = ChatMessage::system(
+            // Create system message with text context
+            let mut context_message = ChatMessage::system(
                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
                     .to_string()
                     + &context_content,
             );
+
+            // Add images to the system message if available
+            if !image_context.context.is_empty() {
+                let mut images = Vec::new();
+                for ctx in image_context.context {
+                    if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
+                        if let Ok(image_data) = std::fs::read(&image_metadata.source) {
+                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                            images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                        }
+                    }
+                }
+                if !images.is_empty() {
+                    context_message.images = Some(images);
+                }
+            }
+
+            let mut conversation = body.messages.clone();
             if conversation.len() > 0 {
                 conversation.insert(conversation.len() - 1, context_message);
             } else {
