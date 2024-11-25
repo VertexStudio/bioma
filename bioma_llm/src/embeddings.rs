@@ -21,6 +21,7 @@ lazy_static! {
 struct SharedEmbedding {
     text_embedding_tx: mpsc::Sender<TextEmbeddingRequest>,
     image_embedding_tx: mpsc::Sender<ImageEmbeddingRequest>,
+    image_caption_embedding_tx: mpsc::Sender<TextEmbeddingRequest>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -126,9 +127,13 @@ pub struct GeneratedTextEmbeddings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Query {
     TextEmbedding(Vec<f32>),
-    ImageEmbedding(Vec<f32>),
     Text(String),
-    Image(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ImageQuery {
+    ImageEmbedding(Vec<f32>),
+    ImageCaption(String),
 }
 
 /// Get the top k similar embeddings to a query, filtered by tag
@@ -152,16 +157,40 @@ pub struct Similarity {
     pub metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageSimilarity {
+    pub caption: Option<String>,
+    pub similarity: f32,
+    pub metadata: Option<Value>,
+}
+
+/// Get the top k similar image embeddings to a query, filtered by tag
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopKImages {
+    /// The query to search for
+    pub query: ImageQuery,
+    /// The tag to filter the embeddings by
+    pub tag: Option<String>,
+    /// Number of similar embeddings to return
+    pub k: usize,
+    /// The threshold for the similarity score
+    pub threshold: f32,
+}
+
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
     #[builder(default = Model::NomicEmbedTextV15)]
     pub text_model: Model,
     #[builder(default = ImageModel::ClipVitB32)]
     pub image_model: ImageModel,
+    #[builder(default = Model::ClipVitB32)]
+    pub image_caption_model: Model,
     #[serde(skip)]
     text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
     #[serde(skip)]
     image_embedding_tx: Option<mpsc::Sender<ImageEmbeddingRequest>>,
+    #[serde(skip)]
+    image_caption_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
     #[serde(skip)]
     shared_embedding: Option<StrongSharedEmbedding>,
 }
@@ -180,8 +209,10 @@ impl Clone for Embeddings {
         Self {
             text_model: self.text_model.clone(),
             image_model: self.image_model.clone(),
+            image_caption_model: self.image_caption_model.clone(),
             text_embedding_tx: None,
             image_embedding_tx: None,
+            image_caption_embedding_tx: None,
             shared_embedding: None,
         }
     }
@@ -202,8 +233,8 @@ impl Message<TopK> for Embeddings {
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
         let query_embedding = match &message.query {
-            Query::TextEmbedding(embedding) | Query::ImageEmbedding(embedding) => embedding.clone(),
-            Query::Text(text) | Query::Image(text) => {
+            Query::TextEmbedding(embedding) => embedding.clone(),
+            Query::Text(text) => {
                 let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::TextEmbeddingNotInitialized);
                 };
@@ -213,18 +244,9 @@ impl Message<TopK> for Embeddings {
             }
         };
 
-        // TODO: Queries are similar. See if we can use just one.
-        // Get the similar embeddings using the appropriate query
-        let query_sql = match message.query {
-            Query::TextEmbedding(_) | Query::Text(_) => {
-                include_str!("../sql/similarities/similarities_text.surql")
-            }
-            _ => {
-                include_str!("../sql/similarities/similarities_image.surql")
-            }
-        };
-
         let db = ctx.engine().db();
+        let query_sql = include_str!("../sql/similarities/similarities_text.surql");
+
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
@@ -371,14 +393,54 @@ impl Message<StoreImageEmbeddings> for Embeddings {
     }
 }
 
+impl Message<TopKImages> for Embeddings {
+    type Response = Vec<ImageSimilarity>;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &TopKImages,
+    ) -> Result<Vec<ImageSimilarity>, EmbeddingsError> {
+        let query_embedding = match &message.query {
+            ImageQuery::ImageEmbedding(embedding) => embedding.clone(),
+            ImageQuery::ImageCaption(text) => {
+                let Some(image_caption_embedding_tx) = self.image_caption_embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
+                };
+                let (tx, rx) = oneshot::channel();
+                image_caption_embedding_tx
+                    .send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] })
+                    .await?;
+                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+            }
+        };
+
+        let db = ctx.engine().db();
+        let query_sql = include_str!("../sql/similarities/similarities_image.surql");
+
+        let mut results = db
+            .query(query_sql)
+            .bind(("query", query_embedding))
+            .bind(("top_k", message.k.clone()))
+            .bind(("tag", message.tag.clone()))
+            .bind(("threshold", message.threshold))
+            .await
+            .map_err(SystemActorError::from)?;
+        let results: Result<Vec<ImageSimilarity>, _> = results.take(0).map_err(SystemActorError::from);
+        results.map_err(EmbeddingsError::from)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum Model {
     NomicEmbedTextV15,
+    ClipVitB32,
 }
 
 fn get_fastembed_model(model: &Model) -> fastembed::EmbeddingModel {
     match model {
         Model::NomicEmbedTextV15 => fastembed::EmbeddingModel::NomicEmbedTextV15,
+        Model::ClipVitB32 => fastembed::EmbeddingModel::ClipVitB32,
     }
 }
 
@@ -440,6 +502,11 @@ impl Actor for Embeddings {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<TopK>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<TopKImages>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
@@ -552,8 +619,9 @@ impl Embeddings {
 
                         #[cfg(target_os = "linux")]
                         {
-                            options =
-                                options.with_execution_providers(vec![ort::CUDAExecutionProvider::default().build()]);
+                            options = options.with_execution_providers(vec![
+                                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                            ]);
                         }
 
                         let text_embedding = fastembed::TextEmbedding::try_new(options)?;
@@ -613,8 +681,54 @@ impl Embeddings {
                         Ok(())
                     });
 
+                // Setup text embeddings for images
+                let (image_caption_embedding_tx, mut image_caption_embedding_rx) =
+                    mpsc::channel::<TextEmbeddingRequest>(100);
+                let caption_model = self.image_caption_model.clone();
+                let caption_cache_dir = ctx.engine().huggingface_cache_dir().clone();
+
+                let _image_caption_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
+                    tokio::task::spawn_blocking(move || {
+                        let mut options = fastembed::InitOptions::new(get_fastembed_model(&caption_model))
+                            .with_cache_dir(caption_cache_dir);
+
+                        #[cfg(target_os = "macos")]
+                        {
+                            options =
+                                options.with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
+                        }
+
+                        #[cfg(target_os = "linux")]
+                        {
+                            options = options.with_execution_providers(vec![
+                                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                            ]);
+                        }
+
+                        let caption_embedding = fastembed::TextEmbedding::try_new(options)?;
+                        while let Some(request) = image_caption_embedding_rx.blocking_recv() {
+                            let start = std::time::Instant::now();
+                            match caption_embedding.embed(request.texts.clone(), None) {
+                                Ok(embeddings) => {
+                                    info!(
+                                        "Generated {} image caption embeddings in {:?}",
+                                        request.texts.len(),
+                                        start.elapsed()
+                                    );
+                                    let _ = request.response_tx.send(Ok(embeddings));
+                                }
+                                Err(err) => {
+                                    error!("Failed to generate image caption embeddings: {}", err);
+                                    let _ = request.response_tx.send(Err(err));
+                                }
+                            }
+                        }
+                        Ok(())
+                    });
+
                 // Store the shared embedding
-                let shared_embedding = Arc::new(SharedEmbedding { text_embedding_tx, image_embedding_tx });
+                let shared_embedding =
+                    Arc::new(SharedEmbedding { text_embedding_tx, image_embedding_tx, image_caption_embedding_tx });
                 *weak_ref = Arc::downgrade(&shared_embedding);
                 Some(shared_embedding)
             }
@@ -623,6 +737,8 @@ impl Embeddings {
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
         self.text_embedding_tx = self.shared_embedding.as_ref().map(|se| se.text_embedding_tx.clone());
         self.image_embedding_tx = self.shared_embedding.as_ref().map(|se| se.image_embedding_tx.clone());
+        self.image_caption_embedding_tx =
+            self.shared_embedding.as_ref().map(|se| se.image_caption_embedding_tx.clone());
 
         info!("{} Finished", ctx.id());
         Ok(())

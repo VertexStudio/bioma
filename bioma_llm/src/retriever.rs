@@ -115,46 +115,34 @@ impl Message<RetrieveContext> for Retriever {
             return Err(RetrieverError::RerankIdNotFound);
         };
 
-        // Convert the query type to embeddings::Query
-        let query = match &message.query {
+        match &message.query {
             QueryType::Text(text) => {
                 info!("Fetching context for text query: {}", text);
-                embeddings::Query::Text(text.clone())
-            }
-            QueryType::Image(text) => {
-                info!("Fetching context for image query: {}", text);
-                embeddings::Query::Image(text.clone())
-            }
-        };
+                let embeddings_req = embeddings::TopK {
+                    query: embeddings::Query::Text(text.clone()),
+                    k: message.limit * 2,
+                    threshold: message.threshold,
+                    tag: Some(self.tag.clone().to_string()),
+                };
 
-        let embeddings_req = embeddings::TopK {
-            query,
-            k: message.limit * 2,
-            threshold: message.threshold,
-            tag: Some(self.tag.clone().to_string()),
-        };
+                info!("Searching for similarities");
+                let start = std::time::Instant::now();
+                let similarities = match ctx
+                    .send::<Embeddings, embeddings::TopK>(
+                        embeddings_req,
+                        embeddings_id,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                    )
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        error!("Failed to get similarities: {}", e);
+                        return Err(RetrieverError::ComputingSimilarity(e.to_string()));
+                    }
+                };
+                info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
 
-        info!("Searching for similarities");
-        let start = std::time::Instant::now();
-        let similarities = match ctx
-            .send::<Embeddings, embeddings::TopK>(
-                embeddings_req,
-                embeddings_id,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-            )
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                error!("Failed to get similarities: {}", e);
-                return Err(RetrieverError::ComputingSimilarity(e.to_string()));
-            }
-        };
-        info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
-
-        // For text queries, we can use reranking. For image queries, we'll skip it
-        let context = match &message.query {
-            QueryType::Text(text) => {
                 // Rank the embeddings
                 info!("Ranking similarity texts");
                 let start = std::time::Instant::now();
@@ -177,7 +165,7 @@ impl Message<RetrieveContext> for Retriever {
                 info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
 
                 // Get the context from the ranked texts
-                if ranked_texts.texts.len() > 0 {
+                let context = if ranked_texts.texts.len() > 0 {
                     ranked_texts
                         .texts
                         .into_iter()
@@ -192,22 +180,49 @@ impl Message<RetrieveContext> for Retriever {
                         .collect()
                 } else {
                     vec![Context { text: "No context found".to_string(), metadata: None }]
-                }
+                };
+
+                Ok(RetrievedContext { context })
             }
-            QueryType::Image { .. } => {
+            QueryType::Image(text) => {
+                info!("Fetching context for image query: {}", text);
+                let embeddings_req = embeddings::TopKImages {
+                    query: embeddings::ImageQuery::ImageCaption(text.clone()),
+                    k: message.limit,
+                    threshold: message.threshold,
+                    tag: Some(self.tag.clone().to_string()),
+                };
+
+                info!("Searching for image similarities");
+                let start = std::time::Instant::now();
+                let similarities = match ctx
+                    .send::<Embeddings, embeddings::TopKImages>(
+                        embeddings_req,
+                        embeddings_id,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                    )
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        error!("Failed to get similarities: {}", e);
+                        return Err(RetrieverError::ComputingSimilarity(e.to_string()));
+                    }
+                };
+                info!("Image similarities: {} in {:?}", similarities.len(), start.elapsed());
+
                 // For images, just use the similarities directly
-                similarities
+                let context = similarities
                     .into_iter()
-                    .take(message.limit)
                     .map(|s| Context {
-                        text: s.text,
+                        text: s.caption.unwrap_or_default(),
                         metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
                     })
-                    .collect()
-            }
-        };
+                    .collect();
 
-        Ok(RetrievedContext { context })
+                Ok(RetrievedContext { context })
+            }
+        }
     }
 }
 
