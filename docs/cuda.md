@@ -46,3 +46,16 @@ sudo apt-get update
 sudo apt-get -y install cudnn
 ```
 
+### ONNX Runtime
+
+```bash
+# Download ONNX Runtime
+wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-gpu-1.20.0.tgz
+
+# Extract and install
+tar -xzf onnxruntime-linux-x64-gpu-1.20.0.tgz
+sudo mkdir -p /opt/onnxruntime
+sudo mv onnxruntime-linux-x64-gpu-1.20.0 /opt/onnxruntime/
+echo 'export LD_LIBRARY_PATH=/opt/onnxruntime/onnxruntime-linux-x64-gpu-1.20.0/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+```
