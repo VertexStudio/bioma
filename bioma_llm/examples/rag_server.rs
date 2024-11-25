@@ -1,10 +1,11 @@
 use actix_cors::Cors;
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use walkdir::WalkDir;
@@ -37,6 +38,18 @@ struct AppState {
     indexer_actor_id: ActorId,
     retriever_actor_id: ActorId,
     chat_actor_id: ActorId,
+    embeddings_actor: Arc<EmbeddingsActor>,
+    rerank_actor: Arc<RerankActor>,
+}
+
+struct EmbeddingsActor {
+    embeddings_ctx: Mutex<ActorContext<Embeddings>>,
+    embeddings_actor: Mutex<Embeddings>,
+}
+
+struct RerankActor {
+    rerank_ctx: Mutex<ActorContext<Rerank>>,
+    rerank_actor: Mutex<Rerank>,
 }
 
 async fn health() -> impl Responder {
@@ -241,6 +254,7 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
 struct ChatQuery {
     messages: Vec<ChatMessage>,
 }
+
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
     // Build query from all user messages
     let query = body
@@ -453,6 +467,77 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     }
 }
 
+#[derive(Deserialize)]
+struct EmbeddingsQuery {
+    model: String,
+    input: serde_json::Value,
+}
+
+async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
+    let mut embeddings_actor = data.embeddings_actor.embeddings_actor.lock().await;
+    let mut embeddings_ctx = data.embeddings_actor.embeddings_ctx.lock().await;
+
+    if body.model != "nomic-embed-text" {
+        return HttpResponse::BadRequest().body("Invalid model");
+    }
+
+    // Check if input is a string or a list of strings
+    let texts = match body.input.as_str() {
+        Some(s) => vec![s.to_string()],
+        None => body.input.as_array().unwrap().iter().map(|s| s.to_string()).collect(),
+    };
+
+    let max_text_len = texts.iter().map(|text| text.len()).max().unwrap_or(0);
+    info!("Received embed query with {} texts (max. {} chars)", texts.len(), max_text_len);
+
+    const CHUNK_SIZE: usize = 10;
+    let mut all_embeddings = Vec::new();
+
+    // Process texts in chunks
+    for chunk in texts.chunks(CHUNK_SIZE) {
+        match embeddings_actor.handle(&mut embeddings_ctx, &GenerateTextEmbeddings { texts: chunk.to_vec() }).await {
+            Ok(chunk_response) => {
+                all_embeddings.extend(chunk_response.embeddings);
+            }
+            Err(e) => {
+                error!("Error processing chunk: {:?}", e);
+                return HttpResponse::InternalServerError().body(e.to_string());
+            }
+        }
+    }
+
+    // Return combined results
+    let generated_embeddings = GeneratedTextEmbeddings { embeddings: all_embeddings };
+    HttpResponse::Ok().json(generated_embeddings)
+}
+
+#[derive(Deserialize)]
+struct RerankQuery {
+    query: String,
+    texts: Vec<String>,
+}
+
+async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> HttpResponse {
+    let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
+    info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
+
+    let mut rerank_actor = data.rerank_actor.rerank_actor.lock().await;
+    let mut rerank_ctx = data.rerank_actor.rerank_ctx.lock().await;
+
+    println!("Rerank query: {:#?}", body.query);
+    println!("Rerank texts: {:#?}", body.texts);
+
+    let response =
+        rerank_actor.handle(&mut rerank_ctx, &RankTexts { query: body.query.clone(), texts: body.texts.clone() }).await;
+
+    println!("Rerank response: {:#?}", response);
+
+    match response {
+        Ok(response) => HttpResponse::Ok().json(response.texts),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -570,6 +655,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
+    // Embeddings
+    let embeddings_actor_id = ActorId::of::<Embeddings>("/rag/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
+        engine.clone(),
+        embeddings_actor_id.clone(),
+        Embeddings::default(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await
+    .unwrap();
+
+    embeddings_actor.init(&mut embeddings_ctx).await.unwrap();
+
+    let embeddings_actor = Arc::new(EmbeddingsActor {
+        embeddings_ctx: Mutex::new(embeddings_ctx),
+        embeddings_actor: Mutex::new(embeddings_actor),
+    });
+
+    // Rerank
+    let rerank_actor_id = ActorId::of::<Rerank>("/rag/rerank");
+    let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
+        engine.clone(),
+        rerank_actor_id.clone(),
+        Rerank::default(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await
+    .unwrap();
+
+    rerank_actor.init(&mut rerank_ctx).await.unwrap();
+
+    let rerank_actor =
+        Arc::new(RerankActor { rerank_ctx: Mutex::new(rerank_ctx), rerank_actor: Mutex::new(rerank_actor) });
+
     // Create the app state
     let data = web::Data::new(AppState {
         engine: engine.clone(),
@@ -579,6 +698,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         indexer_actor_id: indexer_actor_id,
         retriever_actor_id: retriever_actor_id.clone(),
         chat_actor_id: chat_actor_id.clone(),
+        embeddings_actor,
+        rerank_actor,
     });
 
     // Create the server
@@ -586,6 +707,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
+            .wrap(Logger::default())
             .wrap(cors)
             .app_data(data.clone())
             .route("/health", web::get().to(health))
@@ -597,6 +719,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
+            .route("/api/embed", web::post().to(embed))
+            .route("/rerank", web::post().to(rerank))
     })
     .bind("0.0.0.0:8080")?
     .run()

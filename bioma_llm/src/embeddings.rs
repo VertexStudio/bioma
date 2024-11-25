@@ -268,6 +268,37 @@ impl Actor for Embeddings {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
 
+        self.init(ctx).await?;
+
+        // Start the message stream
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(input) = frame.is::<StoreTextEmbeddings>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<GenerateTextEmbeddings>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<TopK>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+        info!("{} Finished", ctx.id());
+        Ok(())
+    }
+}
+
+impl Embeddings {
+    pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
+        info!("{} Started", ctx.id());
+
         // Manage a shared embedding task
         let shared_embedding = {
             let mut weak_ref = SHARED_EMBEDDING.lock().await;
@@ -367,27 +398,6 @@ impl Actor for Embeddings {
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
         self.text_embedding_tx = self.shared_embedding.as_ref().map(|se| se.text_embedding_tx.clone());
 
-        // Start the message stream
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<StoreTextEmbeddings>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<GenerateTextEmbeddings>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<TopK>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            }
-        }
-        info!("{} Finished", ctx.id());
         Ok(())
     }
 }
