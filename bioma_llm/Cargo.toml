@@ -50,6 +50,7 @@ bioma_actor = { path = "../bioma_actor" }
 
 ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
+    "cuda",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
+use ort::execution_providers::CUDAExecutionProvider;
 
 pub const DEFAULT_EMBEDDING_LENGTH: usize = 768;
 
@@ -325,7 +326,7 @@ impl Actor for Embeddings {
                         #[cfg(target_os = "linux")]
                         {
                             options =
-                                options.with_execution_providers(vec![ort::CUDAExecutionProvider::default().build()]);
+                                options.with_execution_providers(vec![CUDAExecutionProvider::default().build()]);
                         }
 
                         let text_embedding = fastembed::TextEmbedding::try_new(options)?;

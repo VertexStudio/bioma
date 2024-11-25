@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
+use ort::execution_providers::CUDAExecutionProvider;
 
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
@@ -168,7 +169,7 @@ impl Actor for Rerank {
 
                     #[cfg(target_os = "linux")]
                     {
-                        options = options.with_execution_providers(vec![ort::CUDAExecutionProvider::default().build()]);
+                        options = options.with_execution_providers(vec![CUDAExecutionProvider::default().build()]);
                     }
 
                     let reranker = fastembed::TextRerank::try_new(options)?;
