@@ -5,7 +5,6 @@ use crate::{
 use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use serde_json::Value;
 use std::borrow::Cow;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
@@ -157,6 +156,22 @@ pub struct DeletedSource {
     pub deleted_embeddings: usize,
     pub deleted_sources: Vec<String>,
     pub not_found_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageDimensions {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageMetadata {
+    pub source: String,
+    pub format: String,
+    pub dimensions: ImageDimensions,
+    pub size_bytes: u64,
+    pub modified: u64,
+    pub created: u64,
 }
 
 impl Indexer {
@@ -330,17 +345,16 @@ impl Indexer {
             // Get file metadata
             let file_metadata = std::fs::metadata(&source_clone).ok()?;
 
-            Some(json!({
-                "source": source_clone,
-                "format": format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown"),
-                "dimensions": {
-                    "width": dimensions.0,
-                    "height": dimensions.1
-                },
-                "size_bytes": file_metadata.len(),
-                "modified": file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-                "created": file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-            }))
+            let image_metadata = ImageMetadata {
+                source: source_clone,
+                format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
+                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+                size_bytes: file_metadata.len(),
+                modified: file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
+                created: file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
+            };
+
+            Some(serde_json::to_value(image_metadata).ok()?)
         })
         .await
         .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
