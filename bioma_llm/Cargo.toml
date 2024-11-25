@@ -48,18 +48,18 @@ mdka = "1.2"
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
 
-ort = { version = "=v2.0.0-rc.9", default-features = false, features = [
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-ort = { version = "=v2.0.0-rc.9", default-features = false, features = [
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
     "coreml",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ort = { version = "=v2.0.0-rc.9", default-features = false, features = [
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
     "cuda",
 ] }
