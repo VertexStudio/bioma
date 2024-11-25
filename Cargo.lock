@@ -942,6 +942,7 @@ dependencies = [
  "actix-multipart",
  "actix-web",
  "anyhow",
+ "base64 0.22.1",
  "bioma_actor",
  "bioma_derive",
  "bon",
