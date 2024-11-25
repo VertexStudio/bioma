@@ -1,5 +1,5 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
-use crate::indexer::ChunkMetadata;
+use crate::indexer::{ChunkMetadata, ImageMetadata};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -66,7 +66,15 @@ fn default_retriever_threshold() -> f32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
     pub text: String,
-    pub metadata: Option<ChunkMetadata>,
+    #[serde(flatten)]
+    pub metadata: Option<ContextMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ContextMetadata {
+    Text(ChunkMetadata),
+    Image(ImageMetadata),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,11 +87,24 @@ impl RetrievedContext {
         let mut context_content = String::new();
 
         for (index, context) in self.context.iter().enumerate() {
-            // Add source information
+            // Add metadata information based on type
             if let Some(metadata) = &context.metadata {
-                context_content.push_str(&format!("Source: {}\n", metadata.source));
-                context_content.push_str(&format!("Type: {}\n", metadata.text_type));
-                context_content.push_str(&format!("Chunk: {}\n\n", metadata.chunk_number));
+                match metadata {
+                    ContextMetadata::Text(text_metadata) => {
+                        context_content.push_str(&format!("Source: {}\n", text_metadata.source));
+                        context_content.push_str(&format!("Type: {}\n", text_metadata.text_type));
+                        context_content.push_str(&format!("Chunk: {}\n\n", text_metadata.chunk_number));
+                    }
+                    ContextMetadata::Image(image_metadata) => {
+                        context_content.push_str(&format!("Source: {}\n", image_metadata.source));
+                        context_content.push_str(&format!("Format: {}\n", image_metadata.format));
+                        context_content.push_str(&format!(
+                            "Dimensions: {}x{}\n",
+                            image_metadata.dimensions.width, image_metadata.dimensions.height
+                        ));
+                        context_content.push_str(&format!("Size: {} bytes\n\n", image_metadata.size_bytes));
+                    }
+                }
             }
 
             // Add the text content
@@ -216,7 +237,9 @@ impl Message<RetrieveContext> for Retriever {
                     .into_iter()
                     .map(|s| Context {
                         text: s.caption.unwrap_or_default(),
-                        metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
+                        metadata: s.metadata.and_then(|m| {
+                            serde_json::from_value(m).ok().map(|metadata| ContextMetadata::Image(metadata))
+                        }),
                     })
                     .collect();
 
