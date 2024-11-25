@@ -32,7 +32,7 @@ ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "a40ea0c39
 hf-hub = "0.3.2"
 # fastembed = "4"
 # fastembed = { path = "../../fastembed-rs" }
-fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "fix/ort-2.0.0-rc.6" }
+fastembed = { git = "https://github.com/Anush008/fastembed-rs", branch = "main" }
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
