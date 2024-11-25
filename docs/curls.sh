@@ -17,3 +17,9 @@ curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" 
 
 # Ask a question:
 curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
+
+
+curl -X POST http://localhost:8080/api/embed -H "Content-Type: application/json" -d '{
+  "model": "nomic-embed-text",
+  "input": ["Why is the sky blue?", "Why is the grass green?"]
+}'
