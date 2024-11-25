@@ -128,7 +128,7 @@ pub enum Query {
     TextEmbedding(Vec<f32>),
     ImageEmbedding(Vec<f32>),
     Text(String),
-    Image(String, Option<String>),
+    Image(String),
 }
 
 /// Get the top k similar embeddings to a query, filtered by tag
@@ -202,43 +202,32 @@ impl Message<TopK> for Embeddings {
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
         let query_embedding = match &message.query {
-            Query::TextEmbedding(embedding) => (embedding.clone(), true),
-            Query::ImageEmbedding(embedding) => (embedding.clone(), false),
-            Query::Text(text) => {
+            Query::TextEmbedding(embedding) | Query::ImageEmbedding(embedding) => embedding.clone(),
+            Query::Text(text) | Query::Image(text) => {
                 let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::TextEmbeddingNotInitialized);
                 };
                 let (tx, rx) = oneshot::channel();
                 text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] }).await?;
-                (rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?, true)
-            }
-            Query::Image(path, caption) => {
-                let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                image_embedding_tx
-                    .send(ImageEmbeddingRequest {
-                        response_tx: tx,
-                        images: vec![Image { path: path.to_string(), caption: caption.clone() }],
-                    })
-                    .await?;
-                (rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?, false)
+                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
         };
 
         // TODO: Queries are similar. See if we can use just one.
         // Get the similar embeddings using the appropriate query
-        let query_sql = if query_embedding.1 {
-            include_str!("../sql/similarities/similarities_text.surql")
-        } else {
-            include_str!("../sql/similarities/similarities_image.surql")
+        let query_sql = match message.query {
+            Query::TextEmbedding(_) | Query::Text(_) => {
+                include_str!("../sql/similarities/similarities_text.surql")
+            }
+            _ => {
+                include_str!("../sql/similarities/similarities_image.surql")
+            }
         };
 
         let db = ctx.engine().db();
         let mut results = db
             .query(query_sql)
-            .bind(("query", query_embedding.0))
+            .bind(("query", query_embedding))
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
             .bind(("threshold", message.threshold))

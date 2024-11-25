@@ -254,7 +254,10 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         .join("\n");
     info!("Received ask query: {:#?}", query);
 
-    let retrieve_context = RetrieveContext { query: QueryType::Text(query), limit: 5, threshold: 0.0 };
+    // Create both text and image retrieve contexts using the same query
+    let text_context = RetrieveContext { query: QueryType::Text(query.clone()), limit: 5, threshold: 0.0 };
+    let image_context = RetrieveContext { query: QueryType::Image(query), limit: 2, threshold: 0.0 };
+
     let retriever_actor_id = data.retriever_actor_id.clone();
 
     // Try to lock the retriever_relay_ctx without waiting
@@ -266,7 +269,6 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         }
     };
 
-    // Try to lock the chat_relay_ctx without waiting
     let chat_relay_ctx = match data.chat_relay_ctx.try_lock() {
         Ok(ctx) => ctx,
         Err(_) => {
@@ -275,27 +277,37 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         }
     };
 
-    info!("Sending message to retriever actor");
-    let response = retriever_relay_ctx
+    info!("Sending messages to retriever actor");
+    let text_response = retriever_relay_ctx
         .send::<Retriever, RetrieveContext>(
-            retrieve_context,
+            text_context,
             &retriever_actor_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         )
         .await;
 
-    match response {
-        Ok(mut context) => {
-            // Reverse context to put most important last
-            context.context.reverse();
+    let image_response = retriever_relay_ctx
+        .send::<Retriever, RetrieveContext>(
+            image_context,
+            &retriever_actor_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+        )
+        .await;
+
+    match (text_response, image_response) {
+        (Ok(mut text_context), Ok(image_context)) => {
+            // Reverse text context as before
+            text_context.context.reverse();
+
+            // Combine text and image contexts
+            let mut context = text_context;
+            context.context.extend(image_context.context);
 
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Create chat conversation with all messages
+            // Rest of the existing code remains exactly the same
             let mut conversation = body.messages.clone();
-
-            // Insert context to conversation as a system message, at one position before the last message
             let context_message = ChatMessage::system(
                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
                     .to_string()
@@ -326,7 +338,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 }
             }
         }
-        Err(e) => {
+        (Err(e), _) | (_, Err(e)) => {
             error!("Error fetching context: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
         }
