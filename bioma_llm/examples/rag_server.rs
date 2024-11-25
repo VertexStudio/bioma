@@ -271,7 +271,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     // Create both text and image retrieve contexts using the same query
     let text_context = RetrieveContext { query: QueryType::Text(query.clone()), limit: 5, threshold: 0.0 };
-    let image_context = RetrieveContext { query: QueryType::Image(query), limit: 2, threshold: 0.0 };
+    // TODO: llama3.2-vision only supports 1 image per message
+    let image_context = RetrieveContext { query: QueryType::Image(query), limit: 1, threshold: 0.0 };
 
     let retriever_actor_id = data.retriever_actor_id.clone();
 
@@ -692,7 +693,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    let chat = Chat::builder().model("llama3.2".into()).build();
+    let chat = Chat::builder().model("llama3.2-vision".into()).build();
 
     let chat_actor_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
