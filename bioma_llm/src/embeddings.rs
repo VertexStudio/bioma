@@ -179,12 +179,11 @@ pub struct TopKImages {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = Model::NomicEmbedTextV15)]
+    pub name: String,
+    #[builder(default = Model::ClipVitB32Text)]
     pub text_model: Model,
     #[builder(default = ImageModel::ClipVitB32Vision)]
     pub image_model: ImageModel,
-    #[builder(default = Model::ClipVitB32Text)]
-    pub image_caption_model: Model,
     #[serde(skip)]
     text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
     #[serde(skip)]
@@ -207,20 +206,14 @@ impl std::fmt::Debug for StrongSharedEmbedding {
 impl Clone for Embeddings {
     fn clone(&self) -> Self {
         Self {
+            name: self.name.clone(),
             text_model: self.text_model.clone(),
             image_model: self.image_model.clone(),
-            image_caption_model: self.image_caption_model.clone(),
             text_embedding_tx: None,
             image_embedding_tx: None,
             image_caption_embedding_tx: None,
             shared_embedding: None,
         }
-    }
-}
-
-impl Default for Embeddings {
-    fn default() -> Self {
-        Embeddings::builder().build()
     }
 }
 
