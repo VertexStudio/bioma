@@ -1,10 +1,10 @@
 SELECT * FROM (
     SELECT
-        caption,
+        text,
         vector::similarity::cosine(embedding, $query) AS similarity,
         metadata,
         id.tag AS tag
-    FROM image_embedding
+    FROM type::table($table)
 ) WHERE
     (tag IS NONE OR tag = $tag)
     AND (similarity > $threshold)

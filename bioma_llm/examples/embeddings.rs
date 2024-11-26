@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get similarities
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("Hello, how are you?".to_string()),
+        query: embeddings::TextQuery::Text("Hello, how are you?".to_string()),
         threshold: -0.5,
         k: 5,
         tag: Some("test".to_string()),

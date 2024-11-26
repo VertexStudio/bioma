@@ -2,43 +2,26 @@
 DEFINE TABLE model TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD name ON model TYPE string PERMISSIONS FULL;
 
--- Define the text_embedding table
-DEFINE TABLE text_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD text ON text_embedding TYPE string PERMISSIONS FULL;
-DEFINE FIELD embedding ON text_embedding TYPE array<number> PERMISSIONS FULL;
-DEFINE INDEX text_embedding_index ON TABLE text_embedding FIELDS embedding MTREE DIMENSION 768 DIST EUCLIDEAN;
+-- Define the embedding table for {prefix}
+DEFINE TABLE {prefix}_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD text ON {prefix}_embedding TYPE option<string> PERMISSIONS FULL;
+DEFINE FIELD embedding ON {prefix}_embedding TYPE array<number> PERMISSIONS FULL;
+DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding FIELDS embedding MTREE DIMENSION {dim} DIST EUCLIDEAN;
 
--- Define the image_embedding table
-DEFINE TABLE image_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD caption ON image_embedding TYPE option<string> PERMISSIONS FULL;
-DEFINE FIELD embedding ON image_embedding TYPE array<number> PERMISSIONS FULL;
-DEFINE INDEX image_embedding_index ON TABLE image_embedding FIELDS embedding MTREE DIMENSION 512 DIST EUCLIDEAN;
-
--- Add Full-Text Search indices
+-- Add Full-Text Search index for the embedding text field
 DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
-DEFINE INDEX text_embedding_text_search ON text_embedding FIELDS text SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
-DEFINE INDEX image_embedding_caption_search ON image_embedding FIELDS caption SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
+DEFINE INDEX {prefix}_embedding_text_search ON {prefix}_embedding FIELDS text SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
 
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
 
--- Define the source_text_embeddings table
-DEFINE TABLE source_text_embeddings TYPE RELATION IN source OUT text_embedding SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD in ON source_text_embeddings TYPE record<source> PERMISSIONS FULL;
-DEFINE FIELD out ON source_text_embeddings TYPE record<text_embedding> PERMISSIONS FULL;
+-- Define the source_embeddings table
+DEFINE TABLE {prefix}_source_embeddings TYPE RELATION IN source OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD in ON {prefix}_source_embeddings TYPE record<source> PERMISSIONS FULL;
+DEFINE FIELD out ON {prefix}_source_embeddings TYPE record<{prefix}_embedding> PERMISSIONS FULL;
 
--- Define the source_image_embeddings table
-DEFINE TABLE source_image_embeddings TYPE RELATION IN source OUT image_embedding SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD in ON source_image_embeddings TYPE record<source> PERMISSIONS FULL;
-DEFINE FIELD out ON source_image_embeddings TYPE record<image_embedding> PERMISSIONS FULL;
-
--- Define the model_text_embeddings table
-DEFINE TABLE model_text_embeddings TYPE RELATION IN model OUT text_embedding SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD in ON model_text_embeddings TYPE record<model> PERMISSIONS FULL;
-DEFINE FIELD out ON model_text_embeddings TYPE record<text_embedding> PERMISSIONS FULL;
-
--- Define the model_image_embeddings table
-DEFINE TABLE model_image_embeddings TYPE RELATION IN model OUT image_embedding SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD in ON model_image_embeddings TYPE record<model> PERMISSIONS FULL;
-DEFINE FIELD out ON model_image_embeddings TYPE record<image_embedding> PERMISSIONS FULL;
+-- Define the model_embeddings table
+DEFINE TABLE {prefix}_model_embeddings TYPE RELATION IN model OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD in ON {prefix}_model_embeddings TYPE record<model> PERMISSIONS FULL;
+DEFINE FIELD out ON {prefix}_model_embeddings TYPE record<{prefix}_embedding> PERMISSIONS FULL;
