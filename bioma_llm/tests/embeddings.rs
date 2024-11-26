@@ -11,6 +11,8 @@ enum TestError {
     Embeddings(#[from] EmbeddingsError),
 }
 
+const CLIPVIT32_EMBEDDING_LENGTH: usize = 512;
+
 #[test(tokio::test)]
 async fn test_embeddings_generate() -> Result<(), TestError> {
     let engine = Engine::test().await?;
@@ -36,8 +38,8 @@ async fn test_embeddings_generate() -> Result<(), TestError> {
 
     // Generate embeddings
     let embeddings = relay_ctx
-        .send::<Embeddings, GenerateTextEmbeddings>(
-            GenerateTextEmbeddings { texts: texts.iter().map(|text| text.to_string()).collect() },
+        .send::<Embeddings, GenerateEmbeddings>(
+            GenerateEmbeddings { content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()) },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -46,7 +48,7 @@ async fn test_embeddings_generate() -> Result<(), TestError> {
     // Check the results
     assert_eq!(embeddings.embeddings.len(), texts.len());
     for embedding in &embeddings.embeddings {
-        assert_eq!(embedding.len(), DEFAULT_TEXT_EMBEDDING_LENGTH);
+        assert_eq!(embedding.len(), CLIPVIT32_EMBEDDING_LENGTH);
     }
 
     // Additional assertions
@@ -88,10 +90,10 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
     ];
 
     let _ = relay_ctx
-        .send::<Embeddings, StoreTextEmbeddings>(
-            StoreTextEmbeddings {
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
                 source: "test".to_string(),
-                texts: texts.iter().map(|text| text.to_string()).collect(),
+                content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: None,
                 tag: Some("test".to_string()),
             },
@@ -115,7 +117,7 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
     // Check the results
     assert_eq!(similarities.len(), 2);
     assert!(similarities[0].similarity >= similarities[1].similarity);
-    assert_eq!(similarities[0].text, "Hello, how are you?");
+    assert_eq!(similarities[0].text, Some("Hello, how are you?".to_string()));
 
     // Additional assertions
     assert!(similarities.iter().all(|s| s.similarity >= -1.0 && s.similarity <= 1.0));
@@ -150,10 +152,10 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
     // Generate embeddings
     let texts = vec!["Persistent embedding test"];
     let _ = relay_ctx
-        .send::<Embeddings, StoreTextEmbeddings>(
-            StoreTextEmbeddings {
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
                 source: "test".to_string(),
-                texts: texts.iter().map(|text| text.to_string()).collect(),
+                content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: None,
                 tag: Some("persistence_test".to_string()),
             },
@@ -192,7 +194,7 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
 
     assert_eq!(similarities.len(), 1);
-    assert_eq!(similarities[0].text, "Persistent embedding test");
+    assert_eq!(similarities[0].text, Some("Persistent embedding test".to_string()));
 
     // Additional assertion
     assert!(similarities[0].similarity > 0.5, "Expected high similarity for persistent embedding");
@@ -227,10 +229,10 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
     let texts = vec!["Text with metadata"];
     let metadata = vec![serde_json::json!({"key": "value"})];
     let _ = relay_ctx
-        .send::<Embeddings, StoreTextEmbeddings>(
-            StoreTextEmbeddings {
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
                 source: "test".to_string(),
-                texts: texts.iter().map(|text| text.to_string()).collect(),
+                content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: Some(metadata),
                 tag: Some("metadata_test".to_string()),
             },
@@ -251,7 +253,7 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
 
     assert_eq!(similarities.len(), 1);
-    assert_eq!(similarities[0].text, "Text with metadata");
+    assert_eq!(similarities[0].text, Some("Text with metadata".to_string()));
     assert_eq!(similarities[0].metadata, Some(serde_json::json!({"key": "value"})));
 
     // Additional assertions
@@ -324,10 +326,10 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
 
     for (i, chunk) in chunks.iter().enumerate() {
         let embeddings_id = &embeddings_actors[i];
-        let future = relay_ctx.send::<Embeddings, StoreTextEmbeddings>(
-            StoreTextEmbeddings {
+        let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
                 source: "test".to_string(),
-                texts: chunk.clone(),
+                content: EmbeddingContent::Text(chunk.clone()),
                 metadata: None,
                 tag: Some(format!("test_{}", i)),
             },
@@ -343,7 +345,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
         let embeddings = embeddings_result?;
         assert!(!embeddings.lengths.is_empty());
         for length in &embeddings.lengths {
-            assert_eq!(*length, DEFAULT_TEXT_EMBEDDING_LENGTH);
+            assert_eq!(*length, CLIPVIT32_EMBEDDING_LENGTH);
         }
     }
 
