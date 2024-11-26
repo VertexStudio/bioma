@@ -140,7 +140,7 @@ impl Message<RetrieveContext> for Retriever {
             QueryType::Text(text) => {
                 info!("Fetching context for text query: {}", text);
                 let embeddings_req = embeddings::TopK {
-                    query: embeddings::Query::Text(text.clone()),
+                    query: embeddings::TextQuery::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
                     tag: Some(self.tag.clone().to_string()),
@@ -208,7 +208,7 @@ impl Message<RetrieveContext> for Retriever {
             QueryType::Image(text) => {
                 info!("Fetching context for image query: {}", text);
                 let embeddings_req = embeddings::TopKImages {
-                    query: embeddings::ImageQuery::ImageCaption(text.clone()),
+                    query: embeddings::ImageQuery::Text(text.clone()),
                     k: message.limit,
                     threshold: message.threshold,
                     tag: Some(self.tag.clone().to_string()),
