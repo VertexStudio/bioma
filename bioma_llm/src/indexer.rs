@@ -334,8 +334,9 @@ impl Indexer {
 
         // Extract image metadata
         let source_clone = source.clone();
+        let uri_clone = uri.clone();
         let metadata = tokio::task::spawn_blocking(move || {
-            let file = std::fs::File::open(&source_clone).ok()?;
+            let file = std::fs::File::open(&uri_clone).ok()?;
             let reader = std::io::BufReader::new(file);
 
             // Get image format and dimensions
@@ -347,11 +348,11 @@ impl Indexer {
             };
 
             // Get file metadata
-            let file_metadata = std::fs::metadata(&source_clone).ok()?;
+            let file_metadata = std::fs::metadata(&uri_clone).ok()?;
 
             let image_metadata = ImageMetadata {
                 source: source_clone.clone(),
-                uri: uri.clone(),
+                uri: uri_clone.clone(),
                 format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                 dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                 size_bytes: file_metadata.len(),
@@ -370,8 +371,8 @@ impl Indexer {
         let result = ctx
             .send::<Embeddings, StoreImageEmbeddings>(
                 StoreImageEmbeddings {
-                    source: source.clone(),
-                    images: vec![Image { path: source, caption }],
+                    source,
+                    images: vec![Image { path: uri, caption }],
                     metadata: metadata.map(|m| vec![m]),
                     tag: Some(self.tag.clone().to_string()),
                 },

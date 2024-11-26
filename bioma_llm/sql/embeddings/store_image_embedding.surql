@@ -1,5 +1,5 @@
 LET $id = rand::ulid(time::now());
-LET $emb = CREATE ONLY image_embedding:{id: $id, tag: $tag} SET text = $text, embedding = $embedding, metadata = $metadata;
+LET $emb = CREATE ONLY image_embedding:{id: $id, tag: $tag} SET caption = $caption, embedding = $embedding, metadata = $metadata;
 RELATE $model_id->model_image_embeddings->($emb.id);
 
 LET $src = SELECT VALUE id FROM ONLY source:{source: $source, tag: $tag};
