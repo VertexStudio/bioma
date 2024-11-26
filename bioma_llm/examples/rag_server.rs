@@ -312,10 +312,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     match (text_response, image_response) {
         (Ok(mut text_context), Ok(image_context)) => {
-            // Print image context for debugging
             info!("Image context: {:#?}", image_context);
 
-            // Only use text context for now
             text_context.context.reverse();
             info!("Text context fetched: {:#?}", text_context);
             let context_content = text_context.to_markdown();
