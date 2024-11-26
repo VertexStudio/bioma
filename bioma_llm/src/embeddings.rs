@@ -17,8 +17,7 @@ lazy_static! {
 }
 
 struct SharedEmbedding {
-    text_embedding_tx: mpsc::Sender<TextEmbeddingRequest>,
-    image_embedding_tx: mpsc::Sender<ImageEmbeddingRequest>,
+    embedding_tx: mpsc::Sender<EmbeddingRequest>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -36,26 +35,17 @@ pub enum EmbeddingsError {
     #[error("Text embedding not initialized")]
     TextEmbeddingNotInitialized,
     #[error("Error sending text embeddings: {0}")]
-    SendTextEmbeddings(#[from] mpsc::error::SendError<TextEmbeddingRequest>),
+    SendTextEmbeddings(#[from] mpsc::error::SendError<EmbeddingRequest>),
     #[error("Error receiving text embeddings: {0}")]
     RecvEmbeddings(#[from] oneshot::error::RecvError),
-    #[error("Error sending image embeddings: {0}")]
-    SendImageEmbeddings(#[from] mpsc::error::SendError<ImageEmbeddingRequest>),
-    #[error("Image embedding not initialized")]
-    ImageEmbeddingNotInitialized,
-}
-
-pub struct TextEmbeddingRequest {
-    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
-    texts: Vec<String>,
-}
-
-pub struct ImageEmbeddingRequest {
-    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
-    images: Vec<Image>,
 }
 
 impl ActorError for EmbeddingsError {}
+
+pub struct EmbeddingRequest {
+    response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
+    content: EmbeddingContent,
+}
 
 /// Store embeddings for texts or images
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,9 +134,7 @@ pub struct Embeddings {
     #[builder(default = ImageModel::ClipVitB32Vision)]
     pub image_model: ImageModel,
     #[serde(skip)]
-    text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
-    #[serde(skip)]
-    image_embedding_tx: Option<mpsc::Sender<ImageEmbeddingRequest>>,
+    embedding_tx: Option<mpsc::Sender<EmbeddingRequest>>,
     #[serde(skip)]
     shared_embedding: Option<StrongSharedEmbedding>,
 }
@@ -166,8 +154,7 @@ impl Clone for Embeddings {
             table_name_prefix: self.table_name_prefix.clone(),
             text_model: self.text_model.clone(),
             image_model: self.image_model.clone(),
-            text_embedding_tx: None,
-            image_embedding_tx: None,
+            embedding_tx: None,
             shared_embedding: None,
         }
     }
@@ -191,11 +178,13 @@ impl Message<TopK> for Embeddings {
             Query::TextEmbedding(embedding) => embedding.clone(),
             Query::ImageEmbedding(embedding) => embedding.clone(),
             Query::Text(text) => {
-                let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
+                let Some(embedding_tx) = self.embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::TextEmbeddingNotInitialized);
                 };
                 let (tx, rx) = oneshot::channel();
-                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] }).await?;
+                embedding_tx
+                    .send(EmbeddingRequest { response_tx: tx, content: EmbeddingContent::Text(vec![text.to_string()]) })
+                    .await?;
                 rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
         };
@@ -224,25 +213,14 @@ impl Message<StoreEmbeddings> for Embeddings {
         ctx: &mut ActorContext<Self>,
         message: &StoreEmbeddings,
     ) -> Result<StoredEmbeddings, EmbeddingsError> {
-        let embeddings = match &message.content {
-            EmbeddingContent::Text(texts) => {
-                let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: texts.clone() }).await?;
-                rx.await??
-            }
-            EmbeddingContent::Image(paths) => {
-                let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
-                };
-                let images = paths.iter().map(|path| Image { path: path.clone(), caption: None }).collect();
-                let (tx, rx) = oneshot::channel();
-                image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images }).await?;
-                rx.await??
-            }
+        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
+
+        let (tx, rx) = oneshot::channel();
+        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
+
+        let embeddings = rx.await??;
 
         // Check if metadata length matches content length
         if let Some(metadata) = &message.metadata {
@@ -289,26 +267,14 @@ impl Message<GenerateEmbeddings> for Embeddings {
         _ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
     ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
-        let embeddings = match &message.content {
-            EmbeddingContent::Text(texts) => {
-                let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: texts.clone() }).await?;
-                rx.await??
-            }
-            EmbeddingContent::Image(paths) => {
-                let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
-                };
-                let images = paths.iter().map(|path| Image { path: path.clone(), caption: None }).collect();
-                let (tx, rx) = oneshot::channel();
-                image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images }).await?;
-                rx.await??
-            }
+        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
 
+        let (tx, rx) = oneshot::channel();
+        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
+
+        let embeddings = rx.await??;
         Ok(GeneratedEmbeddings { embeddings })
     }
 }
@@ -465,94 +431,94 @@ impl Embeddings {
                 }
 
                 // Create a new shared embedding
-                let model = self.text_model.clone();
+                let (embedding_tx, mut embedding_rx) = mpsc::channel::<EmbeddingRequest>(100);
+                let text_model = self.text_model.clone();
+                let image_model = self.image_model.clone();
                 let cache_dir = ctx.engine().huggingface_cache_dir().clone();
-                let (text_embedding_tx, mut text_embedding_rx) = mpsc::channel::<TextEmbeddingRequest>(100);
-                let _text_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
+
+                let _embedding_task: JoinHandle<Result<(), fastembed::Error>> =
                     tokio::task::spawn_blocking(move || {
-                        let mut options =
-                            fastembed::InitOptions::new(get_fastembed_model(&model)).with_cache_dir(cache_dir);
+                        // Initialize both text and image embeddings
+                        let mut text_options = fastembed::InitOptions::new(get_fastembed_model(&text_model))
+                            .with_cache_dir(cache_dir.clone());
+                        let image_options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
+                            .with_cache_dir(cache_dir);
 
                         #[cfg(target_os = "macos")]
                         {
-                            options =
-                                options.with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
+                            text_options = text_options
+                                .with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
                         }
 
                         #[cfg(target_os = "linux")]
                         {
-                            options = options.with_execution_providers(vec![
+                            text_options = text_options.with_execution_providers(vec![
                                 ort::execution_providers::CUDAExecutionProvider::default().build(),
                             ]);
                         }
 
-                        let text_embedding = fastembed::TextEmbedding::try_new(options)?;
-                        while let Some(request) = text_embedding_rx.blocking_recv() {
+                        let text_embedding = fastembed::TextEmbedding::try_new(text_options)?;
+                        let image_embedding = fastembed::ImageEmbedding::try_new(image_options)?;
+
+                        while let Some(request) = embedding_rx.blocking_recv() {
                             let start = std::time::Instant::now();
-                            let avg_text_len = request.texts.iter().map(|text| text.len() as f32).sum::<f32>()
-                                / request.texts.len() as f32;
-                            let text_count = request.texts.len();
-                            match text_embedding.embed(request.texts, None) {
-                                Ok(embeddings) => {
-                                    info!(
-                                        "Generated {} embeddings (avg. {:.1} chars) in {:?}",
-                                        text_count,
-                                        avg_text_len,
-                                        start.elapsed()
-                                    );
-                                    let _ = request.response_tx.send(Ok(embeddings));
+
+                            match request.content {
+                                EmbeddingContent::Text(texts) => {
+                                    let avg_text_len =
+                                        texts.iter().map(|text| text.len() as f32).sum::<f32>() / texts.len() as f32;
+                                    let text_count = texts.len();
+                                    match text_embedding.embed(texts, None) {
+                                        Ok(embeddings) => {
+                                            info!(
+                                                "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
+                                                text_count,
+                                                avg_text_len,
+                                                start.elapsed()
+                                            );
+                                            let _ = request.response_tx.send(Ok(embeddings));
+                                        }
+                                        Err(err) => {
+                                            error!("Failed to generate text embeddings: {}", err);
+                                            let _ = request.response_tx.send(Err(err));
+                                        }
+                                    }
                                 }
-                                Err(err) => {
-                                    error!("Failed to generate embeddings: {}", err);
-                                    let _ = request.response_tx.send(Err(err));
+                                EmbeddingContent::Image(paths) => {
+                                    let images: Vec<Image> =
+                                        paths.iter().map(|path| Image { path: path.clone(), caption: None }).collect();
+                                    let image_count = images.len();
+                                    match image_embedding.embed(images, None) {
+                                        Ok(embeddings) => {
+                                            info!(
+                                                "Generated {} image embeddings in {:?}",
+                                                image_count,
+                                                start.elapsed()
+                                            );
+                                            let _ = request.response_tx.send(Ok(embeddings));
+                                        }
+                                        Err(err) => {
+                                            error!("Failed to generate image embeddings: {}", err);
+                                            let _ = request.response_tx.send(Err(err));
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        info!("{} text embedding finished", ctx_id);
-                        drop(text_embedding);
-
-                        Ok(())
-                    });
-
-                // Setup image embeddings
-                let (image_embedding_tx, mut image_embedding_rx) = mpsc::channel::<ImageEmbeddingRequest>(100);
-                let image_model = self.image_model.clone();
-                let cache_dir = ctx.engine().huggingface_cache_dir().clone();
-
-                let _image_embedding_task: JoinHandle<Result<(), fastembed::Error>> =
-                    tokio::task::spawn_blocking(move || {
-                        let options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
-                            .with_cache_dir(cache_dir);
-
-                        let image_embedding = fastembed::ImageEmbedding::try_new(options)?;
-                        while let Some(request) = image_embedding_rx.blocking_recv() {
-                            let start = std::time::Instant::now();
-                            let path_count = request.images.len();
-                            match image_embedding.embed(request.images, None) {
-                                Ok(embeddings) => {
-                                    info!("Generated {} image embeddings in {:?}", path_count, start.elapsed());
-                                    let _ = request.response_tx.send(Ok(embeddings));
-                                }
-                                Err(err) => {
-                                    error!("Failed to generate image embeddings: {}", err);
-                                    let _ = request.response_tx.send(Err(err));
-                                }
-                            }
-                        }
+                        info!("{} embedding task finished", ctx_id);
                         Ok(())
                     });
 
                 // Store the shared embedding
-                let shared_embedding = Arc::new(SharedEmbedding { text_embedding_tx, image_embedding_tx });
+                let shared_embedding = Arc::new(SharedEmbedding { embedding_tx });
                 *weak_ref = Arc::downgrade(&shared_embedding);
                 Some(shared_embedding)
             }
         };
 
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
-        self.text_embedding_tx = self.shared_embedding.as_ref().map(|se| se.text_embedding_tx.clone());
-        self.image_embedding_tx = self.shared_embedding.as_ref().map(|se| se.image_embedding_tx.clone());
+        self.embedding_tx = self.shared_embedding.as_ref().map(|se| se.embedding_tx.clone());
 
         info!("{} Finished", ctx.id());
         Ok(())
