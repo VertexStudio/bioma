@@ -74,10 +74,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (i, chunk) in chunks.iter().enumerate() {
         let embeddings_id = &embeddings_actors[i];
-        let future = relay_ctx.send::<Embeddings, StoreTextEmbeddings>(
-            StoreTextEmbeddings {
+        let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
                 source: "test".to_string(),
-                texts: chunk.clone(),
+                content: EmbeddingContent::Text(chunk.clone()),
                 metadata: None,
                 tag: Some(format!("test_{}", i)),
             },
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (i, embeddings_id) in embeddings_actors.iter().enumerate() {
         let top_k = embeddings::TopK {
-            query: embeddings::TextQuery::Text("Hello, how are you?".to_string()),
+            query: embeddings::Query::Text("Hello, how are you?".to_string()),
             threshold: -0.5,
             k: 5,
             tag: Some(format!("test_{}", i)),
@@ -116,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, similarities_result) in all_similarities.into_iter().enumerate() {
         let similarities = similarities_result?;
         for similarity in similarities {
-            info!("Actor {}: Similarity: {}   {}", i, similarity.text, similarity.similarity);
+            info!("Actor {}: Similarity: {:?}   {}", i, similarity.text, similarity.similarity);
         }
     }
 

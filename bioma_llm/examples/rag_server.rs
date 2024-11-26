@@ -4,6 +4,7 @@ use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responde
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use embeddings::EmbeddingContent;
 use indexer::IndexImages;
 use retriever::{ContextMetadata, QueryType};
 use serde::{Deserialize, Serialize};
@@ -278,14 +279,12 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         .join("\n");
     info!("Received ask query: {:#?}", query);
 
-    // Create both text and image retrieve contexts using the same query
-    let text_context = RetrieveContext { query: QueryType::Text(query.clone()), limit: 5, threshold: 0.0 };
-    // TODO: llama3.2-vision only supports 1 image per message
-    let image_context = RetrieveContext { query: QueryType::Image(query), limit: 1, threshold: 0.0 };
+    // Only use text query type
+    let retrieve_context = RetrieveContext { query: QueryType::Text(query), limit: 5, threshold: 0.0 };
 
     let retriever_actor_id = data.retriever_actor_id.clone();
 
-    // Try to lock the retriever_relay_ctx without waiting
+    // Try to lock the contexts
     let retriever_relay_ctx = match data.retriever_relay_ctx.try_lock() {
         Ok(ctx) => ctx,
         Err(_) => {
@@ -302,30 +301,20 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         }
     };
 
-    info!("Sending messages to retriever actor");
-    let text_response = retriever_relay_ctx
+    info!("Sending message to retriever actor");
+    let response = retriever_relay_ctx
         .send::<Retriever, RetrieveContext>(
-            text_context,
+            retrieve_context,
             &retriever_actor_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         )
         .await;
 
-    let image_response = retriever_relay_ctx
-        .send::<Retriever, RetrieveContext>(
-            image_context,
-            &retriever_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-        )
-        .await;
-
-    match (text_response, image_response) {
-        (Ok(mut text_context), Ok(image_context)) => {
-            info!("Image context: {:#?}", image_context);
-
-            text_context.context.reverse();
-            info!("Text context fetched: {:#?}", text_context);
-            let context_content = text_context.to_markdown();
+    match response {
+        Ok(mut context) => {
+            context.context.reverse();
+            info!("Context fetched: {:#?}", context);
+            let context_content = context.to_markdown();
 
             // Create system message with text context
             let mut context_message = ChatMessage::system(
@@ -334,19 +323,16 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     + &context_content,
             );
 
-            // Add images to the system message if available
-            if !image_context.context.is_empty() {
-                let mut images = Vec::new();
-                for ctx in image_context.context {
-                    if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
-                        if let Ok(image_data) = std::fs::read(&image_metadata.source) {
-                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                            images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
-                        }
+            // If there's an image in the context, use only the first one
+            if let Some(ctx) =
+                context.context.iter().find(|ctx| matches!(ctx.metadata, Some(ContextMetadata::Image(_))))
+            {
+                if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
+                    if let Ok(image_data) = std::fs::read(&image_metadata.source) {
+                        let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                        context_message.images =
+                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
                     }
-                }
-                if !images.is_empty() {
-                    context_message.images = Some(images);
                 }
             }
 
@@ -376,7 +362,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 }
             }
         }
-        (Err(e), _) | (_, Err(e)) => {
+        Err(e) => {
             error!("Error fetching context: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
         }
@@ -598,7 +584,10 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
 
     // Process texts in chunks
     for chunk in texts.chunks(CHUNK_SIZE) {
-        match embeddings_actor.handle(&mut embeddings_ctx, &GenerateTextEmbeddings { texts: chunk.to_vec() }).await {
+        match embeddings_actor
+            .handle(&mut embeddings_ctx, &GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) })
+            .await
+        {
             Ok(chunk_response) => {
                 all_embeddings.extend(chunk_response.embeddings);
             }
@@ -610,7 +599,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
     }
 
     // Return combined results
-    let generated_embeddings = GeneratedTextEmbeddings { embeddings: all_embeddings };
+    let generated_embeddings = GeneratedEmbeddings { embeddings: all_embeddings };
     HttpResponse::Ok().json(generated_embeddings)
 }
 

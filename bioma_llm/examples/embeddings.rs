@@ -48,10 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send the texts to the embeddings actor
     let embeddings_lentghs = relay_ctx
-        .send::<Embeddings, StoreTextEmbeddings>(
-            StoreTextEmbeddings {
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
                 source: "test".to_string(),
-                texts: texts.clone(),
+                content: EmbeddingContent::Text(texts.clone()),
                 metadata: None,
                 tag: Some("test".to_string()),
             },
@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get similarities
     let top_k = embeddings::TopK {
-        query: embeddings::TextQuery::Text("Hello, how are you?".to_string()),
+        query: embeddings::Query::Text("Hello, how are you?".to_string()),
         threshold: -0.5,
         k: 5,
         tag: Some("test".to_string()),
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
 
     for similarity in similarities {
-        info!("Similarity: {}   {}", similarity.text, similarity.similarity);
+        info!("Similarity: {:?}   {}", similarity.text, similarity.similarity);
     }
 
     embeddings_handle.abort();
