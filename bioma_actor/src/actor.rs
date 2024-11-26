@@ -118,9 +118,9 @@ pub struct FrameReply {
     /// Receiver
     pub rx: RecordId,
     /// Message content
-    pub msg: Value,
+    pub msg: Option<Value>,
     /// Error message
-    pub err: Value,
+    pub err: Option<Value>,
 }
 
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<FrameMessage, SystemActorError>> + Send>>;
@@ -715,16 +715,25 @@ impl<T: Actor> ActorContext<T> {
         let response = match notification.action {
             Action::Create => {
                 let data = &notification.data;
-                debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
+
+                let data_msg = match &data.msg {
+                    Some(msg) => msg.to_string(),
+                    None => "null".to_string(),
+                };
+
+                debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, data_msg);
+
                 Ok(data.clone())
             }
             _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
         }?;
 
-        if response.err != serde_json::Value::Null {
-            return Err(SystemActorError::MessageReply(response.err.to_string().into()));
+        if response.err != None {
+            return Err(SystemActorError::MessageReply(response.err.unwrap().to_string().into()));
         }
-        let response = serde_json::from_value(response.msg)?;
+
+        let response = serde_json::from_value(response.msg.unwrap())?;
+
         Ok(response)
     }
 
@@ -789,8 +798,8 @@ impl<T: Actor> ActorContext<T> {
             name: std::any::type_name::<M::Response>().into(),
             tx: request.rx.clone(),
             rx: request.tx.clone(),
-            msg: msg_value.clone(),
-            err: err_value.clone(),
+            msg: Some(msg_value.clone()),
+            err: Some(err_value.clone()),
         };
 
         debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &msg_value);
