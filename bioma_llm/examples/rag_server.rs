@@ -381,7 +381,11 @@ struct AskQuery {
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     info!("Received ask query: {:#?}", body.query);
-    let retrieve_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
+
+    // Create both text and image retrieve contexts using the same query
+    let text_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
+    let image_context = RetrieveContext { query: QueryType::Image(body.query.clone()), limit: 1, threshold: 0.0 };
+
     let retriever_actor_id = data.retriever_actor_id.clone();
 
     // Try to lock the retriever_relay_ctx without waiting
@@ -402,29 +406,55 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
         }
     };
 
-    info!("Sending message to retriever actor");
-    let response = retriever_relay_ctx
+    info!("Sending messages to retriever actor");
+    let text_response = retriever_relay_ctx
         .send::<Retriever, RetrieveContext>(
-            retrieve_context,
+            text_context,
             &retriever_actor_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         )
         .await;
 
-    match response {
-        Ok(context) => {
-            info!("Context fetched: {:#?}", context);
+    let image_response = retriever_relay_ctx
+        .send::<Retriever, RetrieveContext>(
+            image_context,
+            &retriever_actor_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+        )
+        .await;
+
+    match (text_response, image_response) {
+        (Ok(context), Ok(image_context)) => {
+            info!("Image context: {:#?}", image_context);
+            info!("Text context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
             // Create chat conversation
             let mut conversation = vec![];
 
             // Add context to conversation as a system message
-            let context_message = ChatMessage::system(
+            let mut context_message = ChatMessage::system(
                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
                     .to_string()
                     + &context_content,
             );
+
+            // Add images to the system message if available
+            if !image_context.context.is_empty() {
+                let mut images = Vec::new();
+                for ctx in image_context.context {
+                    if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
+                        if let Ok(image_data) = std::fs::read(&image_metadata.source) {
+                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                            images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                        }
+                    }
+                }
+                if !images.is_empty() {
+                    context_message.images = Some(images);
+                }
+            }
+
             conversation.push(context_message);
 
             // Add user's query to conversation
@@ -453,7 +483,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 }
             }
         }
-        Err(e) => {
+        (Err(e), _) | (_, Err(e)) => {
             error!("Error fetching context: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
         }
@@ -779,7 +809,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/reset", web::post().to(reset))
             .route("/index_files", web::post().to(index_files))
             .route("/retrieve", web::post().to(retrieve))
-            .route("/ask", web::post().to(ask))
+            .route("/ask", web::post().to(self::ask))
             .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
