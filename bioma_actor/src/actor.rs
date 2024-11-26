@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 // Constants for database table names
 const DB_TABLE_ACTOR: &str = "actor";
@@ -361,14 +361,18 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
     ) -> impl Future<Output = Result<(ActorContext<Self>, Self), Self::Error>> {
         async move {
             // Check if the actor already exists
+            info!("Obtener record del actor: {}", &id.record_id());
             let actor_record: Option<ActorRecord> =
                 engine.db().select(&id.record_id()).await.map_err(SystemActorError::from)?;
+            dbg!("Obtener id del actor: {}", &actor_record);
 
             if let Some(actor_record) = actor_record {
                 // Actor exists, apply options
                 match options.exists {
                     SpawnExistsOptions::Reset => {
                         // Reset the actor by deleting its record
+
+                        dbg!("Aqui entran los Reset", &id.record_id());
                         let _: Option<ActorRecord> =
                             engine.db().delete(&id.record_id()).await.map_err(SystemActorError::from)?;
                         // We'll create a new record below
@@ -378,7 +382,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     }
                     SpawnExistsOptions::Restore => {
                         // Restore the actor by loading its state from the database
-                        let actor: Self = serde_json::from_value(actor_record.state).map_err(SystemActorError::from)?;
+                        let actor: Self = serde_json::from_value(actor_record.state.unwrap()).map_err(SystemActorError::from)?;
+
                         // Create and return the actor context with restored state
                         let ctx =
                             ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
@@ -393,7 +398,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
 
             // Create or update actor record in the database
-            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: actor_state };
+            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: Some(actor_state) };
             let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
@@ -447,7 +452,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let record_id = ctx.id().record_id();
 
             // Update actor record in the database
-            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: actor_state };
+            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: Some(actor_state) };
 
             let _record: Option<Record> =
                 ctx.engine().db().update(&record_id).content(content).await.map_err(SystemActorError::from)?;
@@ -462,7 +467,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
 pub struct ActorRecord {
     id: RecordId,
     tag: Cow<'static, str>,
-    state: Value,
+    state: Option<Value>,
 }
 
 /// Context for an actor, that binds an actor to its engine
@@ -758,7 +763,14 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        debug!("[{}] msg-rply params {} {} {} {:?}", &self.id().record_id(), &request.name, &request.id, &request.tx, &message);
+        debug!(
+            "[{}] msg-rply params {} {} {} {:?}",
+            &self.id().record_id(),
+            &request.name,
+            &request.id,
+            &request.tx,
+            &message
+        );
         let (msg_value, err_value) = match message {
             Ok(msg) => (serde_json::to_value(&msg)?, serde_json::Value::Null),
             Err(err) => (serde_json::Value::Null, serde_json::to_value(&err.to_string())?),
