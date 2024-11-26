@@ -181,9 +181,9 @@ pub struct TopKImages {
 pub struct Embeddings {
     #[builder(default = Model::NomicEmbedTextV15)]
     pub text_model: Model,
-    #[builder(default = ImageModel::ClipVitB32)]
+    #[builder(default = ImageModel::ClipVitB32Vision)]
     pub image_model: ImageModel,
-    #[builder(default = Model::ClipVitB32)]
+    #[builder(default = Model::ClipVitB32Text)]
     pub image_caption_model: Model,
     #[serde(skip)]
     text_embedding_tx: Option<mpsc::Sender<TextEmbeddingRequest>>,
@@ -434,19 +434,19 @@ impl Message<TopKImages> for Embeddings {
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum Model {
     NomicEmbedTextV15,
-    ClipVitB32,
+    ClipVitB32Text,
 }
 
 fn get_fastembed_model(model: &Model) -> fastembed::EmbeddingModel {
     match model {
         Model::NomicEmbedTextV15 => fastembed::EmbeddingModel::NomicEmbedTextV15,
-        Model::ClipVitB32 => fastembed::EmbeddingModel::ClipVitB32,
+        Model::ClipVitB32Text => fastembed::EmbeddingModel::ClipVitB32,
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum ImageModel {
-    ClipVitB32,
+    ClipVitB32Vision,
     Resnet50,
     UnicomVitB16,
     UnicomVitB32,
@@ -454,7 +454,7 @@ pub enum ImageModel {
 
 fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingModel {
     match model {
-        ImageModel::ClipVitB32 => fastembed::ImageEmbeddingModel::ClipVitB32,
+        ImageModel::ClipVitB32Vision => fastembed::ImageEmbeddingModel::ClipVitB32,
         ImageModel::Resnet50 => fastembed::ImageEmbeddingModel::Resnet50,
         ImageModel::UnicomVitB16 => fastembed::ImageEmbeddingModel::UnicomVitB16,
         ImageModel::UnicomVitB32 => fastembed::ImageEmbeddingModel::UnicomVitB32,
@@ -563,6 +563,18 @@ impl Embeddings {
                     model_file: image_model_info.model_file.clone(),
                 };
 
+                // Get image caption model info
+                let fastembed_image_caption_model = get_fastembed_model(&self.image_caption_model);
+                let image_caption_model_info =
+                    fastembed::TextEmbedding::get_model_info(&fastembed_image_caption_model)?;
+                let image_caption_model_info = ModelInfo {
+                    name: self.image_caption_model.clone(),
+                    dim: image_caption_model_info.dim,
+                    description: image_caption_model_info.description.clone(),
+                    model_code: image_caption_model_info.model_code.clone(),
+                    model_file: image_caption_model_info.model_file.clone(),
+                };
+
                 // Assert embedding lengths
                 if text_model_info.dim != DEFAULT_TEXT_EMBEDDING_LENGTH {
                     panic!(
@@ -600,6 +612,16 @@ impl Embeddings {
                     .map_err(SystemActorError::from);
                 if let Ok(Some(model)) = &model {
                     info!("Model {:?} stored with id: {}", self.image_model, model.id);
+                }
+
+                // Store image caption model info in database if not already present
+                let model: Result<Option<Record>, _> = db
+                    .create(("model", self.image_caption_model.to_string()))
+                    .content(image_caption_model_info)
+                    .await
+                    .map_err(SystemActorError::from);
+                if let Ok(Some(model)) = &model {
+                    info!("Model {:?} stored with id: {}", self.image_caption_model, model.id);
                 }
 
                 // Create a new shared embedding
@@ -681,7 +703,7 @@ impl Embeddings {
                         Ok(())
                     });
 
-                // Setup text embeddings for images
+                // Setup image caption embeddings
                 let (image_caption_embedding_tx, mut image_caption_embedding_rx) =
                     mpsc::channel::<TextEmbeddingRequest>(100);
                 let caption_model = self.image_caption_model.clone();
