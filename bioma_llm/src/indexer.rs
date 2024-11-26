@@ -1,5 +1,5 @@
 use crate::{
-    embeddings::{Embeddings, EmbeddingsError, Image, StoreImageEmbeddings, StoreTextEmbeddings},
+    embeddings::{Embeddings, EmbeddingsError, StoreEmbeddings},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
@@ -10,6 +10,8 @@ use std::borrow::Cow;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
+
+use crate::embeddings::EmbeddingContent;
 
 const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
@@ -83,7 +85,7 @@ pub struct IndexGlobs {
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexImages {
     /// The images to index
-    pub images: Vec<Image>,
+    pub images: Vec<String>,
 }
 
 fn default_chunk_capacity() -> std::ops::Range<usize> {
@@ -275,10 +277,10 @@ impl Indexer {
 
         for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
             let result = ctx
-                .send::<Embeddings, StoreTextEmbeddings>(
-                    StoreTextEmbeddings {
+                .send::<Embeddings, StoreEmbeddings>(
+                    StoreEmbeddings {
                         source: source.clone(),
-                        texts: chunk_batch.to_vec(),
+                        content: EmbeddingContent::Text(chunk_batch.to_vec()),
                         metadata: Some(metadata_batch.to_vec()),
                         tag: Some(self.tag.clone().to_string()),
                     },
@@ -307,7 +309,6 @@ impl Indexer {
         ctx: &mut ActorContext<Self>,
         source: String,
         uri: String,
-        caption: Option<String>,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
         // Simplified query to only check source
@@ -369,10 +370,10 @@ impl Indexer {
 
         // Create the image embedding request
         let result = ctx
-            .send::<Embeddings, StoreImageEmbeddings>(
-                StoreImageEmbeddings {
+            .send::<Embeddings, StoreEmbeddings>(
+                StoreEmbeddings {
                     source,
-                    images: vec![Image { path: uri, caption }],
+                    content: EmbeddingContent::Image(vec![uri]),
                     metadata: metadata.map(|m| vec![m]),
                     tag: Some(self.tag.clone().to_string()),
                 },
@@ -505,7 +506,7 @@ impl Message<IndexGlobs> for Indexer {
                 if let Some(ext) = ext {
                     if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
                         info!("Found image file: {}", &uri);
-                        match self.index_image(ctx, source.clone(), uri, None, embeddings_id).await? {
+                        match self.index_image(ctx, source.clone(), uri, embeddings_id).await? {
                             IndexResult::Indexed(count) => {
                                 if count > 0 {
                                     indexed += 1;
@@ -658,26 +659,26 @@ impl Message<IndexImages> for Indexer {
 
         for image in &message.images {
             // If path is not absolute, make it relative to local_store_dir
-            let source = if std::path::Path::new(&image.path).is_absolute() {
-                image.path.clone()
+            let source = if std::path::Path::new(&image).is_absolute() {
+                image.clone()
             } else {
-                local_store_dir.join(&image.path).to_string_lossy().into_owned()
+                local_store_dir.join(&image).to_string_lossy().into_owned()
             };
 
             info!("Indexing image: {}", &source);
 
-            match self.index_image(ctx, source.clone(), source, image.caption.clone(), embeddings_id).await? {
+            match self.index_image(ctx, source.clone(), source, embeddings_id).await? {
                 IndexResult::Indexed(count) => {
                     if count > 0 {
                         indexed += 1;
                     }
                 }
                 IndexResult::Failed => {
-                    warn!("Failed to index image: {}", &image.path);
+                    warn!("Failed to index image: {}", &image);
                 }
                 IndexResult::Cached => {
                     cached += 1;
-                    debug!("Image already indexed: {}", &image.path);
+                    debug!("Image already indexed: {}", &image);
                 }
             }
         }

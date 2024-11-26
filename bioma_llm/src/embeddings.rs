@@ -4,7 +4,6 @@ use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
 use std::sync::{Arc, Weak};
 use surrealdb::value::RecordId;
 use tokio::sync::Mutex;
@@ -63,7 +62,7 @@ pub struct StoreEmbeddings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EmbeddingContent {
     Text(Vec<String>),
-    Image(Vec<String>), // Just paths now, no captions
+    Image(Vec<String>),
 }
 
 /// Generate embeddings for texts or images
@@ -77,18 +76,6 @@ pub struct GenerateEmbeddings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneratedEmbeddings {
     pub embeddings: Vec<Vec<f32>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Image {
-    pub path: String,
-    pub caption: Option<String>,
-}
-
-impl AsRef<Path> for Image {
-    fn as_ref(&self) -> &Path {
-        Path::new(&self.path)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -485,10 +472,8 @@ impl Embeddings {
                                     }
                                 }
                                 EmbeddingContent::Image(paths) => {
-                                    let images: Vec<Image> =
-                                        paths.iter().map(|path| Image { path: path.clone(), caption: None }).collect();
-                                    let image_count = images.len();
-                                    match image_embedding.embed(images, None) {
+                                    let image_count = paths.len();
+                                    match image_embedding.embed(paths, None) {
                                         Ok(embeddings) => {
                                             info!(
                                                 "Generated {} image embeddings in {:?}",

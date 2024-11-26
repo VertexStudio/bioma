@@ -65,7 +65,7 @@ fn default_retriever_threshold() -> f32 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
-    pub text: String,
+    pub text: Option<String>,
     #[serde(flatten)]
     pub metadata: Option<ContextMetadata>,
 }
@@ -108,7 +108,9 @@ impl RetrievedContext {
             }
 
             // Add the text content
-            context_content.push_str(&context.text);
+            if let Some(text) = &context.text {
+                context_content.push_str(text);
+            }
             context_content.push_str("\n\n");
 
             // Add a separator between chunks, except for the last one
@@ -138,9 +140,9 @@ impl Message<RetrieveContext> for Retriever {
 
         match &message.query {
             QueryType::Text(text) => {
-                info!("Fetching context for text query: {}", text);
+                info!("Fetching context for query: {}", text);
                 let embeddings_req = embeddings::TopK {
-                    query: embeddings::TextQuery::Text(text.clone()),
+                    query: embeddings::Query::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
                     tag: Some(self.tag.clone().to_string()),
@@ -164,29 +166,31 @@ impl Message<RetrieveContext> for Retriever {
                 };
                 info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
 
-                // Rank the embeddings
-                info!("Ranking similarity texts");
-                let start = std::time::Instant::now();
-                let rerank_req =
-                    RankTexts { query: text.clone(), texts: similarities.iter().map(|s| s.text.clone()).collect() };
-                let ranked_texts = match ctx
-                    .send::<Rerank, RankTexts>(
-                        rerank_req,
-                        rerank_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                    )
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(e) => {
-                        error!("Failed to rank texts: {}", e);
-                        return Err(RetrieverError::ComputingRerank(e.to_string()));
-                    }
-                };
-                info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
+                // Only rerank if we have text content
+                let context = if similarities.iter().any(|s| s.text.is_some()) {
+                    // Rank the embeddings only for text content
+                    info!("Ranking similarity texts");
+                    let start = std::time::Instant::now();
+                    let texts: Vec<String> = similarities.iter().filter_map(|s| s.text.clone()).collect();
 
-                // Get the context from the ranked texts
-                let context = if ranked_texts.texts.len() > 0 {
+                    let rerank_req = RankTexts { query: text.clone(), texts };
+
+                    let ranked_texts = match ctx
+                        .send::<Rerank, RankTexts>(
+                            rerank_req,
+                            rerank_id,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        )
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(e) => {
+                            error!("Failed to rank texts: {}", e);
+                            return Err(RetrieverError::ComputingRerank(e.to_string()));
+                        }
+                    };
+                    info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
+
                     ranked_texts
                         .texts
                         .into_iter()
@@ -200,51 +204,20 @@ impl Message<RetrieveContext> for Retriever {
                         .take(message.limit)
                         .collect()
                 } else {
-                    vec![Context { text: "No context found".to_string(), metadata: None }]
+                    // For non-text content (images, etc.), use similarities directly
+                    similarities
+                        .into_iter()
+                        .map(|s| Context {
+                            text: s.text,
+                            metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
+                        })
+                        .take(message.limit)
+                        .collect()
                 };
 
                 Ok(RetrievedContext { context })
             }
-            QueryType::Image(text) => {
-                info!("Fetching context for image query: {}", text);
-                let embeddings_req = embeddings::TopKImages {
-                    query: embeddings::ImageQuery::Text(text.clone()),
-                    k: message.limit,
-                    threshold: message.threshold,
-                    tag: Some(self.tag.clone().to_string()),
-                };
-
-                info!("Searching for image similarities");
-                let start = std::time::Instant::now();
-                let similarities = match ctx
-                    .send::<Embeddings, embeddings::TopKImages>(
-                        embeddings_req,
-                        embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                    )
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(e) => {
-                        error!("Failed to get similarities: {}", e);
-                        return Err(RetrieverError::ComputingSimilarity(e.to_string()));
-                    }
-                };
-                info!("Image similarities: {} in {:?}", similarities.len(), start.elapsed());
-
-                // For images, just use the similarities directly
-                let context = similarities
-                    .into_iter()
-                    .map(|s| Context {
-                        text: s.caption.unwrap_or_default(),
-                        metadata: s.metadata.and_then(|m| {
-                            serde_json::from_value(m).ok().map(|metadata| ContextMetadata::Image(metadata))
-                        }),
-                    })
-                    .collect();
-
-                Ok(RetrievedContext { context })
-            }
+            _ => unimplemented!("Only Text queries are currently supported"),
         }
     }
 }
