@@ -108,6 +108,11 @@ impl Message<RetrieveContext> for Retriever {
         };
 
         info!("Fetching context for query: {}", message.query);
+        debug!("Query: {}", message.query);
+        debug!("Limit: {}", message.limit);
+        debug!("Threshold: {}", message.threshold);
+        debug!("Tag: {}", self.tag);
+        debug!("Embeddings ID: {}", embeddings_id);
         let embeddings_req = embeddings::TopK {
             query: embeddings::Query::Text(message.query.clone()),
             k: message.limit * 2,
