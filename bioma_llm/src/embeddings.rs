@@ -57,37 +57,36 @@ pub struct ImageEmbeddingRequest {
 
 impl ActorError for EmbeddingsError {}
 
-/// Generate embeddings for a set of texts
+/// Store embeddings for texts or images
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoreTextEmbeddings {
+pub struct StoreEmbeddings {
     /// Source of the embeddings
     pub source: String,
-    /// The texts to embed
-    pub texts: Vec<String>,
+    /// The content to embed (either texts or images)
+    pub content: EmbeddingContent,
     /// Metadata to store with the embeddings
     pub metadata: Option<Vec<Value>>,
     /// The tag to store the embeddings with
     pub tag: Option<String>,
 }
 
-/// Store embeddings for a set of images
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoreImageEmbeddings {
-    /// Source of the embeddings
-    pub source: String,
-    /// The images to embed
-    pub images: Vec<Image>,
-    /// Metadata to store with the embeddings
-    pub metadata: Option<Vec<Value>>,
-    /// The tag to store the embeddings with
-    pub tag: Option<String>,
+pub enum EmbeddingContent {
+    Text(Vec<String>),
+    Image(Vec<String>), // Just paths now, no captions
 }
 
-/// Generate embeddings for a set of images
+/// Generate embeddings for texts or images
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateImageEmbeddings {
-    /// The images to embed
-    pub images: Vec<Image>,
+pub struct GenerateEmbeddings {
+    /// The content to embed (either texts or images)
+    pub content: EmbeddingContent,
+}
+
+/// The generated embeddings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedEmbeddings {
+    pub embeddings: Vec<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,28 +106,9 @@ pub struct StoredEmbeddings {
     pub lengths: Vec<usize>,
 }
 
-/// Generate embeddings for a set of texts
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateTextEmbeddings {
-    /// The texts to embed
-    pub texts: Vec<String>,
-}
-
-/// The generated embeddings
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeneratedTextEmbeddings {
-    pub embeddings: Vec<Vec<f32>>,
-}
-
 /// The query to search for
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TextQuery {
-    TextEmbedding(Vec<f32>),
-    Text(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ImageQuery {
+pub enum Query {
     ImageEmbedding(Vec<f32>),
     TextEmbedding(Vec<f32>),
     Text(String),
@@ -138,7 +118,7 @@ pub enum ImageQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopK {
     /// The query to search for
-    pub query: TextQuery,
+    pub query: Query,
     /// The tag to filter the embeddings by
     pub tag: Option<String>,
     /// Number of similar embeddings to return
@@ -150,29 +130,9 @@ pub struct TopK {
 /// The similarity between a query and an embedding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Similarity {
-    pub text: String,
+    pub text: Option<String>,
     pub similarity: f32,
     pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageSimilarity {
-    pub caption: Option<String>,
-    pub similarity: f32,
-    pub metadata: Option<Value>,
-}
-
-/// Get the top k similar image embeddings to a query, filtered by tag
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TopKImages {
-    /// The query to search for
-    pub query: ImageQuery,
-    /// The tag to filter the embeddings by
-    pub tag: Option<String>,
-    /// Number of similar embeddings to return
-    pub k: usize,
-    /// The threshold for the similarity score
-    pub threshold: f32,
 }
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
@@ -228,8 +188,9 @@ impl Message<TopK> for Embeddings {
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
         let query_embedding = match &message.query {
-            TextQuery::TextEmbedding(embedding) => embedding.clone(),
-            TextQuery::Text(text) => {
+            Query::TextEmbedding(embedding) => embedding.clone(),
+            Query::ImageEmbedding(embedding) => embedding.clone(),
+            Query::Text(text) => {
                 let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::TextEmbeddingNotInitialized);
                 };
@@ -255,173 +216,100 @@ impl Message<TopK> for Embeddings {
     }
 }
 
-impl Message<StoreTextEmbeddings> for Embeddings {
+impl Message<StoreEmbeddings> for Embeddings {
     type Response = StoredEmbeddings;
 
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
-        message: &StoreTextEmbeddings,
+        message: &StoreEmbeddings,
     ) -> Result<StoredEmbeddings, EmbeddingsError> {
-        let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-        };
-
-        let (tx, rx) = oneshot::channel();
-        text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: message.texts.clone() }).await?;
-        let embeddings = rx.await??;
-
-        let db = ctx.engine().db();
-        let emb_query = include_str!("../sql/embeddings.surql");
-
-        // Check if metadata is same length as texts
-        if let Some(metadata) = &message.metadata {
-            if metadata.len() != message.texts.len() {
-                error!("Metadata length does not match texts length");
-            }
-        }
-
-        // Store embeddings
-        for (i, text) in message.texts.iter().enumerate() {
-            let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
-            let embedding = embeddings[i].clone();
-            let model_id = RecordId::from_table_key("model", self.text_model.to_string());
-            db.query(emb_query)
-                .bind(("tag", message.tag.clone()))
-                .bind(("text", text.to_string()))
-                .bind(("embedding", embedding))
-                .bind(("metadata", metadata))
-                .bind(("model_id", model_id))
-                .bind(("source", message.source.clone()))
-                .await
-                .map_err(SystemActorError::from)?;
-        }
-
-        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
-    }
-}
-
-impl Message<GenerateTextEmbeddings> for Embeddings {
-    type Response = GeneratedTextEmbeddings;
-
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        message: &GenerateTextEmbeddings,
-    ) -> Result<GeneratedTextEmbeddings, EmbeddingsError> {
-        let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-        };
-
-        let (tx, rx) = oneshot::channel();
-        text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: message.texts.clone() }).await?;
-        let embeddings = rx.await??;
-
-        Ok(GeneratedTextEmbeddings { embeddings })
-    }
-}
-
-impl Message<GenerateImageEmbeddings> for Embeddings {
-    type Response = StoredEmbeddings;
-
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        message: &GenerateImageEmbeddings,
-    ) -> Result<StoredEmbeddings, EmbeddingsError> {
-        let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-        };
-
-        let (tx, rx) = oneshot::channel();
-        image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images: message.images.clone() }).await?;
-        let embeddings = rx.await??;
-
-        // Since this is just generate (not store), we just return the lengths
-        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
-    }
-}
-
-impl Message<StoreImageEmbeddings> for Embeddings {
-    type Response = StoredEmbeddings;
-
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &StoreImageEmbeddings,
-    ) -> Result<StoredEmbeddings, EmbeddingsError> {
-        let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-        };
-
-        let (tx, rx) = oneshot::channel();
-        image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images: message.images.clone() }).await?;
-        let embeddings = rx.await??;
-
-        let db = ctx.engine().db();
-        let emb_query = include_str!("../sql/embeddings.surql");
-
-        // Check if metadata is same length as image paths
-        if let Some(metadata) = &message.metadata {
-            if metadata.len() != message.images.len() {
-                error!("Metadata length does not match images length");
-            }
-        }
-
-        // Store embeddings
-        for (i, image) in message.images.iter().enumerate() {
-            let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
-            let embedding = embeddings[i].clone();
-            let model_id = RecordId::from_table_key("model", self.image_model.to_string());
-            db.query(emb_query)
-                .bind(("tag", message.tag.clone()))
-                .bind(("caption", image.caption.clone()))
-                .bind(("embedding", embedding))
-                .bind(("metadata", metadata))
-                .bind(("model_id", model_id))
-                .bind(("source", message.source.clone()))
-                .await
-                .map_err(SystemActorError::from)?;
-        }
-
-        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
-    }
-}
-
-impl Message<TopKImages> for Embeddings {
-    type Response = Vec<ImageSimilarity>;
-
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &TopKImages,
-    ) -> Result<Vec<ImageSimilarity>, EmbeddingsError> {
-        let query_embedding = match &message.query {
-            ImageQuery::ImageEmbedding(embedding) => embedding.clone(),
-            ImageQuery::TextEmbedding(embedding) => embedding.clone(),
-            ImageQuery::Text(text) => {
+        let embeddings = match &message.content {
+            EmbeddingContent::Text(texts) => {
                 let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
+                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
                 };
                 let (tx, rx) = oneshot::channel();
-                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: vec![text.to_string()] }).await?;
-                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: texts.clone() }).await?;
+                rx.await??
+            }
+            EmbeddingContent::Image(paths) => {
+                let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
+                };
+                let images = paths.iter().map(|path| Image { path: path.clone(), caption: None }).collect();
+                let (tx, rx) = oneshot::channel();
+                image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images }).await?;
+                rx.await??
             }
         };
 
-        let db = ctx.engine().db();
-        let query_sql = include_str!("../sql/similarities.surql");
+        // Check if metadata length matches content length
+        if let Some(metadata) = &message.metadata {
+            let content_len = match &message.content {
+                EmbeddingContent::Text(texts) => texts.len(),
+                EmbeddingContent::Image(paths) => paths.len(),
+            };
+            if metadata.len() != content_len {
+                error!("Metadata length does not match content length");
+            }
+        }
 
-        let mut results = db
-            .query(query_sql)
-            .bind(("query", query_embedding))
-            .bind(("top_k", message.k.clone()))
-            .bind(("tag", message.tag.clone()))
-            .bind(("threshold", message.threshold))
-            .await
-            .map_err(SystemActorError::from)?;
-        let results: Result<Vec<ImageSimilarity>, _> = results.take(0).map_err(SystemActorError::from);
-        results.map_err(EmbeddingsError::from)
+        let db = ctx.engine().db();
+        let emb_query = include_str!("../sql/embeddings.surql");
+
+        // Store embeddings
+        for (i, embedding) in embeddings.iter().enumerate() {
+            let embedding = embedding.clone();
+            let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
+            let model_id = match &message.content {
+                EmbeddingContent::Text(_) => RecordId::from_table_key("model", self.text_model.to_string()),
+                EmbeddingContent::Image(_) => RecordId::from_table_key("model", self.image_model.to_string()),
+            };
+
+            db.query(emb_query)
+                .bind(("tag", message.tag.clone()))
+                .bind(("embedding", embedding))
+                .bind(("metadata", metadata))
+                .bind(("model_id", model_id))
+                .bind(("source", message.source.clone()))
+                .await
+                .map_err(SystemActorError::from)?;
+        }
+
+        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+    }
+}
+
+impl Message<GenerateEmbeddings> for Embeddings {
+    type Response = GeneratedEmbeddings;
+
+    async fn handle(
+        &mut self,
+        _ctx: &mut ActorContext<Self>,
+        message: &GenerateEmbeddings,
+    ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
+        let embeddings = match &message.content {
+            EmbeddingContent::Text(texts) => {
+                let Some(text_embedding_tx) = self.text_embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+                };
+                let (tx, rx) = oneshot::channel();
+                text_embedding_tx.send(TextEmbeddingRequest { response_tx: tx, texts: texts.clone() }).await?;
+                rx.await??
+            }
+            EmbeddingContent::Image(paths) => {
+                let Some(image_embedding_tx) = self.image_embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::ImageEmbeddingNotInitialized);
+                };
+                let images = paths.iter().map(|path| Image { path: path.clone(), caption: None }).collect();
+                let (tx, rx) = oneshot::channel();
+                image_embedding_tx.send(ImageEmbeddingRequest { response_tx: tx, images }).await?;
+                rx.await??
+            }
+        };
+
+        Ok(GeneratedEmbeddings { embeddings })
     }
 }
 
@@ -485,32 +373,17 @@ impl Actor for Embeddings {
         // Start the message stream
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<StoreTextEmbeddings>() {
+            if let Some(input) = frame.is::<StoreEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
                 }
-            } else if let Some(input) = frame.is::<GenerateTextEmbeddings>() {
+            } else if let Some(input) = frame.is::<GenerateEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<TopK>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<TopKImages>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<GenerateImageEmbeddings>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<StoreImageEmbeddings>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
