@@ -4,7 +4,7 @@ use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 const DEFAULT_RETRIEVER_TAG: &str = "indexer_content";
 const DEFAULT_RETRIEVER_LIMIT: usize = 10;
