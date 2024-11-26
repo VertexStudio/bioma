@@ -142,7 +142,7 @@ pub trait Message<MT>: Actor
 where
     MT: MessageType,
 {
-    type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
+    type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync + Debug;
 
     /// Handles a message of type `MT` for this actor.
     ///
@@ -758,7 +758,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        debug!("[{}] msg-rply original params {} {} {} {:?}", &self.id().record_id(), &request.name, &request.id, &request.tx, &message);
+        debug!("[{}] msg-rply params {} {} {} {:?}", &self.id().record_id(), &request.name, &request.id, &request.tx, &message);
         let (msg_value, err_value) = match message {
             Ok(msg) => (serde_json::to_value(&msg)?, serde_json::Value::Null),
             Err(err) => (serde_json::Value::Null, serde_json::to_value(&err.to_string())?),
