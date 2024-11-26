@@ -133,14 +133,7 @@ curl -X POST http://localhost:8080/index_files -H "Content-Type: application/jso
 ### Index some images:
 
 ```bash
-curl -X POST http://localhost:8080/index_images -H "Content-Type: application/json" -d '{
-  "images": [
-    {
-      "path": "/path/to/image.jpg",
-      "caption": "A beautiful image"
-    }
-  ]
-}'
+curl -X POST http://localhost:8080/index_images -H "Content-Type: application/json" -d '{"images": [{"path": "/path/to/image.jpg", "caption": "A beautiful image"}]}'
 ```
 
 ### Retrieve context:
