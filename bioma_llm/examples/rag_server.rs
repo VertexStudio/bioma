@@ -22,7 +22,7 @@ use zip::ZipArchive;
 /// curl -X POST http://localhost:8080/reset
 ///
 /// Index some files:
-/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
+/// curl -X POST http://localhost:8080/index_files -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
 ///
 /// Retrieve context:
 /// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'

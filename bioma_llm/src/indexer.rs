@@ -15,6 +15,7 @@ const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
 
 #[derive(thiserror::Error, Debug)]
 pub enum IndexerError {
@@ -167,6 +168,7 @@ pub struct ImageDimensions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageMetadata {
     pub source: String,
+    pub uri: String,
     pub format: String,
     pub dimensions: ImageDimensions,
     pub size_bytes: u64,
@@ -304,6 +306,7 @@ impl Indexer {
         &self,
         ctx: &mut ActorContext<Self>,
         source: String,
+        uri: String,
         caption: Option<String>,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
@@ -311,9 +314,10 @@ impl Indexer {
         let source_embeddings = ctx
             .engine()
             .db()
-            .query("SELECT source, ->source_image_embeddings.out AS embeddings FROM source:{source:$source, tag:$tag}")
+            .query("SELECT source, ->source_image_embeddings.out AS embeddings FROM source:{source:$source, tag:$tag} WHERE ->source_image_embeddings.out.metadata.uri CONTAINS $uri")
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
+            .bind(("uri", uri.clone()))
             .await;
 
         let Ok(mut source_embeddings) = source_embeddings else {
@@ -346,7 +350,8 @@ impl Indexer {
             let file_metadata = std::fs::metadata(&source_clone).ok()?;
 
             let image_metadata = ImageMetadata {
-                source: source_clone,
+                source: source_clone.clone(),
+                uri: uri.clone(),
                 format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                 dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                 size_bytes: file_metadata.len(),
@@ -445,6 +450,7 @@ impl Message<IndexGlobs> for Indexer {
         let total_index_globs_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
+
         for glob in message.globs.iter() {
             let local_store_dir = ctx.engine().local_store_dir();
 
@@ -494,6 +500,24 @@ impl Message<IndexGlobs> for Indexer {
                 // Use the full path as the URI
                 let uri = pathbuf.to_string_lossy().to_string();
 
+                // Check if it's an image file
+                if let Some(ext) = ext {
+                    if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
+                        info!("Found image file: {}", &uri);
+                        match self.index_image(ctx, source.clone(), uri, None, embeddings_id).await? {
+                            IndexResult::Indexed(count) => {
+                                if count > 0 {
+                                    indexed += 1;
+                                }
+                            }
+                            IndexResult::Cached => cached += 1,
+                            IndexResult::Failed => continue,
+                        }
+                        continue;
+                    }
+                }
+
+                // Handle other file types as before
                 let text_type = match ext {
                     Some("md") => TextType::Markdown,
                     Some("rs") => TextType::Code(CodeLanguage::Rust),
@@ -558,6 +582,7 @@ impl Message<IndexGlobs> for Indexer {
                 }
             }
         }
+
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
         Ok(Indexed { indexed, cached })
     }
@@ -640,7 +665,7 @@ impl Message<IndexImages> for Indexer {
 
             info!("Indexing image: {}", &source);
 
-            match self.index_image(ctx, source, image.caption.clone(), embeddings_id).await? {
+            match self.index_image(ctx, source.clone(), source, image.caption.clone(), embeddings_id).await? {
                 IndexResult::Indexed(count) => {
                     if count > 0 {
                         indexed += 1;
