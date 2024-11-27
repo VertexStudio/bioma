@@ -114,11 +114,11 @@ pub struct Similarity {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = "clip_vit_b32".to_string())]
+    #[builder(default = "nomic_embed_text_v15".to_string())]
     pub table_name_prefix: String,
-    #[builder(default = Model::ClipVitB32Text)]
+    #[builder(default = Model::NomicEmbedTextV15)]
     pub text_model: Model,
-    #[builder(default = ImageModel::ClipVitB32Vision)]
+    #[builder(default = ImageModel::NomicEmbedVisionV15)]
     pub image_model: ImageModel,
     #[serde(skip)]
     embedding_tx: Option<mpsc::Sender<EmbeddingRequest>>,
@@ -287,6 +287,7 @@ pub enum ImageModel {
     Resnet50,
     UnicomVitB16,
     UnicomVitB32,
+    NomicEmbedVisionV15,
 }
 
 fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingModel {
@@ -295,6 +296,7 @@ fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingMod
         ImageModel::Resnet50 => fastembed::ImageEmbeddingModel::Resnet50,
         ImageModel::UnicomVitB16 => fastembed::ImageEmbeddingModel::UnicomVitB16,
         ImageModel::UnicomVitB32 => fastembed::ImageEmbeddingModel::UnicomVitB32,
+        ImageModel::NomicEmbedVisionV15 => fastembed::ImageEmbeddingModel::NomicEmbedVisionV15,
     }
 }
 

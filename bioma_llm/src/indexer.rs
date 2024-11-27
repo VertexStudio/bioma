@@ -177,17 +177,19 @@ pub struct ImageMetadata {
     pub created: u64,
 }
 
+#[derive(Debug, Clone)]
+pub enum Content {
+    Text { content: String, text_type: TextType, chunk_config: (std::ops::Range<usize>, usize, usize) },
+    Image { path: String },
+}
+
 impl Indexer {
-    async fn index_text(
+    async fn index_content(
         &self,
         ctx: &mut ActorContext<Self>,
         source: String,
         uri: String,
-        content: String,
-        text_type: TextType,
-        chunk_capacity: std::ops::Range<usize>,
-        chunk_overlap: usize,
-        chunk_batch_size: usize,
+        content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
         let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix);
@@ -195,7 +197,7 @@ impl Indexer {
             "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
             edge_name, edge_name
         );
-        // TODO: This query is twice slow compared to the previous one. Guess it's because we're ->source_text_embeddings.out.metadata.uri twice. Not sure.
+
         let source_embeddings = ctx
             .engine()
             .db()
@@ -212,194 +214,140 @@ impl Indexer {
 
         let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
         if !source_embeddings.is_empty() {
-            debug!("Source already indexed with URI: {} {}", source, uri);
+            debug!("Content already indexed with URI: {} {}", source, uri);
             return Ok(IndexResult::Cached);
         }
 
-        // Map types if needed
-        let (text_type, content) = match text_type {
-            // Convert html to markdown
-            TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
-            // PDF is already markdown
-            TextType::Pdf => (TextType::Markdown, content),
-            _ => (text_type, content),
-        };
+        match content {
+            Content::Image { path } => {
+                let source_clone = source.clone();
+                let path_clone = path.clone();
+                let metadata = tokio::task::spawn_blocking(move || {
+                    let file = std::fs::File::open(&path).ok()?;
+                    let reader = std::io::BufReader::new(file);
 
-        let chunks = match &text_type {
-            TextType::Text => {
-                let splitter = TextSplitter::new(
-                    ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
-                );
-                splitter.chunks(&content).collect::<Vec<&str>>()
-            }
-            TextType::Markdown => {
-                let splitter = MarkdownSplitter::new(
-                    ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
-                );
-                splitter.chunks(&content).collect::<Vec<&str>>()
-            }
-            TextType::Code(language) => {
-                let language = match language {
-                    CodeLanguage::Rust => tree_sitter_rust::LANGUAGE,
-                    CodeLanguage::Python => tree_sitter_python::LANGUAGE,
-                    CodeLanguage::Cue => tree_sitter_cue::LANGUAGE,
-                    CodeLanguage::Cpp => tree_sitter_cpp::LANGUAGE,
-                    CodeLanguage::Html => panic!("Should have been converted to markdown"),
-                };
-                let splitter = CodeSplitter::new(
-                    language,
-                    ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
-                )
-                .expect("Invalid tree-sitter language");
-                splitter.chunks(&content).collect::<Vec<&str>>()
-            }
-            _ => panic!("Invalid text type"),
-        };
+                    let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
+                    let format_type = format.format();
+                    let dimensions = match format_type {
+                        Some(_) => format.into_dimensions().ok()?,
+                        None => return None,
+                    };
 
-        let start_time = std::time::Instant::now();
+                    let file_metadata = std::fs::metadata(&path).ok()?;
 
-        let chunks = chunks.iter().map(|c| c.to_string()).collect::<Vec<String>>();
-        let metadata = chunks
-            .iter()
-            .enumerate()
-            .map(|(i, _)| ChunkMetadata {
-                source: source.clone(),
-                text_type: text_type.clone(),
-                chunk_number: i,
-                uri: uri.clone(),
-            })
-            .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
-            .collect::<Vec<Value>>();
-        let chunks_time = start_time.elapsed();
-        debug!("Generated {} chunks in {:?}", chunks.len(), chunks_time);
-
-        let start_time = std::time::Instant::now();
-
-        let chunk_batches = chunks.chunks(chunk_batch_size);
-        let metadata_batches = metadata.chunks(chunk_batch_size);
-        let mut embeddings_count = 0;
-
-        for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
-            let result = ctx
-                .send::<Embeddings, StoreEmbeddings>(
-                    StoreEmbeddings {
+                    let image_metadata = ImageMetadata {
                         source: source.clone(),
-                        content: EmbeddingContent::Text(chunk_batch.to_vec()),
-                        metadata: Some(metadata_batch.to_vec()),
-                        tag: Some(self.tag.clone().to_string()),
-                    },
-                    embeddings_id,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                )
-                .await;
-            match result {
-                Ok(_result) => {
-                    embeddings_count += 1;
-                }
-                Err(e) => {
-                    error!("Failed to generate embeddings: {} {}", e, source);
+                        uri: uri.clone(),
+                        format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
+                        dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+                        size_bytes: file_metadata.len(),
+                        modified: file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
+                        created: file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
+                    };
+
+                    Some(serde_json::to_value(image_metadata).ok()?)
+                })
+                .await
+                .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+
+                let result = ctx
+                    .send::<Embeddings, StoreEmbeddings>(
+                        StoreEmbeddings {
+                            source: source_clone,
+                            content: EmbeddingContent::Image(vec![path_clone]),
+                            metadata: metadata.map(|m| vec![m]),
+                            tag: Some(self.tag.clone().to_string()),
+                        },
+                        embeddings_id,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                    )
+                    .await;
+
+                match result {
+                    Ok(_) => Ok(IndexResult::Indexed(1)),
+                    Err(e) => {
+                        error!("Failed to generate image embedding: {}", e);
+                        Ok(IndexResult::Failed)
+                    }
                 }
             }
-        }
+            Content::Text { content, text_type, chunk_config: (chunk_capacity, chunk_overlap, chunk_batch_size) } => {
+                // Map types if needed
+                let (text_type, content) = match text_type {
+                    TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
+                    TextType::Pdf => (TextType::Markdown, content),
+                    _ => (text_type, content),
+                };
 
-        let embeddings_time = start_time.elapsed();
-        debug!("Generated embeddings in {:?}", embeddings_time);
+                let chunks = match &text_type {
+                    TextType::Text => {
+                        let splitter = TextSplitter::new(
+                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                        );
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Markdown => {
+                        let splitter = MarkdownSplitter::new(
+                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                        );
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    TextType::Code(language) => {
+                        let language = match language {
+                            CodeLanguage::Rust => tree_sitter_rust::LANGUAGE,
+                            CodeLanguage::Python => tree_sitter_python::LANGUAGE,
+                            CodeLanguage::Cue => tree_sitter_cue::LANGUAGE,
+                            CodeLanguage::Cpp => tree_sitter_cpp::LANGUAGE,
+                            CodeLanguage::Html => panic!("Should have been converted to markdown"),
+                        };
+                        let splitter = CodeSplitter::new(
+                            language,
+                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                        )
+                        .expect("Invalid tree-sitter language");
+                        splitter.chunks(&content).collect::<Vec<&str>>()
+                    }
+                    _ => panic!("Invalid text type"),
+                };
 
-        Ok(IndexResult::Indexed(embeddings_count))
-    }
+                let chunks = chunks.iter().map(|c| c.to_string()).collect::<Vec<String>>();
+                let metadata = chunks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| ChunkMetadata {
+                        source: source.clone(),
+                        text_type: text_type.clone(),
+                        chunk_number: i,
+                        uri: uri.clone(),
+                    })
+                    .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
+                    .collect::<Vec<Value>>();
 
-    async fn index_image(
-        &self,
-        ctx: &mut ActorContext<Self>,
-        source: String,
-        uri: String,
-        embeddings_id: &ActorId,
-    ) -> Result<IndexResult, IndexerError> {
-        let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix);
-        let query = format!(
-            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
-            edge_name, edge_name
-        );
+                let chunk_batches = chunks.chunks(chunk_batch_size);
+                let metadata_batches = metadata.chunks(chunk_batch_size);
+                let mut embeddings_count = 0;
 
-        let source_embeddings = ctx
-            .engine()
-            .db()
-            .query(&query)
-            .bind(("source", source.clone()))
-            .bind(("tag", self.tag.clone()))
-            .bind(("uri", uri.clone()))
-            .await;
+                for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
+                    let result = ctx
+                        .send::<Embeddings, StoreEmbeddings>(
+                            StoreEmbeddings {
+                                source: source.clone(),
+                                content: EmbeddingContent::Text(chunk_batch.to_vec()),
+                                metadata: Some(metadata_batch.to_vec()),
+                                tag: Some(self.tag.clone().to_string()),
+                            },
+                            embeddings_id,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        )
+                        .await;
 
-        let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {}", source);
-            return Ok(IndexResult::Failed);
-        };
+                    match result {
+                        Ok(_) => embeddings_count += 1,
+                        Err(e) => error!("Failed to generate embeddings: {} {}", e, source),
+                    }
+                }
 
-        let source_embeddings: Vec<SourceImageEmbeddings> =
-            source_embeddings.take(0).map_err(SystemActorError::from)?;
-        if !source_embeddings.is_empty() {
-            debug!("Image already indexed: {}", source);
-            return Ok(IndexResult::Cached);
-        }
-
-        // Extract image metadata
-        let source_clone = source.clone();
-        let uri_clone = uri.clone();
-        let metadata = tokio::task::spawn_blocking(move || {
-            let file = std::fs::File::open(&uri_clone).ok()?;
-            let reader = std::io::BufReader::new(file);
-
-            // Get image format and dimensions
-            let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
-            let format_type = format.format();
-            let dimensions = match format_type {
-                Some(_) => format.into_dimensions().ok()?,
-                None => return None,
-            };
-
-            // Get file metadata
-            let file_metadata = std::fs::metadata(&uri_clone).ok()?;
-
-            let image_metadata = ImageMetadata {
-                source: source_clone.clone(),
-                uri: uri_clone.clone(),
-                format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
-                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
-                size_bytes: file_metadata.len(),
-                modified: file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-                created: file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-            };
-
-            Some(serde_json::to_value(image_metadata).ok()?)
-        })
-        .await
-        .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
-
-        let start_time = std::time::Instant::now();
-
-        // Create the image embedding request
-        let result = ctx
-            .send::<Embeddings, StoreEmbeddings>(
-                StoreEmbeddings {
-                    source,
-                    content: EmbeddingContent::Image(vec![uri]),
-                    metadata: metadata.map(|m| vec![m]),
-                    tag: Some(self.tag.clone().to_string()),
-                },
-                embeddings_id,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-            )
-            .await;
-
-        match result {
-            Ok(_) => {
-                let embeddings_time = start_time.elapsed();
-                debug!("Generated image embedding in {:?}", embeddings_time);
-                Ok(IndexResult::Indexed(1))
-            }
-            Err(e) => {
-                error!("Failed to generate image embedding: {}", e);
-                Ok(IndexResult::Failed)
+                Ok(IndexResult::Indexed(embeddings_count))
             }
         }
     }
@@ -419,15 +367,15 @@ impl Message<IndexTexts> for Indexer {
 
         for SourcedText { source, text, text_type } in message.texts.iter() {
             match self
-                .index_text(
+                .index_content(
                     ctx,
                     source.clone(),
                     String::new(),
-                    text.clone(),
-                    text_type.clone(),
-                    message.chunk_capacity.clone(),
-                    message.chunk_overlap,
-                    message.chunk_batch_size,
+                    Content::Text {
+                        content: text.clone(),
+                        text_type: text_type.clone(),
+                        chunk_config: (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size),
+                    },
                     embeddings_id,
                 )
                 .await?
@@ -464,8 +412,6 @@ impl Message<IndexGlobs> for Indexer {
 
         for glob in message.globs.iter() {
             let local_store_dir = ctx.engine().local_store_dir();
-
-            // If glob is not absolute, make it relative to local_store_dir
             let full_glob = if std::path::Path::new(glob).is_absolute() {
                 glob.clone()
             } else {
@@ -473,16 +419,13 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             info!("Indexing glob: {}", &full_glob);
-            let task_glob = full_glob.clone();
-
-            // Use the modified glob path in the spawn_blocking task
+            let full_glob_clone = full_glob.clone();
             let paths = tokio::task::spawn_blocking(move || {
                 let mut paths = Vec::new();
-                for entry in glob::glob(&task_glob).unwrap().flatten() {
+                for entry in glob::glob(&full_glob).unwrap().flatten() {
                     if entry.is_file() {
                         paths.push(entry);
                     } else if entry.is_dir() {
-                        // Use WalkDir to recursively collect all files
                         for entry in WalkDir::new(entry)
                             .follow_links(true)
                             .into_iter()
@@ -505,84 +448,56 @@ impl Message<IndexGlobs> for Indexer {
             for pathbuf in paths {
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
-
-                // Use the full_glob as the source instead of the original glob
-                let source = full_glob.clone();
-                // Use the full path as the URI
+                let source = full_glob_clone.clone();
                 let uri = pathbuf.to_string_lossy().to_string();
 
-                // Check if it's an image file
-                if let Some(ext) = ext {
+                let content = if let Some(ext) = ext {
                     if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
-                        info!("Found image file: {}", &uri);
-                        match self.index_image(ctx, source.clone(), uri, embeddings_id).await? {
-                            IndexResult::Indexed(count) => {
-                                if count > 0 {
-                                    indexed += 1;
+                        Content::Image { path: uri.clone() }
+                    } else {
+                        let chunk_config =
+                            (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size);
+
+                        // Special handling for PDF
+                        if ext == "pdf" {
+                            match ctx
+                                .send::<PdfAnalyzer, AnalyzePdf>(
+                                    AnalyzePdf { file_path: pathbuf.clone() },
+                                    pdf_analyzer_id,
+                                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                )
+                                .await
+                            {
+                                Ok(content) => Content::Text { content, text_type: TextType::Pdf, chunk_config },
+                                Err(e) => {
+                                    error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                                    continue;
                                 }
                             }
-                            IndexResult::Cached => cached += 1,
-                            IndexResult::Failed => continue,
-                        }
-                        continue;
-                    }
-                }
+                        } else {
+                            // Handle all other text-based files
+                            let text_type = match ext {
+                                "md" => TextType::Markdown,
+                                "rs" => TextType::Code(CodeLanguage::Rust),
+                                "py" => TextType::Code(CodeLanguage::Python),
+                                "cue" => TextType::Code(CodeLanguage::Cue),
+                                "html" => TextType::Code(CodeLanguage::Html),
+                                "cpp" => TextType::Code(CodeLanguage::Cpp),
+                                "h" => TextType::Text,
+                                _ => TextType::Text,
+                            };
 
-                // Handle other file types as before
-                let text_type = match ext {
-                    Some("md") => TextType::Markdown,
-                    Some("rs") => TextType::Code(CodeLanguage::Rust),
-                    Some("py") => TextType::Code(CodeLanguage::Python),
-                    Some("cue") => TextType::Code(CodeLanguage::Cue),
-                    Some("html") => TextType::Code(CodeLanguage::Html),
-                    Some("cpp") => TextType::Code(CodeLanguage::Cpp),
-                    Some("h") => TextType::Text,
-                    Some("pdf") => TextType::Pdf,
-                    _ => TextType::Text,
-                };
-
-                let content = match &text_type {
-                    TextType::Pdf => {
-                        let result = ctx
-                            .send::<PdfAnalyzer, AnalyzePdf>(
-                                AnalyzePdf { file_path: pathbuf.clone() },
-                                pdf_analyzer_id,
-                                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                            )
-                            .await;
-
-                        let file_content = match result {
-                            Ok(content) => content,
-                            Err(e) => {
-                                error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
-                                continue;
+                            match tokio::fs::read_to_string(&pathbuf).await {
+                                Ok(content) => Content::Text { content, text_type, chunk_config },
+                                Err(_) => continue,
                             }
-                        };
-
-                        Ok(file_content)
+                        }
                     }
-                    _ => tokio::fs::read_to_string(&pathbuf).await,
-                };
-
-                let Ok(content) = content else {
-                    error!("Failed to index file: {}", pathbuf.display());
+                } else {
                     continue;
                 };
 
-                match self
-                    .index_text(
-                        ctx,
-                        source,
-                        uri,
-                        content,
-                        text_type,
-                        message.chunk_capacity.clone(),
-                        message.chunk_overlap,
-                        message.chunk_batch_size,
-                        embeddings_id,
-                    )
-                    .await?
-                {
+                match self.index_content(ctx, source, uri, content, embeddings_id).await? {
                     IndexResult::Indexed(count) => {
                         if count > 0 {
                             indexed += 1;
