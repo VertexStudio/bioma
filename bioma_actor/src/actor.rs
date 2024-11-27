@@ -462,6 +462,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
 pub struct ActorRecord {
     id: RecordId,
     tag: Cow<'static, str>,
+    #[serde(default)]
     state: Value,
 }
 

@@ -6,7 +6,7 @@ LET $emb = CREATE ONLY type::table($prefix + "_embedding") CONTENT {
     embedding: $embedding, 
     metadata: $metadata
 };
-RELATE $model_id->$prefix + "_model_embeddings"->($emb.id);
+RELATE $model_id->($prefix + "_model_embeddings")->($emb.id);
 
 LET $src = SELECT VALUE id FROM ONLY source:{source: $source, tag: $tag};
 LET $src_id = IF $src == NONE THEN 
@@ -15,4 +15,4 @@ ELSE
     $src
 END;
 
-RELATE $src_id->$prefix + "_source_embeddings"->($emb.id);
+RELATE $src_id->($prefix + "_source_embeddings")->($emb.id);
