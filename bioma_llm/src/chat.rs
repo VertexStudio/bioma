@@ -122,7 +122,7 @@ impl Actor for Chat {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ChatError> {
         info!("{} Started", ctx.id());
 
-        self.ollama = Ollama::from_url(self.endpoint.clone());
+        self.init(ctx).await?;
 
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
@@ -134,6 +134,13 @@ impl Actor for Chat {
             }
         }
         info!("{} Finished", ctx.id());
+        Ok(())
+    }
+}
+
+impl Chat {
+    pub async fn init(&mut self, _ctx: &mut ActorContext<Self>) -> Result<(), ChatError> {
+        self.ollama = Ollama::from_url(self.endpoint.clone());
         Ok(())
     }
 }
