@@ -328,17 +328,27 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     + &context_content,
             );
 
-            // If there's an image in the context, use only the first one
-            if let Some(ctx) =
-                context.context.iter().find(|ctx| matches!(ctx.metadata, Some(ContextMetadata::Image(_))))
-            {
-                if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
-                    if let Ok(image_data) = std::fs::read(&image_metadata.source) {
-                        let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                        context_message.images =
-                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+            // Handle images with new metadata structure
+            let images = context
+                .context
+                .iter()
+                .filter_map(|ctx| {
+                    if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
+                        // Use the base metadata source field
+                        if let Ok(image_data) = std::fs::read(&image_metadata.base.source) {
+                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                            Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
                     }
-                }
+                })
+                .collect::<Vec<_>>();
+
+            if !images.is_empty() {
+                context_message.images = Some(images);
             }
 
             let mut conversation = body.messages.clone();
@@ -384,7 +394,6 @@ struct AskQuery {
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     info!("Received ask query: {:#?}", &body.query);
-    info!("Received ask query: {:#?}", &body.query);
 
     info!("Sending message to retriever actor");
     let retrieved = {
@@ -409,20 +418,26 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                     + &context_content,
             );
 
-            // Add images to the system message if available
-            if !context.context.is_empty() {
-                let mut images = Vec::new();
-                for ctx in context.context {
-                    if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
-                        if let Ok(image_data) = std::fs::read(&image_metadata.source) {
+            // Handle images with new metadata structure
+            let images = context
+                .context
+                .iter()
+                .filter_map(|ctx| {
+                    if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
+                        if let Ok(image_data) = std::fs::read(&image_metadata.base.source) {
                             let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                            images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                            Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
-                }
-                if !images.is_empty() {
-                    context_message.images = Some(images);
-                }
+                })
+                .collect::<Vec<_>>();
+
+            if !images.is_empty() {
+                context_message.images = Some(images);
             }
 
             conversation.push(context_message);

@@ -116,11 +116,34 @@ pub enum TextType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChunkMetadata {
+pub struct BaseMetadata {
     pub source: String,
-    pub text_type: TextType,
-    pub chunk_number: usize,
     pub uri: String,
+    pub content_type: ContentType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ContentType {
+    Text(TextType),
+    Image,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextChunkMetadata {
+    #[serde(flatten)]
+    pub base: BaseMetadata,
+    pub chunk_number: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageMetadata {
+    #[serde(flatten)]
+    pub base: BaseMetadata,
+    pub format: String,
+    pub dimensions: ImageDimensions,
+    pub size_bytes: u64,
+    pub modified: u64,
+    pub created: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,17 +174,6 @@ pub struct DeletedSource {
 pub struct ImageDimensions {
     pub width: u32,
     pub height: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageMetadata {
-    pub source: String,
-    pub uri: String,
-    pub format: String,
-    pub dimensions: ImageDimensions,
-    pub size_bytes: u64,
-    pub modified: u64,
-    pub created: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -223,8 +235,11 @@ impl Indexer {
                     let file_metadata = std::fs::metadata(&path).ok()?;
 
                     let image_metadata = ImageMetadata {
-                        source: source.clone(),
-                        uri: uri.clone(),
+                        base: BaseMetadata {
+                            source: source.clone(),
+                            uri: uri.clone(),
+                            content_type: ContentType::Image,
+                        },
                         format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                         dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                         size_bytes: file_metadata.len(),
@@ -301,11 +316,13 @@ impl Indexer {
                 let metadata = chunks
                     .iter()
                     .enumerate()
-                    .map(|(i, _)| ChunkMetadata {
-                        source: source.clone(),
-                        text_type: text_type.clone(),
+                    .map(|(i, _)| TextChunkMetadata {
+                        base: BaseMetadata {
+                            source: source.clone(),
+                            uri: uri.clone(),
+                            content_type: ContentType::Text(text_type.clone()),
+                        },
                         chunk_number: i,
-                        uri: uri.clone(),
                     })
                     .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
                     .collect::<Vec<Value>>();
