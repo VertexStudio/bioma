@@ -118,8 +118,10 @@ pub struct FrameReply {
     /// Receiver
     pub rx: RecordId,
     /// Message content
+    #[serde(default)]
     pub msg: Value,
     /// Error message
+    #[serde(default)]
     pub err: Value,
 }
 

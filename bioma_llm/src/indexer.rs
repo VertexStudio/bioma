@@ -134,7 +134,6 @@ pub struct ChunkMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceEmbeddings {
     pub source: String,
-    pub uris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,11 +190,16 @@ impl Indexer {
         chunk_batch_size: usize,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
+        let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix);
+        let query = format!(
+            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
+            edge_name, edge_name
+        );
         // TODO: This query is twice slow compared to the previous one. Guess it's because we're ->source_text_embeddings.out.metadata.uri twice. Not sure.
         let source_embeddings = ctx
             .engine()
             .db()
-            .query("SELECT source, ->source_text_embeddings.out.metadata.uri AS uris FROM source:{source:$source, tag:$tag} WHERE ->source_text_embeddings.out.metadata.uri CONTAINS $uri")
+            .query(&query)
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
             .bind(("uri", uri.clone()))
@@ -311,11 +315,16 @@ impl Indexer {
         uri: String,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        // Simplified query to only check source
+        let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix);
+        let query = format!(
+            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
+            edge_name, edge_name
+        );
+
         let source_embeddings = ctx
             .engine()
             .db()
-            .query("SELECT source, ->source_image_embeddings.out AS embeddings FROM source:{source:$source, tag:$tag} WHERE ->source_image_embeddings.out.metadata.uri CONTAINS $uri")
+            .query(&query)
             .bind(("source", source.clone()))
             .bind(("tag", self.tag.clone()))
             .bind(("uri", uri.clone()))
