@@ -79,7 +79,8 @@ pub struct FrameMessage {
     /// Receiver
     pub rx: RecordId,
     /// Message content
-    pub msg: Option<Value>,
+    #[serde(default)]
+    pub msg: Value,
 }
 
 impl FrameMessage {
@@ -99,7 +100,7 @@ impl FrameMessage {
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
     {
         if self.name == std::any::type_name::<M>() {
-            serde_json::from_value(self.msg.clone().unwrap_or(serde_json::Value::Null)).ok()
+            serde_json::from_value(self.msg.clone()).ok()
         } else {
             None
         }
@@ -535,7 +536,7 @@ impl<T: Actor> ActorContext<T> {
             name: name.into(),
             tx: self.id().record_id(),
             rx: to.record_id(),
-            msg: Some(msg_value.clone()),
+            msg: msg_value.clone(),
         };
 
         debug!("[{}] msg-send {} {} {} {}", &self.id().record_id(), name, &request.id, &to.record_id(), &msg_value);
@@ -849,7 +850,7 @@ impl<T: Actor> ActorContext<T> {
                         &frame.id,
                         &frame.tx,
                         &frame.rx,
-                        &frame.msg.as_ref().unwrap_or(&serde_json::Value::Null)
+                        &frame.msg
                     );
                 }
                 Err(error) => debug!("msg-recv {} {:?}", self_id.record_id(), error),
