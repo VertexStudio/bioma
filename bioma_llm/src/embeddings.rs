@@ -114,7 +114,7 @@ pub struct Similarity {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = "nomic_embed_text_v15".to_string())]
+    #[builder(default = "nomic_embed_v15".to_string())]
     pub table_name_prefix: String,
     #[builder(default = Model::NomicEmbedTextV15)]
     pub text_model: Model,
