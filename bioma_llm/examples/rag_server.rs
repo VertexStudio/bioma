@@ -384,6 +384,7 @@ struct AskQuery {
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     info!("Received ask query: {:#?}", &body.query);
+    info!("Received ask query: {:#?}", &body.query);
 
     info!("Sending message to retriever actor");
     let retrieved = {
