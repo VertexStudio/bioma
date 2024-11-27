@@ -242,6 +242,11 @@ impl Message<StoreEmbeddings> for Embeddings {
                 EmbeddingContent::Image(_) => RecordId::from_table_key("model", self.image_model.to_string()),
             };
 
+            let text = match &message.content {
+                EmbeddingContent::Text(texts) => Some(texts[i].clone()),
+                EmbeddingContent::Image(_) => None,
+            };
+
             db.query(emb_query)
                 .bind(("tag", message.tag.clone()))
                 .bind(("embedding", embedding))
@@ -249,6 +254,7 @@ impl Message<StoreEmbeddings> for Embeddings {
                 .bind(("model_id", model_id))
                 .bind(("source", message.source.clone()))
                 .bind(("prefix", self.table_name_prefix.clone()))
+                .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
         }

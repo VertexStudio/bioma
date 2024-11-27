@@ -166,56 +166,61 @@ impl Message<RetrieveContext> for Retriever {
                 };
                 info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
 
-                // Only rerank if we have text content
-                let context = if similarities.iter().any(|s| s.text.is_some()) {
-                    // Rank the embeddings only for text content
-                    info!("Ranking similarity texts");
-                    let start = std::time::Instant::now();
-                    let texts: Vec<String> = similarities.iter().filter_map(|s| s.text.clone()).collect();
+                // Separate text and image content, but keep their scores
+                let (text_similarities, image_similarities): (Vec<_>, Vec<_>) = similarities
+                    .into_iter()
+                    .map(|s| (s.clone(), s.similarity)) // Keep the score alongside the content
+                    .partition(|(s, _)| s.text.is_some());
+
+                // Process text content with reranking
+                let mut ranked_contexts = if !text_similarities.is_empty() {
+                    let texts: Vec<String> = text_similarities.iter().filter_map(|(s, _)| s.text.clone()).collect();
 
                     let rerank_req = RankTexts { query: text.clone(), texts };
-
-                    let ranked_texts = match ctx
+                    let ranked_texts = ctx
                         .send::<Rerank, RankTexts>(
                             rerank_req,
                             rerank_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                         )
-                        .await
-                    {
-                        Ok(result) => result,
-                        Err(e) => {
-                            error!("Failed to rank texts: {}", e);
-                            return Err(RetrieverError::ComputingRerank(e.to_string()));
-                        }
-                    };
-                    info!("Ranked texts: {} in {:?}", ranked_texts.texts.len(), start.elapsed());
+                        .await?;
 
+                    // Create contexts with rerank scores
                     ranked_texts
                         .texts
                         .into_iter()
-                        .map(|t| Context {
-                            text: similarities[t.index].text.clone(),
-                            metadata: similarities[t.index]
-                                .metadata
-                                .as_ref()
-                                .and_then(|m| serde_json::from_value(m.clone()).ok()),
+                        .map(|t| {
+                            (
+                                Context {
+                                    text: text_similarities[t.index].0.text.clone(),
+                                    metadata: text_similarities[t.index]
+                                        .0
+                                        .metadata
+                                        .as_ref()
+                                        .and_then(|m| serde_json::from_value(m.clone()).ok()),
+                                },
+                                t.score,
+                            )
                         })
-                        .take(message.limit)
-                        .collect()
+                        .collect::<Vec<_>>()
                 } else {
-                    // For non-text content (images, etc.), use similarities directly
-                    similarities
-                        .into_iter()
-                        .map(|s| Context {
-                            text: s.text,
-                            metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
-                        })
-                        .take(message.limit)
-                        .collect()
+                    Vec::new()
                 };
 
-                Ok(RetrievedContext { context })
+                // Add image contexts with their similarity scores
+                ranked_contexts.extend(image_similarities.into_iter().map(|(s, score)| {
+                    (Context { text: s.text, metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()) }, score)
+                }));
+
+                // Sort all contexts by score in descending order
+                ranked_contexts.sort_by(|(_, a_score), (_, b_score)| {
+                    b_score.partial_cmp(a_score).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                // Take only the contexts, limited by the requested amount
+                let contexts = ranked_contexts.into_iter().map(|(context, _)| context).take(message.limit).collect();
+
+                Ok(RetrievedContext { context: contexts })
             }
             _ => unimplemented!("Only Text queries are currently supported"),
         }
