@@ -166,23 +166,68 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                     }
                 };
 
-                // Extract to a directory based on the zip name without the .zip extension
-                let extract_to = if let Some(parent) = temp_file_path.parent() {
-                    if let Some(stem) = temp_file_path.file_stem() {
-                        parent.join(stem)
+                // Extract to directory based on the metadata path (without .zip extension)
+                let extract_to = if let Some(parent) = target_dir.parent() {
+                    if let Some(stem) = target_dir.file_stem() {
+                        output_dir.join(parent).join(stem)
                     } else {
-                        parent.to_path_buf()
+                        output_dir.join(parent)
                     }
                 } else {
-                    temp_file_path.with_extension("")
+                    output_dir.join(target_dir.file_stem().unwrap_or_default())
                 };
 
-                if let Err(e) = archive.extract(&extract_to) {
-                    error!("Error extracting zip archive: {:?}", e);
-                    return HttpResponse::InternalServerError().json(json!({
-                        "error": "Failed to extract zip archive",
-                        "details": e.to_string()
-                    }));
+                // Extract files one by one to avoid the extra subdirectory
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i).unwrap();
+                    let outpath = match file.enclosed_name() {
+                        Some(path) => {
+                            let path_str = path.to_string_lossy();
+                            // Skip the root directory if it exists
+                            let cleaned_path = path_str.split('/').skip(1).collect::<Vec<_>>().join("/");
+                            if cleaned_path.is_empty() {
+                                continue;
+                            }
+                            extract_to.join(cleaned_path)
+                        }
+                        None => continue,
+                    };
+
+                    if file.is_dir() {
+                        match std::fs::create_dir_all(&outpath) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                error!("Failed to create directory {}: {}", outpath.display(), e);
+                                continue;
+                            }
+                        }
+                    } else {
+                        if let Some(p) = outpath.parent() {
+                            match std::fs::create_dir_all(p) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    error!("Failed to create directory {}: {}", p.display(), e);
+                                    continue;
+                                }
+                            }
+                        }
+                        let mut outfile = match std::fs::File::create(&outpath) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                error!("Failed to create file {}: {}", outpath.display(), e);
+                                continue;
+                            }
+                        };
+                        if let Err(e) = std::io::copy(&mut file, &mut outfile) {
+                            error!("Failed to copy to {}: {}", outpath.display(), e);
+                            continue;
+                        }
+                    }
+                }
+
+                // Delete the temporary zip file after extraction
+                if let Err(e) = std::fs::remove_file(&temp_file_path) {
+                    warn!("Error removing temporary zip file: {:?}", e);
                 }
 
                 let mut files = Vec::new();
@@ -191,11 +236,6 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
                     if entry.file_type().is_file() {
                         files.push(entry.path().to_path_buf());
                     }
-                }
-
-                // Delete the temporary zip file after extraction
-                if let Err(e) = std::fs::remove_file(&temp_file_path) {
-                    warn!("Error removing temporary zip file: {:?}", e);
                 }
 
                 (format!("Zip file extracted {} files successfully", files.len()), files)
