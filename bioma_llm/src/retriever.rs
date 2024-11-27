@@ -1,5 +1,5 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
-use crate::indexer::{ContentType, ImageMetadata, TextChunkMetadata};
+use crate::indexer::{BaseMetadata, ContentType};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -66,15 +66,7 @@ fn default_retriever_threshold() -> f32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
     pub text: Option<String>,
-    #[serde(flatten)]
-    pub metadata: Option<ContextMetadata>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ContextMetadata {
-    Text(TextChunkMetadata),
-    Image(ImageMetadata),
+    pub metadata: Option<BaseMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,40 +79,24 @@ impl RetrievedContext {
         let mut context_content = String::new();
 
         for (index, context) in self.context.iter().enumerate() {
-            // Add metadata information based on type
             if let Some(metadata) = &context.metadata {
-                match metadata {
-                    ContextMetadata::Text(text_metadata) => {
-                        context_content.push_str(&format!("Source: {}\n", text_metadata.base.source));
-                        context_content.push_str(&format!("URI: {}\n", text_metadata.base.uri));
-                        match &text_metadata.base.content_type {
-                            ContentType::Text(text_type) => {
-                                context_content.push_str(&format!("Type: {}\n", text_type));
-                            }
-                            _ => unreachable!(), // This shouldn't happen due to the enum variant
-                        }
-                        context_content.push_str(&format!("Chunk: {}\n\n", text_metadata.chunk_number));
+                context_content.push_str(&format!("Source: {}\n", metadata.source));
+                context_content.push_str(&format!("URI: {}\n", metadata.uri));
+                match &metadata.content_type {
+                    ContentType::Text(text_type) => {
+                        context_content.push_str(&format!("Type: {}\n", text_type));
                     }
-                    ContextMetadata::Image(image_metadata) => {
-                        context_content.push_str(&format!("Source: {}\n", image_metadata.base.source));
-                        context_content.push_str(&format!("URI: {}\n", image_metadata.base.uri));
-                        context_content.push_str(&format!("Format: {}\n", image_metadata.format));
-                        context_content.push_str(&format!(
-                            "Dimensions: {}x{}\n",
-                            image_metadata.dimensions.width, image_metadata.dimensions.height
-                        ));
-                        context_content.push_str(&format!("Size: {} bytes\n\n", image_metadata.size_bytes));
+                    ContentType::Image => {
+                        context_content.push_str("Type: Image\n");
                     }
                 }
             }
 
-            // Add the text content
             if let Some(text) = &context.text {
                 context_content.push_str(text);
             }
             context_content.push_str("\n\n");
 
-            // Add a separator between chunks, except for the last one
             if index < self.context.len() - 1 {
                 context_content.push_str("---\n\n");
             }
@@ -173,11 +149,14 @@ impl Message<RetrieveContext> for Retriever {
                 };
                 info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
 
-                // Separate text and image content, but keep their scores
-                let (text_similarities, image_similarities): (Vec<_>, Vec<_>) = similarities
-                    .into_iter()
-                    .map(|s| (s.clone(), s.similarity)) // Keep the score alongside the content
-                    .partition(|(s, _)| s.text.is_some());
+                // Separate text and image content based on ContentType
+                let (text_similarities, image_similarities): (Vec<_>, Vec<_>) =
+                    similarities.into_iter().map(|s| (s.clone(), s.similarity)).partition(|(s, _)| {
+                        s.metadata
+                            .as_ref()
+                            .and_then(|m| serde_json::from_value::<BaseMetadata>(m.clone()).ok())
+                            .map_or(false, |metadata| matches!(metadata.content_type, ContentType::Text(_)))
+                    });
 
                 // Process text content with reranking
                 let mut ranked_contexts = if !text_similarities.is_empty() {

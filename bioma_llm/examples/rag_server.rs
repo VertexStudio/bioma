@@ -5,7 +5,8 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use retriever::{ContextMetadata, QueryType};
+use indexer::ContentType;
+use retriever::QueryType;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -333,11 +334,14 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 .context
                 .iter()
                 .filter_map(|ctx| {
-                    if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
-                        // Use the base metadata source field
-                        if let Ok(image_data) = std::fs::read(&image_metadata.base.source) {
-                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                            Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
+                    if let Some(metadata) = &ctx.metadata {
+                        if matches!(metadata.content_type, ContentType::Image) {
+                            if let Ok(image_data) = std::fs::read(&metadata.source) {
+                                let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                                Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -423,10 +427,14 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 .context
                 .iter()
                 .filter_map(|ctx| {
-                    if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
-                        if let Ok(image_data) = std::fs::read(&image_metadata.base.source) {
-                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                            Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
+                    if let Some(metadata) = &ctx.metadata {
+                        if matches!(metadata.content_type, ContentType::Image) {
+                            if let Ok(image_data) = std::fs::read(&metadata.source) {
+                                let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                                Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
