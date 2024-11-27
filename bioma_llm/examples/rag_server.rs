@@ -35,14 +35,21 @@ use zip::ZipArchive;
 
 struct AppState {
     engine: Engine,
-    indexer_relay_ctx: Mutex<ActorContext<Relay>>,
-    retriever_relay_ctx: Mutex<ActorContext<Relay>>,
-    chat_relay_ctx: Mutex<ActorContext<Relay>>,
-    indexer_actor_id: ActorId,
-    retriever_actor_id: ActorId,
-    chat_actor_id: ActorId,
+    indexer_actor: Arc<IndexerActor>,
+    retriever_actor: Arc<RetrieverActor>,
     embeddings_actor: Arc<EmbeddingsActor>,
     rerank_actor: Arc<RerankActor>,
+    chat_actor: Arc<ChatActor>,
+}
+
+struct IndexerActor {
+    indexer_ctx: Mutex<ActorContext<Indexer>>,
+    indexer_actor: Mutex<Indexer>,
+}
+
+struct RetrieverActor {
+    retriever_ctx: Mutex<ActorContext<Retriever>>,
+    retriever_actor: Mutex<Retriever>,
 }
 
 struct EmbeddingsActor {
@@ -53,6 +60,11 @@ struct EmbeddingsActor {
 struct RerankActor {
     rerank_ctx: Mutex<ActorContext<Rerank>>,
     rerank_actor: Mutex<Rerank>,
+}
+
+struct ChatActor {
+    chat_ctx: Mutex<ActorContext<Chat>>,
+    chat_actor: Mutex<Chat>,
 }
 
 async fn health() -> impl Responder {
@@ -204,22 +216,13 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
 }
 
 async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
+    let mut indexer_ctx = data.indexer_actor.indexer_ctx.lock().await;
+    let mut indexer_actor = data.indexer_actor.indexer_actor.lock().await;
+
     let index_globs = body.clone();
 
-    let indexer_actor_id = data.indexer_actor_id.clone();
-
-    // Try to lock the indexer_relay_ctx without waiting
-    let relay_ctx = match data.indexer_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on indexer_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Indexer resource busy");
-        }
-    };
-
     info!("Sending message to indexer actor");
-    let response = relay_ctx.do_send::<Indexer, IndexGlobs>(index_globs, &indexer_actor_id).await;
-
+    let response = indexer_actor.handle(&mut indexer_ctx, &index_globs).await;
     match response {
         Ok(_) => HttpResponse::Ok().body("OK"),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
@@ -227,27 +230,13 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
 }
 
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
+    let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
+    let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+
     let retrieve_context = body.clone();
 
-    let retriever_actor_id = data.retriever_actor_id.clone();
-
-    // Try to lock the retriever_relay_ctx without waiting
-    let relay_ctx = match data.retriever_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on retriever_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Retriever resource busy");
-        }
-    };
-
     info!("Sending message to retriever actor");
-    let response = relay_ctx
-        .send::<Retriever, RetrieveContext>(
-            retrieve_context,
-            &retriever_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-        )
-        .await;
+    let response = retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await;
 
     match response {
         Ok(context) => {
@@ -278,38 +267,15 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         .join("\n");
     info!("Received ask query: {:#?}", query);
 
-    // Only use text query type
-    let retrieve_context = RetrieveContext { query: QueryType::Text(query), limit: 5, threshold: 0.0 };
-
-    let retriever_actor_id = data.retriever_actor_id.clone();
-
-    // Try to lock the contexts
-    let retriever_relay_ctx = match data.retriever_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on retriever_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Retriever resource busy");
-        }
-    };
-
-    let chat_relay_ctx = match data.chat_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on chat_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Chat resource busy");
-        }
-    };
-
     info!("Sending message to retriever actor");
-    let response = retriever_relay_ctx
-        .send::<Retriever, RetrieveContext>(
-            retrieve_context,
-            &retriever_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-        )
-        .await;
+    let retrieved = {
+        let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
+        let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+        let retrieve_context = RetrieveContext { query: QueryType::Text(query.clone()), limit: 5, threshold: 0.0 };
+        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
+    };
 
-    match response {
+    match retrieved {
         Ok(mut context) => {
             context.context.reverse();
             info!("Context fetched: {:#?}", context);
@@ -343,13 +309,16 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             }
 
             info!("Sending context to chat actor");
-            let chat_response = chat_relay_ctx
-                .send::<Chat, ChatMessages>(
-                    ChatMessages { messages: conversation.clone(), restart: false, persist: true },
-                    &data.chat_actor_id,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                )
-                .await;
+            let chat_response = {
+                let mut chat_ctx = data.chat_actor.chat_ctx.lock().await;
+                let mut chat_actor = data.chat_actor.chat_actor.lock().await;
+                chat_actor
+                    .handle(
+                        &mut chat_ctx,
+                        &ChatMessages { messages: conversation.clone(), restart: false, persist: true },
+                    )
+                    .await
+            };
             match chat_response {
                 Ok(response) => {
                     info!("Chat response: {:#?}", response);
@@ -374,53 +343,19 @@ struct AskQuery {
 }
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
-    info!("Received ask query: {:#?}", body.query);
+    info!("Received ask query: {:#?}", &body.query);
 
-    // Create both text and image retrieve contexts using the same query
-    let text_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
-    let image_context = RetrieveContext { query: QueryType::Image(body.query.clone()), limit: 1, threshold: 0.0 };
-
-    let retriever_actor_id = data.retriever_actor_id.clone();
-
-    // Try to lock the retriever_relay_ctx without waiting
-    let retriever_relay_ctx = match data.retriever_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on retriever_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Retriever resource busy");
-        }
+    info!("Sending message to retriever actor");
+    let retrieved = {
+        let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
+        let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+        let retrieve_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
+        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
-    // Try to lock the chat_relay_ctx without waiting
-    let chat_relay_ctx = match data.chat_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on chat_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Chat resource busy");
-        }
-    };
-
-    info!("Sending messages to retriever actor");
-    let text_response = retriever_relay_ctx
-        .send::<Retriever, RetrieveContext>(
-            text_context,
-            &retriever_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-        )
-        .await;
-
-    let image_response = retriever_relay_ctx
-        .send::<Retriever, RetrieveContext>(
-            image_context,
-            &retriever_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-        )
-        .await;
-
-    match (text_response, image_response) {
-        (Ok(context), Ok(image_context)) => {
-            info!("Image context: {:#?}", image_context);
-            info!("Text context fetched: {:#?}", context);
+    match retrieved {
+        Ok(context) => {
+            info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
             // Create chat conversation
@@ -434,9 +369,9 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             );
 
             // Add images to the system message if available
-            if !image_context.context.is_empty() {
+            if !context.context.is_empty() {
                 let mut images = Vec::new();
-                for ctx in image_context.context {
+                for ctx in context.context {
                     if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
                         if let Ok(image_data) = std::fs::read(&image_metadata.source) {
                             let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
@@ -457,13 +392,16 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
             // Sending context and user query to chat actor
             info!("Sending context to chat actor");
-            let chat_response = chat_relay_ctx
-                .send::<Chat, ChatMessages>(
-                    ChatMessages { messages: conversation.clone(), restart: true, persist: false },
-                    &data.chat_actor_id,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                )
-                .await;
+            let chat_response = {
+                let mut chat_ctx = data.chat_actor.chat_ctx.lock().await;
+                let mut chat_actor = data.chat_actor.chat_actor.lock().await;
+                chat_actor
+                    .handle(
+                        &mut chat_ctx,
+                        &ChatMessages { messages: conversation.clone(), restart: true, persist: false },
+                    )
+                    .await
+            };
             match chat_response {
                 Ok(response) => {
                     info!("Chat response for query: {:#?} is: \n{:#?}", body.query, response);
@@ -477,7 +415,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 }
             }
         }
-        (Err(e), _) | (_, Err(e)) => {
+        Err(e) => {
             error!("Error fetching context: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
         }
@@ -485,25 +423,13 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
-    let indexer_actor_id = data.indexer_actor_id.clone();
+    let mut indexer_ctx = data.indexer_actor.indexer_ctx.lock().await;
+    let mut indexer_actor = data.indexer_actor.indexer_actor.lock().await;
 
-    // Try to lock the indexer_relay_ctx without waiting
-    let relay_ctx = match data.indexer_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on indexer_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Indexer resource busy");
-        }
-    };
+    let delete_source = body.clone();
 
     info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
-    let response = relay_ctx
-        .send::<Indexer, DeleteSource>(
-            body.clone(),
-            &indexer_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-        )
-        .await;
+    let response = indexer_actor.handle(&mut indexer_ctx, &delete_source).await;
 
     match response {
         Ok(result) => {
@@ -609,8 +535,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
     let engine = Engine::connect(engine_options).await?;
 
-    // Spawn the indexer actor, if it already exists, restore it, otherwise reset it
-    let indexer_actor_id = ActorId::of::<Indexer>("/indexer");
+    // Indexer
+    let indexer_actor_id = ActorId::of::<Indexer>("/rag/indexer");
     let (mut indexer_ctx, mut indexer_actor) = match Actor::spawn(
         engine.clone(),
         indexer_actor_id.clone(),
@@ -636,15 +562,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Start the indexer actor
-    let indexer_handle = tokio::spawn(async move {
-        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
-            error!("Indexer actor error: {}", e);
-        }
-    });
+    indexer_actor.init(&mut indexer_ctx).await.unwrap();
 
-    // Spawn a retriever actor, reset if it already exists, otherwise create it
-    let retriever_actor_id = ActorId::of::<Retriever>("/retriever");
+    let indexer_actor =
+        Arc::new(IndexerActor { indexer_ctx: Mutex::new(indexer_ctx), indexer_actor: Mutex::new(indexer_actor) });
+
+    // Retriever
+    let retriever_actor_id = ActorId::of::<Retriever>("/rag/retriever");
     let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
         engine.clone(),
         retriever_actor_id.clone(),
@@ -654,34 +578,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .unwrap();
 
-    // Start the retriever actor
-    let retriever_handle = tokio::spawn(async move {
-        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
-            error!("Retriever actor error: {}", e);
-        }
+    retriever_actor.init(&mut retriever_ctx).await.unwrap();
+
+    let retriever_actor = Arc::new(RetrieverActor {
+        retriever_ctx: Mutex::new(retriever_ctx),
+        retriever_actor: Mutex::new(retriever_actor),
     });
-
-    // Spawn a relay actor to send messages to indexer
-    let indexer_relay_id = ActorId::of::<Relay>("/relay/indexer");
-    let (indexer_relay_ctx, _indexer_relay_actor) = Actor::spawn(
-        engine.clone(),
-        indexer_relay_id.clone(),
-        Relay,
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await
-    .unwrap();
-
-    // Spawn a relay actor to send messages to retriever
-    let retriever_relay_id = ActorId::of::<Relay>("/relay/retriever");
-    let (retriever_relay_ctx, _retriever_relay_actor) = Actor::spawn(
-        engine.clone(),
-        retriever_relay_id.clone(),
-        Relay,
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await
-    .unwrap();
 
     let chat = Chat::builder().model("llama3.2-vision".into()).build();
 
@@ -694,22 +596,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await
     .unwrap();
-    let chat_handle = tokio::spawn(async move {
-        if let Err(e) = chat_actor.start(&mut chat_ctx).await {
-            error!("Chat actor error: {}", e);
-        }
-    });
 
-    // Spawn a relay actor to send messages to chat
-    let chat_relay_id = ActorId::of::<Relay>("/relay/chat");
-    let (chat_relay_ctx, _chat_relay_actor) = Actor::spawn(
-        engine.clone(),
-        chat_relay_id.clone(),
-        Relay,
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await
-    .unwrap();
+    chat_actor.init(&mut chat_ctx).await.unwrap();
+
+    let chat_actor = Arc::new(ChatActor { chat_ctx: Mutex::new(chat_ctx), chat_actor: Mutex::new(chat_actor) });
 
     // Embeddings
     let embeddings_actor_id = ActorId::of::<Embeddings>("/rag/embeddings");
@@ -748,14 +638,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create the app state
     let data = web::Data::new(AppState {
         engine: engine.clone(),
-        indexer_relay_ctx: Mutex::new(indexer_relay_ctx),
-        retriever_relay_ctx: Mutex::new(retriever_relay_ctx),
-        chat_relay_ctx: Mutex::new(chat_relay_ctx),
-        indexer_actor_id: indexer_actor_id,
-        retriever_actor_id: retriever_actor_id.clone(),
-        chat_actor_id: chat_actor_id.clone(),
+        indexer_actor,
+        retriever_actor,
         embeddings_actor,
         rerank_actor,
+        chat_actor,
     });
 
     // Create the server
@@ -786,10 +673,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(_) => info!("Server stopped"),
         Err(e) => error!("Server error: {}", e),
     }
-
-    chat_handle.abort();
-    retriever_handle.abort();
-    indexer_handle.abort();
 
     Ok(())
 }

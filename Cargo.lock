@@ -871,14 +871,13 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "indexmap 2.6.0",
- "jsonpath-rust",
  "object_store 0.11.1",
  "rand",
  "serde",
  "serde_json",
  "surrealdb",
  "test-log",
- "thiserror 1.0.69",
+ "thiserror 2.0.3",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -899,14 +898,13 @@ dependencies = [
  "humantime",
  "humantime-serde",
  "indexmap 2.6.0",
- "jsonpath-rust",
  "object_store 0.11.1",
  "rand",
  "serde",
  "serde_json",
  "surrealdb",
  "test-log",
- "thiserror 1.0.69",
+ "thiserror 2.0.3",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -946,7 +944,6 @@ dependencies = [
  "humantime-serde",
  "image",
  "indexmap 2.6.0",
- "jsonpath-rust",
  "lazy_static",
  "mdka",
  "ollama-rs",
@@ -958,7 +955,7 @@ dependencies = [
  "surrealdb",
  "test-log",
  "text-splitter 0.16.1",
- "thiserror 1.0.69",
+ "thiserror 2.0.3",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1036,9 +1033,9 @@ dependencies = [
 
 [[package]]
 name = "blake3"
-version = "1.5.4"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d82033247fd8e890df8f740e407ad4d038debb9eb1f40533fffb32e7d17dc6f7"
+checksum = "b8ee0c1824c4dea5b5f81736aff91bae041d2c07ee1192bec91054e10e3e601e"
 dependencies = [
  "arrayref",
  "arrayvec",
@@ -2070,8 +2067,9 @@ dependencies = [
 
 [[package]]
 name = "fastembed"
-version = "4.2.0"
-source = "git+https://github.com/Anush008/fastembed-rs?rev=49a2185ef0024f0f5ee8aae6bc48fa60ffdfe567#49a2185ef0024f0f5ee8aae6bc48fa60ffdfe567"
+version = "4.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa32ee8c9f4219e3700aa9e201028e1c8206072794cae0b8323c1463f7b93466"
 dependencies = [
  "anyhow",
  "hf-hub",
@@ -3116,21 +3114,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonpath-rust"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19d8fe85bd70ff715f31ce8c739194b423d79811a19602115d611a3ec85d6200"
-dependencies = [
- "lazy_static",
- "once_cell",
- "pest",
- "pest_derive",
- "regex",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "jsonwebtoken"
 version = "9.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3205,9 +3188,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.165"
+version = "0.2.164"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb4d3d38eab6c5239a362fa8bae48c03baf980a6e7079f063942d563ef3533e"
+checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -3813,7 +3796,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.2.1"
-source = "git+https://github.com/pepperoni21/ollama-rs?rev=a40ea0c3980b85aeba28b077e1673dfba1a4be36#a40ea0c3980b85aeba28b077e1673dfba1a4be36"
+source = "git+https://github.com/pepperoni21/ollama-rs?rev=56d7ec24e656840a9a81437ea4324d0fcc2189c6#56d7ec24e656840a9a81437ea4324d0fcc2189c6"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -4030,40 +4013,6 @@ dependencies = [
  "memchr",
  "thiserror 1.0.69",
  "ucd-trie",
-]
-
-[[package]]
-name = "pest_derive"
-version = "2.7.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d214365f632b123a47fd913301e14c946c61d1c183ee245fa76eb752e59a02dd"
-dependencies = [
- "pest",
- "pest_generator",
-]
-
-[[package]]
-name = "pest_generator"
-version = "2.7.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb55586734301717aea2ac313f50b2eb8f60d2fc3dc01d190eefa2e625f60c4e"
-dependencies = [
- "pest",
- "pest_meta",
- "proc-macro2",
- "quote",
- "syn 2.0.89",
-]
-
-[[package]]
-name = "pest_meta"
-version = "2.7.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b75da2a70cf4d9cb76833c990ac9cd3923c9a8905a8929789ce347c84564d03d"
-dependencies = [
- "once_cell",
- "pest",
- "sha2",
 ]
 
 [[package]]
@@ -4897,9 +4846,9 @@ dependencies = [
 
 [[package]]
 name = "roaring"
-version = "0.10.6"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f4b84ba6e838ceb47b41de5194a60244fac43d9fe03b71dbe8c5a201081d6d1"
+checksum = "f81dc953b2244ddd5e7860cb0bb2a790494b898ef321d4aff8e260efab60cc88"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -6349,9 +6298,9 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tracing"
-version = "0.1.40"
+version = "0.1.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3523ab5a71916ccf420eebdf5521fcef02141234bbc0b8a49f2fdc4544364ef"
+checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
  "log",
  "pin-project-lite",
@@ -6361,9 +6310,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
+checksum = "395ae124c09f9e6918a2310af6038fba074bcf474ac352496d5910dd59a2226d"
 dependencies = [
  "proc-macro2",
  "quote",

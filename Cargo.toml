@@ -21,7 +21,7 @@ tokio = { version = "1", features = ["full", "tracing"] }
 surrealdb = { version = "2.1.2", features = ["kv-mem"] }
 uuid = "1.10"
 ulid = "1.1"
-thiserror = "1.0"
+thiserror = "2.0"
 derive_more = "0.99"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -29,9 +29,8 @@ indexmap = { version = "2.4", features = ["serde"] }
 futures = "0.3"
 humantime = "2.1"
 humantime-serde = "1.1"
-jsonpath-rust = "0.5"
 bon = "2.1"
-object_store = { version = "0.11.0", features = ["serde"] }
+object_store = { version = "0.11", features = ["serde"] }
 url = { version = "2", features = ["serde"] }
 test-log = { version = "0.2", default-features = false, features = [
     "trace",
@@ -45,6 +44,6 @@ rand = "0.8"
 reqwest = { version = "0.12", features = ["multipart"] }
 glob = "0.3"
 walkdir = "2.4"
-zip = "2.2.0"
+zip = "2.2"
 
 bioma_derive = { path = "../bioma_derive" }

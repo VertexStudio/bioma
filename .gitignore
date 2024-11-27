@@ -4,3 +4,8 @@ bioma_behavior_v0
 bioma_js/node_modules
 /.bioma
 /.output
+
+# Not platform agnostic yet, so ignore it
+uv.lock
+.python-version
+pyproject.toml

@@ -183,8 +183,9 @@ impl Rerank {
 
                     #[cfg(target_os = "macos")]
                     {
-                        options =
-                            options.with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
+                        options = options.with_execution_providers(vec![
+                            ort::execution_providers::CoreMLExecutionProvider::default().build(),
+                        ]);
                     }
 
                     #[cfg(target_os = "linux")]

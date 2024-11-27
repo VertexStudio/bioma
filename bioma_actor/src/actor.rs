@@ -79,7 +79,7 @@ pub struct FrameMessage {
     /// Receiver
     pub rx: RecordId,
     /// Message content
-    pub msg: Value,
+    pub msg: Option<Value>,
 }
 
 impl FrameMessage {
@@ -99,7 +99,7 @@ impl FrameMessage {
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
     {
         if self.name == std::any::type_name::<M>() {
-            serde_json::from_value(self.msg.clone()).ok()
+            serde_json::from_value(self.msg.clone().unwrap_or(serde_json::Value::Null)).ok()
         } else {
             None
         }
@@ -380,7 +380,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     }
                     SpawnExistsOptions::Restore => {
                         // Restore the actor by loading its state from the database
-                        let actor: Self = serde_json::from_value(actor_record.state).map_err(SystemActorError::from)?;
+                        let actor_state = actor_record.state;
+                        let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
                         let ctx =
                             ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
@@ -534,7 +535,7 @@ impl<T: Actor> ActorContext<T> {
             name: name.into(),
             tx: self.id().record_id(),
             rx: to.record_id(),
-            msg: msg_value.clone(),
+            msg: Some(msg_value.clone()),
         };
 
         debug!("[{}] msg-send {} {} {} {}", &self.id().record_id(), name, &request.id, &to.record_id(), &msg_value);
@@ -722,7 +723,9 @@ impl<T: Actor> ActorContext<T> {
         if response.err != serde_json::Value::Null {
             return Err(SystemActorError::MessageReply(response.err.to_string().into()));
         }
-        let response = serde_json::from_value(response.msg)?;
+
+        let response = response.msg;
+        let response = serde_json::from_value(response)?;
         Ok(response)
     }
 
@@ -761,9 +764,9 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let (msg_value, err_value) = match message {
-            Ok(msg) => (serde_json::to_value(&msg)?, serde_json::Value::Null),
-            Err(err) => (serde_json::Value::Null, serde_json::to_value(&err.to_string())?),
+        let msg_value = match message {
+            Ok(msg) => serde_json::to_value(&msg)?,
+            Err(err) => serde_json::to_value(&err.to_string())?,
         };
 
         // Use the request id as the reply id
@@ -780,7 +783,7 @@ impl<T: Actor> ActorContext<T> {
             tx: request.rx.clone(),
             rx: request.tx.clone(),
             msg: msg_value.clone(),
-            err: err_value.clone(),
+            err: serde_json::Value::Null,
         };
 
         debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &msg_value);
@@ -820,9 +823,6 @@ impl<T: Actor> ActorContext<T> {
     /// - The live query setup fails.
     /// - There's an error in the database query.
     pub async fn recv(&self) -> Result<MessageStream, SystemActorError> {
-        let unreplied_messages = self.unreplied_messages().await?;
-        let unreplied_stream = futures::stream::iter(unreplied_messages).map(Ok);
-
         let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().record_id());
         debug!("[{}] msg-live {}", &self.id().record_id(), &query);
         let mut res = self.engine().db().query(&query).await?;
@@ -849,12 +849,14 @@ impl<T: Actor> ActorContext<T> {
                         &frame.id,
                         &frame.tx,
                         &frame.rx,
-                        &frame.msg
+                        &frame.msg.as_ref().unwrap_or(&serde_json::Value::Null)
                     );
                 }
                 Err(error) => debug!("msg-recv {} {:?}", self_id.record_id(), error),
             });
 
+        let unreplied_messages = self.unreplied_messages().await?;
+        let unreplied_stream = futures::stream::iter(unreplied_messages).map(Ok);
         let chained_stream = unreplied_stream.chain(live_query);
 
         Ok(Box::pin(chained_stream))
