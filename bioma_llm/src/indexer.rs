@@ -41,8 +41,6 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
-    #[error("Image embedding error: {0}")]
-    ImageEmbedding(String),
 }
 
 impl ActorError for IndexerError {}
@@ -80,12 +78,6 @@ pub struct IndexGlobs {
     #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
-}
-
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
-pub struct IndexImages {
-    /// The images to index
-    pub images: Vec<String>,
 }
 
 fn default_chunk_capacity() -> std::ops::Range<usize> {
@@ -133,11 +125,6 @@ pub struct ChunkMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceEmbeddings {
-    pub source: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SourceImageEmbeddings {
     pub source: String,
 }
 
@@ -522,7 +509,7 @@ impl Message<DeleteSource> for Indexer {
         ctx: &mut ActorContext<Self>,
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
-        let query = include_str!("../sql/del_source.surql");
+        let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_name_prefix);
         let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
@@ -540,10 +527,9 @@ impl Message<DeleteSource> for Indexer {
 
             // Delete from database
             let mut results = db
-                .query(query)
+                .query(&query)
                 .bind(("source", full_source.clone()))
                 .bind(("tag", self.tag.clone()))
-                .bind(("prefix", self.embeddings.table_name_prefix.clone()))
                 .await
                 .map_err(SystemActorError::from)?;
 
