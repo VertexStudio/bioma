@@ -721,7 +721,7 @@ impl<T: Actor> ActorContext<T> {
             _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
         }?;
 
-        if response.err != serde_json::Value::Null {
+        if !response.err.is_null() {
             return Err(SystemActorError::MessageReply(response.err.to_string().into()));
         }
 
@@ -787,7 +787,7 @@ impl<T: Actor> ActorContext<T> {
             err: serde_json::Value::Null,
         };
 
-        debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &msg_value);
+        debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &reply.msg);
 
         let reply_query = include_str!("../sql/reply.surql");
 
