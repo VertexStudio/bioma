@@ -86,9 +86,9 @@ pub struct StoredEmbeddings {
 /// The query to search for
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Query {
-    ImageEmbedding(Vec<f32>),
-    TextEmbedding(Vec<f32>),
+    Embedding(Vec<f32>),
     Text(String),
+    Image(String),
 }
 
 /// Get the top k similar embeddings to a query, filtered by tag
@@ -162,8 +162,7 @@ impl Message<TopK> for Embeddings {
         message: &TopK,
     ) -> Result<Vec<Similarity>, EmbeddingsError> {
         let query_embedding = match &message.query {
-            Query::TextEmbedding(embedding) => embedding.clone(),
-            Query::ImageEmbedding(embedding) => embedding.clone(),
+            Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
                 let Some(embedding_tx) = self.embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::TextEmbeddingNotInitialized);
@@ -171,6 +170,16 @@ impl Message<TopK> for Embeddings {
                 let (tx, rx) = oneshot::channel();
                 embedding_tx
                     .send(EmbeddingRequest { response_tx: tx, content: EmbeddingContent::Text(vec![text.to_string()]) })
+                    .await?;
+                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+            }
+            Query::Image(path) => {
+                let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+                };
+                let (tx, rx) = oneshot::channel();
+                embedding_tx
+                    .send(EmbeddingRequest { response_tx: tx, content: EmbeddingContent::Image(vec![path.clone()]) })
                     .await?;
                 rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
