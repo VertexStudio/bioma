@@ -654,50 +654,6 @@ impl Message<DeleteSource> for Indexer {
     }
 }
 
-impl Message<IndexImages> for Indexer {
-    type Response = Indexed;
-
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexImages) -> Result<Indexed, IndexerError> {
-        let Some(embeddings_id) = &self.embeddings_id else {
-            return Err(IndexerError::EmbeddingsActorNotInitialized);
-        };
-
-        let total_index_images_time = std::time::Instant::now();
-        let mut indexed = 0;
-        let mut cached = 0;
-        let local_store_dir = ctx.engine().local_store_dir().to_owned();
-
-        for image in &message.images {
-            // If path is not absolute, make it relative to local_store_dir
-            let source = if std::path::Path::new(&image).is_absolute() {
-                image.clone()
-            } else {
-                local_store_dir.join(&image).to_string_lossy().into_owned()
-            };
-
-            info!("Indexing image: {}", &source);
-
-            match self.index_image(ctx, source.clone(), source, embeddings_id).await? {
-                IndexResult::Indexed(count) => {
-                    if count > 0 {
-                        indexed += 1;
-                    }
-                }
-                IndexResult::Failed => {
-                    warn!("Failed to index image: {}", &image);
-                }
-                IndexResult::Cached => {
-                    cached += 1;
-                    debug!("Image already indexed: {}", &image);
-                }
-            }
-        }
-
-        info!("Indexed {} images, cached {} images, in {:?}", indexed, cached, total_index_images_time.elapsed());
-        Ok(Indexed { indexed, cached })
-    }
-}
-
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Indexer {
     pub embeddings: Embeddings,
@@ -778,11 +734,6 @@ impl Actor for Indexer {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<DeleteSource>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<IndexImages>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
