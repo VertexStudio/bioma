@@ -5,7 +5,6 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use indexer::IndexImages;
 use retriever::{ContextMetadata, QueryType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,7 +22,7 @@ use zip::ZipArchive;
 /// curl -X POST http://localhost:8080/reset
 ///
 /// Index some files:
-/// curl -X POST http://localhost:8080/index_files -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
+/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
 ///
 /// Retrieve context:
 /// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
@@ -204,7 +203,7 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     }
 }
 
-async fn index_files(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
     let index_globs = body.clone();
 
     let indexer_actor_id = data.indexer_actor_id.clone();
@@ -521,41 +520,6 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     }
 }
 
-async fn index_images(body: web::Json<IndexImages>, data: web::Data<AppState>) -> HttpResponse {
-    let index_images = body.clone();
-
-    let indexer_actor_id = data.indexer_actor_id.clone();
-
-    // Try to lock the indexer_relay_ctx without waiting
-    let relay_ctx = match data.indexer_relay_ctx.try_lock() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            error!("Resource busy: could not acquire lock on indexer_relay_ctx");
-            return HttpResponse::ServiceUnavailable().body("Indexer resource busy");
-        }
-    };
-
-    info!("Sending message to indexer actor to index images");
-    let response = relay_ctx
-        .send::<Indexer, IndexImages>(
-            index_images,
-            &indexer_actor_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-        )
-        .await;
-
-    match response {
-        Ok(indexed) => {
-            info!("Successfully indexed {} images, {} were cached", indexed.indexed, indexed.cached);
-            HttpResponse::Ok().json(indexed)
-        }
-        Err(e) => {
-            error!("Error indexing images: {:?}", e);
-            HttpResponse::InternalServerError().body(e.to_string())
-        }
-    }
-}
-
 #[derive(Deserialize)]
 struct EmbeddingsQuery {
     model: String,
@@ -805,13 +769,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/health", web::get().to(health))
             .route("/hello", web::post().to(hello))
             .route("/reset", web::post().to(reset))
-            .route("/index_files", web::post().to(index_files))
+            .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(self::ask))
             .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
-            .route("/index_images", web::post().to(index_images))
             .route("/api/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
     })
