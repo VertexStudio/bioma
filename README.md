@@ -125,15 +125,9 @@ curl -X POST http://localhost:8080/upload -H "Content-Type: multipart/form-data"
 ### Index some files:
 
 ```bash
-curl -X POST http://localhost:8080/index_files -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 # or
-curl -X POST http://localhost:8080/index_files -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
-```
-
-### Index some images:
-
-```bash
-curl -X POST http://localhost:8080/index_images -H "Content-Type: application/json" -d '{"images": [{"path": "/path/to/image.jpg", "caption": "A beautiful image"}]}'
+curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
