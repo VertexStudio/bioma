@@ -1,5 +1,5 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
-use crate::indexer::{ChunkMetadata, ImageMetadata};
+use crate::indexer::{ContentType, ImageMetadata, TextChunkMetadata};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -73,7 +73,7 @@ pub struct Context {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContextMetadata {
-    Text(ChunkMetadata),
+    Text(TextChunkMetadata),
     Image(ImageMetadata),
 }
 
@@ -91,12 +91,19 @@ impl RetrievedContext {
             if let Some(metadata) = &context.metadata {
                 match metadata {
                     ContextMetadata::Text(text_metadata) => {
-                        context_content.push_str(&format!("Source: {}\n", text_metadata.source));
-                        context_content.push_str(&format!("Type: {}\n", text_metadata.text_type));
+                        context_content.push_str(&format!("Source: {}\n", text_metadata.base.source));
+                        context_content.push_str(&format!("URI: {}\n", text_metadata.base.uri));
+                        match &text_metadata.base.content_type {
+                            ContentType::Text(text_type) => {
+                                context_content.push_str(&format!("Type: {}\n", text_type));
+                            }
+                            _ => unreachable!(), // This shouldn't happen due to the enum variant
+                        }
                         context_content.push_str(&format!("Chunk: {}\n\n", text_metadata.chunk_number));
                     }
                     ContextMetadata::Image(image_metadata) => {
-                        context_content.push_str(&format!("Source: {}\n", image_metadata.source));
+                        context_content.push_str(&format!("Source: {}\n", image_metadata.base.source));
+                        context_content.push_str(&format!("URI: {}\n", image_metadata.base.uri));
                         context_content.push_str(&format!("Format: {}\n", image_metadata.format));
                         context_content.push_str(&format!(
                             "Dimensions: {}x{}\n",
