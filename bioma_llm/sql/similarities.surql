@@ -4,7 +4,7 @@ SELECT * FROM (
         vector::similarity::cosine(embedding, $query) AS similarity,
         metadata,
         id.tag AS tag
-    FROM type::table($table)
+    FROM type::table($prefix + "_embedding")
 ) WHERE
     (tag IS NONE OR tag = $tag)
     AND (similarity > $threshold)

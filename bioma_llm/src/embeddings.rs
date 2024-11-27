@@ -115,7 +115,7 @@ pub struct Similarity {
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
     #[builder(default = "clip_vit_b32".to_string())]
-    table_name_prefix: String,
+    pub table_name_prefix: String,
     #[builder(default = Model::ClipVitB32Text)]
     pub text_model: Model,
     #[builder(default = ImageModel::ClipVitB32Vision)]
@@ -185,6 +185,7 @@ impl Message<TopK> for Embeddings {
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
             .bind(("threshold", message.threshold))
+            .bind(("prefix", self.table_name_prefix.clone()))
             .await
             .map_err(SystemActorError::from)?;
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
@@ -238,6 +239,7 @@ impl Message<StoreEmbeddings> for Embeddings {
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
                 .bind(("source", message.source.clone()))
+                .bind(("prefix", self.table_name_prefix.clone()))
                 .await
                 .map_err(SystemActorError::from)?;
         }
