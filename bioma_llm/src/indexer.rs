@@ -481,7 +481,13 @@ impl Message<IndexGlobs> for Indexer {
                         }
                     }
                 } else {
-                    continue;
+                    // Handle files without extensions as text
+                    let chunk_config =
+                        (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size);
+                    match tokio::fs::read_to_string(&pathbuf).await {
+                        Ok(content) => Content::Text { content, text_type: TextType::Text, chunk_config },
+                        Err(_) => continue,
+                    }
                 };
 
                 match self.index_content(ctx, source, uri, content, embeddings_id).await? {
