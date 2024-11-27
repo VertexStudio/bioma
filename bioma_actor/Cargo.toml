@@ -15,7 +15,6 @@ indexmap = { workspace = true, features = ["serde"] }
 futures = { workspace = true }
 humantime = { workspace = true }
 humantime-serde = { workspace = true }
-jsonpath-rust = { workspace = true }
 tracing = { workspace = true }
 bon = { workspace = true }
 object_store = { workspace = true, features = ["serde", "aws"] }

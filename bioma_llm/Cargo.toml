@@ -16,7 +16,6 @@ indexmap = { version = "2.4", features = ["serde"] }
 futures = { workspace = true }
 humantime = { workspace = true }
 humantime-serde = { workspace = true }
-jsonpath-rust = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
@@ -26,13 +25,13 @@ lazy_static = "1.5.0"
 walkdir = { workspace = true }
 zip = { workspace = true }
 
-ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "a40ea0c3980b85aeba28b077e1673dfba1a4be36", features = [
+ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "56d7ec24e656840a9a81437ea4324d0fcc2189c6", features = [
     "function-calling",
 ] }
 hf-hub = "0.3.2"
-# fastembed = "4"
+fastembed = "4.3"
 # fastembed = { path = "../../fastembed-rs" }
-fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "fix/ort-2.0.0-rc.6" }
+# fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "feature/nomic-embed-vision-v1.5" }
 
 text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
@@ -48,18 +47,18 @@ mdka = "1.2"
 bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
 
-ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
     "coreml",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ort = { version = "=2.0.0-rc.6", default-features = false, features = [
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
     "ndarray",
     "cuda",
 ] }
