@@ -189,6 +189,10 @@ pub struct Retriever {
     pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
     rerank_id: Option<ActorId>,
+    #[serde(skip)]
+    embeddings_handle: Option<tokio::task::JoinHandle<()>>,
+    #[serde(skip)]
+    rerank_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for Retriever {
@@ -199,6 +203,8 @@ impl Default for Retriever {
             tag: DEFAULT_RETRIEVER_TAG.into(),
             embeddings_id: None,
             rerank_id: None,
+            embeddings_handle: None,
+            rerank_handle: None,
         }
     }
 }
@@ -207,6 +213,24 @@ impl Actor for Retriever {
     type Error = RetrieverError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), RetrieverError> {
+        self.init(ctx).await?;
+
+        // Start the message stream
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(input) = frame.is::<RetrieveContext>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Retriever {
+    pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), RetrieverError> {
         let self_id = ctx.id().clone();
         let embeddings_id = ActorId::of::<Embeddings>(format!("{}/embeddings", self_id.name()));
         let rerank_id = ActorId::of::<Rerank>(format!("{}/rerank", self_id.name()));
@@ -246,20 +270,11 @@ impl Actor for Retriever {
             }
         });
 
+        self.embeddings_handle = Some(embeddings_handle);
+        self.rerank_handle = Some(rerank_handle);
+
         info!("Retriever ready");
 
-        // Start the message stream
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<RetrieveContext>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            }
-        }
-        embeddings_handle.abort();
-        rerank_handle.abort();
         Ok(())
     }
 }

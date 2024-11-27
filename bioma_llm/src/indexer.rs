@@ -508,6 +508,10 @@ pub struct Indexer {
     pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
     pdf_analyzer_id: Option<ActorId>,
+    #[serde(skip)]
+    pdf_analyzer_handle: Option<tokio::task::JoinHandle<()>>,
+    #[serde(skip)]
+    embeddings_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for Indexer {
@@ -518,6 +522,8 @@ impl Default for Indexer {
             tag: DEFAULT_INDEXER_TAG.into(),
             embeddings_id: None,
             pdf_analyzer_id: None,
+            pdf_analyzer_handle: None,
+            embeddings_handle: None,
         }
     }
 }
@@ -526,6 +532,30 @@ impl Actor for Indexer {
     type Error = IndexerError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
+        self.init(ctx).await?;
+
+        // Start the message stream
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(input) = frame.is::<IndexGlobs>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<DeleteSource>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Indexer {
+    pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
         // Used to namespace child actors
         let self_id = ctx.id().clone();
 
@@ -569,26 +599,11 @@ impl Actor for Indexer {
             }
         });
 
+        self.pdf_analyzer_handle = Some(pdf_analyzer_handle);
+        self.embeddings_handle = Some(embeddings_handle);
+
         info!("Indexer ready");
 
-        // Start the message stream
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<IndexGlobs>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<DeleteSource>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            }
-        }
-
-        embeddings_handle.abort();
-        pdf_analyzer_handle.abort();
         Ok(())
     }
 }
