@@ -378,7 +378,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     }
                     SpawnExistsOptions::Restore => {
                         // Restore the actor by loading its state from the database
-                        let actor: Self = serde_json::from_value(actor_record.state).map_err(SystemActorError::from)?;
+                        let actor_state = actor_record.state.unwrap_or(serde_json::Value::Null);
+                        let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
                         let ctx =
                             ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
@@ -393,7 +394,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
 
             // Create or update actor record in the database
-            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: actor_state };
+            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: Some(actor_state) };
             let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
@@ -447,7 +448,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let record_id = ctx.id().record_id();
 
             // Update actor record in the database
-            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: actor_state };
+            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: Some(actor_state) };
 
             let _record: Option<Record> =
                 ctx.engine().db().update(&record_id).content(content).await.map_err(SystemActorError::from)?;
@@ -462,7 +463,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
 pub struct ActorRecord {
     id: RecordId,
     tag: Cow<'static, str>,
-    state: Value,
+    state: Option<Value>,
 }
 
 /// Context for an actor, that binds an actor to its engine
