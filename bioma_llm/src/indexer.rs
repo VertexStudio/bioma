@@ -619,6 +619,7 @@ impl Message<DeleteSource> for Indexer {
                 .query(query)
                 .bind(("source", full_source.clone()))
                 .bind(("tag", self.tag.clone()))
+                .bind(("prefix", self.embeddings.table_name_prefix.clone()))
                 .await
                 .map_err(SystemActorError::from)?;
 
