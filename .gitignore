@@ -8,3 +8,5 @@ bioma_js/node_modules
 # Not platform agnostic yet, so ignore it
 uv.lock
 .python-version
+
+*.log
