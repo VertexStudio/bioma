@@ -30,38 +30,18 @@ use zip::ZipArchive;
 /// Upload a file:
 /// curl -X POST http://localhost:8080/upload -F 'file=@/Users/rozgo/BiomaAI/bioma/README.md' -F 'metadata={"path": "temp0/temp1/README.md"};type=application/json'
 
+struct ActorHandle<T: Actor> {
+    ctx: Mutex<ActorContext<T>>,
+    actor: Mutex<T>,
+}
+
 struct AppState {
     engine: Engine,
-    indexer_actor: Arc<IndexerActor>,
-    retriever_actor: Arc<RetrieverActor>,
-    embeddings_actor: Arc<EmbeddingsActor>,
-    rerank_actor: Arc<RerankActor>,
-    chat_actor: Arc<ChatActor>,
-}
-
-struct IndexerActor {
-    indexer_ctx: Mutex<ActorContext<Indexer>>,
-    indexer_actor: Mutex<Indexer>,
-}
-
-struct RetrieverActor {
-    retriever_ctx: Mutex<ActorContext<Retriever>>,
-    retriever_actor: Mutex<Retriever>,
-}
-
-struct EmbeddingsActor {
-    embeddings_ctx: Mutex<ActorContext<Embeddings>>,
-    embeddings_actor: Mutex<Embeddings>,
-}
-
-struct RerankActor {
-    rerank_ctx: Mutex<ActorContext<Rerank>>,
-    rerank_actor: Mutex<Rerank>,
-}
-
-struct ChatActor {
-    chat_ctx: Mutex<ActorContext<Chat>>,
-    chat_actor: Mutex<Chat>,
+    indexer_actor: Arc<ActorHandle<Indexer>>,
+    retriever_actor: Arc<ActorHandle<Retriever>>,
+    embeddings_actor: Arc<ActorHandle<Embeddings>>,
+    rerank_actor: Arc<ActorHandle<Rerank>>,
+    chat_actor: Arc<ActorHandle<Chat>>,
 }
 
 async fn health() -> impl Responder {
@@ -204,8 +184,8 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
 }
 
 async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.indexer_ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.indexer_actor.lock().await;
+    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
+    let mut indexer_actor = data.indexer_actor.actor.lock().await;
 
     let index_globs = body.clone();
 
@@ -218,8 +198,8 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
 }
 
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
-    let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
-    let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+    let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+    let mut retriever_actor = data.retriever_actor.actor.lock().await;
 
     let retrieve_context = body.clone();
 
@@ -257,8 +237,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+        let mut retriever_actor = data.retriever_actor.actor.lock().await;
         let retrieve_context = RetrieveContext { query: query.clone(), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
@@ -288,8 +268,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             info!("Sending context to chat actor");
             let chat_response = {
-                let mut chat_ctx = data.chat_actor.chat_ctx.lock().await;
-                let mut chat_actor = data.chat_actor.chat_actor.lock().await;
+                let mut chat_ctx = data.chat_actor.ctx.lock().await;
+                let mut chat_actor = data.chat_actor.actor.lock().await;
                 chat_actor
                     .handle(
                         &mut chat_ctx,
@@ -325,8 +305,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+        let mut retriever_actor = data.retriever_actor.actor.lock().await;
         let retrieve_context = RetrieveContext { query: body.query.clone(), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
@@ -354,8 +334,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             // Sending context and user query to chat actor
             info!("Sending context to chat actor");
             let chat_response = {
-                let mut chat_ctx = data.chat_actor.chat_ctx.lock().await;
-                let mut chat_actor = data.chat_actor.chat_actor.lock().await;
+                let mut chat_ctx = data.chat_actor.ctx.lock().await;
+                let mut chat_actor = data.chat_actor.actor.lock().await;
                 chat_actor
                     .handle(
                         &mut chat_ctx,
@@ -384,8 +364,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.indexer_ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.indexer_actor.lock().await;
+    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
+    let mut indexer_actor = data.indexer_actor.actor.lock().await;
 
     let delete_source = body.clone();
 
@@ -414,8 +394,8 @@ struct EmbeddingsQuery {
 }
 
 async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
-    let mut embeddings_actor = data.embeddings_actor.embeddings_actor.lock().await;
-    let mut embeddings_ctx = data.embeddings_actor.embeddings_ctx.lock().await;
+    let mut embeddings_actor = data.embeddings_actor.actor.lock().await;
+    let mut embeddings_ctx = data.embeddings_actor.ctx.lock().await;
 
     if body.model != "nomic-embed-text" {
         return HttpResponse::BadRequest().body("Invalid model");
@@ -461,8 +441,8 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
 
-    let mut rerank_actor = data.rerank_actor.rerank_actor.lock().await;
-    let mut rerank_ctx = data.rerank_actor.rerank_ctx.lock().await;
+    let mut rerank_actor = data.rerank_actor.actor.lock().await;
+    let mut rerank_ctx = data.rerank_actor.ctx.lock().await;
 
     println!("Rerank query: {:#?}", body.query);
     println!("Rerank texts: {:#?}", body.texts);
@@ -523,7 +503,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     indexer_actor.init(&mut indexer_ctx).await.unwrap();
 
     let indexer_actor =
-        Arc::new(IndexerActor { indexer_ctx: Mutex::new(indexer_ctx), indexer_actor: Mutex::new(indexer_actor) });
+        Arc::new(ActorHandle::<Indexer> { ctx: Mutex::new(indexer_ctx), actor: Mutex::new(indexer_actor) });
 
     // Retriever
     let retriever_actor_id = ActorId::of::<Retriever>("/rag/retriever");
@@ -538,10 +518,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     retriever_actor.init(&mut retriever_ctx).await.unwrap();
 
-    let retriever_actor = Arc::new(RetrieverActor {
-        retriever_ctx: Mutex::new(retriever_ctx),
-        retriever_actor: Mutex::new(retriever_actor),
-    });
+    let retriever_actor =
+        Arc::new(ActorHandle::<Retriever> { ctx: Mutex::new(retriever_ctx), actor: Mutex::new(retriever_actor) });
 
     let chat = Chat::builder().model("llama3.2".into()).build();
 
@@ -557,7 +535,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     chat_actor.init(&mut chat_ctx).await.unwrap();
 
-    let chat_actor = Arc::new(ChatActor { chat_ctx: Mutex::new(chat_ctx), chat_actor: Mutex::new(chat_actor) });
+    let chat_actor = Arc::new(ActorHandle::<Chat> { ctx: Mutex::new(chat_ctx), actor: Mutex::new(chat_actor) });
 
     // Embeddings
     let embeddings_actor_id = ActorId::of::<Embeddings>("/rag/embeddings");
@@ -572,10 +550,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     embeddings_actor.init(&mut embeddings_ctx).await.unwrap();
 
-    let embeddings_actor = Arc::new(EmbeddingsActor {
-        embeddings_ctx: Mutex::new(embeddings_ctx),
-        embeddings_actor: Mutex::new(embeddings_actor),
-    });
+    let embeddings_actor =
+        Arc::new(ActorHandle::<Embeddings> { ctx: Mutex::new(embeddings_ctx), actor: Mutex::new(embeddings_actor) });
 
     // Rerank
     let rerank_actor_id = ActorId::of::<Rerank>("/rag/rerank");
@@ -590,8 +566,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     rerank_actor.init(&mut rerank_ctx).await.unwrap();
 
-    let rerank_actor =
-        Arc::new(RerankActor { rerank_ctx: Mutex::new(rerank_ctx), rerank_actor: Mutex::new(rerank_actor) });
+    let rerank_actor = Arc::new(ActorHandle::<Rerank> { ctx: Mutex::new(rerank_ctx), actor: Mutex::new(rerank_actor) });
 
     // Create the app state
     let data = web::Data::new(AppState {
