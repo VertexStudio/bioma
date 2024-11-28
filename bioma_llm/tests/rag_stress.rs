@@ -11,9 +11,15 @@ async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
         .header("Content-Type", "application/json")
         .body(payload.to_string());
 
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).build();
+    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Ask").build();
 
-    let _goose = user.request(goose_request).await?;
+    let mut goose = user.request(goose_request).await?;
+
+    if let Ok(response) = &goose.response {
+        if !response.status().is_success() {
+            return user.set_failure("ask request failed", &mut goose.request, Some(response.headers()), None);
+        }
+    }
 
     Ok(())
 }
@@ -30,9 +36,15 @@ async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
         .header("Content-Type", "application/json")
         .body(payload.to_string());
 
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).build();
+    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Retrieve").build();
 
-    let _goose = user.request(goose_request).await?;
+    let mut goose = user.request(goose_request).await?;
+
+    if let Ok(response) = &goose.response {
+        if !response.status().is_success() {
+            return user.set_failure("retrieve request failed", &mut goose.request, Some(response.headers()), None);
+        }
+    }
 
     Ok(())
 }
@@ -52,9 +64,15 @@ async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
         .header("Content-Type", "application/json")
         .body(payload.to_string());
 
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).build();
+    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Rerank").build();
 
-    let _goose = user.request(goose_request).await?;
+    let mut goose = user.request(goose_request).await?;
+
+    if let Ok(response) = &goose.response {
+        if !response.status().is_success() {
+            return user.set_failure("rerank request failed", &mut goose.request, Some(response.headers()), None);
+        }
+    }
 
     Ok(())
 }
@@ -66,11 +84,13 @@ async fn test_stress_rag_server() -> Result<(), GooseError> {
         .set_default(GooseDefault::Users, 10)?
         .set_default(GooseDefault::RunTime, 60)?
         .set_default(GooseDefault::RequestLog, "../.output/requests.log")?
+        .set_default(GooseDefault::ReportFile, "../.output/report.html")?
+        .set_default(GooseDefault::RunningMetrics, 15)?
         .register_scenario(
-            scenario!("LoadTest")
-                .register_transaction(transaction!(load_test_ask))
-                .register_transaction(transaction!(load_test_retrieve))
-                .register_transaction(transaction!(load_test_rerank)),
+            scenario!("RAG Load Test")
+                .register_transaction(transaction!(load_test_ask).set_name("Ask").set_weight(3)?)
+                .register_transaction(transaction!(load_test_retrieve).set_name("Retrieve").set_weight(2)?)
+                .register_transaction(transaction!(load_test_rerank).set_name("Rerank").set_weight(1)?),
         )
         .execute()
         .await?;
