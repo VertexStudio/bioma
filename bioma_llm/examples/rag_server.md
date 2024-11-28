@@ -69,6 +69,12 @@ graph TD
         direction TB
         FileReader[Content Extractor]
         TypeDetector[Content Type Detector]
+
+        subgraph PdfToMarkdown[" "]
+            direction TB
+            PdfAnalyzer[Pdf Analyzer]
+            JsonToMarkdown[JSON to Markdown]
+        end
         
         subgraph Splitters["AST"]
             direction LR
@@ -108,8 +114,13 @@ graph TD
 
     RawDocs --> FileReader
     FileReader --> TypeDetector
+    TypeDetector -->|PDF| PdfAnalyzer
+
+    PdfAnalyzer -->|JSON| JsonToMarkdown
+
     TypeDetector -->|Text| TextSplitter
     TypeDetector -->|Markdown| MarkdownSplitter
+    JsonToMarkdown --> |Markdown| MarkdownSplitter
     TypeDetector -->|Code| CodeSplitter
     
     TextSplitter --> ChunkGenerator
