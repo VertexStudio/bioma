@@ -1,6 +1,7 @@
 # Agentic RAG Server
 
 ## System Architecture
+
 ```mermaid
 graph TB
     Client[Client]
