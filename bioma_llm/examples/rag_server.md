@@ -82,6 +82,7 @@ graph TD
             TextSplitter[Text Splitter]
             MarkdownSplitter[Markdown Splitter]
             CodeSplitter[Code Splitter]
+            CueSplitter[CUE Splitter]
         end
         
         ChunkGenerator[Chunk Generator]
@@ -121,12 +122,14 @@ graph TD
 
     TypeDetector -->|Text| TextSplitter
     TypeDetector -->|Markdown| MarkdownSplitter
-    JsonToMarkdown --> |Markdown| MarkdownSplitter
+    JsonToMarkdown -->|Markdown| MarkdownSplitter
     TypeDetector -->|Code| CodeSplitter
+    TypeDetector -->|CUE| CueSplitter
     
     TextSplitter --> ChunkGenerator
     MarkdownSplitter --> ChunkGenerator
     CodeSplitter --> ChunkGenerator
+    CueSplitter --> ChunkGenerator
     
     ChunkGenerator --> EmbeddingModel
     EmbeddingModel --> SurrealDB
