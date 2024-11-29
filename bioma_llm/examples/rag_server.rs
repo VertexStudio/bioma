@@ -588,7 +588,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .app_data(data.clone())
             .app_data(
                 actix_multipart::form::MultipartFormConfig::default()
-                    .memory_limit(50 * 1024 * 1024) //
+                    .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
             .route("/health", web::get().to(health))
