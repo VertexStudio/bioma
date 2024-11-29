@@ -116,8 +116,7 @@ pub struct Similarity {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = "nomic_embed_v15".to_string())]
-    pub table_name_prefix: String,
+    pub table_name_prefix: Option<String>,
     #[builder(default = Model::NomicEmbedTextV15)]
     pub model: Model,
     #[builder(default = ImageModel::NomicEmbedVisionV15)]
@@ -151,7 +150,11 @@ impl Clone for Embeddings {
 
 impl Default for Embeddings {
     fn default() -> Self {
-        Self::builder().build()
+        let mut embeddings = Self::builder().build();
+        if embeddings.table_name_prefix.is_none() {
+            embeddings.table_name_prefix = Some(embeddings.model.to_string());
+        }
+        embeddings
     }
 }
 
@@ -425,7 +428,7 @@ impl Embeddings {
 
                 // Define schema
                 let schema_def = include_str!("../sql/def.surql")
-                    .replace("{prefix}", &self.table_name_prefix)
+                    .replace("{prefix}", &self.table_name_prefix.as_ref().unwrap())
                     .replace("{dim}", &text_model_info.dim.to_string());
 
                 // Execute the schema definition
