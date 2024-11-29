@@ -79,7 +79,8 @@ pub struct FrameMessage {
     /// Receiver
     pub rx: RecordId,
     /// Message content
-    pub msg: Option<Value>,
+    #[serde(default)]
+    pub msg: Value,
 }
 
 impl FrameMessage {
@@ -99,7 +100,7 @@ impl FrameMessage {
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
     {
         if self.name == std::any::type_name::<M>() {
-            serde_json::from_value(self.msg.clone().unwrap_or(serde_json::Value::Null)).ok()
+            serde_json::from_value(self.msg.clone()).ok()
         } else {
             None
         }
@@ -118,9 +119,11 @@ pub struct FrameReply {
     /// Receiver
     pub rx: RecordId,
     /// Message content
-    pub msg: Option<Value>,
+    #[serde(default)]
+    pub msg: Value,
     /// Error message
-    pub err: Option<Value>,
+    #[serde(default)]
+    pub err: Value,
 }
 
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<FrameMessage, SystemActorError>> + Send>>;
@@ -378,7 +381,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     }
                     SpawnExistsOptions::Restore => {
                         // Restore the actor by loading its state from the database
-                        let actor_state = actor_record.state.unwrap_or(serde_json::Value::Null);
+                        let actor_state = actor_record.state;
                         let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
                         let ctx =
@@ -394,7 +397,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
 
             // Create or update actor record in the database
-            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: Some(actor_state) };
+            let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: actor_state };
             let _record: Option<Record> =
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
@@ -448,7 +451,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let record_id = ctx.id().record_id();
 
             // Update actor record in the database
-            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: Some(actor_state) };
+            let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: actor_state };
 
             let _record: Option<Record> =
                 ctx.engine().db().update(&record_id).content(content).await.map_err(SystemActorError::from)?;
@@ -463,7 +466,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
 pub struct ActorRecord {
     id: RecordId,
     tag: Cow<'static, str>,
-    state: Option<Value>,
+    #[serde(default)]
+    state: Value,
 }
 
 /// Context for an actor, that binds an actor to its engine
@@ -532,7 +536,7 @@ impl<T: Actor> ActorContext<T> {
             name: name.into(),
             tx: self.id().record_id(),
             rx: to.record_id(),
-            msg: Some(msg_value.clone()),
+            msg: msg_value.clone(),
         };
 
         debug!("[{}] msg-send {} {} {} {}", &self.id().record_id(), name, &request.id, &to.record_id(), &msg_value);
@@ -711,24 +715,17 @@ impl<T: Actor> ActorContext<T> {
         let response = match notification.action {
             Action::Create => {
                 let data = &notification.data;
-                debug!(
-                    "[{}] msg-done {} {} {} {}",
-                    &self.id().record_id(),
-                    &data.name,
-                    &data.id,
-                    &data.rx,
-                    &data.msg.as_ref().unwrap_or(&serde_json::Value::Null)
-                );
+                debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
                 Ok(data.clone())
             }
             _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
         }?;
 
-        if let Some(err) = response.err {
-            return Err(SystemActorError::MessageReply(err.to_string().into()));
+        if !response.err.is_null() {
+            return Err(SystemActorError::MessageReply(response.err.to_string().into()));
         }
 
-        let response = response.msg.unwrap_or(serde_json::Value::Null);
+        let response = response.msg;
         let response = serde_json::from_value(response)?;
         Ok(response)
     }
@@ -768,9 +765,9 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let (msg_value, err_value) = match message {
-            Ok(msg) => (Some(serde_json::to_value(&msg)?), None),
-            Err(err) => (None, Some(serde_json::to_value(&err.to_string())?)),
+        let msg_value = match message {
+            Ok(msg) => serde_json::to_value(&msg)?,
+            Err(err) => serde_json::to_value(&err.to_string())?,
         };
 
         // Use the request id as the reply id
@@ -787,17 +784,10 @@ impl<T: Actor> ActorContext<T> {
             tx: request.rx.clone(),
             rx: request.tx.clone(),
             msg: msg_value.clone(),
-            err: err_value.clone(),
+            err: serde_json::Value::Null,
         };
 
-        debug!(
-            "[{}] msg-rply {} {} {} {}",
-            &self.id().record_id(),
-            &reply.name,
-            &reply_id,
-            &reply.tx,
-            &msg_value.as_ref().unwrap_or(&serde_json::Value::Null)
-        );
+        debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &reply.msg);
 
         let reply_query = include_str!("../sql/reply.surql");
 
@@ -860,7 +850,7 @@ impl<T: Actor> ActorContext<T> {
                         &frame.id,
                         &frame.tx,
                         &frame.rx,
-                        &frame.msg.as_ref().unwrap_or(&serde_json::Value::Null)
+                        &frame.msg
                     );
                 }
                 Err(error) => debug!("msg-recv {} {:?}", self_id.record_id(), error),
