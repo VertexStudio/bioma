@@ -45,6 +45,7 @@ pub struct RetrieveContext {
     #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
     #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
+    pub sources: Option<Vec<String>>,
 }
 
 fn default_retriever_limit() -> usize {
