@@ -5,67 +5,29 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use indexer::ContentType;
-use retriever::QueryType;
+use retriever::ContextMetadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-use walkdir::WalkDir;
-use zip::ZipArchive;
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
-/// CURL examples:
-///
-/// Reset the engine:
-/// curl -X POST http://localhost:8080/reset
-///
-/// Index some files:
-/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
-///
-/// Retrieve context:
-/// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
-///
-/// Ask a question:
-/// curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
-///
-/// Upload a file:
-/// curl -X POST http://localhost:8080/upload -F 'file=@/Users/rozgo/BiomaAI/bioma/README.md' -F 'metadata={"path": "temp0/temp1/README.md"};type=application/json'
+/// CURL (examples)[docs/examples.sh]
+
+struct ActorHandle<T: Actor> {
+    ctx: Mutex<ActorContext<T>>,
+    actor: Mutex<T>,
+}
 
 struct AppState {
     engine: Engine,
-    indexer_actor: Arc<IndexerActor>,
-    retriever_actor: Arc<RetrieverActor>,
-    embeddings_actor: Arc<EmbeddingsActor>,
-    rerank_actor: Arc<RerankActor>,
-    chat_actor: Arc<ChatActor>,
-}
-
-struct IndexerActor {
-    indexer_ctx: Mutex<ActorContext<Indexer>>,
-    indexer_actor: Mutex<Indexer>,
-}
-
-struct RetrieverActor {
-    retriever_ctx: Mutex<ActorContext<Retriever>>,
-    retriever_actor: Mutex<Retriever>,
-}
-
-struct EmbeddingsActor {
-    embeddings_ctx: Mutex<ActorContext<Embeddings>>,
-    embeddings_actor: Mutex<Embeddings>,
-}
-
-struct RerankActor {
-    rerank_ctx: Mutex<ActorContext<Rerank>>,
-    rerank_actor: Mutex<Rerank>,
-}
-
-struct ChatActor {
-    chat_ctx: Mutex<ActorContext<Chat>>,
-    chat_actor: Mutex<Chat>,
+    indexer_actor: Arc<ActorHandle<Indexer>>,
+    retriever_actor: Arc<ActorHandle<Retriever>>,
+    embeddings_actor: Arc<ActorHandle<Embeddings>>,
+    rerank_actor: Arc<ActorHandle<Rerank>>,
+    chat_actor: Arc<ActorHandle<Chat>>,
 }
 
 async fn health() -> impl Responder {
@@ -116,13 +78,11 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
 
-    // If uploading a zip file but target doesn't end in .zip, append original filename
+    // Determine the target path for the file
     let temp_file_path = if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
         if target_dir.extension().map_or(false, |ext| ext == "zip") {
-            // If target ends in .zip, use it directly
             output_dir.join(&target_dir)
         } else {
-            // If target is a directory, append the original filename
             let original_name =
                 form.file.file_name.as_ref().map(|name| name.to_string()).unwrap_or_else(|| "uploaded.zip".to_string());
             output_dir.join(&target_dir).join(original_name)
@@ -131,134 +91,118 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
         output_dir.join(&target_dir)
     };
 
-    // Create parent directory if it doesn't exist
-    if let Err(e) = tokio::fs::create_dir_all(temp_file_path.parent().unwrap_or(&temp_file_path)).await {
-        error!("Failed to create target directory: {}", e);
+    // Create parent directory
+    if let Some(parent) = temp_file_path.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            error!("Failed to create target directory: {}", e);
+            return HttpResponse::InternalServerError().json(json!({
+                "error": "Failed to create target directory",
+                "details": e.to_string()
+            }));
+        }
+    }
+
+    // Create a temporary file for the upload
+    let temp_path = std::env::temp_dir().join(format!("upload_{}", uuid::Uuid::new_v4()));
+
+    // Copy the uploaded content to the temporary file using tokio
+    if let Err(e) = tokio::fs::copy(&form.file.file.path(), &temp_path).await {
+        error!("Failed to copy uploaded file: {}", e);
         return HttpResponse::InternalServerError().json(json!({
-            "error": "Failed to create target directory",
+            "error": "Failed to copy uploaded file",
             "details": e.to_string()
         }));
     }
 
-    match form.file.file.persist(&temp_file_path) {
-        Ok(_) => {
-            info!("File uploaded successfully to temporary location");
+    let temp_path_clone = temp_path.clone();
+    let temp_file_path_clone = temp_file_path.clone();
 
-            let (message, paths) = if temp_file_path.extension().map_or(false, |ext| ext == "zip") {
-                let file = match std::fs::File::open(&temp_file_path) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        error!("Error opening zip file: {:?}", e);
-                        return HttpResponse::InternalServerError().json(json!({
-                            "error": "Failed to open zip file",
-                            "details": e.to_string()
-                        }));
-                    }
-                };
+    if temp_file_path.extension().map_or(false, |ext| ext == "zip") {
+        // Handle zip file
+        let extract_result = tokio::task::spawn_blocking(
+            move || -> Result<Vec<std::path::PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
+                let file = std::fs::File::open(&temp_path_clone)?;
+                let mut archive = zip::ZipArchive::new(file)?;
 
-                let mut archive = match ZipArchive::new(file) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        error!("Error creating zip archive: {:?}", e);
-                        return HttpResponse::InternalServerError().json(json!({
-                            "error": "Failed to read zip archive",
-                            "details": e.to_string()
-                        }));
-                    }
-                };
+                // Extract to the parent directory of the zip file
+                let extract_to = temp_file_path_clone.parent().unwrap_or(&temp_file_path_clone);
 
-                // Extract to directory based on the metadata path (without .zip extension)
-                let extract_to = if let Some(parent) = target_dir.parent() {
-                    if let Some(stem) = target_dir.file_stem() {
-                        output_dir.join(parent).join(stem)
-                    } else {
-                        output_dir.join(parent)
-                    }
-                } else {
-                    output_dir.join(target_dir.file_stem().unwrap_or_default())
-                };
-
-                // Extract files one by one to avoid the extra subdirectory
+                // Get list of files that will be extracted
+                let mut extracted_files = Vec::new();
                 for i in 0..archive.len() {
-                    let mut file = archive.by_index(i).unwrap();
-                    let outpath = match file.enclosed_name() {
-                        Some(path) => {
-                            let path_str = path.to_string_lossy();
-                            // Skip the root directory if it exists
-                            let cleaned_path = path_str.split('/').skip(1).collect::<Vec<_>>().join("/");
-                            if cleaned_path.is_empty() {
-                                continue;
-                            }
-                            extract_to.join(cleaned_path)
-                        }
-                        None => continue,
-                    };
-
-                    if file.is_dir() {
-                        match std::fs::create_dir_all(&outpath) {
-                            Ok(_) => (),
-                            Err(e) => {
-                                error!("Failed to create directory {}: {}", outpath.display(), e);
-                                continue;
-                            }
-                        }
-                    } else {
-                        if let Some(p) = outpath.parent() {
-                            match std::fs::create_dir_all(p) {
-                                Ok(_) => (),
-                                Err(e) => {
-                                    error!("Failed to create directory {}: {}", p.display(), e);
-                                    continue;
-                                }
-                            }
-                        }
-                        let mut outfile = match std::fs::File::create(&outpath) {
-                            Ok(f) => f,
-                            Err(e) => {
-                                error!("Failed to create file {}: {}", outpath.display(), e);
-                                continue;
-                            }
-                        };
-                        if let Err(e) = std::io::copy(&mut file, &mut outfile) {
-                            error!("Failed to copy to {}: {}", outpath.display(), e);
-                            continue;
-                        }
+                    let file = archive.by_index(i)?;
+                    if !file.name().ends_with('/') {
+                        // Skip directories
+                        let outpath = extract_to.join(file.name());
+                        extracted_files.push(outpath);
                     }
                 }
 
-                // Delete the temporary zip file after extraction
-                if let Err(e) = std::fs::remove_file(&temp_file_path) {
-                    warn!("Error removing temporary zip file: {:?}", e);
-                }
+                // Now perform the extraction
+                archive.extract(extract_to)?;
 
-                let mut files = Vec::new();
-                // Walk through the extracted directory
-                for entry in WalkDir::new(&extract_to).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() {
-                        files.push(entry.path().to_path_buf());
-                    }
-                }
+                Ok(extracted_files)
+            },
+        )
+        .await;
 
-                (format!("Zip file extracted {} files successfully", files.len()), files)
-            } else {
-                ("File uploaded successfully".to_string(), vec![temp_file_path])
-            };
+        // Clean up temporary file
+        let _ = tokio::fs::remove_file(&temp_path).await;
 
-            HttpResponse::Ok().json(Uploaded { message, paths, size: form.file.size })
+        match extract_result {
+            Ok(Ok(files)) => HttpResponse::Ok().json(Uploaded {
+                message: format!("Zip file extracted {} files successfully", files.len()),
+                paths: files,
+                size: form.file.size,
+            }),
+            Ok(Err(e)) => {
+                error!("Error extracting zip file: {:?}", e);
+                HttpResponse::InternalServerError().json(json!({
+                    "error": "Failed to extract zip archive",
+                    "details": e.to_string()
+                }))
+            }
+            Err(e) => {
+                error!("Task error: {:?}", e);
+                HttpResponse::InternalServerError().json(json!({
+                    "error": "Internal server error",
+                    "details": e.to_string()
+                }))
+            }
         }
-        Err(e) => {
-            error!("Error saving file: {:?}", e);
-            HttpResponse::InternalServerError().json(json!({
-                "error": "Failed to save uploaded file",
-                "details": e.to_string()
-            }))
+    } else {
+        // Handle regular file
+        match tokio::fs::rename(&temp_path, &temp_file_path).await {
+            Ok(_) => HttpResponse::Ok().json(Uploaded {
+                message: "File uploaded successfully".to_string(),
+                paths: vec![temp_file_path],
+                size: form.file.size,
+            }),
+            Err(e) => {
+                error!("Error moving file: {:?}", e);
+                if let Err(copy_err) = tokio::fs::copy(&temp_path, &temp_file_path).await {
+                    error!("Error copying file: {:?}", copy_err);
+                    return HttpResponse::InternalServerError().json(json!({
+                        "error": "Failed to save uploaded file",
+                        "details": copy_err.to_string()
+                    }));
+                }
+                // Clean up source file after successful copy
+                let _ = tokio::fs::remove_file(&temp_path).await;
+
+                HttpResponse::Ok().json(Uploaded {
+                    message: "File uploaded successfully".to_string(),
+                    paths: vec![temp_file_path],
+                    size: form.file.size,
+                })
+            }
         }
     }
 }
 
 async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.indexer_ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.indexer_actor.lock().await;
+    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
+    let mut indexer_actor = data.indexer_actor.actor.lock().await;
 
     let index_globs = body.clone();
 
@@ -271,8 +215,8 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
 }
 
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
-    let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
-    let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
+    let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+    let mut retriever_actor = data.retriever_actor.actor.lock().await;
 
     let retrieve_context = body.clone();
 
@@ -310,9 +254,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
-        let retrieve_context = RetrieveContext { query: QueryType::Text(query.clone()), limit: 5, threshold: 0.0 };
+        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+        let mut retriever_actor = data.retriever_actor.actor.lock().await;
+        let retrieve_context = RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
@@ -329,30 +273,32 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     + &context_content,
             );
 
-            // Handle images with new metadata structure
-            let images = context
-                .context
-                .iter()
-                .filter_map(|ctx| {
-                    if let Some(metadata) = &ctx.metadata {
-                        if matches!(metadata.content_type, ContentType::Image) {
-                            if let Ok(image_data) = std::fs::read(&metadata.source) {
-                                let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                                Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
-                            } else {
-                                None
+            // If there's an image in the context, use only the first one
+            if let Some(ctx) =
+                context.context.iter().find(|ctx| matches!(ctx.metadata, Some(ContextMetadata::Image(_))))
+            {
+                if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
+                    match tokio::fs::read(&image_metadata.source).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    context_message.images =
+                                        Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
                             }
-                        } else {
-                            None
                         }
-                    } else {
-                        None
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
                     }
-                })
-                .collect::<Vec<_>>();
-
-            if !images.is_empty() {
-                context_message.images = Some(images);
+                }
             }
 
             let mut conversation = body.messages.clone();
@@ -364,8 +310,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             info!("Sending context to chat actor");
             let chat_response = {
-                let mut chat_ctx = data.chat_actor.chat_ctx.lock().await;
-                let mut chat_actor = data.chat_actor.chat_actor.lock().await;
+                let mut chat_ctx = data.chat_actor.ctx.lock().await;
+                let mut chat_actor = data.chat_actor.actor.lock().await;
                 chat_actor
                     .handle(
                         &mut chat_ctx,
@@ -401,9 +347,10 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.retriever_ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.retriever_actor.lock().await;
-        let retrieve_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
+        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+        let mut retriever_actor = data.retriever_actor.actor.lock().await;
+        let retrieve_context =
+            RetrieveContext { query: RetrieveQuery::Text(body.query.clone()), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
@@ -422,28 +369,31 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                     + &context_content,
             );
 
-            // Handle images with new metadata structure
-            let images = context
-                .context
-                .iter()
-                .filter_map(|ctx| {
-                    if let Some(metadata) = &ctx.metadata {
-                        if matches!(metadata.content_type, ContentType::Image) {
-                            if let Ok(image_data) = std::fs::read(&metadata.source) {
-                                let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                                Some(ollama_rs::generation::images::Image::from_base64(&base64_data))
-                            } else {
-                                None
+            // Add images to the system message if available
+            let mut images = Vec::new();
+            for ctx in context.context {
+                if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
+                    match tokio::fs::read(&image_metadata.source).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
                             }
-                        } else {
-                            None
                         }
-                    } else {
-                        None
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
                     }
-                })
-                .collect::<Vec<_>>();
-
+                }
+            }
             if !images.is_empty() {
                 context_message.images = Some(images);
             }
@@ -457,8 +407,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             // Sending context and user query to chat actor
             info!("Sending context to chat actor");
             let chat_response = {
-                let mut chat_ctx = data.chat_actor.chat_ctx.lock().await;
-                let mut chat_actor = data.chat_actor.chat_actor.lock().await;
+                let mut chat_ctx = data.chat_actor.ctx.lock().await;
+                let mut chat_actor = data.chat_actor.actor.lock().await;
                 chat_actor
                     .handle(
                         &mut chat_ctx,
@@ -487,8 +437,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.indexer_ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.indexer_actor.lock().await;
+    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
+    let mut indexer_actor = data.indexer_actor.actor.lock().await;
 
     let delete_source = body.clone();
 
@@ -517,8 +467,8 @@ struct EmbeddingsQuery {
 }
 
 async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
-    let mut embeddings_actor = data.embeddings_actor.embeddings_actor.lock().await;
-    let mut embeddings_ctx = data.embeddings_actor.embeddings_ctx.lock().await;
+    let mut embeddings_actor = data.embeddings_actor.actor.lock().await;
+    let mut embeddings_ctx = data.embeddings_actor.ctx.lock().await;
 
     if body.model != "nomic-embed-text" {
         return HttpResponse::BadRequest().body("Invalid model");
@@ -567,8 +517,8 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
 
-    let mut rerank_actor = data.rerank_actor.rerank_actor.lock().await;
-    let mut rerank_ctx = data.rerank_actor.rerank_ctx.lock().await;
+    let mut rerank_actor = data.rerank_actor.actor.lock().await;
+    let mut rerank_ctx = data.rerank_actor.ctx.lock().await;
 
     println!("Rerank query: {:#?}", body.query);
     println!("Rerank texts: {:#?}", body.texts);
@@ -629,7 +579,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     indexer_actor.init(&mut indexer_ctx).await.unwrap();
 
     let indexer_actor =
-        Arc::new(IndexerActor { indexer_ctx: Mutex::new(indexer_ctx), indexer_actor: Mutex::new(indexer_actor) });
+        Arc::new(ActorHandle::<Indexer> { ctx: Mutex::new(indexer_ctx), actor: Mutex::new(indexer_actor) });
 
     // Retriever
     let retriever_actor_id = ActorId::of::<Retriever>("/rag/retriever");
@@ -644,10 +594,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     retriever_actor.init(&mut retriever_ctx).await.unwrap();
 
-    let retriever_actor = Arc::new(RetrieverActor {
-        retriever_ctx: Mutex::new(retriever_ctx),
-        retriever_actor: Mutex::new(retriever_actor),
-    });
+    let retriever_actor =
+        Arc::new(ActorHandle::<Retriever> { ctx: Mutex::new(retriever_ctx), actor: Mutex::new(retriever_actor) });
 
     let chat = Chat::builder().model("llama3.2-vision".into()).build();
 
@@ -663,7 +611,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     chat_actor.init(&mut chat_ctx).await.unwrap();
 
-    let chat_actor = Arc::new(ChatActor { chat_ctx: Mutex::new(chat_ctx), chat_actor: Mutex::new(chat_actor) });
+    let chat_actor = Arc::new(ActorHandle::<Chat> { ctx: Mutex::new(chat_ctx), actor: Mutex::new(chat_actor) });
 
     // Embeddings
     let embeddings_actor_id = ActorId::of::<Embeddings>("/rag/embeddings");
@@ -678,10 +626,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     embeddings_actor.init(&mut embeddings_ctx).await.unwrap();
 
-    let embeddings_actor = Arc::new(EmbeddingsActor {
-        embeddings_ctx: Mutex::new(embeddings_ctx),
-        embeddings_actor: Mutex::new(embeddings_actor),
-    });
+    let embeddings_actor =
+        Arc::new(ActorHandle::<Embeddings> { ctx: Mutex::new(embeddings_ctx), actor: Mutex::new(embeddings_actor) });
 
     // Rerank
     let rerank_actor_id = ActorId::of::<Rerank>("/rag/rerank");
@@ -696,8 +642,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     rerank_actor.init(&mut rerank_ctx).await.unwrap();
 
-    let rerank_actor =
-        Arc::new(RerankActor { rerank_ctx: Mutex::new(rerank_ctx), rerank_actor: Mutex::new(rerank_actor) });
+    let rerank_actor = Arc::new(ActorHandle::<Rerank> { ctx: Mutex::new(rerank_ctx), actor: Mutex::new(rerank_actor) });
 
     // Create the app state
     let data = web::Data::new(AppState {
@@ -717,19 +662,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .wrap(Logger::default())
             .wrap(cors)
             .app_data(data.clone())
+            .app_data(
+                actix_multipart::form::MultipartFormConfig::default()
+                    .memory_limit(50 * 1024 * 1024)
+                    .total_limit(100 * 1024 * 1024),
+            )
             .route("/health", web::get().to(health))
             .route("/hello", web::post().to(hello))
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(self::ask))
-            .route("/chat", web::post().to(self::chat))
+            .route("/api/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/api/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
     })
-    .bind("0.0.0.0:8080")?
+    .bind("0.0.0.0:5766")?
     .run()
     .await;
 

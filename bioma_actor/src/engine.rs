@@ -143,9 +143,9 @@ impl Engine {
     pub async fn reset(&self) -> Result<(), SystemActorError> {
         let db = self.db.clone();
         let db_name = self.options.database.clone();
-        db.use_db("test").await?;
+        let ns_name = self.options.namespace.clone();
         db.query(format!("REMOVE DATABASE `{}`;", db_name)).await?;
-        db.use_ns(self.options.namespace.clone()).use_db(db_name.clone()).await?;
+        db.use_ns(ns_name).use_db(db_name).await?;
         Engine::define(&db).await?;
         Ok(())
     }
