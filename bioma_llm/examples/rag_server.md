@@ -1,6 +1,7 @@
 # Agentic RAG Server
 
 ## System Architecture
+
 ```mermaid
 graph TB
     Client[Client]
@@ -69,12 +70,19 @@ graph TD
         direction TB
         FileReader[Content Extractor]
         TypeDetector[Content Type Detector]
+
+        subgraph PdfToMarkdown[" "]
+            direction TB
+            PdfAnalyzer[Pdf Analyzer]
+            JsonToMarkdown[JSON to Markdown]
+        end
         
         subgraph Splitters["AST"]
             direction LR
             TextSplitter[Text Splitter]
             MarkdownSplitter[Markdown Splitter]
             CodeSplitter[Code Splitter]
+            CueSplitter[CUE Splitter]
         end
         
         ChunkGenerator[Chunk Generator]
@@ -108,13 +116,20 @@ graph TD
 
     RawDocs --> FileReader
     FileReader --> TypeDetector
+    TypeDetector -->|PDF| PdfAnalyzer
+
+    PdfAnalyzer -->|JSON| JsonToMarkdown
+
     TypeDetector -->|Text| TextSplitter
     TypeDetector -->|Markdown| MarkdownSplitter
+    JsonToMarkdown -->|Markdown| MarkdownSplitter
     TypeDetector -->|Code| CodeSplitter
+    TypeDetector -->|CUE| CueSplitter
     
     TextSplitter --> ChunkGenerator
     MarkdownSplitter --> ChunkGenerator
     CodeSplitter --> ChunkGenerator
+    CueSplitter --> ChunkGenerator
     
     ChunkGenerator --> EmbeddingModel
     EmbeddingModel --> SurrealDB
