@@ -1,8 +1,18 @@
+use bioma_llm::indexer::{DeleteSource, IndexGlobs};
+use bioma_llm::prelude::*;
+use bioma_llm::rerank::RankTexts;
+use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use goose::GooseError;
 use serde_json::json;
 use test_log::test;
+
+const DEFAULT_CHUNK_CAPACITY: usize = 1024;
+const DEFAULT_CHUNK_OVERLAP: usize = 256;
+const DEFAULT_CHUNK_BATCH_SIZE: usize = 10;
+const DEFAULT_RETRIEVER_LIMIT: usize = 5;
+const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
     let request_builder = user.get_request_builder(&GooseMethod::Get, "/health")?.header("Accept", "text/plain");
@@ -58,14 +68,19 @@ pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({
-        "globs": ["/path/to/your/files/**/*.rs"] // Update the path as needed
-    });
+    let payload = IndexGlobs {
+        globs: vec!["src/*.rs".to_string()],
+        chunk_capacity: 0..DEFAULT_CHUNK_CAPACITY,
+        chunk_overlap: DEFAULT_CHUNK_OVERLAP,
+        chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
+    };
+
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/index")?
         .header("Content-Type", "application/json")
-        .body(payload.to_string());
+        .body(payload_str);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Index Files").build();
 
@@ -81,19 +96,18 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({
-        "messages": [
-            {
-                "role": "user",
-                "content": "Hello, how are you?"
-            }
-        ]
-    });
+    let payload = ChatMessages {
+        messages: vec![ChatMessage::user("Hello, how are you?".to_string())],
+        restart: false,
+        persist: false,
+    };
+
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/chat")?
         .header("Content-Type", "application/json")
-        .body(payload.to_string());
+        .body(payload_str);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Chat").build();
 
@@ -136,14 +150,14 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({
-        "sources": ["uploads/test.txt"] // Update with actual sources to delete
-    });
+    let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
+
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/delete_source")?
         .header("Content-Type", "application/json")
-        .body(payload.to_string());
+        .body(payload_str);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Delete Source").build();
 
@@ -188,14 +202,18 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({
-        "query": "What is Bioma?",
-    });
+    let payload = RetrieveContext {
+        query: RetrieveQuery::Text("What is Bioma?".to_string()),
+        limit: DEFAULT_RETRIEVER_LIMIT,
+        threshold: DEFAULT_RETRIEVER_THRESHOLD,
+    };
+
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/ask")?
         .header("Content-Type", "application/json")
-        .body(payload.to_string());
+        .body(payload_str);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Ask").build();
 
@@ -211,16 +229,15 @@ pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({
-        "query": "How to use actors?",
-        "limit": 5,
-        "threshold": 0.0
-    });
+    let payload =
+        RetrieveContext { query: RetrieveQuery::Text("How to use actors?".to_string()), limit: 5, threshold: 0.0 };
+
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/retrieve")?
         .header("Content-Type", "application/json")
-        .body(payload.to_string());
+        .body(payload_str);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Retrieve").build();
 
@@ -236,19 +253,21 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({
-        "query": "What is the weather?",
-        "texts": [
-            "The weather is sunny today",
-            "It's raining outside",
-            "The temperature is 25 degrees"
-        ]
-    });
+    let payload = RankTexts {
+        query: "What is the weather?".to_string(),
+        texts: vec![
+            "The weather is sunny today".to_string(),
+            "It's raining outside".to_string(),
+            "The temperature is 25 degrees".to_string(),
+        ],
+    };
+
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/rerank")?
         .header("Content-Type", "application/json")
-        .body(payload.to_string());
+        .body(payload_str);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Rerank").build();
 
