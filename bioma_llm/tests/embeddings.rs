@@ -561,7 +561,7 @@ async fn test_image_embeddings_generate() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Generate embeddings for the image
-    let image_paths = vec!["../../assets/images/rust-pet.png".to_string()];
+    let image_paths = vec!["../assets/images/rust-pet.png".to_string()];
     let generated = relay_ctx
         .send::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Image(image_paths.clone()) },
@@ -603,7 +603,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Store image embeddings with metadata
-    let image_paths = vec!["../../assets/images/elephant.jpg".to_string()];
+    let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
     let metadata = vec![serde_json::json!({
         "description": "An elephant image",
         "type": "wildlife"
@@ -627,7 +627,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     // Search using the same image
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Image("../../assets/images/elephant.jpg".to_string()),
+        query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
         threshold: 0.5,
         k: 1,
         tag: Some("test_images".to_string()),
@@ -674,7 +674,7 @@ async fn test_cross_modal_search() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Store image embeddings
-    let image_paths = vec!["../../assets/images/elephant.jpg".to_string()];
+    let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
     let _ = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
