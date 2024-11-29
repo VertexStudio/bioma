@@ -113,41 +113,41 @@ cargo run --release -p bioma_llm --example rag_server
 ### Reset the engine:
 
 ```bash
-curl -X POST http://localhost:8080/reset
+curl -X POST http://localhost:5766/reset
 ```
 
 ### Upload some files:
 
 ```bash
-curl -X POST http://localhost:8080/upload -H "Content-Type: multipart/form-data" -F "file=@/path/to/file.zip" -F 'metadata={"path":"relative/to/store/path"};type=application/json'
+curl -X POST http://localhost:5766/upload -H "Content-Type: multipart/form-data" -F "file=@/path/to/file.zip" -F 'metadata={"path":"relative/to/store/path"};type=application/json'
 ```
 
 ### Index some files:
 
 ```bash
-curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+curl -X POST http://localhost:5766/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 # or
-curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+curl -X POST http://localhost:5766/index -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
 
 ```bash
-curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10}'
+curl -X POST http://localhost:5766/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10}'
 ```
 
 ### Ask a question:
 
 ```bash
-curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
+curl -X POST http://localhost:5766/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
 ```
 
 ### Delete indexed source:
 
 ```bash
-curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"sources": ["/absolute/path/to/source1", "/absolute/path/to/source2"]}'
+curl -X POST http://localhost:5766/delete_source -H "Content-Type: application/json" -d '{"sources": ["/absolute/path/to/source1", "/absolute/path/to/source2"]}'
 # or
-curl -X POST http://localhost:8080/delete_source -H "Content-Type: application/json" -d '{"sources": ["relative/to/store/path1", "relative/to/store/path2"]}'
+curl -X POST http://localhost:5766/delete_source -H "Content-Type: application/json" -d '{"sources": ["relative/to/store/path1", "relative/to/store/path2"]}'
 ```
 
 ### Connect to examples DB:

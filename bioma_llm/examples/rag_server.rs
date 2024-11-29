@@ -667,7 +667,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/api/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
     })
-    .bind("0.0.0.0:8080")?
+    .bind("0.0.0.0:5766")?
     .run()
     .await;
 
