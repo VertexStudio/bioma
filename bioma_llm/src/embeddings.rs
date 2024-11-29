@@ -150,11 +150,7 @@ impl Clone for Embeddings {
 
 impl Default for Embeddings {
     fn default() -> Self {
-        let mut embeddings = Self::builder().build();
-        if embeddings.table_name_prefix.is_none() {
-            embeddings.table_name_prefix = Some(embeddings.model.to_string());
-        }
-        embeddings
+        Self::builder().build()
     }
 }
 
@@ -199,7 +195,7 @@ impl Message<TopK> for Embeddings {
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
             .bind(("threshold", message.threshold))
-            .bind(("prefix", self.table_name_prefix.clone()))
+            .bind(("prefix", self.table_name_prefix.as_ref().unwrap_or(&self.model.to_string()).clone()))
             .await
             .map_err(SystemActorError::from)?;
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
@@ -258,7 +254,7 @@ impl Message<StoreEmbeddings> for Embeddings {
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
                 .bind(("source", message.source.clone()))
-                .bind(("prefix", self.table_name_prefix.clone()))
+                .bind(("prefix", self.table_name_prefix.as_ref().unwrap_or(&self.model.to_string()).clone()))
                 .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
@@ -428,7 +424,7 @@ impl Embeddings {
 
                 // Define schema
                 let schema_def = include_str!("../sql/def.surql")
-                    .replace("{prefix}", &self.table_name_prefix.as_ref().unwrap())
+                    .replace("{prefix}", &self.table_name_prefix.as_ref().unwrap_or(&self.model.to_string()).clone())
                     .replace("{dim}", &text_model_info.dim.to_string());
 
                 // Execute the schema definition
