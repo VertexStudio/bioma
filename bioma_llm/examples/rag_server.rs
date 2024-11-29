@@ -8,8 +8,6 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-use walkdir::WalkDir;
-use zip::ZipArchive;
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
@@ -92,13 +90,11 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
 
-    // If uploading a zip file but target doesn't end in .zip, append original filename
+    // Determine the target path for the file
     let temp_file_path = if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
         if target_dir.extension().map_or(false, |ext| ext == "zip") {
-            // If target ends in .zip, use it directly
             output_dir.join(&target_dir)
         } else {
-            // If target is a directory, append the original filename
             let original_name =
                 form.file.file_name.as_ref().map(|name| name.to_string()).unwrap_or_else(|| "uploaded.zip".to_string());
             output_dir.join(&target_dir).join(original_name)
@@ -107,78 +103,111 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
         output_dir.join(&target_dir)
     };
 
-    // Create parent directory if it doesn't exist
-    if let Err(e) = tokio::fs::create_dir_all(temp_file_path.parent().unwrap_or(&temp_file_path)).await {
-        error!("Failed to create target directory: {}", e);
+    // Create parent directory
+    if let Some(parent) = temp_file_path.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            error!("Failed to create target directory: {}", e);
+            return HttpResponse::InternalServerError().json(json!({
+                "error": "Failed to create target directory",
+                "details": e.to_string()
+            }));
+        }
+    }
+
+    // Create a temporary file for the upload
+    let temp_path = std::env::temp_dir().join(format!("upload_{}", uuid::Uuid::new_v4()));
+
+    // Copy the uploaded content to the temporary file using tokio
+    if let Err(e) = tokio::fs::copy(&form.file.file.path(), &temp_path).await {
+        error!("Failed to copy uploaded file: {}", e);
         return HttpResponse::InternalServerError().json(json!({
-            "error": "Failed to create target directory",
+            "error": "Failed to copy uploaded file",
             "details": e.to_string()
         }));
     }
 
-    match form.file.file.persist(&temp_file_path) {
-        Ok(_) => {
-            info!("File uploaded successfully to temporary location");
+    let temp_path_clone = temp_path.clone();
+    let temp_file_path_clone = temp_file_path.clone();
 
-            let (message, paths) = if temp_file_path.extension().map_or(false, |ext| ext == "zip") {
-                let file = match std::fs::File::open(&temp_file_path) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        error!("Error opening zip file: {:?}", e);
-                        return HttpResponse::InternalServerError().json(json!({
-                            "error": "Failed to open zip file",
-                            "details": e.to_string()
-                        }));
-                    }
-                };
-
-                let mut archive = match ZipArchive::new(file) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        error!("Error creating zip archive: {:?}", e);
-                        return HttpResponse::InternalServerError().json(json!({
-                            "error": "Failed to read zip archive",
-                            "details": e.to_string()
-                        }));
-                    }
-                };
+    if temp_file_path.extension().map_or(false, |ext| ext == "zip") {
+        // Handle zip file
+        let extract_result = tokio::task::spawn_blocking(
+            move || -> Result<Vec<std::path::PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
+                let file = std::fs::File::open(&temp_path_clone)?;
+                let mut archive = zip::ZipArchive::new(file)?;
 
                 // Extract to the parent directory of the zip file
-                let extract_to = temp_file_path.parent().unwrap_or(&temp_file_path);
-                if let Err(e) = archive.extract(extract_to) {
-                    error!("Error extracting zip archive: {:?}", e);
-                    return HttpResponse::InternalServerError().json(json!({
-                        "error": "Failed to extract zip archive",
-                        "details": e.to_string()
-                    }));
-                }
+                let extract_to = temp_file_path_clone.parent().unwrap_or(&temp_file_path_clone);
 
-                let mut files = Vec::new();
-                // Walk through the extracted directory
-                for entry in WalkDir::new(extract_to).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() && entry.path() != temp_file_path {
-                        files.push(entry.path().to_path_buf());
+                // Get list of files that will be extracted
+                let mut extracted_files = Vec::new();
+                for i in 0..archive.len() {
+                    let file = archive.by_index(i)?;
+                    if !file.name().ends_with('/') {
+                        // Skip directories
+                        let outpath = extract_to.join(file.name());
+                        extracted_files.push(outpath);
                     }
                 }
 
-                // Delete the temporary zip file after extraction
-                if let Err(e) = std::fs::remove_file(&temp_file_path) {
-                    warn!("Error removing temporary zip file: {:?}", e);
-                }
+                // Now perform the extraction
+                archive.extract(extract_to)?;
 
-                (format!("Zip file extracted {} files successfully", files.len()), files)
-            } else {
-                ("File uploaded successfully".to_string(), vec![temp_file_path])
-            };
+                Ok(extracted_files)
+            },
+        )
+        .await;
 
-            HttpResponse::Ok().json(Uploaded { message, paths, size: form.file.size })
+        // Clean up temporary file
+        let _ = tokio::fs::remove_file(&temp_path).await;
+
+        match extract_result {
+            Ok(Ok(files)) => HttpResponse::Ok().json(Uploaded {
+                message: format!("Zip file extracted {} files successfully", files.len()),
+                paths: files,
+                size: form.file.size,
+            }),
+            Ok(Err(e)) => {
+                error!("Error extracting zip file: {:?}", e);
+                HttpResponse::InternalServerError().json(json!({
+                    "error": "Failed to extract zip archive",
+                    "details": e.to_string()
+                }))
+            }
+            Err(e) => {
+                error!("Task error: {:?}", e);
+                HttpResponse::InternalServerError().json(json!({
+                    "error": "Internal server error",
+                    "details": e.to_string()
+                }))
+            }
         }
-        Err(e) => {
-            error!("Error saving file: {:?}", e);
-            HttpResponse::InternalServerError().json(json!({
-                "error": "Failed to save uploaded file",
-                "details": e.to_string()
-            }))
+    } else {
+        // Handle regular file
+        match tokio::fs::rename(&temp_path, &temp_file_path).await {
+            Ok(_) => HttpResponse::Ok().json(Uploaded {
+                message: "File uploaded successfully".to_string(),
+                paths: vec![temp_file_path],
+                size: form.file.size,
+            }),
+            Err(e) => {
+                error!("Error moving file: {:?}", e);
+                if let Err(copy_err) = tokio::fs::copy(&temp_path, &temp_file_path).await {
+                    error!("Error copying file: {:?}", copy_err);
+                    return HttpResponse::InternalServerError().json(json!({
+                        "error": "Failed to save uploaded file",
+                        "details": copy_err.to_string()
+                    }));
+                }
+                // Clean up source file after successful copy
+                let _ = tokio::fs::remove_file(&temp_path).await;
+
+                HttpResponse::Ok().json(Uploaded {
+                    message: "File uploaded successfully".to_string(),
+                    paths: vec![temp_file_path],
+                    size: form.file.size,
+                })
+            }
         }
     }
 }
