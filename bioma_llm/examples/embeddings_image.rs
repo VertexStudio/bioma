@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
-    let embeddings_handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
         }
@@ -32,54 +32,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Texts to embed
-    let texts = vec![
-        "Hello, how are you?",
-        "What is the meaning of life?",
-        "The quick brown fox jumps over the lazy dog",
-        "Why is the sky blue?",
-        "What is the capital of the moon?",
-        "How are they doing?",
-        "Are you ok?",
-    ]
-    .iter()
-    .map(|text| text.to_string())
-    .collect::<Vec<String>>();
+    // print cwd
+    info!("Current working directory: {:?}", std::env::current_dir());
 
-    // Send the texts to the embeddings actor
-    let embeddings_lentghs = relay_ctx
+    // Image paths to embed
+    let image_paths = vec!["assets/images/elephant.jpg", "assets/images/rust-pet.png", "assets/images/python-pet.jpg"]
+        .iter()
+        .map(|path| path.to_string())
+        .collect::<Vec<String>>();
+
+    // Store image embeddings
+    let embeddings_lengths = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                source: "test".to_string(),
-                content: EmbeddingContent::Text(texts.clone()),
+                source: "test_images".to_string(),
+                content: EmbeddingContent::Image(image_paths.clone()),
                 metadata: None,
-                tag: Some("test".to_string()),
+                tag: Some("test_images".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
         )
         .await?;
 
-    for (i, length) in embeddings_lentghs.lengths.iter().enumerate() {
-        info!("Stored embeddings for text: {} with length: {}", texts[i], length);
+    for (i, length) in embeddings_lengths.lengths.iter().enumerate() {
+        info!("Stored embeddings for image: {} with length: {}", image_paths[i], length);
     }
 
-    // Get similarities
+    // Search for similar images using an image query
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("Hello, how are you?".to_string()),
-        threshold: -0.5,
-        k: 5,
-        tag: Some("test".to_string()),
+        query: embeddings::Query::Image("assets/images/rust-pet.png".to_string()),
+        threshold: 0.5,
+        k: 3,
+        tag: Some("test_images".to_string()),
     };
-    info!("Query: {:?}", top_k);
+    info!("Image query: {:?}", top_k);
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
 
     for similarity in similarities {
-        info!("Similarity: {:?}   {}", similarity.text, similarity.similarity);
+        info!("Similarity score: {}", similarity.similarity);
+        if let Some(metadata) = similarity.metadata {
+            info!("Metadata: {:?}", metadata);
+        }
     }
 
-    embeddings_handle.abort();
+    // Generate embeddings without storing them
+    let generated = relay_ctx
+        .send::<Embeddings, GenerateEmbeddings>(
+            GenerateEmbeddings { content: EmbeddingContent::Image(vec!["assets/images/rust-pet.png".to_string()]) },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    info!("Generated embedding dimensions: {}", generated.embeddings[0].len());
 
     // Export the database for debugging
     dbg_export_db!(engine);

@@ -2,15 +2,17 @@ BEGIN;
 
 LET $source = source:{ source: $source, tag: $tag };
 
-LET $embeddings = SELECT ->source_embeddings.out as embedding FROM $source;
+LET $image_embeddings = SELECT ->{prefix}_source_embeddings.out as embedding FROM $source;
 
-LET $flat_embeddings = array::flatten($embeddings.embedding);
+LET $flat_image_embeddings = array::flatten($image_embeddings.embedding);
 
-DELETE model_embeddings WHERE out IN $flat_embeddings;
-DELETE source_embeddings WHERE in = $source;
-DELETE embedding WHERE id IN $flat_embeddings;
+DELETE {prefix}_model_embeddings WHERE out IN $flat_image_embeddings;
+DELETE {prefix}_source_embeddings WHERE in = $source;
+DELETE {prefix}_embedding WHERE id IN $flat_image_embeddings;
 DELETE $source;
 
-RETURN count($flat_embeddings);
+LET $total_deleted = count($flat_image_embeddings);
+
+RETURN $total_deleted;
 
 COMMIT;
