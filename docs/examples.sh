@@ -2,29 +2,29 @@
 
 # RAG Server API Examples
 # =====================
-# Server runs on localhost:8080
+# Server runs on localhost:5766
 # Ollama runs on localhost:11434
 
 # Server Management
 # ----------------
 # Reset the RAG engine
-curl -X POST http://localhost:8080/reset
+curl -X POST http://localhost:5766/reset
 
 # Document Management
 # ----------------
 # Index files using glob patterns
-curl -X POST http://localhost:8080/index \
+curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
     -d '{"globs": ["./path/to/files/**/*.rs"]}'
 
 # Upload a single file
-curl -X POST http://localhost:8080/upload \
+curl -X POST http://localhost:5766/upload \
     -X POST \
     -F 'file=@./path/to/file.md' \
     -F 'metadata={"path": "dest/path/file.md"};type=application/json'
 
 # Upload a zip archive
-curl -X POST http://localhost:8080/upload \
+curl -X POST http://localhost:5766/upload \
     -X POST \
     -F 'file=@./archive.zip' \
     -F 'metadata={"path": "archive.zip"};type=application/json'
@@ -32,7 +32,7 @@ curl -X POST http://localhost:8080/upload \
 # Search and Retrieval
 # ----------------
 # Retrieve context
-curl -X POST http://localhost:8080/retrieve \
+curl -X POST http://localhost:5766/retrieve \
     -H "Content-Type: application/json" \
     -d '{
         "query": "What is Bioma?",
@@ -41,14 +41,14 @@ curl -X POST http://localhost:8080/retrieve \
     }'
 
 # Ask a question (RAG-enhanced)
-curl -X POST http://localhost:8080/ask \
+curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
     -d '{"query": "What is Bioma?"}'
 
 # Embedding Operations
 # ----------------
 # Generate embeddings
-curl -X POST http://localhost:8080/api/embed \
+curl -X POST http://localhost:5766/api/embed \
     -H "Content-Type: application/json" \
     -d '{
         "model": "nomic-embed-text",
@@ -59,7 +59,7 @@ curl -X POST http://localhost:8080/api/embed \
     }'
 
 # Rerank texts
-curl -X POST http://localhost:8080/rerank \
+curl -X POST http://localhost:5766/rerank \
     -H "Content-Type: application/json" \
     -d '{
         "query": "What is Deep Learning?",
@@ -71,7 +71,7 @@ curl -X POST http://localhost:8080/rerank \
     }'
 
 # Chat completion (compatible with Ollama)
-curl -X POST http://localhost:8080/api/chat \
+curl -X POST http://localhost:5766/api/chat \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",

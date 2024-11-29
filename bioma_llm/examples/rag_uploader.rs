@@ -20,7 +20,7 @@ struct Args {
     upload: String,
 
     /// Server URL
-    #[arg(short, long, default_value = "http://localhost:8080")]
+    #[arg(short, long, default_value = "http://localhost:5766")]
     endpoint: String,
 }
 
