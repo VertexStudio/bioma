@@ -383,3 +383,119 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn test_embeddings_source_filtering() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Store embeddings from different sources
+    let sources_and_texts = vec![
+        ("document1.pdf", vec!["This is content from document 1.", "More content from doc 1."]),
+        ("document2.pdf", vec!["Content from document 2.", "Additional content from doc 2."]),
+        ("document3.pdf", vec!["Document 3 content here.", "More from document 3."]),
+    ];
+
+    // Store all embeddings
+    for (source, texts) in &sources_and_texts {
+        let _ = relay_ctx
+            .send::<Embeddings, StoreTextEmbeddings>(
+                StoreTextEmbeddings {
+                    source: source.to_string(),
+                    texts: texts.iter().map(|t| t.to_string()).collect(),
+                    metadata: None,
+                    tag: Some("source_test".to_string()),
+                },
+                &embeddings_id,
+                SendOptions::default(),
+            )
+            .await?;
+    }
+
+    // Test 1: Query with specific source filter
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("content from document".to_string()),
+        threshold: -0.5,
+        k: 4,
+        tag: Some("source_test".to_string()),
+        sources: Some(vec!["document1.pdf".to_string()]),
+    };
+
+    let similarities = relay_ctx
+        .send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
+
+    // Verify only document1.pdf results are returned
+    assert!(!similarities.is_empty());
+    for similarity in &similarities {
+        assert!(similarity.text.contains("document 1"), 
+            "Expected only results from document1.pdf, got: {}", similarity.text);
+    }
+
+    // Test 2: Query with multiple source filters
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("content".to_string()),
+        threshold: -0.5,
+        k: 4,
+        tag: Some("source_test".to_string()),
+        sources: Some(vec!["document1.pdf".to_string(), "document2.pdf".to_string()]),
+    };
+
+    let similarities = relay_ctx
+        .send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
+
+    // Verify only document1.pdf and document2.pdf results are returned
+    assert!(!similarities.is_empty());
+    for similarity in &similarities {
+        assert!(
+            similarity.text.contains("document 1") || similarity.text.contains("document 2"),
+            "Expected only results from document1.pdf or document2.pdf, got: {}", 
+            similarity.text
+        );
+    }
+
+    // Test 3: Query without source filter (should return all results)
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("content".to_string()),
+        threshold: -0.5,
+        k: 6,
+        tag: Some("source_test".to_string()),
+        sources: None,
+    };
+
+    let similarities = relay_ctx
+        .send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
+
+    // Verify results from all documents are returned
+    assert!(similarities.len() > 4); // Should get results from all documents
+    let mut found_sources = vec![false, false, false]; // Track which documents we found
+    for similarity in &similarities {
+        if similarity.text.contains("document 1") { found_sources[0] = true; }
+        if similarity.text.contains("document 2") { found_sources[1] = true; }
+        if similarity.text.contains("document 3") { found_sources[2] = true; }
+    }
+    assert!(found_sources.iter().all(|&found| found), 
+        "Expected results from all documents when no source filter is applied");
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
