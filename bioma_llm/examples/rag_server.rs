@@ -298,10 +298,25 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 context.context.iter().find(|ctx| matches!(ctx.metadata, Some(ContextMetadata::Image(_))))
             {
                 if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
-                    if let Ok(image_data) = std::fs::read(&image_metadata.source) {
-                        let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                        context_message.images =
-                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                    match tokio::fs::read(&image_metadata.source).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    context_message.images =
+                                        Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
                     }
                 }
             }
@@ -376,19 +391,32 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             );
 
             // Add images to the system message if available
-            if !context.context.is_empty() {
-                let mut images = Vec::new();
-                for ctx in context.context {
-                    if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
-                        if let Ok(image_data) = std::fs::read(&image_metadata.source) {
-                            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                            images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+            let mut images = Vec::new();
+            for ctx in context.context {
+                if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
+                    match tokio::fs::read(&image_metadata.source).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
                         }
                     }
                 }
-                if !images.is_empty() {
-                    context_message.images = Some(images);
-                }
+            }
+            if !images.is_empty() {
+                context_message.images = Some(images);
             }
 
             conversation.push(context_message);
