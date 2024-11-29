@@ -10,3 +10,4 @@ uv.lock
 .python-version
 
 *.log
+pyproject.toml

@@ -45,4 +45,3 @@ sudo cp /var/cudnn-local-repo-ubuntu2404-9.5.1/cudnn-*-keyring.gpg /usr/share/ke
 sudo apt-get update
 sudo apt-get -y install cudnn
 ```
-
