@@ -70,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         threshold: -0.5,
         k: 5,
         tag: Some("test".to_string()),
+        sources: None,
     };
     info!("Query: {:?}", top_k);
     let similarities =

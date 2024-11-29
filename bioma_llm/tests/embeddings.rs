@@ -107,6 +107,7 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
         threshold: -0.5,
         k: 2,
         tag: Some("test".to_string()),
+        sources: None,
     };
 
     let similarities =
@@ -186,6 +187,7 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
         threshold: -0.5,
         k: 1,
         tag: Some("persistence_test".to_string()),
+        sources: None,
     };
 
     let similarities =
@@ -245,6 +247,7 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
         threshold: -0.5,
         k: 1,
         tag: Some("metadata_test".to_string()),
+        sources: None,
     };
 
     let similarities =
@@ -356,6 +359,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
             threshold: -0.5,
             k: 2,
             tag: Some(format!("test_{}", i)),
+            sources: None,
         };
         let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
         similarity_futures.push(future);

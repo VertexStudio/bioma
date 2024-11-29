@@ -114,6 +114,7 @@ impl Message<RetrieveContext> for Retriever {
             k: message.limit * 2,
             threshold: message.threshold,
             tag: Some(self.tag.clone().to_string()),
+            sources: message.sources.clone(),
         };
 
         info!("Searching for texts similarities");

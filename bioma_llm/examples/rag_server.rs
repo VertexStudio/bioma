@@ -239,7 +239,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext { query: query.clone(), limit: 5, threshold: 0.0 };
+        let retrieve_context = RetrieveContext { query: query.clone(), limit: 5, threshold: 0.0, sources: None };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
@@ -307,7 +307,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext { query: body.query.clone(), limit: 5, threshold: 0.0 };
+        let retrieve_context = RetrieveContext { query: body.query.clone(), limit: 5, threshold: 0.0, sources: None };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 

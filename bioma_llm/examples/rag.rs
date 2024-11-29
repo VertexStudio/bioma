@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Retrieve context
     info!("Retrieving context");
-    let retrieve_context = RetrieveContext { query: query.to_string(), limit: 10, threshold: 0.0 };
+    let retrieve_context = RetrieveContext { query: query.to_string(), limit: 10, threshold: 0.0, sources: None };
     let context = relay_ctx
         .send::<Retriever, RetrieveContext>(
             retrieve_context,
