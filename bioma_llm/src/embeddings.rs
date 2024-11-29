@@ -4,6 +4,7 @@ use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use surrealdb::value::RecordId;
 use tokio::sync::Mutex;
@@ -12,7 +13,8 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 lazy_static! {
-    static ref SHARED_EMBEDDING: Arc<Mutex<Weak<SharedEmbedding>>> = Arc::new(Mutex::new(Weak::new()));
+    static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 }
 
 struct SharedEmbedding {
@@ -117,7 +119,7 @@ pub struct Embeddings {
     #[builder(default = "nomic_embed_v15".to_string())]
     pub table_name_prefix: String,
     #[builder(default = Model::NomicEmbedTextV15)]
-    pub text_model: Model,
+    pub model: Model,
     #[builder(default = ImageModel::NomicEmbedVisionV15)]
     pub image_model: ImageModel,
     #[serde(skip)]
@@ -139,7 +141,7 @@ impl Clone for Embeddings {
     fn clone(&self) -> Self {
         Self {
             table_name_prefix: self.table_name_prefix.clone(),
-            text_model: self.text_model.clone(),
+            model: self.model.clone(),
             image_model: self.image_model.clone(),
             embedding_tx: None,
             shared_embedding: None,
@@ -238,7 +240,7 @@ impl Message<StoreEmbeddings> for Embeddings {
             let embedding = embedding.clone();
             let metadata = message.metadata.as_ref().map(|m| m[i].clone()).unwrap_or(Value::Null);
             let model_id = match &message.content {
-                EmbeddingContent::Text(_) => RecordId::from_table_key("model", self.text_model.to_string()),
+                EmbeddingContent::Text(_) => RecordId::from_table_key("model", self.model.to_string()),
                 EmbeddingContent::Image(_) => RecordId::from_table_key("model", self.image_model.to_string()),
             };
 
@@ -283,7 +285,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+#[derive(Debug, Clone, Serialize, Deserialize, Display, Eq, Hash, PartialEq)]
 pub enum Model {
     NomicEmbedTextV15,
     ClipVitB32Text,
@@ -298,19 +300,13 @@ fn get_fastembed_model(model: &Model) -> fastembed::EmbeddingModel {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Display)]
 pub enum ImageModel {
-    ClipVitB32Vision,
-    Resnet50,
-    UnicomVitB16,
-    UnicomVitB32,
     NomicEmbedVisionV15,
+    ClipVitB32Vision,
 }
 
 fn get_fastembed_image_model(model: &ImageModel) -> fastembed::ImageEmbeddingModel {
     match model {
         ImageModel::ClipVitB32Vision => fastembed::ImageEmbeddingModel::ClipVitB32,
-        ImageModel::Resnet50 => fastembed::ImageEmbeddingModel::Resnet50,
-        ImageModel::UnicomVitB16 => fastembed::ImageEmbeddingModel::UnicomVitB16,
-        ImageModel::UnicomVitB32 => fastembed::ImageEmbeddingModel::UnicomVitB32,
         ImageModel::NomicEmbedVisionV15 => fastembed::ImageEmbeddingModel::NomicEmbedVisionV15,
     }
 }
@@ -373,18 +369,31 @@ impl Embeddings {
 
         // Manage a shared embedding task
         let shared_embedding = {
-            let mut weak_ref = SHARED_EMBEDDING.lock().await;
-            if let Some(strong_ref) = weak_ref.upgrade() {
-                // Return the existing shared embedding
-                Some(strong_ref)
+            let mut embeddings_map = SHARED_EMBEDDINGS.lock().await;
+            let existing_embedding = if let Some(weak_ref) = embeddings_map.get(&self.model) {
+                if let Some(strong_ref) = weak_ref.upgrade() {
+                    // Return the existing shared embedding
+                    Some(strong_ref)
+                } else {
+                    // Remove the expired weak reference
+                    embeddings_map.remove(&self.model);
+                    None
+                }
             } else {
+                None
+            };
+
+            if let Some(embedding) = existing_embedding {
+                embedding
+            } else {
+                // Create new shared embedding
                 let ctx_id = ctx.id().clone();
 
                 // Get text model info
-                let fastembed_model = get_fastembed_model(&self.text_model);
+                let fastembed_model = get_fastembed_model(&self.model);
                 let text_model_info = fastembed::TextEmbedding::get_model_info(&fastembed_model)?;
                 let text_model_info = ModelInfo {
-                    name: self.text_model.clone(),
+                    name: self.model.clone(),
                     dim: text_model_info.dim,
                     description: text_model_info.description.clone(),
                     model_code: text_model_info.model_code.clone(),
@@ -407,6 +416,13 @@ impl Embeddings {
                     panic!("Text and image model dimensions must be the same");
                 }
 
+                // Assert the model pairs are valid
+                match (&self.model, &self.image_model) {
+                    (Model::ClipVitB32Text, ImageModel::ClipVitB32Vision) => {}
+                    (Model::NomicEmbedTextV15, ImageModel::NomicEmbedVisionV15) => {}
+                    _ => panic!("Invalid model pair"),
+                }
+
                 // Define schema
                 let schema_def = include_str!("../sql/def.surql")
                     .replace("{prefix}", &self.table_name_prefix)
@@ -418,12 +434,12 @@ impl Embeddings {
 
                 // Store text model info in database if not already present
                 let model: Result<Option<Record>, _> = db
-                    .create(("model", self.text_model.to_string()))
+                    .create(("model", self.model.to_string()))
                     .content(text_model_info)
                     .await
                     .map_err(SystemActorError::from);
                 if let Ok(Some(model)) = &model {
-                    info!("Model {:?} stored with id: {}", self.text_model, model.id);
+                    info!("Model {:?} stored with id: {}", self.model, model.id);
                 }
 
                 // Store image model info in database if not already present
@@ -438,7 +454,7 @@ impl Embeddings {
 
                 // Create a new shared embedding
                 let (embedding_tx, mut embedding_rx) = mpsc::channel::<EmbeddingRequest>(100);
-                let text_model = self.text_model.clone();
+                let text_model = self.model.clone();
                 let image_model = self.image_model.clone();
                 let cache_dir = ctx.engine().huggingface_cache_dir().clone();
 
@@ -517,11 +533,12 @@ impl Embeddings {
 
                 // Store the shared embedding
                 let shared_embedding = Arc::new(SharedEmbedding { embedding_tx });
-                *weak_ref = Arc::downgrade(&shared_embedding);
-                Some(shared_embedding)
+                embeddings_map.insert(self.model.clone(), Arc::downgrade(&shared_embedding));
+                shared_embedding
             }
         };
 
+        let shared_embedding = Some(shared_embedding); // Wrap in Option first
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
         self.embedding_tx = self.shared_embedding.as_ref().map(|se| se.embedding_tx.clone());
 
