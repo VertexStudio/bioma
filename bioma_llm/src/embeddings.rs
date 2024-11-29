@@ -100,6 +100,8 @@ pub struct TopK {
     pub query: Query,
     /// The tag to filter the embeddings by
     pub tag: Option<String>,
+    /// The sources to filter by
+    pub sources: Option<Vec<String>>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -195,6 +197,7 @@ impl Message<TopK> for Embeddings {
             .bind(("query", query_embedding))
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
+            .bind(("sources", message.sources.clone()))
             .bind(("threshold", message.threshold))
             .bind(("prefix", self.table_name_prefix.clone()))
             .await
