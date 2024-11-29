@@ -649,7 +649,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 }
 
 #[test(tokio::test)]
-async fn test_cross_modal_search() -> Result<(), TestError> {
+async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     // Spawn the embeddings actor with CLIP model for cross-modal search
@@ -710,7 +710,7 @@ async fn test_cross_modal_search() -> Result<(), TestError> {
 }
 
 #[test(tokio::test)]
-async fn test_multiple_images_batch() -> Result<(), TestError> {
+async fn test_embeddings_multiple_images_batch() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     // Spawn the embeddings actor
@@ -751,7 +751,7 @@ async fn test_multiple_images_batch() -> Result<(), TestError> {
 }
 
 #[test(tokio::test)]
-async fn test_mixed_modal_storage() -> Result<(), TestError> {
+async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     let embeddings_id = ActorId::of::<Embeddings>("/embeddings/clip");
