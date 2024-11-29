@@ -539,3 +539,172 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn test_image_embeddings_generate() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Generate embeddings for the image
+    let image_paths = vec!["../assets/images/rust-pet.png".to_string()];
+    let generated = relay_ctx
+        .send::<Embeddings, GenerateEmbeddings>(
+            GenerateEmbeddings { content: EmbeddingContent::Image(image_paths.clone()) },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Check the results
+    assert_eq!(generated.embeddings.len(), 1);
+    assert_eq!(generated.embeddings[0].len(), NOMIC_V15_EMBEDDING_LENGTH);
+    assert!(generated.embeddings[0].iter().all(|&val| val.is_finite()));
+    assert!(generated.embeddings[0].iter().any(|&val| val != 0.0));
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Store image embeddings with metadata
+    let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
+    let metadata = vec![serde_json::json!({
+        "description": "An elephant image",
+        "type": "wildlife"
+    })];
+
+    let stored = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "test".to_string(),
+                content: EmbeddingContent::Image(image_paths.clone()),
+                metadata: Some(metadata),
+                tag: Some("test_images".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    assert_eq!(stored.lengths.len(), 1);
+    assert_eq!(stored.lengths[0], NOMIC_V15_EMBEDDING_LENGTH);
+
+    // Search using the same image
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Image("assets/images/elephant.jpg".to_string()),
+        threshold: 0.5,
+        k: 1,
+        tag: Some("test_images".to_string()),
+    };
+
+    let similarities =
+        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+
+    // Check search results
+    assert_eq!(similarities.len(), 1);
+    assert!(similarities[0].similarity > 0.9, "Expected very high similarity for exact match");
+    assert!(similarities[0].metadata.is_some());
+    assert_eq!(similarities[0].metadata.as_ref().unwrap()["description"], "An elephant image");
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_cross_modal_search() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor with CLIP model for cross-modal search
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings/clip");
+    let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
+        engine.clone(),
+        embeddings_id.clone(),
+        Embeddings::builder().model(Model::ClipVitB32Text).image_model(ImageModel::ClipVitB32Vision).build(),
+        SpawnOptions::default(),
+    )
+    .await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Store image embeddings
+    let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "test".to_string(),
+                content: EmbeddingContent::Image(image_paths),
+                metadata: None,
+                tag: Some("cross_modal".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Search using text query
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("an elephant".to_string()),
+        threshold: 0.2,
+        k: 1,
+        tag: Some("cross_modal".to_string()),
+    };
+
+    let similarities =
+        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+
+    // Check if text query found the image
+    assert_eq!(similarities.len(), 1);
+    assert!(similarities[0].similarity > 0.2, "Expected reasonable similarity for cross-modal search");
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
