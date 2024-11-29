@@ -452,8 +452,9 @@ impl Embeddings {
 
                         #[cfg(target_os = "macos")]
                         {
-                            text_options = text_options
-                                .with_execution_providers(vec![ort::CoreMLExecutionProvider::default().build()]);
+                            text_options = text_options.with_execution_providers(vec![
+                                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+                            ]);
                         }
 
                         #[cfg(target_os = "linux")]
