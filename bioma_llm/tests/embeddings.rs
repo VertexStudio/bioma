@@ -627,7 +627,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     // Search using the same image
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Image("assets/images/elephant.jpg".to_string()),
+        query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
         threshold: 0.5,
         k: 1,
         tag: Some("test_images".to_string()),
