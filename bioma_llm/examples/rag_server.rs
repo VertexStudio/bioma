@@ -1,8 +1,11 @@
 use actix_cors::Cors;
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
+use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use embeddings::EmbeddingContent;
+use retriever::ContextMetadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -11,22 +14,7 @@ use tracing::{error, info, warn};
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
-/// CURL examples:
-///
-/// Reset the engine:
-/// curl -X POST http://localhost:8080/reset
-///
-/// Index some files:
-/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
-///
-/// Retrieve context:
-/// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
-///
-/// Ask a question:
-/// curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
-///
-/// Upload a file:
-/// curl -X POST http://localhost:8080/upload -F 'file=@/Users/rozgo/BiomaAI/bioma/README.md' -F 'metadata={"path": "temp0/temp1/README.md"};type=application/json'
+/// CURL (examples)[docs/examples.sh]
 
 struct ActorHandle<T: Actor> {
     ctx: Mutex<ActorContext<T>>,
@@ -268,27 +256,52 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext { query: query.clone(), limit: 5, threshold: 0.0 };
+        let retrieve_context = RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
     match retrieved {
         Ok(mut context) => {
-            // Reverse context to put most important last
             context.context.reverse();
-
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Create chat conversation with all messages
-            let mut conversation = body.messages.clone();
-
-            // Insert context to conversation as a system message, at one position before the last message
-            let context_message = ChatMessage::system(
+            // Create system message with text context
+            let mut context_message = ChatMessage::system(
                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
                     .to_string()
                     + &context_content,
             );
+
+            // If there's an image in the context, use only the first one
+            if let Some(ctx) =
+                context.context.iter().find(|ctx| matches!(ctx.metadata, Some(ContextMetadata::Image(_))))
+            {
+                if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
+                    match tokio::fs::read(&image_metadata.source).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    context_message.images =
+                                        Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
+                    }
+                }
+            }
+
+            let mut conversation = body.messages.clone();
             if conversation.len() > 0 {
                 conversation.insert(conversation.len() - 1, context_message);
             } else {
@@ -331,12 +344,14 @@ struct AskQuery {
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     info!("Received ask query: {:#?}", &body.query);
+    info!("Received ask query: {:#?}", &body.query);
 
     info!("Sending message to retriever actor");
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext { query: body.query.clone(), limit: 5, threshold: 0.0 };
+        let retrieve_context =
+            RetrieveContext { query: RetrieveQuery::Text(body.query.clone()), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
@@ -349,11 +364,41 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             let mut conversation = vec![];
 
             // Add context to conversation as a system message
-            let context_message = ChatMessage::system(
+            let mut context_message = ChatMessage::system(
                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
                     .to_string()
                     + &context_content,
             );
+
+            // Add images to the system message if available
+            let mut images = Vec::new();
+            for ctx in context.context {
+                if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
+                    match tokio::fs::read(&image_metadata.source).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
+                    }
+                }
+            }
+            if !images.is_empty() {
+                context_message.images = Some(images);
+            }
+
             conversation.push(context_message);
 
             // Add user's query to conversation
@@ -444,7 +489,10 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
 
     // Process texts in chunks
     for chunk in texts.chunks(CHUNK_SIZE) {
-        match embeddings_actor.handle(&mut embeddings_ctx, &GenerateTextEmbeddings { texts: chunk.to_vec() }).await {
+        match embeddings_actor
+            .handle(&mut embeddings_ctx, &GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) })
+            .await
+        {
             Ok(chunk_response) => {
                 all_embeddings.extend(chunk_response.embeddings);
             }
@@ -456,7 +504,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
     }
 
     // Return combined results
-    let generated_embeddings = GeneratedTextEmbeddings { embeddings: all_embeddings };
+    let generated_embeddings = GeneratedEmbeddings { embeddings: all_embeddings };
     HttpResponse::Ok().json(generated_embeddings)
 }
 
@@ -550,7 +598,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let retriever_actor =
         Arc::new(ActorHandle::<Retriever> { ctx: Mutex::new(retriever_ctx), actor: Mutex::new(retriever_actor) });
 
-    let chat = Chat::builder().model("llama3.2".into()).build();
+    let chat = Chat::builder().model("llama3.2-vision".into()).build();
 
     let chat_actor_id = ActorId::of::<Chat>("/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
@@ -625,14 +673,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
-            .route("/ask", web::post().to(ask))
-            .route("/chat", web::post().to(self::chat))
+            .route("/ask", web::post().to(self::ask))
+            .route("/api/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/api/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
     })
-    .bind("0.0.0.0:8080")?
+    .bind("0.0.0.0:5766")?
     .run()
     .await;
 
