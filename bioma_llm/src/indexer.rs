@@ -535,10 +535,7 @@ impl Message<DeleteSource> for Indexer {
         ctx: &mut ActorContext<Self>,
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
-        let query = include_str!("../sql/del_source.surql").replace(
-            "{prefix}",
-            &self.embeddings.table_name_prefix.as_ref().unwrap_or(&self.embeddings.model.to_string()),
-        );
+        let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
         let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
