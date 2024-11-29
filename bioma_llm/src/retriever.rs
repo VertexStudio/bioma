@@ -46,6 +46,8 @@ pub struct RetrieveContext {
     #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
     #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
+    #[serde(default)]
+    pub sources: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +147,7 @@ impl Message<RetrieveContext> for Retriever {
                     k: message.limit * 2,
                     threshold: message.threshold,
                     tag: Some(self.tag.clone().to_string()),
+                    sources: message.sources.clone(),
                 };
 
                 info!("Searching for similarities");
