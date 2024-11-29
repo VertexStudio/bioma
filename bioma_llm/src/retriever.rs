@@ -39,7 +39,7 @@ impl ActorError for RetrieverError {}
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveContext {
     #[serde(flatten)]
-    pub query: QueryType,
+    pub query: RetrieveQuery,
     #[builder(default = DEFAULT_RETRIEVER_LIMIT)]
     #[serde(default = "default_retriever_limit")]
     pub limit: usize,
@@ -50,9 +50,8 @@ pub struct RetrieveContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "content")]
-pub enum QueryType {
+pub enum RetrieveQuery {
     Text(String),
-    Image(String),
 }
 
 fn default_retriever_limit() -> usize {
@@ -139,7 +138,7 @@ impl Message<RetrieveContext> for Retriever {
         };
 
         match &message.query {
-            QueryType::Text(text) => {
+            RetrieveQuery::Text(text) => {
                 info!("Fetching context for query: {}", text);
                 let embeddings_req = embeddings::TopK {
                     query: embeddings::Query::Text(text.clone()),
@@ -222,7 +221,6 @@ impl Message<RetrieveContext> for Retriever {
 
                 Ok(RetrievedContext { context: contexts })
             }
-            _ => unimplemented!("Only Text queries are currently supported"),
         }
     }
 }
