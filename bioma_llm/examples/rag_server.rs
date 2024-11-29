@@ -5,7 +5,7 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use retriever::ContextMetadata;
+use indexer::ContentType;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -250,7 +250,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         .map(|message| message.content.clone())
         .collect::<Vec<String>>()
         .join("\n");
-    info!("Received ask query: {:#?}", query);
+    info!("Received chat query: {:#?}", query);
 
     info!("Sending message to retriever actor");
     let retrieved = {
@@ -274,29 +274,34 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             );
 
             // If there's an image in the context, use only the first one
-            if let Some(ctx) =
-                context.context.iter().find(|ctx| matches!(ctx.metadata, Some(ContextMetadata::Image(_))))
+            if let Some(ctx) = context
+                .context
+                .iter()
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m.content_type, ContentType::Image)))
             {
-                if let Some(ContextMetadata::Image(image_metadata)) = &ctx.metadata {
-                    match tokio::fs::read(&image_metadata.source).await {
-                        Ok(image_data) => {
-                            match tokio::task::spawn_blocking(move || {
-                                base64::engine::general_purpose::STANDARD.encode(image_data)
-                            })
-                            .await
-                            {
-                                Ok(base64_data) => {
-                                    context_message.images =
-                                        Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
-                                }
-                                Err(e) => {
-                                    error!("Error encoding image: {:?}", e);
+                if let Some(metadata) = &ctx.metadata {
+                    match &metadata.content_type {
+                        ContentType::Image => match tokio::fs::read(&metadata.source).await {
+                            Ok(image_data) => {
+                                match tokio::task::spawn_blocking(move || {
+                                    base64::engine::general_purpose::STANDARD.encode(image_data)
+                                })
+                                .await
+                                {
+                                    Ok(base64_data) => {
+                                        context_message.images =
+                                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                    }
+                                    Err(e) => {
+                                        error!("Error encoding image: {:?}", e);
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            error!("Error reading image file: {:?}", e);
-                        }
+                            Err(e) => {
+                                error!("Error reading image file: {:?}", e);
+                            }
+                        },
+                        _ => {}
                     }
                 }
             }
@@ -372,25 +377,28 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             // Add images to the system message if available
             let mut images = Vec::new();
             for ctx in context.context {
-                if let Some(ContextMetadata::Image(image_metadata)) = ctx.metadata {
-                    match tokio::fs::read(&image_metadata.source).await {
-                        Ok(image_data) => {
-                            match tokio::task::spawn_blocking(move || {
-                                base64::engine::general_purpose::STANDARD.encode(image_data)
-                            })
-                            .await
-                            {
-                                Ok(base64_data) => {
-                                    images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
-                                }
-                                Err(e) => {
-                                    error!("Error encoding image: {:?}", e);
+                if let Some(metadata) = &ctx.metadata {
+                    match &metadata.content_type {
+                        ContentType::Image => match tokio::fs::read(&metadata.source).await {
+                            Ok(image_data) => {
+                                match tokio::task::spawn_blocking(move || {
+                                    base64::engine::general_purpose::STANDARD.encode(image_data)
+                                })
+                                .await
+                                {
+                                    Ok(base64_data) => {
+                                        images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+                                    }
+                                    Err(e) => {
+                                        error!("Error encoding image: {:?}", e);
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            error!("Error reading image file: {:?}", e);
-                        }
+                            Err(e) => {
+                                error!("Error reading image file: {:?}", e);
+                            }
+                        },
+                        _ => {}
                     }
                 }
             }

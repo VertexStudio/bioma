@@ -191,7 +191,7 @@ impl Indexer {
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix);
+        let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix.as_ref().unwrap());
         let query = format!(
             "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
             edge_name, edge_name
@@ -532,7 +532,7 @@ impl Message<DeleteSource> for Indexer {
         ctx: &mut ActorContext<Self>,
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
-        let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_name_prefix);
+        let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_name_prefix.as_ref().unwrap());
         let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
