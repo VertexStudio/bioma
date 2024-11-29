@@ -16,22 +16,7 @@ use zip::ZipArchive;
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
-/// CURL examples:
-///
-/// Reset the engine:
-/// curl -X POST http://localhost:8080/reset
-///
-/// Index some files:
-/// curl -X POST http://localhost:8080/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"]}'
-///
-/// Retrieve context:
-/// curl -X POST http://localhost:8080/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
-///
-/// Ask a question:
-/// curl -X POST http://localhost:8080/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
-///
-/// Upload a file:
-/// curl -X POST http://localhost:8080/upload -F 'file=@/Users/rozgo/BiomaAI/bioma/README.md' -F 'metadata={"path": "temp0/temp1/README.md"};type=application/json'
+/// CURL (examples)[docs/examples.sh]
 
 struct ActorHandle<T: Actor> {
     ctx: Mutex<ActorContext<T>>,
@@ -676,7 +661,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(self::ask))
-            .route("/chat", web::post().to(self::chat))
+            .route("/api/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/api/embed", web::post().to(embed))
