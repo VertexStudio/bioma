@@ -561,7 +561,7 @@ async fn test_image_embeddings_generate() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Generate embeddings for the image
-    let image_paths = vec!["../assets/images/rust-pet.png".to_string()];
+    let image_paths = vec!["../../assets/images/rust-pet.png".to_string()];
     let generated = relay_ctx
         .send::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Image(image_paths.clone()) },
@@ -603,7 +603,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Store image embeddings with metadata
-    let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
+    let image_paths = vec!["../../assets/images/elephant.jpg".to_string()];
     let metadata = vec![serde_json::json!({
         "description": "An elephant image",
         "type": "wildlife"
@@ -627,7 +627,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     // Search using the same image
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
+        query: embeddings::Query::Image("../../assets/images/elephant.jpg".to_string()),
         threshold: 0.5,
         k: 1,
         tag: Some("test_images".to_string()),
@@ -638,7 +638,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     // Check search results
     assert_eq!(similarities.len(), 1);
-    assert!(similarities[0].similarity > 0.9, "Expected very high similarity for exact match");
+    assert!(similarities[0].similarity == 1.0, "Expected similarity of 1.0 for exact match");
     assert!(similarities[0].metadata.is_some());
     assert_eq!(similarities[0].metadata.as_ref().unwrap()["description"], "An elephant image");
 
@@ -674,7 +674,7 @@ async fn test_cross_modal_search() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Store image embeddings
-    let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
+    let image_paths = vec!["../../assets/images/elephant.jpg".to_string()];
     let _ = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
@@ -706,5 +706,119 @@ async fn test_cross_modal_search() -> Result<(), TestError> {
     // Terminate the actor
     embeddings_handle.abort();
 
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_multiple_images_batch() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Use multiple images
+    let image_paths = vec!["../assets/images/elephant.jpg".to_string(), "../assets/images/rust-pet.png".to_string()];
+
+    let generated = relay_ctx
+        .send::<Embeddings, GenerateEmbeddings>(
+            GenerateEmbeddings { content: EmbeddingContent::Image(image_paths) },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Verify batch processing
+    assert_eq!(generated.embeddings.len(), 2);
+    assert!(generated.embeddings.iter().all(|emb| emb.len() == NOMIC_V15_EMBEDDING_LENGTH));
+    assert!(generated.embeddings.iter().all(|emb| emb.iter().all(|&val| val.is_finite())));
+    assert!(generated.embeddings.iter().all(|emb| emb.iter().any(|&val| val != 0.0)));
+
+    embeddings_handle.abort();
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_mixed_modal_storage() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings/clip");
+    let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
+        engine.clone(),
+        embeddings_id.clone(),
+        Embeddings::builder().model(Model::ClipVitB32Text).image_model(ImageModel::ClipVitB32Vision).build(),
+        SpawnOptions::default(),
+    )
+    .await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Store both images and text
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "test".to_string(),
+                content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
+                tag: Some("mixed".to_string()),
+                metadata: Some(vec![serde_json::json!({"type": "image"})]),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "test".to_string(),
+                content: EmbeddingContent::Text(vec!["an elephant in the wild".to_string()]),
+                tag: Some("mixed".to_string()),
+                metadata: Some(vec![serde_json::json!({"type": "text"})]),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Search across both modalities
+    let similarities = relay_ctx
+        .send::<Embeddings, embeddings::TopK>(
+            embeddings::TopK {
+                query: embeddings::Query::Text("elephant".to_string()),
+                threshold: 0.2,
+                k: 2,
+                tag: Some("mixed".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    assert_eq!(similarities.len(), 2);
+    assert!(similarities.iter().any(|s| s.metadata.as_ref().unwrap()["type"] == "image"));
+    assert!(similarities.iter().any(|s| s.metadata.as_ref().unwrap()["type"] == "text"));
+    assert!(similarities.iter().all(|s| s.similarity > 0.2));
+
+    embeddings_handle.abort();
     Ok(())
 }
