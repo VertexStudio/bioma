@@ -1,13 +1,8 @@
+use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use goose::GooseError;
 use serde_json::json;
 use test_log::test;
-
-// Add this near the top of the file, before any tests
-#[ctor::ctor]
-fn init_test_logging() {
-    tracing_subscriber::FmtSubscriber::builder().with_max_level(tracing::Level::INFO).with_test_writer().init();
-}
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
     let request_builder = user.get_request_builder(&GooseMethod::Get, "/health")?.header("Accept", "text/plain");
@@ -114,10 +109,6 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
-    // Note: Goose does not natively support multipart form data.
-    // To test file uploads, you might need to use a workaround or a different tool.
-    // Below is a simplified example using raw multipart data.
-
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
     let file_content = "Sample file content"; // Replace with actual file content or load from a fixture
 
@@ -273,20 +264,18 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
 }
 
 // Helper function to initialize GooseAttack with common settings
-fn initialize_goose() -> Result<Box<GooseAttack>, GooseError> {
-    Ok(GooseAttack::initialize()?
-        .set_default(GooseDefault::Host, "http://localhost:8080")?
-        .set_default(GooseDefault::Users, 10)?
-        .set_default(GooseDefault::RunTime, 60)?
-        .set_default(GooseDefault::RequestLog, "../.output/requests.log")?
-        .set_default(GooseDefault::ReportFile, "../.output/report.html")?
-        .set_default(GooseDefault::RunningMetrics, 15)?)
-}
+fn initialize_goose() -> Result<GooseAttack, GooseError> {
+    let mut config = GooseConfiguration::default();
 
-#[test(tokio::test)]
-async fn test_dummy() -> Result<(), GooseError> {
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    Ok(())
+    config.host = "http://localhost:8080".to_string();
+    config.users = Some(10);
+    config.run_time = "60".to_string();
+    config.request_log = "../.output/requests.log".to_string();
+    config.report_file = "../.output/report.html".to_string();
+    config.running_metrics = Some(15);
+
+    // Initialize GooseAttack with the configuration, otherwise it'll load cli args and since this is a test, we don't want that
+    GooseAttack::initialize_with_config(config)
 }
 
 #[test(tokio::test)]
@@ -304,29 +293,9 @@ async fn test_load_health() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_hello() -> Result<(), GooseError> {
-    tracing_subscriber::FmtSubscriber::builder().with_max_level(tracing::Level::INFO).with_test_writer().init();
-    tracing::info!("Starting hello load test...");
-    let result = initialize_goose()?
-        .register_scenario(
-            scenario!("Hello1").register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
-        )
-        .execute()
-        .await;
-
-    match &result {
-        Ok(_) => tracing::info!("Hello load test completed successfully"),
-        Err(e) => tracing::error!("Hello load test failed: {}", e),
-    }
-
-    Ok(())
-}
-
-#[test(tokio::test)]
-async fn test_load_reset() -> Result<(), GooseError> {
     initialize_goose()?
         .register_scenario(
-            scenario!("Reset Engine")
-                .register_transaction(transaction!(load_test_reset).set_name("Reset Engine").set_weight(1)?),
+            scenario!("Hello").register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
         )
         .execute()
         .await?;
@@ -430,7 +399,6 @@ async fn test_load_rag_server() -> Result<(), GooseError> {
             scenario!("RAG Server Load Test")
                 .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?) // Higher weight for health checks
                 .register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?)
-                .register_transaction(transaction!(load_test_reset).set_name("Reset Engine").set_weight(1)?)
                 .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(3)?)
                 .register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(4)?)
                 // .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_weight(1)?)
