@@ -116,8 +116,7 @@ pub struct Similarity {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = "nomic_embed_v15".to_string())]
-    pub table_name_prefix: String,
+    pub table_name_prefix: Option<String>,
     #[builder(default = Model::NomicEmbedTextV15)]
     pub model: Model,
     #[builder(default = ImageModel::NomicEmbedVisionV15)]
@@ -196,7 +195,7 @@ impl Message<TopK> for Embeddings {
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
             .bind(("threshold", message.threshold))
-            .bind(("prefix", self.table_name_prefix.clone()))
+            .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
@@ -255,7 +254,7 @@ impl Message<StoreEmbeddings> for Embeddings {
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
                 .bind(("source", message.source.clone()))
-                .bind(("prefix", self.table_name_prefix.clone()))
+                .bind(("prefix", self.table_prefix()))
                 .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
@@ -425,7 +424,7 @@ impl Embeddings {
 
                 // Define schema
                 let schema_def = include_str!("../sql/def.surql")
-                    .replace("{prefix}", &self.table_name_prefix)
+                    .replace("{prefix}", &self.table_prefix())
                     .replace("{dim}", &text_model_info.dim.to_string());
 
                 // Execute the schema definition
@@ -544,5 +543,9 @@ impl Embeddings {
 
         info!("{} Finished", ctx.id());
         Ok(())
+    }
+
+    pub fn table_prefix(&self) -> String {
+        self.table_name_prefix.as_ref().unwrap_or(&self.model.to_string()).clone()
     }
 }
