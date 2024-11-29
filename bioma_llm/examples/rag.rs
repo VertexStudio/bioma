@@ -1,6 +1,6 @@
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
-use retriever::QueryType;
+use retriever::RetrieveQuery;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Retrieve context
     info!("Retrieving context");
-    let retrieve_context = RetrieveContext { query: QueryType::Text(query.to_string()), limit: 10, threshold: 0.0 };
+    let retrieve_context = RetrieveContext { query: RetrieveQuery::Text(query.to_string()), limit: 10, threshold: 0.0 };
     let context = relay_ctx
         .send::<Retriever, RetrieveContext>(
             retrieve_context,

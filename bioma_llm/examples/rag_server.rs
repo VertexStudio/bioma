@@ -5,7 +5,7 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use retriever::{ContextMetadata, QueryType};
+use retriever::ContextMetadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -291,7 +291,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext { query: QueryType::Text(query.clone()), limit: 5, threshold: 0.0 };
+        let retrieve_context = RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
@@ -370,7 +370,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext { query: QueryType::Text(body.query.clone()), limit: 5, threshold: 0.0 };
+        let retrieve_context =
+            RetrieveContext { query: RetrieveQuery::Text(body.query.clone()), limit: 5, threshold: 0.0 };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
