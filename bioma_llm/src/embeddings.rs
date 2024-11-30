@@ -462,12 +462,17 @@ impl Embeddings {
                         // Initialize both text and image embeddings
                         let mut text_options = fastembed::InitOptions::new(get_fastembed_model(&text_model))
                             .with_cache_dir(cache_dir.clone());
-                        let image_options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
-                            .with_cache_dir(cache_dir);
+                        let mut image_options =
+                            fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
+                                .with_cache_dir(cache_dir);
 
                         #[cfg(target_os = "macos")]
                         {
                             text_options = text_options.with_execution_providers(vec![
+                                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+                            ]);
+
+                            image_options = image_options.with_execution_providers(vec![
                                 ort::execution_providers::CoreMLExecutionProvider::default().build(),
                             ]);
                         }
@@ -475,6 +480,10 @@ impl Embeddings {
                         #[cfg(target_os = "linux")]
                         {
                             text_options = text_options.with_execution_providers(vec![
+                                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                            ]);
+
+                            image_options = image_options.with_execution_providers(vec![
                                 ort::execution_providers::CUDAExecutionProvider::default().build(),
                             ]);
                         }
