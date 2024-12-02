@@ -5,6 +5,7 @@ use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use goose::GooseError;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use test_log::test;
 
@@ -166,7 +167,7 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
     }
 }
 
-pub async fn    load_test_embed(user: &mut GooseUser) -> TransactionResult {
+pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
     let payload = json!({
         "model": "nomic-embed-text",
         "input": "Sample text to embed"
@@ -189,12 +190,13 @@ pub async fn    load_test_embed(user: &mut GooseUser) -> TransactionResult {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+struct AskQuery {
+    query: String,
+}
+
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
-    let payload = RetrieveContext {
-        query: RetrieveQuery::Text("What is Bioma?".to_string()),
-        limit: DEFAULT_RETRIEVER_LIMIT,
-        threshold: DEFAULT_RETRIEVER_THRESHOLD,
-    };
+    let payload = AskQuery { query: "What is Bioma?".to_string() };
 
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
@@ -207,13 +209,12 @@ pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("ask request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("ask request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
@@ -375,12 +376,14 @@ async fn test_load_embed() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_ask() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Ask").register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_weight(3)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
