@@ -65,6 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         threshold: 0.5,
         k: 3,
         tag: Some("test_images".to_string()),
+        sources: None,
     };
     info!("Image query: {:?}", top_k);
     let similarities =
