@@ -117,22 +117,46 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
-    let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-    let file_content = "Sample file content"; // Replace with actual file content or load from a fixture
+    let boundary = "----WebKitFormBoundaryABC123";
 
-    let payload = format!(
-        "--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\n{}\r\n--{}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"path\": \"uploads/test.txt\"}}\r\n--{}--\r\n",
-        boundary, file_content, boundary, boundary
-    );
+    // Create a temporary file with some content
+    let file_content = "Sample file content for testing";
+    let temp_dir = std::env::temp_dir();
+    let temp_file_path = temp_dir.join("test.txt");
+    std::fs::write(&temp_file_path, file_content).unwrap();
+
+    // Read the file content
+    let file_bytes = std::fs::read(&temp_file_path).unwrap();
+
+    // Create the multipart form data
+    let mut form_data = Vec::new();
+
+    // Add file part
+    form_data.extend_from_slice(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\n",
+    ).as_bytes());
+    form_data.extend_from_slice(&file_bytes);
+    form_data.extend_from_slice(b"\r\n");
+
+    // Add metadata part
+    form_data.extend_from_slice(format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"path\":\"uploads/test.txt\"}}\r\n",
+    ).as_bytes());
+
+    // Add final boundary
+    form_data.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
 
     let request_builder = user
         .get_request_builder(&GooseMethod::Post, "/upload")?
         .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
-        .body(payload);
+        .body(form_data);
 
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Upload File").build();
 
     let mut goose = user.request(goose_request).await?;
+
+// Clean up the temporary file
+    let _ = std::fs::remove_file(temp_file_path);
 
     match &goose.response {
         Ok(_) => return Ok(()),
@@ -341,6 +365,19 @@ async fn test_load_chat() -> Result<(), GooseError> {
 }
 
 #[test(tokio::test)]
+async fn test_load_upload() -> Result<(), GooseError> {
+    initialize_goose()?
+        .register_scenario(
+            scenario!("Upload File")
+                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_weight(1)?),
+        )
+        .execute()
+        .await?;
+
+    Ok(())
+}
+
+#[test(tokio::test)]
 async fn test_load_delete_source() -> Result<(), GooseError> {
     let goose_result = initialize_goose()?
         .register_scenario(
@@ -419,13 +456,13 @@ async fn test_load_rag_server() -> Result<(), GooseError> {
     let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Server Load Test")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?) // Higher weight for health checks
+                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(3)?)
                 .register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?)
                 .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(3)?)
                 .register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(4)?)
-                // .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_weight(1)?)
+                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_weight(1)?)
                 .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source").set_weight(1)?)
-                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_weight(3)?)
+                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_weight(5)?)
                 .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_weight(3)?)
                 .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_weight(2)?)
                 .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_weight(1)?),
