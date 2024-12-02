@@ -239,6 +239,7 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
 #[derive(Deserialize)]
 struct ChatQuery {
     messages: Vec<ChatMessage>,
+    sources: Option<Vec<String>>,
 }
 
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
@@ -256,8 +257,12 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context =
-            RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0, sources: None };
+        let retrieve_context = RetrieveContext {
+            query: RetrieveQuery::Text(query.clone()),
+            limit: 5,
+            threshold: 0.0,
+            sources: body.sources.clone(),
+        };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
@@ -346,6 +351,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 #[derive(Deserialize)]
 struct AskQuery {
     query: String,
+    sources: Option<Vec<String>>,
 }
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
@@ -355,8 +361,12 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     let retrieved = {
         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
         let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context =
-            RetrieveContext { query: RetrieveQuery::Text(body.query.clone()), limit: 5, threshold: 0.0, sources: None };
+        let retrieve_context = RetrieveContext {
+            query: RetrieveQuery::Text(body.query.clone()),
+            limit: 5,
+            threshold: 0.0,
+            sources: body.sources.clone(),
+        };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
 
