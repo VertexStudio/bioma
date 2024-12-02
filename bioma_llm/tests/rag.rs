@@ -41,13 +41,12 @@ pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("hello request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("hello request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
@@ -285,7 +284,7 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
 fn initialize_goose() -> Result<GooseAttack, GooseError> {
     let mut config = GooseConfiguration::default();
 
-    config.host = "http://localhost:8080".to_string();
+    config.host = "http://localhost:5766".to_string();
     config.users = Some(10);
     config.run_time = "60".to_string();
     config.request_log = "../.output/requests.log".to_string();
@@ -313,12 +312,14 @@ async fn test_load_health() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_hello() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Hello").register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
