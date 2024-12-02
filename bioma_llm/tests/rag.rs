@@ -5,14 +5,13 @@ use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use goose::GooseError;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use test_log::test;
 
 const DEFAULT_CHUNK_CAPACITY: usize = 1024;
 const DEFAULT_CHUNK_OVERLAP: usize = 256;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 10;
-const DEFAULT_RETRIEVER_LIMIT: usize = 5;
-const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
     let request_builder = user.get_request_builder(&GooseMethod::Get, "/health")?.header("Accept", "text/plain");
@@ -21,13 +20,12 @@ pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("health check failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("health check failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
@@ -42,13 +40,12 @@ pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("hello request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("hello request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
@@ -58,13 +55,12 @@ pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("reset request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("reset request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
@@ -86,13 +82,12 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("index request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("index request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
@@ -105,7 +100,7 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/chat")?
+        .get_request_builder(&GooseMethod::Post, "/api/chat")?
         .header("Content-Type", "application/json")
         .body(payload_str);
 
@@ -113,13 +108,12 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("chat request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("chat request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
@@ -164,13 +158,12 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     // Clean up the temporary file
     let _ = std::fs::remove_file(temp_file_path);
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("upload request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("upload request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
@@ -187,18 +180,12 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure(
-                "delete_source request failed",
-                &mut goose.request,
-                Some(response.headers()),
-                None,
-            );
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("delete_source request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
@@ -216,21 +203,21 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("embed request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("embed request failed", &mut goose.request, None, None);
         }
     }
+}
 
-    Ok(())
+#[derive(Deserialize, Serialize)]
+struct AskQuery {
+    query: String,
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
-    let payload = RetrieveContext {
-        query: RetrieveQuery::Text("What is Bioma?".to_string()),
-        limit: DEFAULT_RETRIEVER_LIMIT,
-        threshold: DEFAULT_RETRIEVER_THRESHOLD,
-    };
+    let payload = AskQuery { query: "What is Bioma?".to_string() };
 
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
@@ -243,13 +230,12 @@ pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("ask request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("ask request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
@@ -267,13 +253,12 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("retrieve request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("retrieve request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
@@ -297,13 +282,12 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("rerank request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("rerank request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 // Helper function to initialize GooseAttack with common settings
@@ -323,7 +307,7 @@ fn initialize_goose() -> Result<GooseAttack, GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_health() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Health Check")
                 .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?),
@@ -331,42 +315,50 @@ async fn test_load_health() -> Result<(), GooseError> {
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_hello() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Hello").register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
         )
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_index() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Index Files")
-                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(3)?),
+                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(1)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_chat() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
-            scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(4)?),
+            scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(1)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
@@ -386,7 +378,7 @@ async fn test_load_upload() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_delete_source() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Delete Source")
                 .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source").set_weight(1)?),
@@ -394,12 +386,14 @@ async fn test_load_delete_source() -> Result<(), GooseError> {
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_embed() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Embed Text")
                 .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_weight(3)?),
@@ -407,24 +401,28 @@ async fn test_load_embed() -> Result<(), GooseError> {
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_ask() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Ask").register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_weight(3)?),
         )
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_retrieve() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Retrieve")
                 .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_weight(2)?),
@@ -432,12 +430,14 @@ async fn test_load_retrieve() -> Result<(), GooseError> {
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_rerank() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Rerank")
                 .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_weight(1)?),
@@ -445,12 +445,14 @@ async fn test_load_rerank() -> Result<(), GooseError> {
         .execute()
         .await?;
 
+    assert!(goose_result.errors.is_empty());
+
     Ok(())
 }
 
 #[test(tokio::test)]
 async fn test_load_rag_server() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Server Load Test")
                 .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(3)?)
@@ -466,6 +468,8 @@ async fn test_load_rag_server() -> Result<(), GooseError> {
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
