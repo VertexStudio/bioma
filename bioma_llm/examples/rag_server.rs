@@ -547,7 +547,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     color_backtrace::BacktracePrinter::new().message("BOOM! 💥").install(color_backtrace::default_output_stream());
 
     // Initialize the actor system
-    let engine_options = EngineOptions::builder().endpoint("ws://localhost:8080".into()).build();
+    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
     let engine = Engine::connect(engine_options).await?;
 
     // Indexer
