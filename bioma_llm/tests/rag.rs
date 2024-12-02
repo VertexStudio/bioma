@@ -166,7 +166,7 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
     }
 }
 
-pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
+pub async fn    load_test_embed(user: &mut GooseUser) -> TransactionResult {
     let payload = json!({
         "model": "nomic-embed-text",
         "input": "Sample text to embed"
@@ -181,13 +181,12 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("embed request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("embed request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
@@ -361,13 +360,15 @@ async fn test_load_delete_source() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_embed() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Embed Text")
                 .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_weight(3)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
