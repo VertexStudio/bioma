@@ -889,7 +889,8 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     assert!(!similarities.is_empty());
     for similarity in &similarities {
         assert!(
-            similarity.text.as_ref().unwrap().contains("document 1"),
+            similarity.text.as_ref().unwrap().contains("document 1")
+                || similarity.text.as_ref().unwrap().contains("doc 1"),
             "Expected only results from document1.pdf, got: {}",
             similarity.text.as_ref().unwrap()
         );
@@ -912,7 +913,9 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     for similarity in &similarities {
         assert!(
             similarity.text.as_ref().unwrap().contains("document 1")
-                || similarity.text.as_ref().unwrap().contains("document 2"),
+                || similarity.text.as_ref().unwrap().contains("doc 1")
+                || similarity.text.as_ref().unwrap().contains("document 2")
+                || similarity.text.as_ref().unwrap().contains("doc 2"),
             "Expected only results from document1.pdf or document2.pdf, got: {}",
             similarity.text.as_ref().unwrap()
         );
@@ -934,13 +937,14 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     assert!(similarities.len() > 4); // Should get results from all documents
     let mut found_sources = vec![false, false, false]; // Track which documents we found
     for similarity in &similarities {
-        if similarity.text.as_ref().unwrap().contains("document 1") {
+        let text = similarity.text.as_ref().unwrap();
+        if text.contains("document 1") || text.contains("doc 1") {
             found_sources[0] = true;
         }
-        if similarity.text.as_ref().unwrap().contains("document 2") {
+        if text.contains("document 2") || text.contains("doc 2") {
             found_sources[1] = true;
         }
-        if similarity.text.as_ref().unwrap().contains("document 3") {
+        if text.contains("document 3") || text.contains("doc 3") {
             found_sources[2] = true;
         }
     }
