@@ -101,7 +101,7 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
     let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/chat")?
+        .get_request_builder(&GooseMethod::Post, "/api/chat")?
         .header("Content-Type", "application/json")
         .body(payload_str);
 
@@ -109,13 +109,12 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("chat request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("hello request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
@@ -338,12 +337,14 @@ async fn test_load_index() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_chat() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
-            scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(4)?),
+            scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(1)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
