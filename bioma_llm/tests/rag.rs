@@ -59,7 +59,7 @@ pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
     match &goose.response {
         Ok(_) => return Ok(()),
         Err(_) => {
-            return user.set_failure("hello request failed", &mut goose.request, None, None);
+            return user.set_failure("reset request failed", &mut goose.request, None, None);
         }
     }
 }
@@ -86,7 +86,7 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     match &goose.response {
         Ok(_) => return Ok(()),
         Err(_) => {
-            return user.set_failure("hello request failed", &mut goose.request, None, None);
+            return user.set_failure("index request failed", &mut goose.request, None, None);
         }
     }
 }
@@ -112,7 +112,7 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
     match &goose.response {
         Ok(_) => return Ok(()),
         Err(_) => {
-            return user.set_failure("hello request failed", &mut goose.request, None, None);
+            return user.set_failure("chat request failed", &mut goose.request, None, None);
         }
     }
 }
@@ -138,7 +138,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     match &goose.response {
         Ok(_) => return Ok(()),
         Err(_) => {
-            return user.set_failure("hello request failed", &mut goose.request, None, None);
+            return user.set_failure("upload request failed", &mut goose.request, None, None);
         }
     }
 }
@@ -351,13 +351,15 @@ async fn test_load_chat() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_delete_source() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Delete Source")
                 .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source").set_weight(1)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
