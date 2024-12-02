@@ -6,6 +6,7 @@ use clap::{Parser, ValueEnum};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use serde_json::json;
+use std::str::FromStr;
 
 const DEFAULT_CHUNK_CAPACITY: usize = 1024;
 const DEFAULT_CHUNK_OVERLAP: usize = 256;
@@ -200,12 +201,34 @@ enum TestType {
     All,
 }
 
+// Implement FromStr separately to avoid conflict with ValueEnum
+impl FromStr for TestType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "health" => Ok(TestType::Health),
+            "hello" => Ok(TestType::Hello),
+            "index" => Ok(TestType::Index),
+            "chat" => Ok(TestType::Chat),
+            "upload" => Ok(TestType::Upload),
+            "deletesource" => Ok(TestType::DeleteSource),
+            "embed" => Ok(TestType::Embed),
+            "ask" => Ok(TestType::Ask),
+            "retrieve" => Ok(TestType::Retrieve),
+            "rerank" => Ok(TestType::Rerank),
+            "all" => Ok(TestType::All),
+            _ => Err(format!("Unknown test type: {}", s)),
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Endpoints to run
-    #[arg(value_enum, short, long, default_value = "all", value_delimiter = ',')]
-    endpoints: Vec<TestType>,
+    /// Endpoints to run with optional weights (endpoint:weight,endpoint:weight)
+    #[arg(value_delimiter = ',', short, long, default_value = "all")]
+    endpoints: Vec<WeightedEndpoint>,
 
     /// Server URL
     #[arg(short, long, default_value = "http://localhost:5766")]
@@ -232,6 +255,34 @@ struct Args {
     metrics_interval: usize,
 }
 
+#[derive(Debug, Clone)]
+struct WeightedEndpoint {
+    endpoint: TestType,
+    weight: usize,
+}
+
+impl FromStr for WeightedEndpoint {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split(':').collect();
+        match parts.as_slice() {
+            [endpoint, weight] => {
+                let endpoint =
+                    <TestType as FromStr>::from_str(endpoint).map_err(|_| format!("Invalid endpoint: {}", endpoint))?;
+                let weight = weight.parse().map_err(|_| format!("Invalid weight: {}", weight))?;
+                Ok(WeightedEndpoint { endpoint, weight })
+            }
+            [endpoint] => {
+                let endpoint =
+                    <TestType as FromStr>::from_str(endpoint).map_err(|_| format!("Invalid endpoint: {}", endpoint))?;
+                Ok(WeightedEndpoint { endpoint, weight: 1 })
+            }
+            _ => Err(format!("Invalid format: {}", s)),
+        }
+    }
+}
+
 fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     let mut config = GooseConfiguration::default();
 
@@ -251,59 +302,50 @@ async fn main() -> Result<(), GooseError> {
     let mut attack = initialize_goose(&args)?;
 
     // Helper to register a scenario
-    let register_scenario = |attack: GooseAttack, endpoint: TestType| -> Result<GooseAttack, GooseError> {
-        match endpoint {
-            TestType::Health => Ok(attack.register_scenario(
-                scenario!("Health Check").register_transaction(transaction!(load_test_health).set_name("Health Check")),
-            )),
-            TestType::Hello => Ok(attack.register_scenario(
-                scenario!("Hello").register_transaction(transaction!(load_test_hello).set_name("Hello")),
-            )),
-            TestType::Index => Ok(attack.register_scenario(
-                scenario!("Index Files").register_transaction(transaction!(load_test_index).set_name("Index Files")),
-            )),
-            TestType::Chat => Ok(attack.register_scenario(
-                scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat")),
-            )),
-            TestType::Upload => Ok(attack.register_scenario(
-                scenario!("Upload File").register_transaction(transaction!(load_test_upload).set_name("Upload File")),
-            )),
-            TestType::DeleteSource => Ok(attack.register_scenario(
-                scenario!("Delete Source")
-                    .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source")),
-            )),
-            TestType::Embed => Ok(attack.register_scenario(
-                scenario!("Embed Text").register_transaction(transaction!(load_test_embed).set_name("Embed Text")),
-            )),
-            TestType::Ask => Ok(attack.register_scenario(
-                scenario!("RAG Ask").register_transaction(transaction!(load_test_ask).set_name("RAG Ask")),
-            )),
-            TestType::Retrieve => Ok(attack.register_scenario(
-                scenario!("RAG Retrieve")
-                    .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve")),
-            )),
-            TestType::Rerank => Ok(attack.register_scenario(
-                scenario!("RAG Rerank").register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank")),
-            )),
-            TestType::All => Ok(attack.register_scenario(
-                scenario!("RAG Server Load Test")
-                    .register_transaction(transaction!(load_test_health).set_name("Health Check"))
-                    .register_transaction(transaction!(load_test_hello).set_name("Hello"))
-                    .register_transaction(transaction!(load_test_index).set_name("Index Files"))
-                    .register_transaction(transaction!(load_test_chat).set_name("Chat"))
-                    .register_transaction(transaction!(load_test_upload).set_name("Upload File"))
-                    .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source"))
-                    .register_transaction(transaction!(load_test_embed).set_name("Embed Text"))
-                    .register_transaction(transaction!(load_test_ask).set_name("RAG Ask"))
-                    .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve"))
-                    .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank")),
-            )),
-        }
+    let register_scenario = |attack: GooseAttack, weighted: WeightedEndpoint| -> Result<GooseAttack, GooseError> {
+        let scenario = match weighted.endpoint {
+            TestType::Health => {
+                scenario!("Health Check").register_transaction(transaction!(load_test_health).set_name("Health Check"))
+            }
+            TestType::Hello => scenario!("Hello").register_transaction(transaction!(load_test_hello).set_name("Hello")),
+            TestType::Index => {
+                scenario!("Index Files").register_transaction(transaction!(load_test_index).set_name("Index Files"))
+            }
+            TestType::Chat => scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat")),
+            TestType::Upload => {
+                scenario!("Upload File").register_transaction(transaction!(load_test_upload).set_name("Upload File"))
+            }
+            TestType::DeleteSource => scenario!("Delete Source")
+                .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source")),
+            TestType::Embed => {
+                scenario!("Embed Text").register_transaction(transaction!(load_test_embed).set_name("Embed Text"))
+            }
+            TestType::Ask => scenario!("RAG Ask").register_transaction(transaction!(load_test_ask).set_name("RAG Ask")),
+            TestType::Retrieve => scenario!("RAG Retrieve")
+                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve")),
+            TestType::Rerank => {
+                scenario!("RAG Rerank").register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank"))
+            }
+            TestType::All => scenario!("RAG Server Load Test")
+                .register_transaction(transaction!(load_test_health).set_name("Health Check"))
+                .register_transaction(transaction!(load_test_hello).set_name("Hello"))
+                .register_transaction(transaction!(load_test_index).set_name("Index Files"))
+                .register_transaction(transaction!(load_test_chat).set_name("Chat"))
+                .register_transaction(transaction!(load_test_upload).set_name("Upload File"))
+                .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source"))
+                .register_transaction(transaction!(load_test_embed).set_name("Embed Text"))
+                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask"))
+                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve"))
+                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank")),
+        };
+
+        // Convert u32 weight to usize
+        Ok(attack.register_scenario(scenario.set_weight(weighted.weight)?))
     };
 
     // Register selected scenarios
-    for endpoint in args.endpoints {
-        attack = register_scenario(attack, endpoint)?;
+    for weighted_endpoint in args.endpoints {
+        attack = register_scenario(attack, weighted_endpoint)?;
     }
 
     // Execute the attack
