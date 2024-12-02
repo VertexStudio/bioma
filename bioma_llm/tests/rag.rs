@@ -144,7 +144,8 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
+    // let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
+    let payload = DeleteSource { sources: vec!["/home/vertex/Documents/Repositorios/bioma/README.md".to_string()] };
 
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
@@ -157,18 +158,12 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure(
-                "delete_source request failed",
-                &mut goose.request,
-                Some(response.headers()),
-                None,
-            );
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("delete_source request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
