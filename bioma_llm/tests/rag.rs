@@ -416,7 +416,7 @@ async fn test_load_rerank() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_rag_server() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Server Load Test")
                 .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?) // Higher weight for health checks
@@ -432,6 +432,8 @@ async fn test_load_rag_server() -> Result<(), GooseError> {
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
