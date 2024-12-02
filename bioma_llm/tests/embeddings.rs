@@ -954,3 +954,161 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor with CLIP model for cross-modal compatibility
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings/clip");
+    let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
+        engine.clone(),
+        embeddings_id.clone(),
+        Embeddings::builder().model(Model::ClipVitB32Text).image_model(ImageModel::ClipVitB32Vision).build(),
+        SpawnOptions::default(),
+    )
+    .await?;
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Store embeddings for images
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "../assets/images/elephant.jpg".to_string(),
+                content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
+                metadata: Some(vec![serde_json::json!({"type": "image"})]),
+                tag: Some("regex_test".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "../assets/images/rust-pet.png".to_string(),
+                content: EmbeddingContent::Image(vec!["../assets/images/rust-pet.png".to_string()]),
+                metadata: Some(vec![serde_json::json!({"type": "image"})]),
+                tag: Some("regex_test".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Store embeddings for Rust files
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "src/embeddings.rs".to_string(),
+                content: EmbeddingContent::Text(vec!["Embeddings implementation for vector search".to_string()]),
+                metadata: Some(vec![serde_json::json!({"type": "rust"})]),
+                tag: Some("regex_test".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    let _ = relay_ctx
+        .send::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                source: "src/indexer.rs".to_string(),
+                content: EmbeddingContent::Text(vec!["Indexer implementation for content processing".to_string()]),
+                metadata: Some(vec![serde_json::json!({"type": "rust"})]),
+                tag: Some("regex_test".to_string()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Test 1: Query only images using regex
+    let image_query = embeddings::TopK {
+        query: embeddings::Query::Text("visual content".to_string()),
+        threshold: -0.5,
+        k: 4,
+        tag: Some("regex_test".to_string()),
+        sources: Some(vec![".*\\.(?:jpg|png)$".to_string()]),
+    };
+
+    let image_results =
+        relay_ctx.send::<Embeddings, embeddings::TopK>(image_query, &embeddings_id, SendOptions::default()).await?;
+
+    // Verify only image results
+    assert!(!image_results.is_empty());
+    for result in &image_results {
+        assert_eq!(
+            result.metadata.as_ref().unwrap()["type"],
+            "image",
+            "Expected only image results, got: {:?}",
+            result.metadata
+        );
+    }
+
+    // Test 2: Query only Rust files using regex
+    let rust_query = embeddings::TopK {
+        query: embeddings::Query::Text("implementation".to_string()),
+        threshold: -0.5,
+        k: 4,
+        tag: Some("regex_test".to_string()),
+        sources: Some(vec!["src/.*\\.rs$".to_string()]),
+    };
+
+    let rust_results =
+        relay_ctx.send::<Embeddings, embeddings::TopK>(rust_query, &embeddings_id, SendOptions::default()).await?;
+
+    // Verify only Rust file results
+    assert!(!rust_results.is_empty());
+    for result in &rust_results {
+        assert_eq!(
+            result.metadata.as_ref().unwrap()["type"],
+            "rust",
+            "Expected only Rust file results, got: {:?}",
+            result.metadata
+        );
+    }
+
+    // Test 3: Complex regex pattern matching multiple file types
+    let mixed_query = embeddings::TopK {
+        query: embeddings::Query::Text("content".to_string()),
+        threshold: -0.5,
+        k: 4,
+        tag: Some("regex_test".to_string()),
+        sources: Some(vec![
+            ".*\\.(?:jpg|png)$".to_string(),    // Match images
+            "src/embeddings\\.rs$".to_string(), // Match specific Rust file
+        ]),
+    };
+
+    let mixed_results =
+        relay_ctx.send::<Embeddings, embeddings::TopK>(mixed_query, &embeddings_id, SendOptions::default()).await?;
+
+    // Verify mixed results
+    assert!(!mixed_results.is_empty());
+    let mut found_image = false;
+    let mut found_rust = false;
+    for result in &mixed_results {
+        match result.metadata.as_ref().unwrap()["type"].as_str().unwrap() {
+            "image" => found_image = true,
+            "rust" => found_rust = true,
+            _ => panic!("Unexpected result type"),
+        }
+    }
+    assert!(found_image && found_rust, "Expected both image and Rust file results");
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
