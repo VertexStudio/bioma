@@ -30,15 +30,19 @@ async fn make_request<T: serde::Serialize>(
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
+    if let Ok(response) = goose.response {
         if !response.status().is_success() {
+            let status = response.status();
+            let headers = response.headers().clone();
+            let body = response.text().await.unwrap_or_default();
             return user.set_failure(
-                &format!("{} request failed", name.to_lowercase()),
+                &format!("{} request failed with status {}: {}", name.to_lowercase(), status, body),
                 &mut goose.request,
-                Some(response.headers()),
-                None,
+                Some(&headers),
+                Some(&body),
             );
         }
+        goose.response = Ok(response);
     }
 
     Ok(())
@@ -113,7 +117,31 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     let payload = form_data;
 
-    make_request(user, GooseMethod::Post, "/upload", "Upload File", Some(payload)).await
+    // Create a custom request with the correct Content-Type header
+    let mut request_builder = user.get_request_builder(&GooseMethod::Post, "/upload")?;
+    request_builder =
+        request_builder.header("Content-Type", format!("multipart/form-data; boundary={}", boundary)).body(payload);
+
+    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Upload File").build();
+
+    let mut goose = user.request(goose_request).await?;
+
+    if let Ok(response) = goose.response {
+        if !response.status().is_success() {
+            let status = response.status();
+            let headers = response.headers().clone();
+            let body = response.text().await.unwrap_or_default();
+            return user.set_failure(
+                &format!("upload file request failed with status {}: {}", status, body),
+                &mut goose.request,
+                Some(&headers),
+                Some(&body),
+            );
+        }
+        goose.response = Ok(response);
+    }
+
+    Ok(())
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
