@@ -21,13 +21,12 @@ pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("health check failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("health check failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
@@ -299,13 +298,15 @@ fn initialize_goose() -> Result<GooseAttack, GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_health() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Health Check")
                 .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
