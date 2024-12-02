@@ -206,7 +206,9 @@ impl Message<TopK> for Embeddings {
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
+        println!("results: {:?}", results);
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
+        println!("Similarity results: {:?}", results);
         results.map_err(EmbeddingsError::from)
     }
 }
