@@ -100,6 +100,8 @@ pub struct TopK {
     pub query: Query,
     /// The tag to filter the embeddings by
     pub tag: Option<String>,
+    /// The sources to filter by
+    pub sources: Option<Vec<String>>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -189,11 +191,17 @@ impl Message<TopK> for Embeddings {
         let db = ctx.engine().db();
         let query_sql = include_str!("../sql/similarities.surql");
 
+        let pattern = match &message.sources {
+            Some(sources) if !sources.is_empty() => sources.join("|"),
+            _ => ".*".to_string(),
+        };
+
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
+            .bind(("pattern", pattern))
             .bind(("threshold", message.threshold))
             .bind(("prefix", self.table_prefix()))
             .await
