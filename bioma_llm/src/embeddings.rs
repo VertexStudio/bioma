@@ -192,17 +192,24 @@ impl Message<TopK> for Embeddings {
         let db = ctx.engine().db();
         let query_sql = include_str!("../sql/similarities.surql");
 
+        let pattern = match &message.sources {
+            Some(sources) if !sources.is_empty() => sources.join("|"),
+            _ => ".*".to_string(),
+        };
+
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("top_k", message.k.clone()))
             .bind(("tag", message.tag.clone()))
-            .bind(("sources", message.sources.clone()))
+            .bind(("pattern", pattern))
             .bind(("threshold", message.threshold))
             .bind(("prefix", self.table_name_prefix.clone()))
             .await
             .map_err(SystemActorError::from)?;
+        println!("Results: {:#?}", results);
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
+        println!("Similatity Results: {:#?}", results);
         results.map_err(EmbeddingsError::from)
     }
 }
