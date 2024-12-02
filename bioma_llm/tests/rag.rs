@@ -65,7 +65,7 @@ pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let payload = IndexGlobs {
-        globs: vec!["/home/vertex/Documents/Repositorios/bioma/README.md".to_string()],
+        globs: vec!["src/*.rs".to_string()],
         chunk_capacity: 0..DEFAULT_CHUNK_CAPACITY,
         chunk_overlap: DEFAULT_CHUNK_OVERLAP,
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
