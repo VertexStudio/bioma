@@ -155,7 +155,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-// Clean up the temporary file
+    // Clean up the temporary file
     let _ = std::fs::remove_file(temp_file_path);
 
     match &goose.response {
@@ -167,7 +167,6 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    // let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
     let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
 
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
