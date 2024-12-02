@@ -118,8 +118,7 @@ pub struct Similarity {
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
-    #[builder(default = "nomic_embed_v15".to_string())]
-    pub table_name_prefix: String,
+    pub table_name_prefix: Option<String>,
     #[builder(default = Model::NomicEmbedTextV15)]
     pub model: Model,
     #[builder(default = ImageModel::NomicEmbedVisionV15)]
@@ -204,7 +203,7 @@ impl Message<TopK> for Embeddings {
             .bind(("tag", message.tag.clone()))
             .bind(("pattern", pattern))
             .bind(("threshold", message.threshold))
-            .bind(("prefix", self.table_name_prefix.clone()))
+            .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
@@ -263,7 +262,7 @@ impl Message<StoreEmbeddings> for Embeddings {
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
                 .bind(("source", message.source.clone()))
-                .bind(("prefix", self.table_name_prefix.clone()))
+                .bind(("prefix", self.table_prefix()))
                 .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
@@ -433,7 +432,7 @@ impl Embeddings {
 
                 // Define schema
                 let schema_def = include_str!("../sql/def.surql")
-                    .replace("{prefix}", &self.table_name_prefix)
+                    .replace("{prefix}", &self.table_prefix())
                     .replace("{dim}", &text_model_info.dim.to_string());
 
                 // Execute the schema definition
@@ -471,12 +470,17 @@ impl Embeddings {
                         // Initialize both text and image embeddings
                         let mut text_options = fastembed::InitOptions::new(get_fastembed_model(&text_model))
                             .with_cache_dir(cache_dir.clone());
-                        let image_options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
-                            .with_cache_dir(cache_dir);
+                        let mut image_options =
+                            fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
+                                .with_cache_dir(cache_dir);
 
                         #[cfg(target_os = "macos")]
                         {
                             text_options = text_options.with_execution_providers(vec![
+                                ort::execution_providers::CoreMLExecutionProvider::default().build(),
+                            ]);
+
+                            image_options = image_options.with_execution_providers(vec![
                                 ort::execution_providers::CoreMLExecutionProvider::default().build(),
                             ]);
                         }
@@ -484,6 +488,10 @@ impl Embeddings {
                         #[cfg(target_os = "linux")]
                         {
                             text_options = text_options.with_execution_providers(vec![
+                                ort::execution_providers::CUDAExecutionProvider::default().build(),
+                            ]);
+
+                            image_options = image_options.with_execution_providers(vec![
                                 ort::execution_providers::CUDAExecutionProvider::default().build(),
                             ]);
                         }
@@ -552,5 +560,9 @@ impl Embeddings {
 
         info!("{} Finished", ctx.id());
         Ok(())
+    }
+
+    pub fn table_prefix(&self) -> String {
+        self.table_name_prefix.as_ref().unwrap_or(&self.model.to_string()).clone()
     }
 }

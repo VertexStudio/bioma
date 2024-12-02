@@ -116,11 +116,34 @@ pub enum TextType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChunkMetadata {
+pub struct BaseMetadata {
     pub source: String,
-    pub text_type: TextType,
-    pub chunk_number: usize,
     pub uri: String,
+    pub content_type: ContentType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ContentType {
+    Text(TextType),
+    Image,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextChunkMetadata {
+    #[serde(flatten)]
+    pub base: BaseMetadata,
+    pub chunk_number: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageMetadata {
+    #[serde(flatten)]
+    pub base: BaseMetadata,
+    pub format: String,
+    pub dimensions: ImageDimensions,
+    pub size_bytes: u64,
+    pub modified: u64,
+    pub created: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,17 +176,6 @@ pub struct ImageDimensions {
     pub height: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImageMetadata {
-    pub source: String,
-    pub uri: String,
-    pub format: String,
-    pub dimensions: ImageDimensions,
-    pub size_bytes: u64,
-    pub modified: u64,
-    pub created: u64,
-}
-
 #[derive(Debug, Clone)]
 pub enum Content {
     Text { content: String, text_type: TextType, chunk_config: (std::ops::Range<usize>, usize, usize) },
@@ -179,7 +191,10 @@ impl Indexer {
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let edge_name = format!("{}_source_embeddings", self.embeddings.table_name_prefix);
+        let edge_name = format!(
+            "{}_source_embeddings",
+            self.embeddings.table_name_prefix.as_ref().unwrap_or(&self.embeddings.model.to_string())
+        );
         let query = format!(
             "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
             edge_name, edge_name
@@ -223,8 +238,11 @@ impl Indexer {
                     let file_metadata = std::fs::metadata(&path).ok()?;
 
                     let image_metadata = ImageMetadata {
-                        source: source.clone(),
-                        uri: uri.clone(),
+                        base: BaseMetadata {
+                            source: source.clone(),
+                            uri: uri.clone(),
+                            content_type: ContentType::Image,
+                        },
                         format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                         dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                         size_bytes: file_metadata.len(),
@@ -301,11 +319,13 @@ impl Indexer {
                 let metadata = chunks
                     .iter()
                     .enumerate()
-                    .map(|(i, _)| ChunkMetadata {
-                        source: source.clone(),
-                        text_type: text_type.clone(),
+                    .map(|(i, _)| TextChunkMetadata {
+                        base: BaseMetadata {
+                            source: source.clone(),
+                            uri: uri.clone(),
+                            content_type: ContentType::Text(text_type.clone()),
+                        },
                         chunk_number: i,
-                        uri: uri.clone(),
                     })
                     .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
                     .collect::<Vec<Value>>();
@@ -515,7 +535,7 @@ impl Message<DeleteSource> for Indexer {
         ctx: &mut ActorContext<Self>,
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
-        let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_name_prefix);
+        let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
         let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
