@@ -387,13 +387,15 @@ async fn test_load_ask() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_retrieve() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Retrieve")
                 .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_weight(2)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
