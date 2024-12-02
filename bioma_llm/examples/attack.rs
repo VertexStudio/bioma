@@ -8,9 +8,9 @@ use goose::prelude::*;
 use serde_json::json;
 use std::str::FromStr;
 
-const DEFAULT_CHUNK_CAPACITY: usize = 1024;
-const DEFAULT_CHUNK_OVERLAP: usize = 256;
-const DEFAULT_CHUNK_BATCH_SIZE: usize = 10;
+const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
+const DEFAULT_CHUNK_OVERLAP: usize = 200;
+const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
@@ -67,8 +67,8 @@ pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let payload = IndexGlobs {
-        globs: vec!["src/*.rs".to_string()],
-        chunk_capacity: 0..DEFAULT_CHUNK_CAPACITY,
+        globs: vec!["uploads/test.txt".to_string()],
+        chunk_capacity: DEFAULT_CHUNK_CAPACITY,
         chunk_overlap: DEFAULT_CHUNK_OVERLAP,
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
     };
