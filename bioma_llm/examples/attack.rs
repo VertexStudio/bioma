@@ -10,8 +10,6 @@ use serde_json::json;
 const DEFAULT_CHUNK_CAPACITY: usize = 1024;
 const DEFAULT_CHUNK_OVERLAP: usize = 256;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 10;
-const DEFAULT_RETRIEVER_LIMIT: usize = 5;
-const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
@@ -80,7 +78,7 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
         persist: false,
     };
 
-    make_request(user, GooseMethod::Post, "/chat", "Chat", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/api/chat", "Chat", Some(payload)).await
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
@@ -134,11 +132,7 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
-    let payload = RetrieveContext {
-        query: RetrieveQuery::Text("What is Bioma?".to_string()),
-        limit: DEFAULT_RETRIEVER_LIMIT,
-        threshold: DEFAULT_RETRIEVER_THRESHOLD,
-    };
+    let payload = json!({ "query": "What is Bioma?" });
 
     make_request(user, GooseMethod::Post, "/ask", "RAG Ask", Some(payload)).await
 }
