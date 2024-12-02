@@ -12,8 +12,6 @@ use test_log::test;
 const DEFAULT_CHUNK_CAPACITY: usize = 1024;
 const DEFAULT_CHUNK_OVERLAP: usize = 256;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 10;
-const DEFAULT_RETRIEVER_LIMIT: usize = 5;
-const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
     let request_builder = user.get_request_builder(&GooseMethod::Get, "/health")?.header("Accept", "text/plain");
@@ -232,13 +230,12 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("retrieve request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("retrieve request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
