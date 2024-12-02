@@ -259,13 +259,12 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("rerank request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("rerank request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 // Helper function to initialize GooseAttack with common settings
@@ -402,13 +401,15 @@ async fn test_load_retrieve() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_rerank() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("RAG Rerank")
                 .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_weight(1)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
