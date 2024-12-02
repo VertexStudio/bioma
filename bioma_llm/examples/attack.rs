@@ -13,57 +13,53 @@ const DEFAULT_CHUNK_BATCH_SIZE: usize = 10;
 const DEFAULT_RETRIEVER_LIMIT: usize = 5;
 const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
-pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
-    let request_builder = user.get_request_builder(&GooseMethod::Get, "/health")?.header("Accept", "text/plain");
+async fn make_request<T: serde::Serialize>(
+    user: &mut GooseUser,
+    method: GooseMethod,
+    path: &str,
+    name: &str,
+    payload: Option<T>,
+) -> TransactionResult {
+    let mut request_builder = user.get_request_builder(&method, path)?;
 
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Health Check").build();
+    if let Some(payload) = payload {
+        request_builder = request_builder
+            .header("Content-Type", "application/json")
+            .body(serde_json::to_string(&payload).unwrap_or_default());
+    }
+
+    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name(name).build();
 
     let mut goose = user.request(goose_request).await?;
 
     if let Ok(response) = &goose.response {
         if !response.status().is_success() {
-            return user.set_failure("health check failed", &mut goose.request, Some(response.headers()), None);
+            return user.set_failure(
+                &format!("{} request failed", name.to_lowercase()),
+                &mut goose.request,
+                Some(response.headers()),
+                None,
+            );
         }
     }
 
     Ok(())
+}
+
+pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
+    make_request::<()>(user, GooseMethod::Get, "/health", "Health Check", None).await
 }
 
 pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
     let payload = json!("");
 
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/hello")?
-        .header("Content-Type", "application/json")
-        .body(payload.to_string());
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Hello").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("hello request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/hello", "Hello", Some(payload)).await
 }
 
 pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
-    let request_builder = user.get_request_builder(&GooseMethod::Post, "/reset")?.header("Accept", "text/plain");
+    let payload = json!("");
 
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Reset Engine").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("reset request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/reset", "Reset Engine", Some(payload)).await
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
@@ -74,24 +70,7 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
     };
 
-    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
-
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/index")?
-        .header("Content-Type", "application/json")
-        .body(payload_str);
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Index Files").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("index request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/index", "Index Files", Some(payload)).await
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
@@ -101,24 +80,7 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
         persist: false,
     };
 
-    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
-
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/chat")?
-        .header("Content-Type", "application/json")
-        .body(payload_str);
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Chat").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("chat request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/chat", "Chat", Some(payload)).await
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
@@ -151,53 +113,15 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     // Add final boundary
     form_data.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
 
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/upload")?
-        .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
-        .body(form_data);
+    let payload = form_data;
 
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Upload File").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    // Clean up the temporary file
-    let _ = std::fs::remove_file(temp_file_path);
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("upload request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/upload", "Upload File", Some(payload)).await
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
     let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
 
-    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
-
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/delete_source")?
-        .header("Content-Type", "application/json")
-        .body(payload_str);
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Delete Source").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure(
-                "delete_source request failed",
-                &mut goose.request,
-                Some(response.headers()),
-                None,
-            );
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", Some(payload)).await
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
@@ -206,22 +130,7 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
         "input": "Sample text to embed"
     });
 
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/api/embed")?
-        .header("Content-Type", "application/json")
-        .body(payload.to_string());
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("Embed Text").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("embed request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/api/embed", "Embed Text", Some(payload)).await
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
@@ -231,48 +140,14 @@ pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
         threshold: DEFAULT_RETRIEVER_THRESHOLD,
     };
 
-    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
-
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/ask")?
-        .header("Content-Type", "application/json")
-        .body(payload_str);
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Ask").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("ask request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/ask", "RAG Ask", Some(payload)).await
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
     let payload =
         RetrieveContext { query: RetrieveQuery::Text("How to use actors?".to_string()), limit: 5, threshold: 0.0 };
 
-    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
-
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/retrieve")?
-        .header("Content-Type", "application/json")
-        .body(payload_str);
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Retrieve").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("retrieve request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/retrieve", "RAG Retrieve", Some(payload)).await
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
@@ -285,24 +160,7 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
         ],
     };
 
-    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
-
-    let request_builder = user
-        .get_request_builder(&GooseMethod::Post, "/rerank")?
-        .header("Content-Type", "application/json")
-        .body(payload_str);
-
-    let goose_request = GooseRequest::builder().set_request_builder(request_builder).name("RAG Rerank").build();
-
-    let mut goose = user.request(goose_request).await?;
-
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("rerank request failed", &mut goose.request, Some(response.headers()), None);
-        }
-    }
-
-    Ok(())
+    make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", Some(payload)).await
 }
 
 #[derive(Debug, Clone, ValueEnum)]
