@@ -453,7 +453,7 @@ async fn test_load_rag_server() -> Result<(), GooseError> {
     initialize_goose()?
         .register_scenario(
             scenario!("RAG Server Load Test")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?) // Higher weight for health checks
+                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(3)?)
                 .register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?)
                 .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(3)?)
                 .register_transaction(transaction!(load_test_chat).set_name("Chat").set_weight(4)?)
