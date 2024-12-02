@@ -1,8 +1,8 @@
 SELECT * FROM (
-    SELECT 
-        out.text,
+    SELECT
+        out.text AS text,
         vector::similarity::cosine(out.embedding, $query) AS similarity,
-        out.metadata,
+        out.metadata AS metadata,
         out.id.tag AS tag
     FROM type::table($prefix + "_source_embeddings")
     WHERE string::matches(in.source, $pattern)
