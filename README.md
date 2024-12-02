@@ -133,7 +133,7 @@ curl -X POST http://localhost:5766/index -H "Content-Type: application/json" -d 
 ### Retrieve context:
 
 ```bash
-curl -X POST http://localhost:5766/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10}'
+curl -X POST http://localhost:5766/retrieve -H "Content-Type: application/json" -d '{"type": "Text", "content": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10, "sources": ["path/to/specific/source1", ".pdf", ".md"]}'
 ```
 
 ### Ask a question:
