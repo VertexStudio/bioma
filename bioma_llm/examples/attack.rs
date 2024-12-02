@@ -7,11 +7,49 @@ use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use serde_json::json;
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
+static REQUEST_LOCK: once_cell::sync::Lazy<Arc<Mutex<()>>> = once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(())));
+
+// Add this struct to store our custom session data
+#[derive(Debug)]
+struct AttackSessionData {
+    ordered: bool,
+}
+
+// Modify the initialize_goose function to set session data
+fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
+    let mut config = GooseConfiguration::default();
+
+    config.host = args.server.clone();
+    config.users = Some(args.users);
+    config.run_time = args.time.to_string();
+    config.request_log = args.log.clone();
+    config.report_file = args.report.clone();
+    config.running_metrics = Some(args.metrics_interval);
+
+    let mut attack = GooseAttack::initialize_with_config(config)?;
+    if args.order {
+        attack = attack.set_scheduler(GooseScheduler::Serial);
+        // Set session data for all users using test_start
+        attack = attack.test_start(transaction!(setup_session_data));
+    }
+
+    Ok(attack)
+}
+
+// Add this function to set up session data
+async fn setup_session_data(user: &mut GooseUser) -> TransactionResult {
+    user.set_session_data(AttackSessionData { ordered: true });
+    Ok(())
+}
+
+// Modify make_request to use session data
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
     method: GooseMethod,
@@ -19,6 +57,12 @@ async fn make_request<T: serde::Serialize>(
     name: &str,
     payload: Option<T>,
 ) -> TransactionResult {
+    // Check session data for ordered mode
+    let ordered = user.get_session_data::<AttackSessionData>().map(|data| data.ordered).unwrap_or(false);
+
+    // Acquire mutex lock if running in ordered mode
+    let _lock = if ordered { Some(REQUEST_LOCK.lock().await) } else { None };
+
     let mut request_builder = user.get_request_builder(&method, path)?;
 
     if let Some(payload) = payload {
@@ -285,24 +329,6 @@ impl FromStr for WeightedEndpoint {
             _ => Err(format!("Invalid format: {}", s)),
         }
     }
-}
-
-fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
-    let mut config = GooseConfiguration::default();
-
-    config.host = args.server.clone();
-    config.users = Some(args.users);
-    config.run_time = args.time.to_string();
-    config.request_log = args.log.clone();
-    config.report_file = args.report.clone();
-    config.running_metrics = Some(args.metrics_interval);
-
-    let mut attack = GooseAttack::initialize_with_config(config)?;
-    if args.order {
-        attack = attack.set_scheduler(GooseScheduler::Serial);
-    }
-
-    Ok(attack)
 }
 
 #[tokio::main]
