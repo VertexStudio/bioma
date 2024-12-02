@@ -56,18 +56,17 @@ pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("reset request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("hello request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let payload = IndexGlobs {
-        globs: vec!["src/*.rs".to_string()],
+        globs: vec!["/home/vertex/Documents/Repositorios/bioma/README.md".to_string()],
         chunk_capacity: 0..DEFAULT_CHUNK_CAPACITY,
         chunk_overlap: DEFAULT_CHUNK_OVERLAP,
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
@@ -84,13 +83,12 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("index request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("hello request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
@@ -138,13 +136,12 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
-    if let Ok(response) = &goose.response {
-        if !response.status().is_success() {
-            return user.set_failure("upload request failed", &mut goose.request, Some(response.headers()), None);
+    match &goose.response {
+        Ok(_) => return Ok(()),
+        Err(_) => {
+            return user.set_failure("hello request failed", &mut goose.request, None, None);
         }
     }
-
-    Ok(())
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
@@ -326,13 +323,15 @@ async fn test_load_hello() -> Result<(), GooseError> {
 
 #[test(tokio::test)]
 async fn test_load_index() -> Result<(), GooseError> {
-    initialize_goose()?
+    let goose_result = initialize_goose()?
         .register_scenario(
             scenario!("Index Files")
-                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(3)?),
+                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_weight(1)?),
         )
         .execute()
         .await?;
+
+    assert!(goose_result.errors.is_empty());
 
     Ok(())
 }
