@@ -39,6 +39,10 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
+    #[error("Other error: {0}")]
+    Other(String),
+    #[error("SurrealDB error: {0}")]
+    SurrealDB(#[from] surrealdb::Error),
 }
 
 impl ActorError for IndexerError {}
@@ -517,6 +521,12 @@ impl Message<IndexGlobs> for Indexer {
     }
 }
 
+#[derive(Deserialize)]
+struct DeleteQueryResult {
+    total_deleted: usize,
+    deleted_sources: Vec<String>,
+}
+
 impl Message<DeleteSource> for Indexer {
     type Response = DeletedSource;
 
@@ -526,36 +536,38 @@ impl Message<DeleteSource> for Indexer {
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
-        // let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
-        let mut total_deleted = 0;
         let mut deleted_sources = Vec::new();
         let mut not_found_sources = Vec::new();
 
-        let source = message.source.clone();
-
         // Delete from database
-        let mut results = db.query(&query).bind(("source", source.clone())).await.map_err(SystemActorError::from)?;
+        let mut results =
+            db.query(&query).bind(("source", message.source.clone())).await.map_err(SystemActorError::from)?;
 
-        let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
-        total_deleted += deleted_count;
+        let delete_result: DeleteQueryResult = results
+            .take::<Vec<DeleteQueryResult>>(0)
+            .map_err(IndexerError::from)?
+            .pop()
+            .ok_or(IndexerError::Other("No delete result found".to_string()))?;
 
-        // Check if file/directory exists before attempting deletion
-        let source_path = std::path::Path::new(&source);
-        if source_path.exists() {
-            // Handle both files and directories
-            if source_path.is_dir() {
-                tokio::fs::remove_dir_all(source_path).await.ok();
+        // Process each deleted source path
+        for source in delete_result.deleted_sources {
+            let source_path = std::path::Path::new(&source);
+            if source_path.exists() {
+                // Handle both files and directories
+                if source_path.is_dir() {
+                    tokio::fs::remove_dir_all(source_path).await.ok();
+                } else {
+                    tokio::fs::remove_file(source_path).await.ok();
+                }
+                deleted_sources.push(source);
             } else {
-                tokio::fs::remove_file(source_path).await.ok();
+                not_found_sources.push(source);
             }
-            deleted_sources.push(source);
-        } else {
-            not_found_sources.push(source);
         }
 
-        Ok(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources })
+        Ok(DeletedSource { deleted_embeddings: delete_result.total_deleted, deleted_sources, not_found_sources })
     }
 }
 
