@@ -15,7 +15,7 @@ curl -X POST http://localhost:5766/reset
 # Index files using glob patterns
 curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
-    -d '{"globs": ["./path/to/files/**/*.rs"]}'
+    -d '{"globs": ["bioma_actor/**/*.rs"]}'
 
 # Upload a single file
 curl -X POST http://localhost:5766/upload \
