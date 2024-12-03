@@ -48,7 +48,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 source: "test_images".to_string(),
                 content: EmbeddingContent::Image(image_paths.clone()),
                 metadata: None,
-                tag: Some("test_images".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -64,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         query: embeddings::Query::Image("assets/images/rust-pet.png".to_string()),
         threshold: 0.5,
         k: 3,
-        tag: Some("test_images".to_string()),
+        source: None,
     };
     info!("Image query: {:?}", top_k);
     let similarities =

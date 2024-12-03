@@ -1,6 +1,6 @@
 BEGIN;
 
-LET $source = source:{ source: $source, tag: $tag };
+LET $source = source:{ source: $source };
 
 LET $image_embeddings = SELECT ->{prefix}_source_embeddings.out as embedding FROM $source;
 

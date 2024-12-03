@@ -1,5 +1,6 @@
 // use crate::ORT_EXIT_MUTEX;
 use bioma_actor::prelude::*;
+use bon::Builder;
 use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -57,8 +58,6 @@ pub struct StoreEmbeddings {
     pub content: EmbeddingContent,
     /// Metadata to store with the embeddings
     pub metadata: Option<Vec<Value>>,
-    /// The tag to store the embeddings with
-    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,13 +92,13 @@ pub enum Query {
     Image(String),
 }
 
-/// Get the top k similar embeddings to a query, filtered by tag
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Get the top k similar embeddings to a query
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TopK {
     /// The query to search for
     pub query: Query,
-    /// The tag to filter the embeddings by
-    pub tag: Option<String>,
+    /// A source regex pattern to filter the search
+    pub source: Option<String>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -189,11 +188,13 @@ impl Message<TopK> for Embeddings {
         let db = ctx.engine().db();
         let query_sql = include_str!("../sql/similarities.surql");
 
+        let source = message.source.clone().unwrap_or(".*".to_string());
+
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("top_k", message.k.clone()))
-            .bind(("tag", message.tag.clone()))
+            .bind(("source", source))
             .bind(("threshold", message.threshold))
             .bind(("prefix", self.table_prefix()))
             .await
@@ -249,7 +250,6 @@ impl Message<StoreEmbeddings> for Embeddings {
             };
 
             db.query(emb_query)
-                .bind(("tag", message.tag.clone()))
                 .bind(("embedding", embedding))
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))

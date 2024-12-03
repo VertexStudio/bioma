@@ -1,12 +1,12 @@
+-- Get the top k most similar embeddings to the query
+-- $source is the regex pattern to match against
 SELECT * FROM (
     SELECT
-        text,
-        vector::similarity::cosine(embedding, $query) AS similarity,
-        metadata,
-        id.tag AS tag
-    FROM type::table($prefix + "_embedding")
-) WHERE
-    (tag IS NONE OR tag = $tag)
-    AND (similarity > $threshold)
+        out.text AS text,
+        vector::similarity::cosine(out.embedding, $query) AS similarity,
+        out.metadata AS metadata
+    FROM type::table($prefix + "_source_embeddings")
+    WHERE string::matches(in.source, $source)
+) WHERE (similarity > $threshold)
 ORDER BY similarity DESC
-LIMIT $top_k
+LIMIT $top_k;
