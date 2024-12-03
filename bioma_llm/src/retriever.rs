@@ -3,10 +3,8 @@ use crate::indexer::{BaseMetadata, ContentType};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use tracing::{error, info};
 
-const DEFAULT_RETRIEVER_TAG: &str = "indexer_content";
 const DEFAULT_RETRIEVER_LIMIT: usize = 10;
 const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
@@ -38,20 +36,24 @@ impl ActorError for RetrieverError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveContext {
+    /// The query to search for
     #[serde(flatten)]
     pub query: RetrieveQuery,
+    /// The number of contexts to return
     #[builder(default = DEFAULT_RETRIEVER_LIMIT)]
     #[serde(default = "default_retriever_limit")]
     pub limit: usize,
+    /// The threshold for the similarity score
     #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
     #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
+    /// A source regex pattern to filter the search
     #[serde(default)]
-    pub sources: Option<Vec<String>>,
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "content")]
+#[serde(tag = "type", content = "query")]
 pub enum RetrieveQuery {
     Text(String),
 }
@@ -129,8 +131,7 @@ impl Message<RetrieveContext> for Retriever {
                     query: embeddings::Query::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
-                    tag: Some(self.tag.clone().to_string()),
-                    sources: message.sources.clone(),
+                    source: message.source.clone(),
                 };
 
                 info!("Searching for similarities");
@@ -220,8 +221,6 @@ pub struct Retriever {
     pub embeddings: Embeddings,
     #[builder(default)]
     pub rerank: Rerank,
-    #[builder(default = DEFAULT_RETRIEVER_TAG.into())]
-    pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
     rerank_id: Option<ActorId>,
     #[serde(skip)]
@@ -235,7 +234,6 @@ impl Default for Retriever {
         Self {
             embeddings: Embeddings::default(),
             rerank: Rerank::default(),
-            tag: DEFAULT_RETRIEVER_TAG.into(),
             embeddings_id: None,
             rerank_id: None,
             embeddings_handle: None,
