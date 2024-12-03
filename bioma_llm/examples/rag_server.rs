@@ -461,7 +461,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
 
     let delete_source = body.clone();
 
-    info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
+    info!("Sending delete message to indexer actor for source: {:?}", delete_source);
     let response = indexer_actor.handle(&mut indexer_ctx, &delete_source).await;
 
     match response {
