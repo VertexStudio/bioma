@@ -7,11 +7,49 @@ use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use serde_json::json;
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
+static REQUEST_LOCK: once_cell::sync::Lazy<Arc<Mutex<()>>> = once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(())));
+
+// Add this struct to store our custom session data
+#[derive(Debug)]
+struct AttackSessionData {
+    ordered: bool,
+}
+
+// Modify the initialize_goose function to set session data
+fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
+    let mut config = GooseConfiguration::default();
+
+    config.host = args.server.clone();
+    config.users = Some(args.users);
+    config.run_time = args.time.to_string();
+    config.request_log = args.log.clone();
+    config.report_file = args.report.clone();
+    config.running_metrics = Some(args.metrics_interval);
+
+    let mut attack = GooseAttack::initialize_with_config(config)?;
+    if args.order {
+        attack = attack.set_scheduler(GooseScheduler::Serial);
+        // Set session data for all users using test_start
+        attack = attack.test_start(transaction!(setup_session_data));
+    }
+
+    Ok(attack)
+}
+
+// Add this function to set up session data
+async fn setup_session_data(user: &mut GooseUser) -> TransactionResult {
+    user.set_session_data(AttackSessionData { ordered: true });
+    Ok(())
+}
+
+// Modify make_request to use session data
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
     method: GooseMethod,
@@ -19,6 +57,12 @@ async fn make_request<T: serde::Serialize>(
     name: &str,
     payload: Option<T>,
 ) -> TransactionResult {
+    // Check session data for ordered mode
+    let ordered = user.get_session_data::<AttackSessionData>().map(|data| data.ordered).unwrap_or(false);
+
+    // Acquire mutex lock if running in ordered mode
+    let _lock = if ordered { Some(REQUEST_LOCK.lock().await) } else { None };
+
     let mut request_builder = user.get_request_builder(&method, path)?;
 
     if let Some(payload) = payload {
@@ -171,7 +215,7 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
         query: RetrieveQuery::Text("How to use actors?".to_string()),
         limit: 5,
         threshold: 0.0,
-        sources: None,
+        source: None,
     };
 
     make_request(user, GooseMethod::Post, "/retrieve", "RAG Retrieve", Some(payload)).await
@@ -257,6 +301,10 @@ struct Args {
     /// Metrics reporting interval in seconds
     #[arg(short, long, default_value_t = 15)]
     metrics_interval: usize,
+
+    /// Run scenarios in sequential order
+    #[arg(long)]
+    order: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -287,69 +335,61 @@ impl FromStr for WeightedEndpoint {
     }
 }
 
-fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
-    let mut config = GooseConfiguration::default();
-
-    config.host = args.server.clone();
-    config.users = Some(args.users);
-    config.run_time = args.time.to_string();
-    config.request_log = args.log.clone();
-    config.report_file = args.report.clone();
-    config.running_metrics = Some(args.metrics_interval);
-
-    GooseAttack::initialize_with_config(config)
-}
-
 #[tokio::main]
 async fn main() -> Result<(), GooseError> {
     let args = Args::parse();
     let mut attack = initialize_goose(&args)?;
 
     // Helper to register a scenario
-    let register_scenario = |attack: GooseAttack, weighted: WeightedEndpoint| -> Result<GooseAttack, GooseError> {
+    let register_scenario = |attack: GooseAttack,
+                             weighted: WeightedEndpoint,
+                             sequence: usize|
+     -> Result<GooseAttack, GooseError> {
         let scenario = match weighted.endpoint {
-            TestType::Health => {
-                scenario!("Health Check").register_transaction(transaction!(load_test_health).set_name("Health Check"))
-            }
-            TestType::Hello => scenario!("Hello").register_transaction(transaction!(load_test_hello).set_name("Hello")),
-            TestType::Index => {
-                scenario!("Index Files").register_transaction(transaction!(load_test_index).set_name("Index Files"))
-            }
-            TestType::Chat => scenario!("Chat").register_transaction(transaction!(load_test_chat).set_name("Chat")),
-            TestType::Upload => {
-                scenario!("Upload File").register_transaction(transaction!(load_test_upload).set_name("Upload File"))
-            }
-            TestType::DeleteSource => scenario!("Delete Source")
-                .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source")),
-            TestType::Embed => {
-                scenario!("Embed Text").register_transaction(transaction!(load_test_embed).set_name("Embed Text"))
-            }
-            TestType::Ask => scenario!("RAG Ask").register_transaction(transaction!(load_test_ask).set_name("RAG Ask")),
+            TestType::Health => scenario!("Health Check")
+                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_sequence(sequence)),
+            TestType::Hello => scenario!("Hello")
+                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_sequence(sequence)),
+            TestType::Index => scenario!("Index Files")
+                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_sequence(sequence)),
+            TestType::Chat => scenario!("Chat")
+                .register_transaction(transaction!(load_test_chat).set_name("Chat").set_sequence(sequence)),
+            TestType::Upload => scenario!("Upload File")
+                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_sequence(sequence)),
+            TestType::DeleteSource => scenario!("Delete Source").register_transaction(
+                transaction!(load_test_delete_source).set_name("Delete Source").set_sequence(sequence),
+            ),
+            TestType::Embed => scenario!("Embed Text")
+                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_sequence(sequence)),
+            TestType::Ask => scenario!("RAG Ask")
+                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence)),
             TestType::Retrieve => scenario!("RAG Retrieve")
-                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve")),
-            TestType::Rerank => {
-                scenario!("RAG Rerank").register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank"))
-            }
+                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_sequence(sequence)),
+            TestType::Rerank => scenario!("RAG Rerank")
+                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_sequence(sequence)),
             TestType::All => scenario!("RAG Server Load Test")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check"))
-                .register_transaction(transaction!(load_test_hello).set_name("Hello"))
-                .register_transaction(transaction!(load_test_index).set_name("Index Files"))
-                .register_transaction(transaction!(load_test_chat).set_name("Chat"))
-                .register_transaction(transaction!(load_test_upload).set_name("Upload File"))
-                .register_transaction(transaction!(load_test_delete_source).set_name("Delete Source"))
-                .register_transaction(transaction!(load_test_embed).set_name("Embed Text"))
-                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask"))
-                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve"))
-                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank")),
+                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_chat).set_name("Chat").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_sequence(sequence))
+                .register_transaction(
+                    transaction!(load_test_delete_source).set_name("Delete Source").set_sequence(sequence),
+                )
+                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_sequence(sequence))
+                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_sequence(sequence)),
         };
 
-        // Convert u32 weight to usize
         Ok(attack.register_scenario(scenario.set_weight(weighted.weight)?))
     };
 
     // Register selected scenarios
+    let mut sequence = 1;
     for weighted_endpoint in args.endpoints {
-        attack = register_scenario(attack, weighted_endpoint)?;
+        attack = register_scenario(attack, weighted_endpoint, sequence)?;
+        sequence += 1;
     }
 
     // Execute the attack
