@@ -243,7 +243,7 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
         query: RetrieveQuery::Text("How to use actors?".to_string()),
         limit: 5,
         threshold: 0.0,
-        sources: None,
+        source: None,
     };
 
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
