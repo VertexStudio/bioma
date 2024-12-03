@@ -39,10 +39,10 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
-    #[error("Other error: {0}")]
-    Other(String),
     #[error("SurrealDB error: {0}")]
     SurrealDB(#[from] surrealdb::Error),
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl ActorError for IndexerError {}
