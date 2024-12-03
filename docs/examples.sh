@@ -35,9 +35,11 @@ curl -X POST http://localhost:5766/upload \
 curl -X POST http://localhost:5766/retrieve \
     -H "Content-Type: application/json" \
     -d '{
+        "type": "Text",
         "query": "What is Bioma?",
         "threshold": 0.0,
-        "limit": 10
+        "limit": 10,
+        "source": ".*"
     }'
 
 # Ask a question (RAG-enhanced)

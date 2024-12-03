@@ -239,7 +239,7 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
 #[derive(Deserialize)]
 struct ChatQuery {
     messages: Vec<ChatMessage>,
-    sources: Option<Vec<String>>,
+    source: Option<String>,
 }
 
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
@@ -261,7 +261,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             query: RetrieveQuery::Text(query.clone()),
             limit: 5,
             threshold: 0.0,
-            sources: body.sources.clone(),
+            source: body.source.clone(),
         };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
@@ -351,7 +351,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 #[derive(Deserialize)]
 struct AskQuery {
     query: String,
-    sources: Option<Vec<String>>,
+    source: Option<String>,
 }
 
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
@@ -365,7 +365,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             query: RetrieveQuery::Text(body.query.clone()),
             limit: 5,
             threshold: 0.0,
-            sources: body.sources.clone(),
+            source: body.source.clone(),
         };
         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
     };
