@@ -76,10 +76,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let embeddings_id = &embeddings_actors[i];
         let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                source: "test".to_string(),
+                source: format!("test_{}", i),
                 content: EmbeddingContent::Text(chunk.clone()),
                 metadata: None,
-                tag: Some(format!("test_{}", i)),
             },
             embeddings_id,
             SendOptions::default(),
@@ -104,8 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             query: embeddings::Query::Text("Hello, how are you?".to_string()),
             threshold: -0.5,
             k: 5,
-            tag: Some(format!("test_{}", i)),
-            sources: None,
+            source: Some(format!("test_{}", i)),
         };
         info!("Query for actor {}: {:?}", i, top_k);
         let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());

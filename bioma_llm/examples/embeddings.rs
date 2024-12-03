@@ -53,7 +53,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 source: "test".to_string(),
                 content: EmbeddingContent::Text(texts.clone()),
                 metadata: None,
-                tag: Some("test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -69,8 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         query: embeddings::Query::Text("Hello, how are you?".to_string()),
         threshold: -0.5,
         k: 5,
-        tag: Some("test".to_string()),
-        sources: None,
+        source: None,
     };
     info!("Query: {:?}", top_k);
     let similarities =

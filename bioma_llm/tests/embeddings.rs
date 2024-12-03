@@ -253,7 +253,6 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
                 source: "test".to_string(),
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: None,
-                tag: Some("test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -262,13 +261,8 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
 
     // Test top-k similarities
     let query = "How are you doing?";
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text(query.to_string()),
-        threshold: -0.5,
-        k: 2,
-        tag: Some("test".to_string()),
-        sources: None,
-    };
+    let top_k =
+        embeddings::TopK { query: embeddings::Query::Text(query.to_string()), threshold: -0.5, k: 2, source: None };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -284,6 +278,8 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
 
     // Terminate the actor
     embeddings_handle.abort();
+
+    dbg_export_db!(engine);
 
     Ok(())
 }
@@ -316,7 +312,6 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
                 source: "test".to_string(),
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: None,
-                tag: Some("persistence_test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -346,8 +341,7 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
         query: embeddings::Query::Text("Persistent test".to_string()),
         threshold: -0.5,
         k: 1,
-        tag: Some("persistence_test".to_string()),
-        sources: None,
+        source: None,
     };
 
     let similarities =
@@ -394,7 +388,6 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
                 source: "test".to_string(),
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: Some(metadata),
-                tag: Some("metadata_test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -406,8 +399,7 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
         query: embeddings::Query::Text("Text with metadata".to_string()),
         threshold: -0.5,
         k: 1,
-        tag: Some("metadata_test".to_string()),
-        sources: None,
+        source: None,
     };
 
     let similarities =
@@ -489,10 +481,9 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
         let embeddings_id = &embeddings_actors[i];
         let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                source: "test".to_string(),
+                source: format!("test_{}", i),
                 content: EmbeddingContent::Text(chunk.clone()),
                 metadata: None,
-                tag: Some(format!("test_{}", i)),
             },
             embeddings_id,
             SendOptions::default(),
@@ -518,8 +509,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
             query: embeddings::Query::Text("Hello, how are you?".to_string()),
             threshold: -0.5,
             k: 2,
-            tag: Some(format!("test_{}", i)),
-            sources: None,
+            source: Some(format!("test_{}", i)),
         };
         let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
         similarity_futures.push(future);
@@ -619,7 +609,6 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
                 source: "test".to_string(),
                 content: EmbeddingContent::Image(image_paths.clone()),
                 metadata: Some(metadata),
-                tag: Some("test_images".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -634,8 +623,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
         threshold: 0.5,
         k: 1,
-        tag: Some("test_images".to_string()),
-        sources: None,
+        source: None,
     };
 
     let similarities =
@@ -686,7 +674,6 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
                 source: "test".to_string(),
                 content: EmbeddingContent::Image(image_paths),
                 metadata: None,
-                tag: Some("cross_modal".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -698,8 +685,7 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
         query: embeddings::Query::Text("an elephant".to_string()),
         threshold: 0.2,
         k: 1,
-        tag: Some("cross_modal".to_string()),
-        sources: None,
+        source: None,
     };
 
     let similarities =
@@ -785,7 +771,6 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
             StoreEmbeddings {
                 source: "test".to_string(),
                 content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
-                tag: Some("mixed".to_string()),
                 metadata: Some(vec![serde_json::json!({"type": "image"})]),
             },
             &embeddings_id,
@@ -798,7 +783,6 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
             StoreEmbeddings {
                 source: "test".to_string(),
                 content: EmbeddingContent::Text(vec!["an elephant in the wild".to_string()]),
-                tag: Some("mixed".to_string()),
                 metadata: Some(vec![serde_json::json!({"type": "text"})]),
             },
             &embeddings_id,
@@ -813,8 +797,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
                 query: embeddings::Query::Text("elephant".to_string()),
                 threshold: 0.2,
                 k: 2,
-                tag: Some("mixed".to_string()),
-                sources: None,
+                source: None,
             },
             &embeddings_id,
             SendOptions::default(),
@@ -865,7 +848,6 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
                     source: source.to_string(),
                     content: EmbeddingContent::Text(texts.iter().map(|t| t.to_string()).collect()),
                     metadata: None,
-                    tag: Some("source_test".to_string()),
                 },
                 &embeddings_id,
                 SendOptions::default(),
@@ -878,8 +860,7 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         query: embeddings::Query::Text("content from document".to_string()),
         threshold: -0.5,
         k: 4,
-        tag: Some("source_test".to_string()),
-        sources: Some(vec!["document1.pdf".to_string()]),
+        source: Some("document1.pdf".to_string()),
     };
 
     let similarities =
@@ -901,8 +882,7 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         query: embeddings::Query::Text("content".to_string()),
         threshold: -0.5,
         k: 4,
-        tag: Some("source_test".to_string()),
-        sources: Some(vec!["document1.pdf".to_string(), "document2.pdf".to_string()]),
+        source: Some("document1.pdf|document2.pdf".to_string()),
     };
 
     let similarities =
@@ -922,13 +902,8 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     }
 
     // Test 3: Query without source filter (should return all results)
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("content".to_string()),
-        threshold: -0.5,
-        k: 6,
-        tag: Some("source_test".to_string()),
-        sources: None,
-    };
+    let top_k =
+        embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 6, source: None };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -990,7 +965,6 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
                 source: "../assets/images/elephant.jpg".to_string(),
                 content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
                 metadata: Some(vec![serde_json::json!({"type": "image"})]),
-                tag: Some("regex_test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -1003,7 +977,6 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
                 source: "../assets/images/rust-pet.png".to_string(),
                 content: EmbeddingContent::Image(vec!["../assets/images/rust-pet.png".to_string()]),
                 metadata: Some(vec![serde_json::json!({"type": "image"})]),
-                tag: Some("regex_test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -1017,7 +990,6 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
                 source: "src/embeddings.rs".to_string(),
                 content: EmbeddingContent::Text(vec!["Embeddings implementation for vector search".to_string()]),
                 metadata: Some(vec![serde_json::json!({"type": "rust"})]),
-                tag: Some("regex_test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -1030,7 +1002,6 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
                 source: "src/indexer.rs".to_string(),
                 content: EmbeddingContent::Text(vec!["Indexer implementation for content processing".to_string()]),
                 metadata: Some(vec![serde_json::json!({"type": "rust"})]),
-                tag: Some("regex_test".to_string()),
             },
             &embeddings_id,
             SendOptions::default(),
@@ -1042,8 +1013,7 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
         query: embeddings::Query::Text("visual content".to_string()),
         threshold: -0.5,
         k: 4,
-        tag: Some("regex_test".to_string()),
-        sources: Some(vec![".*\\.(?:jpg|png)$".to_string()]),
+        source: Some(".*\\.(?:jpg|png)$".to_string()),
     };
 
     let image_results =
@@ -1065,8 +1035,7 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
         query: embeddings::Query::Text("implementation".to_string()),
         threshold: -0.5,
         k: 4,
-        tag: Some("regex_test".to_string()),
-        sources: Some(vec!["src/.*\\.rs$".to_string()]),
+        source: Some("src/.*\\.rs$".to_string()),
     };
 
     let rust_results =
@@ -1088,11 +1057,7 @@ async fn test_embeddings_regex_source_filtering() -> Result<(), TestError> {
         query: embeddings::Query::Text("content".to_string()),
         threshold: -0.5,
         k: 4,
-        tag: Some("regex_test".to_string()),
-        sources: Some(vec![
-            ".*\\.(?:jpg|png)$".to_string(),    // Match images
-            "src/embeddings\\.rs$".to_string(), // Match specific Rust file
-        ]),
+        source: Some(".*\\.(?:jpg|png)$|src/embeddings\\.rs$".to_string()),
     };
 
     let mixed_results =
