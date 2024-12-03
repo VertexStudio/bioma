@@ -34,6 +34,7 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     config.running_metrics = Some(args.metrics_interval);
 
     let mut attack = GooseAttack::initialize_with_config(config)?;
+
     if args.order {
         attack = attack.set_scheduler(GooseScheduler::Serial);
         // Set session data for all users using test_start
@@ -338,62 +339,70 @@ impl FromStr for WeightedEndpoint {
 #[tokio::main]
 async fn main() -> Result<(), GooseError> {
     let args = Args::parse();
-    let mut attack = initialize_goose(&args)?;
 
-    // Helper to register a scenario
-    let register_scenario = |attack: GooseAttack,
-                             weighted: WeightedEndpoint,
-                             sequence: usize|
-     -> Result<GooseAttack, GooseError> {
-        let scenario = match weighted.endpoint {
-            TestType::Health => scenario!("Health Check")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_sequence(sequence)),
-            TestType::Hello => scenario!("Hello")
-                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_sequence(sequence)),
-            TestType::Index => scenario!("Index Files")
-                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_sequence(sequence)),
-            TestType::Chat => scenario!("Chat")
-                .register_transaction(transaction!(load_test_chat).set_name("Chat").set_sequence(sequence)),
-            TestType::Upload => scenario!("Upload File")
-                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_sequence(sequence)),
-            TestType::DeleteSource => scenario!("Delete Source").register_transaction(
-                transaction!(load_test_delete_source).set_name("Delete Source").set_sequence(sequence),
-            ),
-            TestType::Embed => scenario!("Embed Text")
-                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_sequence(sequence)),
-            TestType::Ask => scenario!("RAG Ask")
-                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence)),
-            TestType::Retrieve => scenario!("RAG Retrieve")
-                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_sequence(sequence)),
-            TestType::Rerank => scenario!("RAG Rerank")
-                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_sequence(sequence)),
-            TestType::All => scenario!("RAG Server Load Test")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_chat).set_name("Chat").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_sequence(sequence))
-                .register_transaction(
-                    transaction!(load_test_delete_source).set_name("Delete Source").set_sequence(sequence),
-                )
-                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_sequence(sequence))
-                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_sequence(sequence)),
-        };
+    let health_metrics = initialize_goose(&args)?
+        .register_scenario(
+            scenario!("Health Check")
+                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?)
+                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
+        )
+        .execute()
+        .await?;
 
-        Ok(attack.register_scenario(scenario.set_weight(weighted.weight)?))
-    };
+    assert!(health_metrics.errors.is_empty());
 
-    // Register selected scenarios
-    let mut sequence = 1;
-    for weighted_endpoint in args.endpoints {
-        attack = register_scenario(attack, weighted_endpoint, sequence)?;
-        sequence += 1;
-    }
+    let upload_metrics = initialize_goose(&args)?
+        .register_scenario(
+            scenario!("Upload Check")
+                .register_transaction(transaction!(load_test_upload).set_name("Upload Check").set_weight(5)?),
+        )
+        .execute()
+        .await?;
 
-    // Execute the attack
-    attack.execute().await?;
+    assert!(upload_metrics.errors.is_empty());
+
+    let index_metrics = initialize_goose(&args)?
+        .register_scenario(
+            scenario!("Index Check")
+                .register_transaction(transaction!(load_test_index).set_name("Index Check").set_weight(5)?),
+        )
+        .execute()
+        .await?;
+
+    assert!(index_metrics.errors.is_empty());
+
+    let embed_metrics = initialize_goose(&args)?
+        .register_scenario(
+            scenario!("Embed Check")
+                .register_transaction(transaction!(load_test_embed).set_name("Embed Check").set_weight(5)?),
+        )
+        .execute()
+        .await?;
+
+    assert!(embed_metrics.errors.is_empty());
+
+    let read_metrics = initialize_goose(&args)?
+        .register_scenario(
+            scenario!("Read Check")
+                .register_transaction(transaction!(load_test_chat).set_name("Chat Check").set_weight(5)?)
+                .register_transaction(transaction!(load_test_ask).set_name("Ask Check").set_weight(5)?)
+                .register_transaction(transaction!(load_test_retrieve).set_name("Retrieve Check").set_weight(5)?)
+                .register_transaction(transaction!(load_test_rerank).set_name("Rerank Check").set_weight(5)?),
+        )
+        .execute()
+        .await?;
+
+    assert!(read_metrics.errors.is_empty());
+
+    let read_metrics = initialize_goose(&args)?
+        .register_scenario(
+            scenario!("Delete Check")
+                .register_transaction(transaction!(load_test_delete_source).set_name("Delete Check").set_weight(5)?)
+        )
+        .execute()
+        .await?;
+
+    assert!(read_metrics.errors.is_empty());
 
     Ok(())
 }
