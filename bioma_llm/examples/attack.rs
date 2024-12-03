@@ -215,7 +215,7 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
         query: RetrieveQuery::Text("How to use actors?".to_string()),
         limit: 5,
         threshold: 0.0,
-        sources: None,
+        source: None,
     };
 
     make_request(user, GooseMethod::Post, "/retrieve", "RAG Retrieve", Some(payload)).await
