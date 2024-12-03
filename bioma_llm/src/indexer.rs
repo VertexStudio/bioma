@@ -526,29 +526,23 @@ impl Message<DeleteSource> for Indexer {
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
-        let local_store_dir = ctx.engine().local_store_dir();
+        // let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
         let mut total_deleted = 0;
         let mut deleted_sources = Vec::new();
         let mut not_found_sources = Vec::new();
 
-        // If source is not absolute, make it relative to local_store_dir
-        let full_source = if std::path::Path::new(&message.source).is_absolute() {
-            message.source.clone()
-        } else {
-            local_store_dir.join(&message.source).to_string_lossy().into_owned()
-        };
+        let source = message.source.clone();
 
         // Delete from database
-        let mut results =
-            db.query(&query).bind(("source", full_source.clone())).await.map_err(SystemActorError::from)?;
+        let mut results = db.query(&query).bind(("source", source.clone())).await.map_err(SystemActorError::from)?;
 
         let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
         total_deleted += deleted_count;
 
         // Check if file/directory exists before attempting deletion
-        let source_path = std::path::Path::new(&full_source);
+        let source_path = std::path::Path::new(&source);
         if source_path.exists() {
             // Handle both files and directories
             if source_path.is_dir() {
@@ -556,9 +550,9 @@ impl Message<DeleteSource> for Indexer {
             } else {
                 tokio::fs::remove_file(source_path).await.ok();
             }
-            deleted_sources.push(full_source);
+            deleted_sources.push(source);
         } else {
-            not_found_sources.push(full_source);
+            not_found_sources.push(source);
         }
 
         Ok(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources })
