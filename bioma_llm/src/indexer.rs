@@ -416,20 +416,22 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             info!("Indexing glob: {}", &full_glob);
-            let full_glob_clone = full_glob.clone();
             let paths = tokio::task::spawn_blocking(move || {
                 let mut paths = Vec::new();
                 for entry in glob::glob(&full_glob).unwrap().flatten() {
                     if entry.is_file() {
-                        paths.push(entry);
+                        // For first-level files, use the file itself as source
+                        paths.push((entry.clone(), entry.clone()));
                     } else if entry.is_dir() {
-                        for entry in WalkDir::new(entry)
+                        // For directories, use the directory as source for all nested files
+                        let source_path = entry.clone();
+                        for file_entry in WalkDir::new(&entry)
                             .follow_links(true)
                             .into_iter()
                             .filter_map(|e| e.ok())
                             .filter(|e| e.file_type().is_file())
                         {
-                            paths.push(entry.path().to_path_buf());
+                            paths.push((file_entry.path().to_path_buf(), source_path.clone()));
                         }
                     }
                 }
@@ -442,10 +444,10 @@ impl Message<IndexGlobs> for Indexer {
                 continue;
             };
 
-            for pathbuf in paths {
+            for (pathbuf, source_path) in paths {
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
-                let source = full_glob_clone.clone();
+                let source = source_path.to_string_lossy().to_string();
                 let uri = pathbuf.to_string_lossy().to_string();
 
                 let content = if let Some(ext) = ext {
