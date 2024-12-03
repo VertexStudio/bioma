@@ -14,7 +14,7 @@ use surrealdb::{
     Surreal,
 };
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[macro_export]
 macro_rules! dbg_export_db {
@@ -158,7 +158,11 @@ impl Engine {
         // load the surreal definition file
         // let def = std::fs::read_to_string("assets/surreal/def.surql").unwrap();
         let def = include_str!("../sql/def.surql").parse::<String>().unwrap();
-        db.query(&def).await?;
+        let mut res = db.query(&def).await?;
+        let err = res.take_errors();
+        for (k, v) in &err {
+            debug!("{}: {}", k, v);
+        }
         Ok(())
     }
 

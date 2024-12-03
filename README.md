@@ -116,38 +116,101 @@ cargo run --release -p bioma_llm --example rag_server
 curl -X POST http://localhost:5766/reset
 ```
 
-### Upload some files:
+### Upload files:
 
 ```bash
-curl -X POST http://localhost:5766/upload -H "Content-Type: multipart/form-data" -F "file=@/path/to/file.zip" -F 'metadata={"path":"relative/to/store/path"};type=application/json'
+# Upload a single file
+curl -X POST http://localhost:5766/upload \
+    -F 'file=@./path/to/file.md' \
+    -F 'metadata={"path": "dest/path/file.md"};type=application/json'
+
+# Upload a zip archive
+curl -X POST http://localhost:5766/upload \
+    -F 'file=@./archive.zip' \
+    -F 'metadata={"path": "archive.zip"};type=application/json'
 ```
 
-### Index some files:
+### Index files:
 
 ```bash
-curl -X POST http://localhost:5766/index -H "Content-Type: application/json" -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_*/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
-# or
-curl -X POST http://localhost:5766/index -H "Content-Type: application/json" -d '{"globs": ["relative/to/store/path"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+curl -X POST http://localhost:5766/index \
+    -H "Content-Type: application/json" \
+    -d '{"globs": ["./path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
 
 ```bash
-curl -X POST http://localhost:5766/retrieve -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?", "threshold": 0.0, "limit": 10}'
+curl -X POST http://localhost:5766/retrieve \
+    -H "Content-Type: application/json" \
+    -d '{
+        "type": "Text",
+        "query": "What is Bioma?",
+        "threshold": 0.0,
+        "limit": 10,
+        "source": ".*"
+    }'
 ```
 
 ### Ask a question:
 
 ```bash
-curl -X POST http://localhost:5766/ask -H "Content-Type: application/json" -d '{"query": "Can I make a game with Bioma?"}'
+curl -X POST http://localhost:5766/ask \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What is Bioma?"}'
 ```
 
-### Delete indexed source:
+### Generate embeddings:
 
 ```bash
-curl -X POST http://localhost:5766/delete_source -H "Content-Type: application/json" -d '{"sources": ["/absolute/path/to/source1", "/absolute/path/to/source2"]}'
-# or
-curl -X POST http://localhost:5766/delete_source -H "Content-Type: application/json" -d '{"sources": ["relative/to/store/path1", "relative/to/store/path2"]}'
+curl -X POST http://localhost:5766/api/embed \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "nomic-embed-text",
+        "input": [
+            "Why is the sky blue?",
+            "Why is the grass green?"
+        ]
+    }'
+```
+
+### Rerank texts:
+
+```bash
+curl -X POST http://localhost:5766/rerank \
+    -H "Content-Type: application/json" \
+    -d '{
+        "query": "What is Deep Learning?",
+        "texts": [
+            "Deep Learning is learning under water",
+            "Deep learning is a branch of machine learning"
+        ],
+        "raw_scores": false
+    }'
+```
+
+### Chat completion:
+
+```bash
+curl -X POST http://localhost:5766/api/chat \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "llama3.2",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Why is the sky blue?"
+            }
+        ]
+    }'
+```
+
+### Delete indexed sources:
+
+```bash
+curl -X POST http://localhost:5766/delete_source \
+    -H "Content-Type: application/json" \
+    -d '{"sources": ["path/to/source1", "path/to/source2"]}'
 ```
 
 ### Connect to examples DB:

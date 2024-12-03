@@ -6,14 +6,12 @@ use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::borrow::Cow;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
 
 use crate::embeddings::EmbeddingContent;
 
-const DEFAULT_INDEXER_TAG: &str = "indexer_content";
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
@@ -196,18 +194,12 @@ impl Indexer {
             self.embeddings.table_name_prefix.as_ref().unwrap_or(&self.embeddings.model.to_string())
         );
         let query = format!(
-            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source, tag:$tag}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
+            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
             edge_name, edge_name
         );
 
-        let source_embeddings = ctx
-            .engine()
-            .db()
-            .query(&query)
-            .bind(("source", source.clone()))
-            .bind(("tag", self.tag.clone()))
-            .bind(("uri", uri.clone()))
-            .await;
+        let source_embeddings =
+            ctx.engine().db().query(&query).bind(("source", source.clone())).bind(("uri", uri.clone())).await;
 
         let Ok(mut source_embeddings) = source_embeddings else {
             error!("Failed to query source embeddings: {} {}", source, uri);
@@ -261,7 +253,6 @@ impl Indexer {
                             source: source_clone,
                             content: EmbeddingContent::Image(vec![path_clone]),
                             metadata: metadata.map(|m| vec![m]),
-                            tag: Some(self.tag.clone().to_string()),
                         },
                         embeddings_id,
                         SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -341,7 +332,6 @@ impl Indexer {
                                 source: source.clone(),
                                 content: EmbeddingContent::Text(chunk_batch.to_vec()),
                                 metadata: Some(metadata_batch.to_vec()),
-                                tag: Some(self.tag.clone().to_string()),
                             },
                             embeddings_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -552,12 +542,8 @@ impl Message<DeleteSource> for Indexer {
             };
 
             // Delete from database
-            let mut results = db
-                .query(&query)
-                .bind(("source", full_source.clone()))
-                .bind(("tag", self.tag.clone()))
-                .await
-                .map_err(SystemActorError::from)?;
+            let mut results =
+                db.query(&query).bind(("source", full_source.clone())).await.map_err(SystemActorError::from)?;
 
             let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
             total_deleted += deleted_count;
@@ -585,8 +571,6 @@ impl Message<DeleteSource> for Indexer {
 pub struct Indexer {
     pub embeddings: Embeddings,
     pub pdf_analyzer: PdfAnalyzer,
-    #[builder(default = DEFAULT_INDEXER_TAG.into())]
-    pub tag: Cow<'static, str>,
     embeddings_id: Option<ActorId>,
     pdf_analyzer_id: Option<ActorId>,
     #[serde(skip)]
@@ -600,7 +584,6 @@ impl Default for Indexer {
         Self {
             embeddings: Embeddings::default(),
             pdf_analyzer: PdfAnalyzer::default(),
-            tag: DEFAULT_INDEXER_TAG.into(),
             embeddings_id: None,
             pdf_analyzer_id: None,
             pdf_analyzer_handle: None,
