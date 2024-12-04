@@ -187,7 +187,7 @@ impl Indexer {
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let query = "SELECT source FROM source WHERE string::matches(source, $source)";
+        let query = "SELECT source FROM source WHERE source = $source";
 
         let source_embeddings = ctx.engine().db().query(*&query).bind(("source", source.clone())).await;
 
