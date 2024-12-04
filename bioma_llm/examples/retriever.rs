@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Prepare globs
     let globs = if args.globs.is_empty() {
-        vec![format!("{}/bioma_*/**/*.toml", workspace_root)]
+        vec![format!("{}/bioma_actor/**/*.toml", workspace_root)]
     } else {
         args.globs.into_iter().map(|glob| format!("{}/{}", workspace_root, glob)).collect()
     };

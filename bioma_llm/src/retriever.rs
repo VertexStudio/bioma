@@ -1,5 +1,5 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
-use crate::indexer::{BaseMetadata, ContentType};
+use crate::indexer::{ContentSource, Metadata};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,8 @@ fn default_retriever_threshold() -> f32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
     pub text: Option<String>,
-    pub metadata: Option<BaseMetadata>,
+    pub source: Option<ContentSource>,
+    pub metadata: Option<Metadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,17 +83,19 @@ impl RetrievedContext {
         let mut context_content = String::new();
 
         for (index, context) in self.context.iter().enumerate() {
-            if let Some(metadata) = &context.metadata {
-                context_content.push_str(&format!("Source: {}\n", metadata.source));
-                context_content.push_str(&format!("URI: {}\n", metadata.uri));
-                match &metadata.content_type {
-                    ContentType::Text(text_type) => {
-                        context_content.push_str(&format!("Type: {}\n", text_type));
-                    }
-                    ContentType::Image => {
-                        context_content.push_str("Type: Image\n");
-                    }
+            if let Some(source) = &context.source {
+                context_content.push_str(&format!("Source: {}\n", source.source));
+                context_content.push_str(&format!("URI: {}\n", source.uri));
+            }
+
+            match &context.metadata {
+                Some(Metadata::Text(text_metadata)) => {
+                    context_content.push_str(&format!("Chunk: {}\n", text_metadata.chunk_number))
                 }
+                Some(Metadata::Image(image_metadata)) => {
+                    context_content.push_str(&format!("Image: {}\n", image_metadata.format))
+                }
+                None => (),
             }
 
             if let Some(text) = &context.text {
@@ -131,7 +134,6 @@ impl Message<RetrieveContext> for Retriever {
                     query: embeddings::Query::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
-                    source: message.source.clone(),
                 };
 
                 info!("Searching for similarities");
@@ -157,8 +159,8 @@ impl Message<RetrieveContext> for Retriever {
                     similarities.into_iter().map(|s| (s.clone(), s.similarity)).partition(|(s, _)| {
                         s.metadata
                             .as_ref()
-                            .and_then(|m| serde_json::from_value::<BaseMetadata>(m.clone()).ok())
-                            .map_or(false, |metadata| matches!(metadata.content_type, ContentType::Text(_)))
+                            .and_then(|m| serde_json::from_value::<Metadata>(m.clone()).ok())
+                            .map_or(false, |metadata| matches!(metadata, Metadata::Text(_)))
                     });
 
                 // Process text content with reranking
@@ -182,6 +184,7 @@ impl Message<RetrieveContext> for Retriever {
                             (
                                 Context {
                                     text: text_similarities[t.index].0.text.clone(),
+                                    source: None,
                                     metadata: text_similarities[t.index]
                                         .0
                                         .metadata
@@ -198,7 +201,14 @@ impl Message<RetrieveContext> for Retriever {
 
                 // Add image contexts with their similarity scores
                 ranked_contexts.extend(image_similarities.into_iter().map(|(s, score)| {
-                    (Context { text: s.text, metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()) }, score)
+                    (
+                        Context {
+                            text: s.text,
+                            source: None,
+                            metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
+                        },
+                        score,
+                    )
                 }));
 
                 // Sort all contexts by score in descending order
