@@ -186,14 +186,13 @@ impl Message<TopK> for Embeddings {
         };
 
         let db = ctx.engine().db();
-        let query_sql = include_str!("../sql/similarities.surql");
+        let query_sql = include_str!("../sql/similarities.surql").replace("{top_k}", &message.k.to_string());
 
         let source = message.source.clone().unwrap_or(".*".to_string());
 
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
-            .bind(("top_k", message.k.clone()))
             .bind(("source", source))
             .bind(("threshold", message.threshold))
             .bind(("prefix", self.table_prefix()))

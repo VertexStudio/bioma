@@ -6,7 +6,7 @@ DEFINE FIELD name ON model TYPE string PERMISSIONS FULL;
 DEFINE TABLE {prefix}_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD text ON {prefix}_embedding TYPE option<string> PERMISSIONS FULL;
 DEFINE FIELD embedding ON {prefix}_embedding TYPE array<number> PERMISSIONS FULL;
-DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding FIELDS embedding MTREE DIMENSION {dim} DIST EUCLIDEAN;
+DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding FIELDS embedding MTREE DIMENSION {dim} DIST COSINE TYPE F32 CAPACITY 40 DOC_IDS_ORDER 1000 DOC_IDS_CACHE 2000 MTREE_CACHE 2000;
 
 -- Add Full-Text Search index for the embedding text field
 DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
