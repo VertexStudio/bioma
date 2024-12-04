@@ -117,7 +117,6 @@ pub enum Metadata {
 #[derive(Debug)]
 enum IndexResult {
     Indexed(Vec<RecordId>),
-    Cached,
     Failed,
 }
 
@@ -160,26 +159,6 @@ impl Indexer {
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let query = format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
-        let sources = ctx
-            .engine()
-            .db()
-            .query(&query)
-            .bind(("source", source.source.clone()))
-            .bind(("uri", source.uri.clone()))
-            .await;
-
-        let Ok(mut sources) = sources else {
-            error!("Failed to query source: {} {}", source.source, source.uri);
-            return Ok(IndexResult::Failed);
-        };
-
-        let sources: Vec<ContentSource> = sources.take(0).map_err(SystemActorError::from)?;
-        if !sources.is_empty() {
-            info!("Content already indexed with URI: {} {}", source.source, source.uri);
-            return Ok(IndexResult::Cached);
-        }
-
         match content {
             Content::Image { path } => {
                 let path_clone = path.clone();
@@ -362,10 +341,31 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             for pathbuf in paths {
+                let uri = pathbuf.to_string_lossy().to_string();
+                let source = ContentSource { source: full_glob_clone.clone(), uri: uri.clone() };
+
+                // Check if source already exists before processing
+                let query =
+                    format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
+                let sources = ctx
+                    .engine()
+                    .db()
+                    .query(&query)
+                    .bind(("source", source.source.clone()))
+                    .bind(("uri", source.uri.clone()))
+                    .await;
+
+                if let Ok(mut sources) = sources {
+                    let sources: Vec<ContentSource> = sources.take(0).map_err(SystemActorError::from)?;
+                    if !sources.is_empty() {
+                        info!("Content already indexed with URI: {} {}", source.source, source.uri);
+                        cached += 1;
+                        continue;
+                    }
+                }
+
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
-                let source = full_glob_clone.clone();
-                let uri = pathbuf.to_string_lossy().to_string();
 
                 let content = if let Some(ext) = ext {
                     if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
@@ -420,7 +420,6 @@ impl Message<IndexGlobs> for Indexer {
                 };
 
                 let mut embeddings_ids: Vec<RecordId> = Vec::new();
-                let source = ContentSource { source, uri };
 
                 match self.index_content(ctx, source.clone(), content, embeddings_id).await? {
                     IndexResult::Indexed(ids) => {
@@ -429,7 +428,6 @@ impl Message<IndexGlobs> for Indexer {
                             indexed += 1;
                         }
                     }
-                    IndexResult::Cached => cached += 1,
                     IndexResult::Failed => continue,
                 }
 
