@@ -76,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let embeddings_id = &embeddings_actors[i];
         let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                source: format!("test_{}", i),
                 content: EmbeddingContent::Text(chunk.clone()),
                 metadata: None,
             },
@@ -89,9 +88,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let all_embeddings = join_all(embedding_futures).await;
 
     for (i, embeddings_result) in all_embeddings.into_iter().enumerate() {
-        let embeddings_lentghs = embeddings_result?;
-        for (j, length) in embeddings_lentghs.lengths.iter().enumerate() {
-            info!("Actor {}: Stored embeddings for text: {} with length: {}", i, chunks[i][j], length);
+        let embeddings_ids = embeddings_result?;
+        for id in embeddings_ids.ids.iter() {
+            info!("Actor {}: Stored embeddings for text: {}", i, id);
         }
     }
 
@@ -103,7 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             query: embeddings::Query::Text("Hello, how are you?".to_string()),
             threshold: -0.5,
             k: 5,
-            source: Some(format!("test_{}", i)),
         };
         info!("Query for actor {}: {:?}", i, top_k);
         let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());

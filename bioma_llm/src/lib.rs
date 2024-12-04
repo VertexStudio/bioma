@@ -8,7 +8,7 @@ pub mod retriever;
 pub mod prelude {
     pub use crate::chat::{self, Chat, ChatError, ChatMessages};
     pub use crate::embeddings::{
-        self, EmbeddingContent, EmbeddingSource, Embeddings, EmbeddingsError, GenerateEmbeddings, GeneratedEmbeddings,
+        self, EmbeddingContent, Embeddings, EmbeddingsError, GenerateEmbeddings, GeneratedEmbeddings,
         StoreEmbeddings,
     };
     pub use crate::indexer::{self, DeleteSource, DeletedSource, IndexGlobs, Indexer, IndexerError};

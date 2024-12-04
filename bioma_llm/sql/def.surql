@@ -6,7 +6,9 @@ DEFINE FIELD name ON model TYPE string PERMISSIONS FULL;
 DEFINE TABLE {prefix}_embedding TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD text ON {prefix}_embedding TYPE option<string> PERMISSIONS FULL;
 DEFINE FIELD embedding ON {prefix}_embedding TYPE array<number> PERMISSIONS FULL;
-DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding FIELDS embedding MTREE DIMENSION {dim} DIST COSINE TYPE F32 CAPACITY 40 DOC_IDS_ORDER 1000 DOC_IDS_CACHE 2000 MTREE_CACHE 2000;
+DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding 
+    FIELDS embedding MTREE DIMENSION {dim} DIST COSINE 
+    TYPE F32 CAPACITY 40 DOC_IDS_ORDER 1000 DOC_IDS_CACHE 2000 MTREE_CACHE 2000;
 
 -- Add Full-Text Search index for the embedding text field
 DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
@@ -29,4 +31,4 @@ DEFINE FIELD out ON {prefix}_source_embeddings TYPE record<{prefix}_embedding> P
 DEFINE TABLE {prefix}_model_embeddings TYPE RELATION IN model OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD in ON {prefix}_model_embeddings TYPE record<model> PERMISSIONS FULL;
 DEFINE FIELD out ON {prefix}_model_embeddings TYPE record<{prefix}_embedding> PERMISSIONS FULL;
-DEFINE INDEX {prefix}_model_embeddings_in_idx ON TABLE {prefix}_model_embeddings FIELDS in;
+-- DEFINE INDEX {prefix}_model_embeddings_in_idx ON TABLE {prefix}_model_embeddings FIELDS in;
