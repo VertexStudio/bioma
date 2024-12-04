@@ -431,13 +431,9 @@ impl Message<IndexGlobs> for Indexer {
                     IndexResult::Failed => continue,
                 }
 
-                println!("embeddings_ids: {:?}", embeddings_ids);
-
                 if !embeddings_ids.is_empty() {
                     let source_query = include_str!("../sql/source.surql");
-                    println!("source_query: {}", source_query);
-                    let results = ctx
-                        .engine()
+                    ctx.engine()
                         .db()
                         .query(*&source_query)
                         .bind(("source", source.source.clone()))
@@ -447,7 +443,6 @@ impl Message<IndexGlobs> for Indexer {
                         .await
                         .map_err(SystemActorError::from)
                         .unwrap();
-                    println!("results: {:?}", results);
                 }
             }
         }
