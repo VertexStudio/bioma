@@ -160,7 +160,7 @@ impl Indexer {
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let query = format!("SELECT * FROM source:{{source: $source, uri: $uri}}");
+        let query = format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
         let sources = ctx
             .engine()
             .db()
