@@ -5,7 +5,7 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use indexer::ContentType;
+use indexer::Metadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -55,7 +55,7 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct Metadata {
+struct UploadMetadata {
     path: std::path::PathBuf,
 }
 
@@ -64,7 +64,7 @@ struct Upload {
     #[multipart(limit = "100MB")]
     file: TempFile,
     #[multipart(rename = "metadata")]
-    metadata: MpJson<Metadata>,
+    metadata: MpJson<UploadMetadata>,
 }
 
 #[derive(Debug, Serialize)]
@@ -283,11 +283,11 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             if let Some(ctx) = context
                 .context
                 .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m.content_type, ContentType::Image)))
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
             {
-                if let Some(metadata) = &ctx.metadata {
-                    match &metadata.content_type {
-                        ContentType::Image => match tokio::fs::read(&metadata.source).await {
+                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+                    match &metadata {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -388,9 +388,9 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             // Add images to the system message if available
             let mut images = Vec::new();
             for ctx in context.context {
-                if let Some(metadata) = &ctx.metadata {
-                    match &metadata.content_type {
-                        ContentType::Image => match tokio::fs::read(&metadata.source).await {
+                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+                    match &metadata {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -618,7 +618,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let chat = Chat::builder().model("llama3.2-vision".into()).build();
 
-    let chat_actor_id = ActorId::of::<Chat>("/chat");
+    let chat_actor_id = ActorId::of::<Chat>("/rag/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_actor_id.clone(),
