@@ -5,6 +5,7 @@ use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
 use clap::{Parser, ValueEnum};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
+use rand::distributions::weighted;
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -238,16 +239,16 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
 #[derive(Debug, Clone, ValueEnum)]
 enum TestType {
     Health,
-    Hello,
+    // Hello,
     Index,
-    Chat,
-    Upload,
-    DeleteSource,
-    Embed,
-    Ask,
-    Retrieve,
-    Rerank,
-    All,
+    // Chat,
+    // Upload,
+    // DeleteSource,
+    // Embed,
+    // Ask,
+    // Retrieve,
+    // Rerank,
+    // All,
 }
 
 // Implement FromStr separately to avoid conflict with ValueEnum
@@ -257,22 +258,22 @@ impl FromStr for TestType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "health" => Ok(TestType::Health),
-            "hello" => Ok(TestType::Hello),
+            // "hello" => Ok(TestType::Hello),
             "index" => Ok(TestType::Index),
-            "chat" => Ok(TestType::Chat),
-            "upload" => Ok(TestType::Upload),
-            "deletesource" => Ok(TestType::DeleteSource),
-            "embed" => Ok(TestType::Embed),
-            "ask" => Ok(TestType::Ask),
-            "retrieve" => Ok(TestType::Retrieve),
-            "rerank" => Ok(TestType::Rerank),
-            "all" => Ok(TestType::All),
+            // "chat" => Ok(TestType::Chat),
+            // "upload" => Ok(TestType::Upload),
+            // "deletesource" => Ok(TestType::DeleteSource),
+            // "embed" => Ok(TestType::Embed),
+            // "ask" => Ok(TestType::Ask),
+            // "retrieve" => Ok(TestType::Retrieve),
+            // "rerank" => Ok(TestType::Rerank),
+            // "all" => Ok(TestType::All),
             _ => Err(format!("Unknown test type: {}", s)),
         }
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Endpoints to run with optional weights (endpoint:weight,endpoint:weight)
@@ -339,70 +340,79 @@ impl FromStr for WeightedEndpoint {
 #[tokio::main]
 async fn main() -> Result<(), GooseError> {
     let args = Args::parse();
+    dbg!(&args);
 
-    let health_metrics = initialize_goose(&args)?
-        .register_scenario(
-            scenario!("Health Check")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_weight(5)?)
-                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
-        )
-        .execute()
-        .await?;
+    for weighted_endpoint in args.clone().endpoints {
+        match weighted_endpoint.endpoint {
+            TestType::Health => {
+                let health_metrics = initialize_goose(&args)?
+                    .register_scenario(
+                        scenario!("Health Check").register_transaction(
+                            transaction!(load_test_health).set_name("Health Check").set_weight(5)?,
+                        ),
+                        //.register_transaction(transaction!(load_test_hello).set_name("Hello").set_weight(2)?),
+                    )
+                    .execute()
+                    .await?;
 
-    assert!(health_metrics.errors.is_empty());
+                assert!(health_metrics.errors.is_empty());
+            }
+            TestType::Index => {
+                let upload_metrics = initialize_goose(&args)?
+                    .register_scenario(
+                        scenario!("Upload Check")
+                            .register_transaction(transaction!(load_test_upload).set_name("Upload Check").set_weight(5)?),
+                    )
+                    .execute()
+                    .await?;
 
-    let upload_metrics = initialize_goose(&args)?
-        .register_scenario(
-            scenario!("Upload Check")
-                .register_transaction(transaction!(load_test_upload).set_name("Upload Check").set_weight(5)?),
-        )
-        .execute()
-        .await?;
+                assert!(upload_metrics.errors.is_empty());
+            }
+        }
+    }
 
-    assert!(upload_metrics.errors.is_empty());
+    // let index_metrics = initialize_goose(&args)?
+    //     .register_scenario(
+    //         scenario!("Index Check")
+    //             .register_transaction(transaction!(load_test_index).set_name("Index Check").set_weight(5)?),
+    //     )
+    //     .execute()
+    //     .await?;
 
-    let index_metrics = initialize_goose(&args)?
-        .register_scenario(
-            scenario!("Index Check")
-                .register_transaction(transaction!(load_test_index).set_name("Index Check").set_weight(5)?),
-        )
-        .execute()
-        .await?;
+    // assert!(index_metrics.errors.is_empty());
 
-    assert!(index_metrics.errors.is_empty());
+    // let embed_metrics = initialize_goose(&args)?
+    //     .register_scenario(
+    //         scenario!("Embed Check")
+    //             .register_transaction(transaction!(load_test_embed).set_name("Embed Check").set_weight(5)?),
+    //     )
+    //     .execute()
+    //     .await?;
 
-    let embed_metrics = initialize_goose(&args)?
-        .register_scenario(
-            scenario!("Embed Check")
-                .register_transaction(transaction!(load_test_embed).set_name("Embed Check").set_weight(5)?),
-        )
-        .execute()
-        .await?;
+    // assert!(embed_metrics.errors.is_empty());
 
-    assert!(embed_metrics.errors.is_empty());
+    // let read_metrics = initialize_goose(&args)?
+    //     .register_scenario(
+    //         scenario!("Read Check")
+    //             .register_transaction(transaction!(load_test_chat).set_name("Chat Check").set_weight(5)?)
+    //             .register_transaction(transaction!(load_test_ask).set_name("Ask Check").set_weight(5)?)
+    //             .register_transaction(transaction!(load_test_retrieve).set_name("Retrieve Check").set_weight(5)?)
+    //             .register_transaction(transaction!(load_test_rerank).set_name("Rerank Check").set_weight(5)?),
+    //     )
+    //     .execute()
+    //     .await?;
 
-    let read_metrics = initialize_goose(&args)?
-        .register_scenario(
-            scenario!("Read Check")
-                .register_transaction(transaction!(load_test_chat).set_name("Chat Check").set_weight(5)?)
-                .register_transaction(transaction!(load_test_ask).set_name("Ask Check").set_weight(5)?)
-                .register_transaction(transaction!(load_test_retrieve).set_name("Retrieve Check").set_weight(5)?)
-                .register_transaction(transaction!(load_test_rerank).set_name("Rerank Check").set_weight(5)?),
-        )
-        .execute()
-        .await?;
+    // assert!(read_metrics.errors.is_empty());
 
-    assert!(read_metrics.errors.is_empty());
+    // let read_metrics = initialize_goose(&args)?
+    //     .register_scenario(
+    //         scenario!("Delete Check")
+    //             .register_transaction(transaction!(load_test_delete_source).set_name("Delete Check").set_weight(5)?)
+    //     )
+    //     .execute()
+    //     .await?;
 
-    let read_metrics = initialize_goose(&args)?
-        .register_scenario(
-            scenario!("Delete Check")
-                .register_transaction(transaction!(load_test_delete_source).set_name("Delete Check").set_weight(5)?)
-        )
-        .execute()
-        .await?;
-
-    assert!(read_metrics.errors.is_empty());
+    // assert!(read_metrics.errors.is_empty());
 
     Ok(())
 }
