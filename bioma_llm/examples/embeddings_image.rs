@@ -44,10 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store image embeddings
     let embeddings_ids = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings {
-                content: EmbeddingContent::Image(image_paths.clone()),
-                metadata: None,
-            },
+            StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -62,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         query: embeddings::Query::Image("assets/images/rust-pet.png".to_string()),
         threshold: 0.5,
         k: 3,
+        source: None,
     };
     info!("Image query: {:?}", top_k);
     let similarities =

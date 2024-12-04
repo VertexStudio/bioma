@@ -134,6 +134,7 @@ impl Message<RetrieveContext> for Retriever {
                     query: embeddings::Query::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
+                    source: message.source.clone(),
                 };
 
                 info!("Searching for similarities");

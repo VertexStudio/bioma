@@ -260,7 +260,8 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
 
     // Test top-k similarities
     let query = "How are you doing?";
-    let top_k = embeddings::TopK { query: embeddings::Query::Text(query.to_string()), threshold: -0.5, k: 2 };
+    let top_k =
+        embeddings::TopK { query: embeddings::Query::Text(query.to_string()), threshold: -0.5, k: 2, source: None };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -334,8 +335,12 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
     });
 
     // Check if the previously generated embedding is still available
-    let top_k =
-        embeddings::TopK { query: embeddings::Query::Text("Persistent test".to_string()), threshold: -0.5, k: 1 };
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("Persistent test".to_string()),
+        threshold: -0.5,
+        k: 1,
+        source: None,
+    };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -387,8 +392,12 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
         .await?;
 
     // Query for the embedding
-    let top_k =
-        embeddings::TopK { query: embeddings::Query::Text("Text with metadata".to_string()), threshold: -0.5, k: 1 };
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("Text with metadata".to_string()),
+        threshold: -0.5,
+        k: 1,
+        source: None,
+    };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -493,6 +502,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
             query: embeddings::Query::Text("Hello, how are you?".to_string()),
             threshold: -0.5,
             k: 2,
+            source: None,
         };
         let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
         similarity_futures.push(future);
@@ -601,6 +611,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
         threshold: 0.5,
         k: 1,
+        source: None,
     };
 
     let similarities =
@@ -654,7 +665,12 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
         .await?;
 
     // Search using text query
-    let top_k = embeddings::TopK { query: embeddings::Query::Text("an elephant".to_string()), threshold: 0.2, k: 1 };
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("an elephant".to_string()),
+        threshold: 0.2,
+        k: 1,
+        source: None,
+    };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -759,7 +775,12 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     // Search across both modalities
     let similarities = relay_ctx
         .send::<Embeddings, embeddings::TopK>(
-            embeddings::TopK { query: embeddings::Query::Text("elephant".to_string()), threshold: 0.2, k: 2 },
+            embeddings::TopK {
+                query: embeddings::Query::Text("elephant".to_string()),
+                threshold: 0.2,
+                k: 2,
+                source: None,
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -816,8 +837,12 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     }
 
     // Test 1: Query with specific source filter
-    let top_k =
-        embeddings::TopK { query: embeddings::Query::Text("content from document".to_string()), threshold: -0.5, k: 4 };
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("content from document".to_string()),
+        threshold: -0.5,
+        k: 4,
+        source: Some("document1.pdf".to_string()),
+    };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -834,7 +859,12 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     }
 
     // Test 2: Query with multiple source filters
-    let top_k = embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 4 };
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("content".to_string()),
+        threshold: -0.5,
+        k: 4,
+        source: Some("document1.pdf".to_string()),
+    };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
@@ -853,7 +883,8 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     }
 
     // Test 3: Query without source filter (should return all results)
-    let top_k = embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 6 };
+    let top_k =
+        embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 6, source: None };
 
     let similarities =
         relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
