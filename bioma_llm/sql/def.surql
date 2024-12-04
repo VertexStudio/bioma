@@ -14,15 +14,16 @@ DEFINE INDEX {prefix}_embedding_text_search ON {prefix}_embedding FIELDS text SE
 
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
-DEFINE INDEX source_unique_idx ON source FIELDS source UNIQUE;
+-- DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
+-- DEFINE FIELD uri ON source TYPE string PERMISSIONS FULL;
+-- DEFINE INDEX source_uri_unique_idx ON source FIELDS source, uri UNIQUE;
 
 -- Define the source_embeddings table
 DEFINE TABLE {prefix}_source_embeddings TYPE RELATION IN source OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD in ON {prefix}_source_embeddings TYPE record<source> PERMISSIONS FULL;
 DEFINE FIELD out ON {prefix}_source_embeddings TYPE record<{prefix}_embedding> PERMISSIONS FULL;
-DEFINE INDEX {prefix}_source_embeddings_in_idx ON TABLE {prefix}_source_embeddings FIELDS in;
-DEFINE INDEX {prefix}_source_embeddings_source_idx ON TABLE {prefix}_source_embeddings FIELDS in.source;
+-- DEFINE INDEX {prefix}_source_embeddings_in_idx ON TABLE {prefix}_source_embeddings FIELDS in;
+-- DEFINE INDEX {prefix}_source_embeddings_source_idx ON TABLE {prefix}_source_embeddings FIELDS in.source;
 
 -- Define the model_embeddings table
 DEFINE TABLE {prefix}_model_embeddings TYPE RELATION IN model OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;
