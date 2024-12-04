@@ -116,7 +116,6 @@ pub enum TextType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseMetadata {
     pub source: String,
-    pub uri: String,
     pub content_type: ContentType,
 }
 
@@ -185,30 +184,21 @@ impl Indexer {
         &self,
         ctx: &mut ActorContext<Self>,
         source: String,
-        uri: String,
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let edge_name = format!(
-            "{}_source_embeddings",
-            self.embeddings.table_name_prefix.as_ref().unwrap_or(&self.embeddings.model.to_string())
-        );
-        let query = format!(
-            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
-            edge_name, edge_name
-        );
+        let query = "SELECT source FROM source WHERE string::matches(source, $source)";
 
-        let source_embeddings =
-            ctx.engine().db().query(&query).bind(("source", source.clone())).bind(("uri", uri.clone())).await;
+        let source_embeddings = ctx.engine().db().query(*&query).bind(("source", source.clone())).await;
 
         let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {} {}", source, uri);
+            error!("Failed to query source embeddings: {}", source);
             return Ok(IndexResult::Failed);
         };
 
         let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
         if !source_embeddings.is_empty() {
-            debug!("Content already indexed with URI: {} {}", source, uri);
+            debug!("Content already indexed: {}", source);
             return Ok(IndexResult::Cached);
         }
 
@@ -230,11 +220,7 @@ impl Indexer {
                     let file_metadata = std::fs::metadata(&path).ok()?;
 
                     let image_metadata = ImageMetadata {
-                        base: BaseMetadata {
-                            source: source.clone(),
-                            uri: uri.clone(),
-                            content_type: ContentType::Image,
-                        },
+                        base: BaseMetadata { source: source.clone(), content_type: ContentType::Image },
                         format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                         dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                         size_bytes: file_metadata.len(),
@@ -313,7 +299,6 @@ impl Indexer {
                     .map(|(i, _)| TextChunkMetadata {
                         base: BaseMetadata {
                             source: source.clone(),
-                            uri: uri.clone(),
                             content_type: ContentType::Text(text_type.clone()),
                         },
                         chunk_number: i,
@@ -367,7 +352,6 @@ impl Message<IndexTexts> for Indexer {
                 .index_content(
                     ctx,
                     source.clone(),
-                    String::new(),
                     Content::Text {
                         content: text.clone(),
                         text_type: text_type.clone(),
@@ -502,7 +486,7 @@ impl Message<IndexGlobs> for Indexer {
                     }
                 };
 
-                match self.index_content(ctx, source, uri, content, embeddings_id).await? {
+                match self.index_content(ctx, source, content, embeddings_id).await? {
                     IndexResult::Indexed(count) => {
                         if count > 0 {
                             indexed += 1;

@@ -1,3 +1,5 @@
+BEGIN;
+
 LET $id = rand::ulid(time::now());
 LET $emb = CREATE ONLY type::table($prefix + "_embedding") CONTENT {
     id: $id, 
@@ -15,3 +17,5 @@ ELSE
 END;
 
 RELATE $src_id->(type::table($prefix + "_source_embeddings"))->($emb.id);
+
+COMMIT;

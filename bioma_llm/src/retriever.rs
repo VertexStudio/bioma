@@ -84,7 +84,6 @@ impl RetrievedContext {
         for (index, context) in self.context.iter().enumerate() {
             if let Some(metadata) = &context.metadata {
                 context_content.push_str(&format!("Source: {}\n", metadata.source));
-                context_content.push_str(&format!("URI: {}\n", metadata.uri));
                 match &metadata.content_type {
                     ContentType::Text(text_type) => {
                         context_content.push_str(&format!("Type: {}\n", text_type));
