@@ -656,13 +656,15 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
 
     // Store image embeddings
     let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
-    let _ = relay_ctx
+    let result = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Image(image_paths), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )
         .await?;
+
+    println!("Stored embeddings: {:#?}", result);
 
     // Search using text query
     let top_k = embeddings::TopK {
