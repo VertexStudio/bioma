@@ -340,34 +340,67 @@ async fn main() -> Result<(), GooseError> {
     let args = Args::parse();
     let mut attack = initialize_goose(&args)?;
 
-    // Helper to register a scenario
-    let register_scenario = |attack: GooseAttack,
-                             weighted: WeightedEndpoint,
-                             sequence: usize|
-     -> Result<GooseAttack, GooseError> {
-        let scenario = match weighted.endpoint {
-            TestType::Health => scenario!("Health Check")
-                .register_transaction(transaction!(load_test_health).set_name("Health Check").set_sequence(sequence)),
-            TestType::Hello => scenario!("Hello")
-                .register_transaction(transaction!(load_test_hello).set_name("Hello").set_sequence(sequence)),
-            TestType::Index => scenario!("Index Files")
-                .register_transaction(transaction!(load_test_index).set_name("Index Files").set_sequence(sequence)),
-            TestType::Chat => scenario!("Chat")
-                .register_transaction(transaction!(load_test_chat).set_name("Chat").set_sequence(sequence)),
-            TestType::Upload => scenario!("Upload File")
-                .register_transaction(transaction!(load_test_upload).set_name("Upload File").set_sequence(sequence)),
-            TestType::DeleteSource => scenario!("Delete Source").register_transaction(
-                transaction!(load_test_delete_source).set_name("Delete Source").set_sequence(sequence),
+    // Create a single scenario
+    let mut scenario = scenario!("RAG Server Load Test");
+
+    // Helper to register transactions to the scenario
+    let register_transaction = |scenario: Scenario,
+                                weighted: WeightedEndpoint,
+                                sequence: usize|
+     -> Result<Scenario, GooseError> {
+        Ok(match weighted.endpoint {
+            TestType::Health => scenario.register_transaction(
+                transaction!(load_test_health)
+                    .set_name("Health Check")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
             ),
-            TestType::Embed => scenario!("Embed Text")
-                .register_transaction(transaction!(load_test_embed).set_name("Embed Text").set_sequence(sequence)),
-            TestType::Ask => scenario!("RAG Ask")
-                .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence)),
-            TestType::Retrieve => scenario!("RAG Retrieve")
-                .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_sequence(sequence)),
-            TestType::Rerank => scenario!("RAG Rerank")
-                .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_sequence(sequence)),
-            TestType::All => scenario!("RAG Server Load Test")
+            TestType::Hello => scenario.register_transaction(
+                transaction!(load_test_hello).set_name("Hello").set_sequence(sequence).set_weight(weighted.weight)?,
+            ),
+            TestType::Index => scenario.register_transaction(
+                transaction!(load_test_index)
+                    .set_name("Index Files")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
+            ),
+            TestType::Chat => scenario.register_transaction(
+                transaction!(load_test_chat).set_name("Chat").set_sequence(sequence).set_weight(weighted.weight)?,
+            ),
+            TestType::Upload => scenario.register_transaction(
+                transaction!(load_test_upload)
+                    .set_name("Upload File")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
+            ),
+            TestType::DeleteSource => scenario.register_transaction(
+                transaction!(load_test_delete_source)
+                    .set_name("Delete Source")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
+            ),
+            TestType::Embed => scenario.register_transaction(
+                transaction!(load_test_embed)
+                    .set_name("Embed Text")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
+            ),
+            TestType::Ask => scenario.register_transaction(
+                transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence).set_weight(weighted.weight)?,
+            ),
+            TestType::Retrieve => scenario.register_transaction(
+                transaction!(load_test_retrieve)
+                    .set_name("RAG Retrieve")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
+            ),
+            TestType::Rerank => scenario.register_transaction(
+                transaction!(load_test_rerank)
+                    .set_name("RAG Rerank")
+                    .set_sequence(sequence)
+                    .set_weight(weighted.weight)?,
+            ),
+            TestType::All => scenario
                 .register_transaction(transaction!(load_test_health).set_name("Health Check").set_sequence(sequence))
                 .register_transaction(transaction!(load_test_hello).set_name("Hello").set_sequence(sequence))
                 .register_transaction(transaction!(load_test_index).set_name("Index Files").set_sequence(sequence))
@@ -380,17 +413,18 @@ async fn main() -> Result<(), GooseError> {
                 .register_transaction(transaction!(load_test_ask).set_name("RAG Ask").set_sequence(sequence))
                 .register_transaction(transaction!(load_test_retrieve).set_name("RAG Retrieve").set_sequence(sequence))
                 .register_transaction(transaction!(load_test_rerank).set_name("RAG Rerank").set_sequence(sequence)),
-        };
-
-        Ok(attack.register_scenario(scenario.set_weight(weighted.weight)?))
+        })
     };
 
-    // Register selected scenarios
+    // Register selected transactions
     let mut sequence = 1;
     for weighted_endpoint in args.endpoints {
-        attack = register_scenario(attack, weighted_endpoint, sequence)?;
+        scenario = register_transaction(scenario, weighted_endpoint, sequence)?;
         sequence += 1;
     }
+
+    // Register the single scenario with all transactions
+    attack = attack.register_scenario(scenario);
 
     // Execute the attack
     attack.execute().await?;
