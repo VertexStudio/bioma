@@ -436,17 +436,20 @@ impl Message<IndexGlobs> for Indexer {
                 println!("embeddings_ids: {:?}", embeddings_ids);
 
                 if !embeddings_ids.is_empty() {
-                    let source_query =
-                        include_str!("../sql/source.surql").replace("{prefix}", &self.embeddings.table_prefix());
-                    ctx.engine()
+                    let source_query = include_str!("../sql/source.surql");
+                    println!("source_query: {}", source_query);
+                    let results = ctx
+                        .engine()
                         .db()
-                        .query(&source_query)
+                        .query(*&source_query)
                         .bind(("source", source.source.clone()))
                         .bind(("uri", source.uri.clone()))
                         .bind(("emb_ids", embeddings_ids))
+                        .bind(("prefix", self.embeddings.table_prefix()))
                         .await
                         .map_err(SystemActorError::from)
                         .unwrap();
+                    println!("results: {:?}", results);
                 }
             }
         }
