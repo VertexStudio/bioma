@@ -75,10 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, chunk) in chunks.iter().enumerate() {
         let embeddings_id = &embeddings_actors[i];
         let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings {
-                content: EmbeddingContent::Text(chunk.clone()),
-                metadata: None,
-            },
+            StoreEmbeddings { content: EmbeddingContent::Text(chunk.clone()), metadata: None },
             embeddings_id,
             SendOptions::default(),
         );

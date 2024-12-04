@@ -44,10 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store image embeddings
     let embeddings_ids = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings {
-                content: EmbeddingContent::Image(image_paths.clone()),
-                metadata: None,
-            },
+            StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )

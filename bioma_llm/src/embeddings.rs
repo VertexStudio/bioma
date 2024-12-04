@@ -217,7 +217,6 @@ impl Message<StoreEmbeddings> for Embeddings {
         let emb_query = include_str!("../sql/embeddings.surql");
 
         let mut embeddings_ids: Vec<RecordId> = Vec::new();
-        println!("metadata: {:#?}", message.metadata);
 
         // Store embeddings
         for (i, embedding) in embeddings.iter().enumerate() {
