@@ -7,9 +7,9 @@ LET $emb = CREATE ONLY type::table($prefix + "_embedding") CONTENT {
 };
 RELATE $model_id->(type::table($prefix + "_model_embeddings"))->($emb.id);
 
-LET $src = SELECT VALUE id FROM ONLY source:{source: $source};
+LET $src = SELECT VALUE id FROM ONLY source:{source: $source, uri: $uri};
 LET $src_id = IF $src == NONE THEN 
-    (CREATE ONLY source:{source: $source} SET source = $source).id 
+    (CREATE ONLY source:{source: $source, uri: $uri} SET source = $source, uri = $uri).id 
 ELSE 
     $src
 END;

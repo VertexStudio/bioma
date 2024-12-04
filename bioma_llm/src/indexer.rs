@@ -1,5 +1,5 @@
 use crate::{
-    embeddings::{Embeddings, EmbeddingsError, StoreEmbeddings},
+    embeddings::{Embeddings, EmbeddingsError, EmbeddingSource, StoreEmbeddings},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
@@ -189,15 +189,7 @@ impl Indexer {
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let edge_name = format!(
-            "{}_source_embeddings",
-            self.embeddings.table_name_prefix.as_ref().unwrap_or(&self.embeddings.model.to_string())
-        );
-        let query = format!(
-            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
-            edge_name, edge_name
-        );
-
+        let query = format!("SELECT * FROM source:{{source: $source, uri: $uri}}");
         let source_embeddings =
             ctx.engine().db().query(&query).bind(("source", source.clone())).bind(("uri", uri.clone())).await;
 
@@ -212,9 +204,14 @@ impl Indexer {
             return Ok(IndexResult::Cached);
         }
 
+        let source = EmbeddingSource { source: source.clone(), uri: uri.clone() };
+
         match content {
             Content::Image { path } => {
-                let source_clone = source.clone();
+
+
+                
+
                 let path_clone = path.clone();
                 let metadata = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::open(&path).ok()?;
@@ -231,8 +228,8 @@ impl Indexer {
 
                     let image_metadata = ImageMetadata {
                         base: BaseMetadata {
-                            source: source.clone(),
-                            uri: uri.clone(),
+                            source: source.source.clone(),
+                            uri: source.uri.clone(),
                             content_type: ContentType::Image,
                         },
                         format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
@@ -250,7 +247,7 @@ impl Indexer {
                 let result = ctx
                     .send::<Embeddings, StoreEmbeddings>(
                         StoreEmbeddings {
-                            source: source_clone,
+                            source,
                             content: EmbeddingContent::Image(vec![path_clone]),
                             metadata: metadata.map(|m| vec![m]),
                         },
