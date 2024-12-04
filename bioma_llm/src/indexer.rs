@@ -482,7 +482,7 @@ impl Message<IndexGlobs> for Indexer {
                                 "cue" => TextType::Code(CodeLanguage::Cue),
                                 "html" => TextType::Code(CodeLanguage::Html),
                                 "cpp" => TextType::Code(CodeLanguage::Cpp),
-                                "h" => TextType::Text,
+                                "h" => TextType::Code(CodeLanguage::Cpp),
                                 _ => TextType::Text,
                             };
 
