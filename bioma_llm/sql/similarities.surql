@@ -7,5 +7,9 @@ SELECT
     metadata
 FROM type::table($prefix + "_embedding")
 WHERE embedding <|{top_k}|> $query
--- AND string::matches(source, $source)
--- ORDER BY similarity DESC;
+AND id IN (
+    SELECT out AS embeddings
+    FROM type::table($prefix + "_source_embeddings")
+    WHERE string::matches(in.id.uri, $source)
+).embeddings
+ORDER BY similarity DESC

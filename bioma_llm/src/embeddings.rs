@@ -95,6 +95,8 @@ pub enum Query {
 pub struct TopK {
     /// The query to search for
     pub query: Query,
+    /// The source regex pattern to match against
+    pub source: Option<String>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -188,6 +190,7 @@ impl Message<TopK> for Embeddings {
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("threshold", message.threshold))
+            .bind(("source", message.source.clone().unwrap_or(".*".to_string())))
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
