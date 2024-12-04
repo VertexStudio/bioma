@@ -44,11 +44,10 @@ pub enum EmbeddingsError {
 
 impl ActorError for EmbeddingsError {}
 
-/// The source of the embeddings
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmbeddingSource {
-    pub source: String,
-    pub uri: String,
+pub enum EmbeddingContent {
+    Text(Vec<String>),
+    Image(Vec<String>),
 }
 
 pub struct EmbeddingRequest {
@@ -59,18 +58,10 @@ pub struct EmbeddingRequest {
 /// Store embeddings for texts or images
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreEmbeddings {
-    /// Source of the embeddings
-    pub source: EmbeddingSource,
     /// The content to embed (either texts or images)
     pub content: EmbeddingContent,
     /// Metadata to store with the embeddings
     pub metadata: Option<Vec<Value>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EmbeddingContent {
-    Text(Vec<String>),
-    Image(Vec<String>),
 }
 
 /// Generate embeddings for texts or images
@@ -88,7 +79,7 @@ pub struct GeneratedEmbeddings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredEmbeddings {
-    pub lengths: Vec<usize>,
+    pub ids: Vec<RecordId>,
 }
 
 /// The query to search for
@@ -104,8 +95,6 @@ pub enum Query {
 pub struct TopK {
     /// The query to search for
     pub query: Query,
-    /// A source regex pattern to filter the search
-    pub source: Option<EmbeddingSource>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -195,16 +184,9 @@ impl Message<TopK> for Embeddings {
         let db = ctx.engine().db();
         let query_sql = include_str!("../sql/similarities.surql").replace("{top_k}", &message.k.to_string());
 
-        let source = match &message.source {
-            Some(source) => source.clone(),
-            None => EmbeddingSource { source: ".*".to_string(), uri: ".*".to_string() },
-        };
-
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
-            .bind(("source", source.source))
-            .bind(("uri", source.uri))
             .bind(("threshold", message.threshold))
             .bind(("prefix", self.table_prefix()))
             .await
@@ -231,19 +213,11 @@ impl Message<StoreEmbeddings> for Embeddings {
 
         let embeddings = rx.await??;
 
-        // Check if metadata length matches content length
-        if let Some(metadata) = &message.metadata {
-            let content_len = match &message.content {
-                EmbeddingContent::Text(texts) => texts.len(),
-                EmbeddingContent::Image(paths) => paths.len(),
-            };
-            if metadata.len() != content_len {
-                error!("Metadata length does not match content length");
-            }
-        }
-
         let db = ctx.engine().db();
         let emb_query = include_str!("../sql/embeddings.surql");
+
+        let mut embeddings_ids: Vec<RecordId> = Vec::new();
+        println!("metadata: {:#?}", message.metadata);
 
         // Store embeddings
         for (i, embedding) in embeddings.iter().enumerate() {
@@ -259,19 +233,25 @@ impl Message<StoreEmbeddings> for Embeddings {
                 EmbeddingContent::Image(_) => None,
             };
 
-            db.query(emb_query)
+            let mut results = db
+                .query(emb_query)
                 .bind(("embedding", embedding))
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
-                .bind(("source", message.source.source.clone()))
-                .bind(("uri", message.source.uri.clone()))
                 .bind(("prefix", self.table_prefix()))
                 .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
+
+            let id: Result<Option<RecordId>, _> = results.take(3).map_err(SystemActorError::from);
+            if let Some(id) = id.map_err(EmbeddingsError::from)? {
+                embeddings_ids.push(id);
+            } else {
+                return Err(EmbeddingsError::NoEmbeddingsGenerated);
+            }
         }
 
-        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+        Ok(StoredEmbeddings { ids: embeddings_ids })
     }
 }
 

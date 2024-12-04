@@ -42,10 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<String>>();
 
     // Store image embeddings
-    let embeddings_lengths = relay_ctx
+    let embeddings_ids = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                source: "test_images".to_string(),
                 content: EmbeddingContent::Image(image_paths.clone()),
                 metadata: None,
             },
@@ -54,8 +53,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
-    for (i, length) in embeddings_lengths.lengths.iter().enumerate() {
-        info!("Stored embeddings for image: {} with length: {}", image_paths[i], length);
+    for id in embeddings_ids.ids.iter() {
+        info!("Stored embeddings for image: {}", id);
     }
 
     // Search for similar images using an image query
@@ -63,7 +62,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         query: embeddings::Query::Image("assets/images/rust-pet.png".to_string()),
         threshold: 0.5,
         k: 3,
-        source: None,
     };
     info!("Image query: {:?}", top_k);
     let similarities =

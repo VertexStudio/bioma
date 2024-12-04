@@ -1,13 +1,14 @@
 use crate::{
-    embeddings::{Embeddings, EmbeddingsError, EmbeddingSource, StoreEmbeddings},
+    embeddings::{Embeddings, EmbeddingsError, StoreEmbeddings},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use walkdir::WalkDir;
 
 use crate::embeddings::EmbeddingContent;
@@ -42,27 +43,6 @@ pub enum IndexerError {
 }
 
 impl ActorError for IndexerError {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourcedText {
-    pub source: String,
-    pub text: String,
-    pub text_type: TextType,
-}
-
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
-pub struct IndexTexts {
-    pub texts: Vec<SourcedText>,
-    #[builder(default = default_chunk_capacity())]
-    #[serde(default = "default_chunk_capacity")]
-    pub chunk_capacity: std::ops::Range<usize>,
-    #[builder(default = default_chunk_overlap())]
-    #[serde(default = "default_chunk_overlap")]
-    pub chunk_overlap: usize,
-    #[builder(default = default_chunk_batch_size())]
-    #[serde(default = "default_chunk_batch_size")]
-    pub chunk_batch_size: usize,
-}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
@@ -114,29 +94,13 @@ pub enum TextType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseMetadata {
-    pub source: String,
-    pub uri: String,
-    pub content_type: ContentType,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ContentType {
-    Text(TextType),
-    Image,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextChunkMetadata {
-    #[serde(flatten)]
-    pub base: BaseMetadata,
+pub struct TextMetadata {
+    pub content: TextType,
     pub chunk_number: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageMetadata {
-    #[serde(flatten)]
-    pub base: BaseMetadata,
     pub format: String,
     pub dimensions: ImageDimensions,
     pub size_bytes: u64,
@@ -145,15 +109,23 @@ pub struct ImageMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SourceEmbeddings {
-    pub source: String,
+pub enum Metadata {
+    Text(TextMetadata),
+    Image(ImageMetadata),
 }
 
 #[derive(Debug)]
 enum IndexResult {
-    Indexed(usize),
+    Indexed(Vec<RecordId>),
     Cached,
     Failed,
+}
+
+/// The source of the embeddings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentSource {
+    pub source: String,
+    pub uri: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,35 +156,34 @@ impl Indexer {
     async fn index_content(
         &self,
         ctx: &mut ActorContext<Self>,
-        source: String,
-        uri: String,
+        source: ContentSource,
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
         let query = format!("SELECT * FROM source:{{source: $source, uri: $uri}}");
-        let source_embeddings =
-            ctx.engine().db().query(&query).bind(("source", source.clone())).bind(("uri", uri.clone())).await;
+        let sources = ctx
+            .engine()
+            .db()
+            .query(&query)
+            .bind(("source", source.source.clone()))
+            .bind(("uri", source.uri.clone()))
+            .await;
 
-        let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {} {}", source, uri);
+        let Ok(mut sources) = sources else {
+            error!("Failed to query source: {} {}", source.source, source.uri);
             return Ok(IndexResult::Failed);
         };
 
-        let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
-        if !source_embeddings.is_empty() {
-            debug!("Content already indexed with URI: {} {}", source, uri);
+        let sources: Vec<ContentSource> = sources.take(0).map_err(SystemActorError::from)?;
+        if !sources.is_empty() {
+            info!("Content already indexed with URI: {} {}", source.source, source.uri);
             return Ok(IndexResult::Cached);
         }
 
-        let source = EmbeddingSource { source: source.clone(), uri: uri.clone() };
-
         match content {
             Content::Image { path } => {
-
-
-                
-
                 let path_clone = path.clone();
+                // let source_clone = source.clone();
                 let metadata = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::open(&path).ok()?;
                     let reader = std::io::BufReader::new(file);
@@ -226,18 +197,13 @@ impl Indexer {
 
                     let file_metadata = std::fs::metadata(&path).ok()?;
 
-                    let image_metadata = ImageMetadata {
-                        base: BaseMetadata {
-                            source: source.source.clone(),
-                            uri: source.uri.clone(),
-                            content_type: ContentType::Image,
-                        },
+                    let image_metadata = Metadata::Image(ImageMetadata {
                         format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                         dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                         size_bytes: file_metadata.len(),
                         modified: file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
                         created: file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-                    };
+                    });
 
                     Some(serde_json::to_value(image_metadata).ok()?)
                 })
@@ -247,7 +213,6 @@ impl Indexer {
                 let result = ctx
                     .send::<Embeddings, StoreEmbeddings>(
                         StoreEmbeddings {
-                            source,
                             content: EmbeddingContent::Image(vec![path_clone]),
                             metadata: metadata.map(|m| vec![m]),
                         },
@@ -256,8 +221,13 @@ impl Indexer {
                     )
                     .await;
 
+                let mut embeddings_ids: Vec<RecordId> = Vec::new();
+
                 match result {
-                    Ok(_) => Ok(IndexResult::Indexed(1)),
+                    Ok(stored_embeddings) => {
+                        embeddings_ids.extend(stored_embeddings.ids);
+                        Ok(IndexResult::Indexed(embeddings_ids))
+                    }
                     Err(e) => {
                         error!("Failed to generate image embedding: {}", e);
                         Ok(IndexResult::Failed)
@@ -307,26 +277,18 @@ impl Indexer {
                 let metadata = chunks
                     .iter()
                     .enumerate()
-                    .map(|(i, _)| TextChunkMetadata {
-                        base: BaseMetadata {
-                            source: source.clone(),
-                            uri: uri.clone(),
-                            content_type: ContentType::Text(text_type.clone()),
-                        },
-                        chunk_number: i,
-                    })
+                    .map(|(i, _)| Metadata::Text(TextMetadata { content: text_type.clone(), chunk_number: i }))
                     .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
                     .collect::<Vec<Value>>();
 
                 let chunk_batches = chunks.chunks(chunk_batch_size);
                 let metadata_batches = metadata.chunks(chunk_batch_size);
-                let mut embeddings_count = 0;
+                let mut embeddings_ids: Vec<RecordId> = Vec::new();
 
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
                         .send::<Embeddings, StoreEmbeddings>(
                             StoreEmbeddings {
-                                source: source.clone(),
                                 content: EmbeddingContent::Text(chunk_batch.to_vec()),
                                 metadata: Some(metadata_batch.to_vec()),
                             },
@@ -336,56 +298,16 @@ impl Indexer {
                         .await;
 
                     match result {
-                        Ok(_) => embeddings_count += 1,
-                        Err(e) => error!("Failed to generate embeddings: {} {}", e, source),
+                        Ok(stored_embeddings) => {
+                            embeddings_ids.extend(stored_embeddings.ids);
+                        }
+                        Err(e) => error!("Failed to generate embeddings: {} {}", e, source.source),
                     }
                 }
 
-                Ok(IndexResult::Indexed(embeddings_count))
+                Ok(IndexResult::Indexed(embeddings_ids))
             }
         }
-    }
-}
-
-impl Message<IndexTexts> for Indexer {
-    type Response = Indexed;
-
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexTexts) -> Result<Indexed, IndexerError> {
-        let Some(embeddings_id) = &self.embeddings_id else {
-            return Err(IndexerError::EmbeddingsActorNotInitialized);
-        };
-
-        let total_index_texts_time = std::time::Instant::now();
-        let mut indexed = 0;
-        let mut cached = 0;
-
-        for SourcedText { source, text, text_type } in message.texts.iter() {
-            match self
-                .index_content(
-                    ctx,
-                    source.clone(),
-                    String::new(),
-                    Content::Text {
-                        content: text.clone(),
-                        text_type: text_type.clone(),
-                        chunk_config: (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size),
-                    },
-                    embeddings_id,
-                )
-                .await?
-            {
-                IndexResult::Indexed(count) => {
-                    if count > 0 {
-                        indexed += 1;
-                    }
-                }
-                IndexResult::Cached => cached += 1,
-                IndexResult::Failed => continue,
-            }
-        }
-
-        info!("Indexed {} texts, cached {} paths, in {:?}", indexed, cached, total_index_texts_time.elapsed());
-        Ok(Indexed { indexed, cached })
     }
 }
 
@@ -497,14 +419,34 @@ impl Message<IndexGlobs> for Indexer {
                     }
                 };
 
-                match self.index_content(ctx, source, uri, content, embeddings_id).await? {
-                    IndexResult::Indexed(count) => {
-                        if count > 0 {
+                let mut embeddings_ids: Vec<RecordId> = Vec::new();
+                let source = ContentSource { source, uri };
+
+                match self.index_content(ctx, source.clone(), content, embeddings_id).await? {
+                    IndexResult::Indexed(ids) => {
+                        embeddings_ids.extend(ids);
+                        if !embeddings_ids.is_empty() {
                             indexed += 1;
                         }
                     }
                     IndexResult::Cached => cached += 1,
                     IndexResult::Failed => continue,
+                }
+
+                println!("embeddings_ids: {:?}", embeddings_ids);
+
+                if !embeddings_ids.is_empty() {
+                    let source_query =
+                        include_str!("../sql/source.surql").replace("{prefix}", &self.embeddings.table_prefix());
+                    ctx.engine()
+                        .db()
+                        .query(&source_query)
+                        .bind(("source", source.source.clone()))
+                        .bind(("uri", source.uri.clone()))
+                        .bind(("emb_ids", embeddings_ids))
+                        .await
+                        .map_err(SystemActorError::from)
+                        .unwrap();
                 }
             }
         }
