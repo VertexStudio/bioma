@@ -49,10 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the texts to the embeddings actor
     let embeddings_ids = relay_ctx
         .send::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings {
-                content: EmbeddingContent::Text(texts.clone()),
-                metadata: None,
-            },
+            StoreEmbeddings { content: EmbeddingContent::Text(texts.clone()), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )
