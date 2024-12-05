@@ -287,7 +287,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             {
                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                     match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -390,7 +390,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             for ctx in context.context {
                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                     match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -461,7 +461,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
 
     let delete_source = body.clone();
 
-    info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
+    info!("Sending delete message to indexer actor for sources: {:?}", delete_source);
     let response = indexer_actor.handle(&mut indexer_ctx, &delete_source).await;
 
     match response {
