@@ -5,24 +5,28 @@ use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
 use clap::{Parser, ValueEnum};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
+use once_cell::sync::Lazy;
 use serde_json::json;
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use tracing::info;
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
-static REQUEST_LOCK: once_cell::sync::Lazy<Arc<Mutex<()>>> = once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(())));
+// Global ordering state
+static ORDERING_STATE: Lazy<Mutex<OrderingState>> =
+    Lazy::new(|| Mutex::new(OrderingState { current_index: 0, endpoint_order: vec![] }));
 
-// Add this struct to store our custom session data
-#[derive(Debug)]
-struct AttackSessionData {
-    ordered: bool,
+// First, add a struct to track ordering state
+#[derive(Debug, Clone)]
+struct OrderingState {
+    current_index: usize,
+    endpoint_order: Vec<TestType>,
 }
 
-// Modify the initialize_goose function to set session data
+// Modify initialize_goose to set up initial session data
 fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     let mut config = GooseConfiguration::default();
 
@@ -31,37 +35,31 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     config.run_time = args.time.to_string();
     config.request_log = args.log.clone();
     config.report_file = args.report.clone();
-    config.running_metrics = Some(args.metrics_interval);
 
-    let mut attack = GooseAttack::initialize_with_config(config)?;
-    if args.order {
-        attack = attack.set_scheduler(GooseScheduler::Serial);
-        // Set session data for all users using test_start
-        attack = attack.test_start(transaction!(setup_session_data));
-    }
-
-    Ok(attack)
+    GooseAttack::initialize_with_config(config)
 }
 
-// Add this function to set up session data
-async fn setup_session_data(user: &mut GooseUser) -> TransactionResult {
-    user.set_session_data(AttackSessionData { ordered: true });
-    Ok(())
-}
-
-// Modify make_request to use session data
+// Modify make_request to use global state
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
     method: GooseMethod,
     path: &str,
     name: &str,
+    endpoint_type: TestType,
     payload: Option<T>,
 ) -> TransactionResult {
-    // Check session data for ordered mode
-    let ordered = user.get_session_data::<AttackSessionData>().map(|data| data.ordered).unwrap_or(false);
+    // Check ordering using global state but don't update yet
+    let should_execute = {
+        info!("Current endpoint: {:?}", endpoint_type);
+        let state = ORDERING_STATE.lock().unwrap();
+        endpoint_type == state.endpoint_order[state.current_index]
+    };
 
-    // Acquire mutex lock if running in ordered mode
-    let _lock = if ordered { Some(REQUEST_LOCK.lock().await) } else { None };
+    if !should_execute {
+        return Ok(());
+    }
+
+    println!("Executing endpoint: {:?}", endpoint_type);
 
     let mut request_builder = user.get_request_builder(&method, path)?;
 
@@ -74,6 +72,14 @@ async fn make_request<T: serde::Serialize>(
     let goose_request = GooseRequest::builder().set_request_builder(request_builder).name(name).build();
 
     let mut goose = user.request(goose_request).await?;
+
+    // Update state after request is complete
+    {
+        let mut state = ORDERING_STATE.lock().unwrap();
+        let current = state.endpoint_order[state.current_index].clone();
+        state.current_index = (state.current_index + 1) % state.endpoint_order.len();
+        println!("Last executed endpoint: {:?}", current);
+    }
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
@@ -94,20 +100,19 @@ async fn make_request<T: serde::Serialize>(
 }
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
-    make_request::<()>(user, GooseMethod::Get, "/health", "Health Check", None).await
+    make_request::<()>(user, GooseMethod::Get, "/health", "Health Check", TestType::Health, None).await
 }
 
 pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
     let payload = json!("");
-
-    make_request(user, GooseMethod::Post, "/hello", "Hello", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/hello", "Hello", TestType::Hello, Some(payload)).await
 }
 
-pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!("");
+// pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
+//     let payload = json!("");
 
-    make_request(user, GooseMethod::Post, "/reset", "Reset Engine", Some(payload)).await
-}
+//     make_request(user, GooseMethod::Post, "/reset", "Reset Engine", TestType::Reset, Some(payload)).await
+// }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let payload = IndexGlobs {
@@ -117,7 +122,7 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
     };
 
-    make_request(user, GooseMethod::Post, "/index", "Index Files", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/index", "Index Files", TestType::Index, Some(payload)).await
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
@@ -127,10 +132,21 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
         persist: false,
     };
 
-    make_request(user, GooseMethod::Post, "/api/chat", "Chat", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/api/chat", "Chat", TestType::Chat, Some(payload)).await
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
+    // Check ordering using global state but don't update yet
+    let should_execute = {
+        info!("Current endpoint: {:?}", TestType::Upload);
+        let state = ORDERING_STATE.lock().unwrap();
+        TestType::Upload == state.endpoint_order[state.current_index]
+    };
+
+    if !should_execute {
+        return Ok(());
+    }
+
     let boundary = "----WebKitFormBoundaryABC123";
 
     // Create a temporary file with some content
@@ -171,6 +187,14 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     let mut goose = user.request(goose_request).await?;
 
+    // Update state after request is complete
+    {
+        let mut state = ORDERING_STATE.lock().unwrap();
+        let current = state.endpoint_order[state.current_index].clone();
+        state.current_index = (state.current_index + 1) % state.endpoint_order.len();
+        println!("Last executed endpoint: {:?}", current);
+    }
+
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
             let status = response.status();
@@ -192,7 +216,8 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
     let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
 
-    make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", TestType::DeleteSource, Some(payload))
+        .await
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
@@ -201,13 +226,13 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
         "input": "Sample text to embed"
     });
 
-    make_request(user, GooseMethod::Post, "/api/embed", "Embed Text", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/api/embed", "Embed Text", TestType::Embed, Some(payload)).await
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
     let payload = json!({ "query": "What is Bioma?" });
 
-    make_request(user, GooseMethod::Post, "/ask", "RAG Ask", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/ask", "RAG Ask", TestType::Ask, Some(payload)).await
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
@@ -218,7 +243,7 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
         source: None,
     };
 
-    make_request(user, GooseMethod::Post, "/retrieve", "RAG Retrieve", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/retrieve", "RAG Retrieve", TestType::Retrieve, Some(payload)).await
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
@@ -231,10 +256,10 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
         ],
     };
 
-    make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", Some(payload)).await
+    make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", TestType::Rerank, Some(payload)).await
 }
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, ValueEnum, PartialEq)]
 enum TestType {
     Health,
     Hello,
@@ -342,6 +367,12 @@ async fn main() -> Result<(), GooseError> {
 
     // Create a single scenario
     let mut scenario = scenario!("RAG Server Load Test");
+
+    if args.order {
+        // Initialize the global ordering state with the endpoint order
+        let endpoint_order: Vec<TestType> = args.endpoints.iter().map(|we| we.endpoint.clone()).collect();
+        ORDERING_STATE.lock().unwrap().endpoint_order = endpoint_order;
+    }
 
     // Helper to register transactions to the scenario
     let register_transaction = |scenario: Scenario,
