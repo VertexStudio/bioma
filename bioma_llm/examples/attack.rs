@@ -7,9 +7,14 @@ use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use once_cell::sync::Lazy;
 use serde_json::json;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Mutex;
 use tracing::info;
+
+// We will have a global variation count and a global map to track each endpoint's current variation
+static VARIATIONS_COUNT: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(1));
+static ENDPOINT_VARIATION_STATE: Lazy<Mutex<HashMap<TestType, usize>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
@@ -19,11 +24,57 @@ const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 static ORDERING_STATE: Lazy<Mutex<OrderingState>> =
     Lazy::new(|| Mutex::new(OrderingState { current_index: 0, endpoint_order: vec![] }));
 
-// First, add a struct to track ordering state
 #[derive(Debug, Clone)]
 struct OrderingState {
     current_index: usize,
     endpoint_order: Vec<TestType>,
+}
+
+#[derive(Debug, Clone, ValueEnum, PartialEq, Eq, Hash)]
+enum TestType {
+    Health,
+    Hello,
+    Index,
+    Chat,
+    Upload,
+    DeleteSource,
+    Embed,
+    Ask,
+    Retrieve,
+    Rerank,
+    All,
+}
+
+// Implement FromStr separately to avoid conflict with ValueEnum
+impl FromStr for TestType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "health" => Ok(TestType::Health),
+            "hello" => Ok(TestType::Hello),
+            "index" => Ok(TestType::Index),
+            "chat" => Ok(TestType::Chat),
+            "upload" => Ok(TestType::Upload),
+            "deletesource" => Ok(TestType::DeleteSource),
+            "embed" => Ok(TestType::Embed),
+            "ask" => Ok(TestType::Ask),
+            "retrieve" => Ok(TestType::Retrieve),
+            "rerank" => Ok(TestType::Rerank),
+            "all" => Ok(TestType::All),
+            _ => Err(format!("Unknown test type: {}", s)),
+        }
+    }
+}
+
+// Add a helper function to get the next variation index for a given endpoint type
+fn get_next_variation(endpoint_type: TestType) -> usize {
+    let variations = *VARIATIONS_COUNT.lock().unwrap();
+    let mut map = ENDPOINT_VARIATION_STATE.lock().unwrap();
+    let entry = map.entry(endpoint_type).or_insert(0);
+    let current = *entry;
+    *entry = (current + 1) % variations;
+    current
 }
 
 // Modify initialize_goose to set up initial session data
@@ -113,15 +164,11 @@ pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
     make_request(user, GooseMethod::Post, "/hello", "Hello", TestType::Hello, Some(payload)).await
 }
 
-// pub async fn load_test_reset(user: &mut GooseUser) -> TransactionResult {
-//     let payload = json!("");
-
-//     make_request(user, GooseMethod::Post, "/reset", "Reset Engine", TestType::Reset, Some(payload)).await
-// }
-
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
+    let variation = get_next_variation(TestType::Index);
+    let file_name = format!("uploads/test{}.txt", variation);
     let payload = IndexGlobs {
-        globs: vec!["uploads/test.txt".to_string()],
+        globs: vec![file_name],
         chunk_capacity: DEFAULT_CHUNK_CAPACITY,
         chunk_overlap: DEFAULT_CHUNK_OVERLAP,
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
@@ -157,6 +204,9 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     info!("Executing Upload");
 
+    let variation = get_next_variation(TestType::Upload);
+    let file_name = format!("uploads/test{}.txt", variation);
+
     let boundary = "----WebKitFormBoundaryABC123";
 
     // Create a temporary file with some content
@@ -180,7 +230,8 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     // Add metadata part
     form_data.extend_from_slice(format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"path\":\"uploads/test.txt\"}}\r\n",
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{{\"path\":\"{}\"}}\r\n",
+        file_name
     ).as_bytes());
 
     // Add final boundary
@@ -224,7 +275,9 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
+    let variation = get_next_variation(TestType::DeleteSource);
+    let file_name = format!("uploads/test{}.txt", variation);
+    let payload = DeleteSource { sources: vec![file_name] };
 
     make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", TestType::DeleteSource, Some(payload))
         .await
@@ -269,39 +322,30 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
     make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", TestType::Rerank, Some(payload)).await
 }
 
-#[derive(Debug, Clone, ValueEnum, PartialEq)]
-enum TestType {
-    Health,
-    Hello,
-    Index,
-    Chat,
-    Upload,
-    DeleteSource,
-    Embed,
-    Ask,
-    Retrieve,
-    Rerank,
-    All,
+#[derive(Debug, Clone)]
+struct WeightedEndpoint {
+    endpoint: TestType,
+    weight: usize,
 }
 
-// Implement FromStr separately to avoid conflict with ValueEnum
-impl FromStr for TestType {
+impl FromStr for WeightedEndpoint {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "health" => Ok(TestType::Health),
-            "hello" => Ok(TestType::Hello),
-            "index" => Ok(TestType::Index),
-            "chat" => Ok(TestType::Chat),
-            "upload" => Ok(TestType::Upload),
-            "deletesource" => Ok(TestType::DeleteSource),
-            "embed" => Ok(TestType::Embed),
-            "ask" => Ok(TestType::Ask),
-            "retrieve" => Ok(TestType::Retrieve),
-            "rerank" => Ok(TestType::Rerank),
-            "all" => Ok(TestType::All),
-            _ => Err(format!("Unknown test type: {}", s)),
+        let parts: Vec<&str> = s.split(':').collect();
+        match parts.as_slice() {
+            [endpoint, weight] => {
+                let endpoint =
+                    <TestType as FromStr>::from_str(endpoint).map_err(|_| format!("Invalid endpoint: {}", endpoint))?;
+                let weight = weight.parse().map_err(|_| format!("Invalid weight: {}", weight))?;
+                Ok(WeightedEndpoint { endpoint, weight })
+            }
+            [endpoint] => {
+                let endpoint =
+                    <TestType as FromStr>::from_str(endpoint).map_err(|_| format!("Invalid endpoint: {}", endpoint))?;
+                Ok(WeightedEndpoint { endpoint, weight: 1 })
+            }
+            _ => Err(format!("Invalid format: {}", s)),
         }
     }
 }
@@ -340,39 +384,22 @@ struct Args {
     /// Run scenarios in sequential order
     #[arg(long)]
     order: bool,
-}
 
-#[derive(Debug, Clone)]
-struct WeightedEndpoint {
-    endpoint: TestType,
-    weight: usize,
-}
-
-impl FromStr for WeightedEndpoint {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split(':').collect();
-        match parts.as_slice() {
-            [endpoint, weight] => {
-                let endpoint =
-                    <TestType as FromStr>::from_str(endpoint).map_err(|_| format!("Invalid endpoint: {}", endpoint))?;
-                let weight = weight.parse().map_err(|_| format!("Invalid weight: {}", weight))?;
-                Ok(WeightedEndpoint { endpoint, weight })
-            }
-            [endpoint] => {
-                let endpoint =
-                    <TestType as FromStr>::from_str(endpoint).map_err(|_| format!("Invalid endpoint: {}", endpoint))?;
-                Ok(WeightedEndpoint { endpoint, weight: 1 })
-            }
-            _ => Err(format!("Invalid format: {}", s)),
-        }
-    }
+    /// Number of variations for the test files
+    #[arg(short, long, default_value_t = 1)]
+    variations: usize,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), GooseError> {
     let args = Args::parse();
+
+    // Set the variations count globally
+    {
+        let mut v = VARIATIONS_COUNT.lock().unwrap();
+        *v = args.variations;
+    }
+
     let mut attack = initialize_goose(&args)?;
 
     // Create a single scenario
