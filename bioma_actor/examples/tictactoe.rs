@@ -110,7 +110,6 @@ impl Message<GameState> for PlayerActor {
         let mut state = state.clone();
         info!("{} Analyzing GameState", ctx.id());
         if state.current_player == player_type {
-            // let empty_positions = &state.board;
 
             if state.board.is_empty() {
                 state.board = vec![PlayerType::Null; 9];
@@ -452,8 +451,6 @@ async fn main() -> Result<(), SystemActorError> {
     color_backtrace::BacktracePrinter::new().message("BOOM! 💥").install(color_backtrace::default_output_stream());
 
     let engine = Engine::test().await?;
-    // let engine_options = EngineOptions::builder().endpoint("ws://localhost:8000".into()).build();
-    // let engine = Engine::connect(engine_options).await?;
 
     // Setup the main actor
     let (mut main_actor_ctx, mut main_actor) =
