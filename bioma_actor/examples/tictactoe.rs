@@ -22,17 +22,12 @@ struct MakeMove {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct GameState {
-    // #[serde(default = "default_board")]
     board: Vec<PlayerType>,
     current_player: PlayerType,
     game_over: bool,
     #[serde(default)]
     winner: Option<PlayerType>,
 }
-
-// fn default_board() -> [Option<PlayerType>; 9] {
-//     [None; 9]
-// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct GameResult {
