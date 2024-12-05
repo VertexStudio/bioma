@@ -8,6 +8,7 @@ use tracing::{error, info};
 enum PlayerType {
     X,
     O,
+    Null,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -21,9 +22,10 @@ struct MakeMove {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct GameState {
-    board: [Option<PlayerType>; 9],
+    board: Vec<PlayerType>,
     current_player: PlayerType,
     game_over: bool,
+    #[serde(default)]
     winner: Option<PlayerType>,
 }
 
@@ -45,8 +47,13 @@ impl Message<StartGame> for GameActor {
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, _: &StartGame) -> Result<Self::Response, Self::Error> {
         let current_player = if self.current_player == PlayerType::X { &self.player_x } else { &self.player_o };
-        let game_state =
-            GameState { board: [None; 9], current_player: self.current_player, game_over: false, winner: None };
+
+        let game_state = GameState {
+            board: vec![PlayerType::Null; 9],
+            current_player: self.current_player,
+            game_over: false,
+            winner: None,
+        };
         info!("{}: Sending GameState to player: {:?}", ctx.id(), self.current_player);
         ctx.do_send::<PlayerActor, GameState>(game_state, current_player).await?;
         Ok(())
@@ -100,14 +107,19 @@ impl Message<GameState> for PlayerActor {
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, state: &GameState) -> Result<Self::Response, Self::Error> {
         let player_type = self.player_type;
         let board = self.board.clone();
-        let state = state.clone();
+        let mut state = state.clone();
         info!("{} Analyzing GameState", ctx.id());
         if state.current_player == player_type {
+
+            if state.board.is_empty() {
+                state.board = vec![PlayerType::Null; 9];
+            }
+
             let empty_positions: Vec<usize> = state
                 .board
                 .iter()
                 .enumerate()
-                .filter_map(|(i, &cell)| if cell.is_none() { Some(i) } else { None })
+                .filter_map(|(i, &cell)| if cell.eq(&PlayerType::Null) { Some(i) } else { None })
                 .collect();
 
             if !empty_positions.is_empty() {
@@ -168,7 +180,7 @@ struct BoardActor {
     game: ActorId,
     player_x: ActorId,
     player_o: ActorId,
-    board: [Option<PlayerType>; 9],
+    board: Vec<PlayerType>,
     current_player: PlayerType,
     game_over: bool,
 }
@@ -187,11 +199,13 @@ impl BoardActor {
         ];
 
         for combo in &WINNING_COMBINATIONS {
-            if let (Some(player), true) = (
+            if let (player, true) = (
                 self.board[combo[0]],
                 self.board[combo[0]] == self.board[combo[1]] && self.board[combo[1]] == self.board[combo[2]],
             ) {
-                return Some(player);
+                if player != PlayerType::Null {
+                    return Some(player);
+                }
             }
         }
 
@@ -199,7 +213,7 @@ impl BoardActor {
     }
 
     fn is_full(&self) -> bool {
-        self.board.iter().all(|cell| cell.is_some())
+        self.board.iter().all(|cell| cell.eq(&PlayerType::X) || cell.eq(&PlayerType::O))
     }
 
     fn draw_board(&self) -> String {
@@ -208,9 +222,9 @@ impl BoardActor {
             for j in 0..3 {
                 let index = i * 3 + j;
                 let symbol = match self.board[index] {
-                    Some(PlayerType::X) => "X",
-                    Some(PlayerType::O) => "O",
-                    None => " ",
+                    PlayerType::X => "X",
+                    PlayerType::O => "O",
+                    PlayerType::Null => " ",
                 };
                 board_str.push_str(symbol);
                 if j < 2 {
@@ -237,9 +251,9 @@ impl Message<MakeMove> for BoardActor {
         info!("{} Received MakeMove: player {:?}, position {}", ctx.id(), move_msg.player, move_msg.position);
 
         // Check if the move is valid
-        if move_msg.player == self.current_player && self.board[move_msg.position].is_none() {
+        if move_msg.player == self.current_player && self.board[move_msg.position].eq(&PlayerType::Null) {
             info!("{} Move is valid. Updating board state.", ctx.id());
-            self.board[move_msg.position] = Some(move_msg.player);
+            self.board[move_msg.position] = move_msg.player;
 
             info!("{} Current board state:\n{}", ctx.id(), self.draw_board());
 
@@ -260,6 +274,7 @@ impl Message<MakeMove> for BoardActor {
                 self.current_player = match self.current_player {
                     PlayerType::X => PlayerType::O,
                     PlayerType::O => PlayerType::X,
+                    PlayerType::Null => self.current_player,
                 };
 
                 info!("{} Current player is now: {:?}", ctx.id(), self.current_player);
@@ -269,7 +284,7 @@ impl Message<MakeMove> for BoardActor {
                 info!("{} Sending updated GameState to next player: {:?}", ctx.id(), self.current_player);
                 ctx.do_send::<PlayerActor, GameState>(
                     GameState {
-                        board: self.board,
+                        board: self.board.clone(),
                         current_player: self.current_player,
                         game_over: self.game_over,
                         winner,
@@ -352,6 +367,7 @@ impl Actor for MainActor {
         .await?;
 
         // Spawn board actor
+
         let (mut board_actor_ctx, mut board_actor) = Actor::spawn(
             ctx.engine().clone(),
             board_id.clone(),
@@ -359,7 +375,7 @@ impl Actor for MainActor {
                 game: game_id.clone(),
                 player_x: player_x_id.clone(),
                 player_o: player_o_id.clone(),
-                board: [None; 9],
+                board: vec![PlayerType::Null; 9],
                 current_player: PlayerType::X,
                 game_over: false,
             },
