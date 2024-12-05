@@ -13,6 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use crate::indexer::ContentSource;
+
 lazy_static! {
     static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -108,6 +110,7 @@ pub struct TopK {
 pub struct Similarity {
     pub text: Option<String>,
     pub similarity: f32,
+    pub source: Option<ContentSource>,
     pub metadata: Option<Value>,
 }
 
@@ -186,8 +189,6 @@ impl Message<TopK> for Embeddings {
         let db = ctx.engine().db();
         let query_sql = include_str!("../sql/similarities.surql").replace("{top_k}", &message.k.to_string());
 
-        println!("source: {:?}", message.source);
-
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
@@ -196,9 +197,7 @@ impl Message<TopK> for Embeddings {
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
-        println!("results: {:#?}", results);
         let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
-        println!("Similarity results: {:#?}", results);
         results.map_err(EmbeddingsError::from)
     }
 }
@@ -248,8 +247,6 @@ impl Message<StoreEmbeddings> for Embeddings {
                 .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
-
-            println!("Raw Embedding results: {:#?}", results);
 
             let id: Result<Option<RecordId>, _> = results.take(3).map_err(SystemActorError::from);
             if let Some(id) = id.map_err(EmbeddingsError::from)? {
