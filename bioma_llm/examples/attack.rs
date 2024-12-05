@@ -48,18 +48,23 @@ async fn make_request<T: serde::Serialize>(
     endpoint_type: TestType,
     payload: Option<T>,
 ) -> TransactionResult {
+    println!("ORDERING STATE: {:#?}", ORDERING_STATE.lock().unwrap());
     // Check ordering using global state but don't update yet
     let should_execute = {
-        info!("Current endpoint: {:?}", endpoint_type);
         let state = ORDERING_STATE.lock().unwrap();
+        info!(
+            "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
+            state.current_index, state.endpoint_order[state.current_index], endpoint_type
+        );
         endpoint_type == state.endpoint_order[state.current_index]
     };
 
     if !should_execute {
+        info!("Skipping {:?} - out of order", endpoint_type);
         return Ok(());
     }
 
-    println!("Executing endpoint: {:?}", endpoint_type);
+    info!("Executing {:?}", endpoint_type);
 
     let mut request_builder = user.get_request_builder(&method, path)?;
 
@@ -76,9 +81,9 @@ async fn make_request<T: serde::Serialize>(
     // Update state after request is complete
     {
         let mut state = ORDERING_STATE.lock().unwrap();
-        let current = state.endpoint_order[state.current_index].clone();
+        let old_index = state.current_index;
         state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-        println!("Last executed endpoint: {:?}", current);
+        info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, state.current_index, endpoint_type);
     }
 
     if let Ok(response) = goose.response {
@@ -136,16 +141,21 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
-    // Check ordering using global state but don't update yet
     let should_execute = {
-        info!("Current endpoint: {:?}", TestType::Upload);
         let state = ORDERING_STATE.lock().unwrap();
+        info!(
+            "Upload Order Check - Current Index: {}, Expected: {:?}, Actual: Upload",
+            state.current_index, state.endpoint_order[state.current_index]
+        );
         TestType::Upload == state.endpoint_order[state.current_index]
     };
 
     if !should_execute {
+        info!("Skipping Upload - out of order");
         return Ok(());
     }
+
+    info!("Executing Upload");
 
     let boundary = "----WebKitFormBoundaryABC123";
 
@@ -190,9 +200,9 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     // Update state after request is complete
     {
         let mut state = ORDERING_STATE.lock().unwrap();
-        let current = state.endpoint_order[state.current_index].clone();
+        let old_index = state.current_index;
         state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-        println!("Last executed endpoint: {:?}", current);
+        info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, state.current_index);
     }
 
     if let Ok(response) = goose.response {
