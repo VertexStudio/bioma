@@ -953,6 +953,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surrealdb",
+ "tempfile",
  "test-log",
  "text-splitter 0.16.1",
  "thiserror 2.0.3",
