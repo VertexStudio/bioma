@@ -27,9 +27,11 @@ zip = { workspace = true }
 
 ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "56d7ec24e656840a9a81437ea4324d0fcc2189c6", features = [
     "function-calling",
+    "stream",
 ] }
 hf-hub = "0.3.2"
 fastembed = "4.3"
+tokio-stream = "0.1.10"
 # fastembed = { path = "../../fastembed-rs" }
 # fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "feature/nomic-embed-vision-v1.5" }
 

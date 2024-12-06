@@ -9,14 +9,16 @@ use ollama_rs::{
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use tracing::{error, info};
+use std::pin::Pin;
+use tokio_stream::StreamExt;
+use tracing::{error, info, warn};
 use url::Url;
 
 const DEFAULT_MODEL_NAME: &str = "llama3.2";
 const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
 
-/// Enumerates the types of errors that can occur in LLM
+/// Enumerates the types of errors that can occur
 #[derive(thiserror::Error, Debug)]
 pub enum ChatError {
     #[error("System error: {0}")]
@@ -25,11 +27,13 @@ pub enum ChatError {
     Ollama(#[from] OllamaError),
     #[error("Ollama not initialized")]
     OllamaNotInitialized,
+    #[error("Stream not started")]
+    StreamNotStarted,
 }
 
 impl ActorError for ChatError {}
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Serialize, Deserialize)]
 pub struct Chat {
     #[builder(default = DEFAULT_MODEL_NAME.into())]
     pub model: Cow<'static, str>,
@@ -43,6 +47,8 @@ pub struct Chat {
     #[serde(skip)]
     #[builder(default)]
     ollama: Ollama,
+    #[serde(skip)]
+    stream: Option<Pin<Box<dyn futures::Stream<Item = Result<ChatMessageResponse, OllamaError>> + Send + Sync>>>,
 }
 
 impl Default for Chat {
@@ -54,34 +60,55 @@ impl Default for Chat {
             messages_number_limit: DEFAULT_MESSAGES_NUMBER_LIMIT,
             history: Vec::new(),
             ollama: Ollama::default(),
+            stream: None,
         }
     }
 }
 
+impl std::fmt::Debug for Chat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Chat")
+            .field("model", &self.model)
+            .field("generation_options", &self.generation_options)
+            .field("endpoint", &self.endpoint)
+            .field("messages_number_limit", &self.messages_number_limit)
+            .field("history", &self.history)
+            .field("ollama", &self.ollama)
+            .field("stream", &"<stream>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessages {
+pub struct ChatStreamStart {
     pub messages: Vec<ChatMessage>,
     pub restart: bool,
     pub persist: bool,
 }
 
-impl Message<ChatMessages> for Chat {
-    type Response = ChatMessageResponse;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatStreamNext;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatStreamChunk {
+    pub response: Option<ChatMessageResponse>,
+    pub done: bool,
+}
+
+impl Message<ChatStreamStart> for Chat {
+    type Response = ChatStreamChunk;
 
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
-        messages: &ChatMessages,
-    ) -> Result<ChatMessageResponse, ChatError> {
-        if messages.restart {
+        start: &ChatStreamStart,
+    ) -> Result<ChatStreamChunk, ChatError> {
+        if start.restart {
             self.history.clear();
         }
 
-        for message in messages.messages.iter() {
-            // Add the message to the history
+        for message in &start.messages {
             self.history.push(message.clone());
-
-            // Truncate history if it exceeds the limit
             if self.history.len() > self.messages_number_limit {
                 self.history.drain(..self.history.len() - self.messages_number_limit);
             }
@@ -92,27 +119,52 @@ impl Message<ChatMessages> for Chat {
             chat_message_request = chat_message_request.options(generation_options.clone());
         }
 
-        // Send the messages to the ollama client
-        let result = self.ollama.send_chat_messages(chat_message_request).await?;
+        // Start streaming
+        let stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
+        self.stream = Some(Box::pin(stream));
 
-        // Add the assistant's message to the history
-        if let Some(message) = &result.message {
-            self.history.push(ChatMessage::assistant(message.content.clone()));
+        // We do not consume any chunk yet, we just return a status that we're ready
+        Ok(ChatStreamChunk { response: None, done: false })
+    }
+}
+
+impl Message<ChatStreamNext> for Chat {
+    type Response = ChatStreamChunk;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        _next: &ChatStreamNext,
+    ) -> Result<ChatStreamChunk, ChatError> {
+        let stream = match &mut self.stream {
+            Some(s) => s,
+            None => return Err(ChatError::StreamNotStarted),
+        };
+
+        match stream.next().await {
+            Some(Ok(chunk)) => {
+                // We got a new chunk
+                let done = chunk.done;
+                if done {
+                    // If done, add to history
+                    if let Some(message) = &chunk.message {
+                        self.history.push(ChatMessage::assistant(message.content.clone()));
+                    }
+                    // You could choose to clear the stream here or leave it
+                    self.stream = None;
+                }
+                Ok(ChatStreamChunk { response: Some(chunk), done })
+            }
+            Some(Err(e)) => {
+                error!("Error fetching stream chunk: {:?}", e);
+                Err(ChatError::Ollama(e))
+            }
+            None => {
+                // No more chunks
+                self.stream = None;
+                Ok(ChatStreamChunk { response: None, done: true })
+            }
         }
-
-        if messages.persist {
-            // Filter out system messages before saving
-            self.history = self
-                .history
-                .iter()
-                .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
-                .cloned()
-                .collect();
-
-            self.save(ctx).await?;
-        }
-
-        Ok(result)
     }
 }
 
@@ -121,18 +173,27 @@ impl Actor for Chat {
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ChatError> {
         info!("{} Started", ctx.id());
-
         self.init(ctx).await?;
 
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(chat_messages) = frame.is::<ChatMessages>() {
-                let response = self.reply(ctx, &chat_messages, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
+        let mut frames = ctx.recv().await?;
+        while let Some(Ok(frame)) = frames.next().await {
+            // Handle stream start
+            if let Some(start) = frame.is::<ChatStreamStart>() {
+                let response = self.reply(ctx, &start, &frame).await;
+                if let Err(e) = response {
+                    error!("Error: {:?}", e);
+                }
+            }
+
+            // Handle next chunk request
+            if let Some(next) = frame.is::<ChatStreamNext>() {
+                let response = self.reply(ctx, &next, &frame).await;
+                if let Err(e) = response {
+                    error!("Error: {:?}", e);
                 }
             }
         }
+
         info!("{} Finished", ctx.id());
         Ok(())
     }
