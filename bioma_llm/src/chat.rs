@@ -97,11 +97,12 @@ impl Default for Chat {
 pub struct ChatStreamStart {
     pub messages: Vec<ChatMessage>,
     pub restart: bool,
-    pub persist: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatStreamNext;
+pub struct ChatStreamNext {
+    pub persist: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatStreamChunk {
@@ -114,7 +115,7 @@ impl Message<ChatStreamStart> for Chat {
 
     async fn handle(
         &mut self,
-        ctx: &mut ActorContext<Self>,
+        _ctx: &mut ActorContext<Self>,
         start: &ChatStreamStart,
     ) -> Result<ChatStreamChunk, ChatError> {
         if start.restart {
@@ -154,7 +155,7 @@ impl Message<ChatStreamNext> for Chat {
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
-        _next: &ChatStreamNext,
+        next: &ChatStreamNext,
     ) -> Result<ChatStreamChunk, ChatError> {
         let mut lock = self.stream.lock().await;
         let stream = match lock.as_mut() {
@@ -166,12 +167,24 @@ impl Message<ChatStreamNext> for Chat {
             Some(Ok(chunk)) => {
                 println!("Chunk: {:?}", chunk);
                 let done = chunk.done;
-                if done {
-                    if let Some(message) = &chunk.message {
-                        self.history.push(ChatMessage::assistant(message.content.clone()));
+
+                // Accumulate message content when it's available
+                if let Some(message) = &chunk.message {
+                    self.history.push(ChatMessage::assistant(message.content.clone()));
+                    if done {
+                        if next.persist {
+                            self.history = self
+                                .history
+                                .iter()
+                                .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
+                                .cloned()
+                                .collect();
+                            self.save(ctx).await?;
+                        }
+                        *lock = None;
                     }
-                    *lock = None;
                 }
+
                 Ok(ChatStreamChunk { response: Some(chunk), done })
             }
             Some(Err(e)) => {
@@ -186,6 +199,7 @@ impl Message<ChatStreamNext> for Chat {
             }
             None => {
                 // Stream ended
+                println!("Stream ended");
                 *lock = None;
                 Ok(ChatStreamChunk { response: None, done: true })
             }

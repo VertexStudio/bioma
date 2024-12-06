@@ -353,7 +353,7 @@ async fn chat_stream(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> H
     let mut chat_actor = data.chat_actor.actor.lock().await;
 
     // Start the stream
-    let start_msg = ChatStreamStart { messages: body.messages.clone(), restart: false, persist: true };
+    let start_msg = ChatStreamStart { messages: body.messages.clone(), restart: false };
 
     match chat_actor.handle(&mut chat_ctx, &start_msg).await {
         Ok(start_chunk) => {
@@ -369,7 +369,7 @@ async fn chat_stream(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> H
                     let mut actor = chat_actor.actor.lock().await;
                     let mut ctx = chat_actor.ctx.lock().await;
 
-                    match actor.handle(&mut ctx, &ChatStreamNext).await {
+                    match actor.handle(&mut ctx, &ChatStreamNext { persist: true }).await {
                         Ok(chunk) => {
                             let json = serde_json::to_string(&chunk).unwrap_or_default();
                             Some((Ok::<web::Bytes, actix_web::Error>(web::Bytes::from(json)), chunk.done))
