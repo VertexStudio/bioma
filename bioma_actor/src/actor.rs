@@ -2,7 +2,6 @@ use crate::engine::{Engine, Record};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-// use std::any::type_name;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::future::Future;
@@ -89,12 +88,12 @@ impl FrameMessage {
     ///
     /// # Type Parameters
     ///
-    /// * `M` - The message type to check against and deserialize into.
+    /// * M - The message type to check against and deserialize into.
     ///
     /// # Returns
     ///
-    /// * `Some(M)` if the frame's name matches the type name of `M` and deserialization succeeds.
-    /// * `None` if the frame's name doesn't match or deserialization fails.
+    /// * Some(M) if the frame's name matches the type name of M and deserialization succeeds.
+    /// * None if the frame's name doesn't match or deserialization fails.
     pub fn is<M>(&self) -> Option<M>
     where
         M: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync,
@@ -107,21 +106,28 @@ impl FrameMessage {
     }
 }
 
-/// The message frame that is sent between actors
+/// The reply frame that is sent as a response to a message
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrameReply {
-    /// Message id created with a ULID
+    /// Message id created with a ULID or structured JSON for chunking
+    ///
+    /// The structure of `id` determines if it's a chunked reply or a final reply:
+    /// - For partial/chunked replies: `reply:{id: "some_base_id", chunk: N}`
+    /// - For the final reply: `reply:{id: "some_base_id"}`
+    ///
+    /// If the `id` contains a "chunk" field, it's a partial reply.
+    /// If not, it's the final reply.
     id: RecordId,
     /// Message name (usually a type name)
     pub name: Cow<'static, str>,
-    /// Sender
+    /// Sender (the actor replying)
     pub tx: RecordId,
-    /// Receiver
+    /// Receiver (the actor who sent the original message)
     pub rx: RecordId,
     /// Message content
     #[serde(default)]
     pub msg: Value,
-    /// Error message
+    /// Error message if any
     #[serde(default)]
     pub err: Value,
 }
@@ -140,29 +146,29 @@ impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de>
 ///
 /// # Type Parameters
 ///
-/// * `MT`: The specific message type this implementation handles.
+/// * MT: The specific message type this implementation handles.
 pub trait Message<MT>: Actor
 where
     MT: MessageType,
 {
     type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
 
-    /// Handles a message of type `MT` for this actor.
+    /// Handles a message of type MT for this actor.
     ///
-    /// This function must be implemented for any actor that wants to handle messages of type `MT`.
+    /// This function must be implemented for any actor that wants to handle messages of type MT.
     /// It defines how the actor processes the incoming message and what response it generates.
     ///
     /// # Arguments
     ///
-    /// * `self` - A mutable reference to the actor instance.
-    /// * `ctx` - A mutable reference to the actor's context, providing access to the actor's state and environment.
-    /// * `message` - A reference to the message of type `MT` to be handled.
+    /// * self - A mutable reference to the actor instance.
+    /// * ctx - A mutable reference to the actor's context, providing access to the actor's state and environment.
+    /// * message - A reference to the message of type MT to be handled.
     ///
     /// # Returns
     ///
-    /// An implementation of `Future` that resolves to a `Result` containing either:
-    /// - `Ok(Self::Response)`: The successful response to the message.
-    /// - `Err(Self::Error)`: An error that occurred during message handling.
+    /// An implementation of Future that resolves to a Result containing either:
+    /// - Ok(Self::Response): The successful response to the message.
+    /// - Err(Self::Error): An error that occurred during message handling.
     fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
@@ -172,18 +178,23 @@ where
     /// Handle and reply to a message.
     ///
     /// This method will:
-    /// 1. Call the actor's `handle` method for this message type
+    /// 1. Call the actor's handle method for this message type
     /// 2. Reply to the sender of the message with the response
+    ///
+    /// By default, this sends a single final reply (no chunk in RecordId).
+    /// If you want to send multiple partial replies, call `ctx.reply_chunked` multiple
+    /// times with different RecordIds that include a `chunk` field until the final one
+    /// without `chunk`.
     ///
     /// # Arguments
     ///
-    /// * `ctx` - A mutable reference to the actor context
-    /// * `message` - A reference to the message to be handled
-    /// * `frame` - A reference to the original message frame
+    /// * ctx - A mutable reference to the actor context
+    /// * message - A reference to the message to be handled
+    /// * frame - A reference to the original message frame
     ///
     /// # Returns
     ///
-    /// A future that resolves to a `Result` containing the response or an error
+    /// A future that resolves to a Result containing the response or an error
     fn reply(
         &mut self,
         ctx: &mut ActorContext<Self>,
@@ -192,12 +203,15 @@ where
     ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
         async move {
             let response = self.handle(ctx, message).await;
-            ctx.reply::<Self, MT>(frame, &response).await?;
+            // Final single reply without chunk
+            ctx.reply_chunked::<Self, MT>(frame, &response, None).await?;
             response
         }
     }
 
     /// Send a message to an actor without waiting for a reply
+    ///
+    /// This sends a message and does not block waiting for any reply.
     fn do_send(
         &self,
         ctx: &mut ActorContext<Self>,
@@ -210,7 +224,18 @@ where
         }
     }
 
-    /// Send a message to an actor and wait for a reply
+    /// Send a message to an actor and wait for a final reply
+    ///
+    /// # Arguments
+    ///
+    /// * ctx - A mutable reference to the actor context
+    /// * message - The message to send
+    /// * to - The ActorId of the recipient
+    /// * options - SendOptions for timeout configuration
+    ///
+    /// # Returns
+    ///
+    /// A Result with the final response or a timeout/error.
     fn send(
         &self,
         ctx: &mut ActorContext<Self>,
@@ -254,19 +279,7 @@ impl std::fmt::Display for ActorId {
 impl ActorId {
     /// Creates an actor id to reference a specific actor.
     ///
-    /// This method generates a unique `ActorId` for a given actor type and identifier.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `T`: The type of the actor, which must implement the `Actor` trait.
-    ///
-    /// # Arguments
-    ///
-    /// * `uid`: A unique identifier for the actor, which can be any type that can be converted into a `Cow<'static, str>`.
-    ///
-    /// # Returns
-    ///
-    /// Returns a new `ActorId` instance with the generated id and the type name of the actor.
+    /// This method generates a unique ActorId for a given actor type and identifier.
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
         let name = uid.into();
         Self { tag: std::any::type_name::<T>().into(), name }
@@ -413,15 +426,15 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
     ///
     /// # Arguments
     ///
-    /// * `&mut self` - A mutable reference to the actor instance.
-    /// * `ctx` - A mutable reference to the actor's context, providing access to the actor's
+    /// * &mut self - A mutable reference to the actor instance.
+    /// * ctx - A mutable reference to the actor's context, providing access to the actor's
     ///   state and communication methods.
     ///
     /// # Returns
     ///
-    /// Returns a `Result<(), Self::Error>`:
-    /// - `Ok(())` if the actor completes its work successfully.
-    /// - `Err(Self::Error)` if an error occurs during the actor's execution.
+    /// Returns a Result<(), Self::Error>:
+    /// - Ok(()) if the actor completes its work successfully.
+    /// - Err(Self::Error) if an error occurs during the actor's execution.
     fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Saves the current state of the actor in the system.
@@ -430,19 +443,13 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
     ///
     /// # Arguments
     ///
-    /// * `ctx` - A reference to the `ActorContext` instance.
+    /// * ctx - A reference to the ActorContext instance.
     ///
     /// # Returns
     ///
-    /// A `Future` that resolves to a `Result` containing either:
-    /// - `Ok(())`: The actor state was successfully saved.
-    /// - `Err(Self::Error)`: An error if the saving process fails.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if:
-    /// - Serialization of the actor state fails.
-    /// - Updating the actor record in the database fails.
+    /// A Future that resolves to a Result containing either:
+    /// - Ok(()): The actor state was successfully saved.
+    /// - Err(Self::Error): An error if the saving process fails.
     fn save(&self, ctx: &ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             // Serialize actor properties
@@ -566,27 +573,7 @@ impl<T: Actor> ActorContext<T> {
     /// Send a message to an actor without waiting for a reply.
     ///
     /// This method sends a message to another actor without expecting or waiting for a response.
-    /// It's useful for fire-and-forget type operations where you don't need to process a reply.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `M`: The message handler type, which must implement `Message<MT>`.
-    /// * `MT`: The message type, which must implement `MessageType`.
-    ///
-    /// # Arguments
-    ///
-    /// * `message`: The message to be sent.
-    /// * `to`: The `ActorId` of the recipient actor.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    /// - `Ok(())` if the message was successfully sent.
-    /// - `Err(SystemActorError)` if there was an error in sending the message.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if the message preparation or sending process fails.
+    /// It's useful for fire-and-forget type operations where you don't need a reply.
     pub async fn do_send<M, MT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
         M: Message<MT>,
@@ -596,33 +583,11 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
-    /// Send a message to an actor and wait for a reply
-    ///
-    /// This method sends a message to another actor and waits for a response.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `M`: The message handler type, which must implement `Message<MT>`.
-    /// * `MT`: The message type, which must implement `MessageType`.
-    ///
-    /// # Arguments
-    ///
-    /// * `message`: The message to be sent.
-    /// * `to`: The `ActorId` of the recipient actor.
-    /// * `options`: The `SendOptions` for this message.
+    /// Send a message to an actor and wait for a final reply
     ///
     /// # Returns
     ///
-    /// A `Result` containing either:
-    /// - `Ok(M::Response)`: The successfully received reply.
-    /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The message preparation fails.
-    /// - The message sending fails.
-    /// - Waiting for the reply times out or encounters other issues.
+    /// Ok(M::Response) if final reply is received, Err(...) otherwise.
     pub async fn send<M, MT>(
         &self,
         message: MT,
@@ -639,28 +604,7 @@ impl<T: Actor> ActorContext<T> {
 
     /// Send a message to an actor without waiting for a reply.
     ///
-    /// This method allows sending a message to an actor without expecting a response.
-    /// It's useful for fire-and-forget type operations where you don't need to wait
-    /// for or process a reply.
-    ///
-    /// # Type Parameters
-    ///
-    /// * `MT`: The type of the message being sent, which must implement `MessageType`.
-    ///
-    /// # Arguments
-    ///
-    /// * `message`: The message to be sent.
-    /// * `to`: The `ActorId` of the recipient actor.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` which is:
-    /// - `Ok(())` if the message was successfully sent.
-    /// - `Err(SystemActorError)` if there was an error in sending the message.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if the message preparation or sending process fails.
+    /// This method allows sending a message without expecting a response.
     pub async fn do_send_as<MT>(&self, message: MT, to: &ActorId) -> Result<(), SystemActorError>
     where
         MT: MessageType,
@@ -669,27 +613,11 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
-    /// Send a message to an actor and wait for a reply.
+    /// Send a message to an actor and wait for a reply of a specific type RT.
     ///
-    /// This method is similar to `send` but allows for sending a message to an actor
-    /// and waiting for a reply without knowing if the actor can handle the message type.
+    /// This is similar to `send` but allows for different request and response types.
     ///
-    /// # Type Parameters
-    ///
-    /// * `MT`: The type of the message being sent.
-    /// * `RT`: The expected type of the reply.
-    ///
-    /// # Arguments
-    ///
-    /// * `message`: The message to be sent.
-    /// * `to`: The `ActorId` of the recipient actor.
-    /// * `options`: The `SendOptions` for this message.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing either:
-    /// - `Ok(RT)`: The successfully received reply of type `RT`.
-    /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
+    /// Waits for the final reply.
     pub async fn send_as<MT, RT>(&self, message: MT, to: ActorId, options: SendOptions) -> Result<RT, SystemActorError>
     where
         MT: MessageType,
@@ -699,67 +627,108 @@ impl<T: Actor> ActorContext<T> {
         self.wait_for_reply::<RT>(&reply_id, options).await
     }
 
-    /// Wait for a reply to a sent message
+    /// Determine if a given `FrameReply.id` is a chunked reply or a final reply.
+    ///
+    /// If the underlying ID is a SurrealDB object containing a "chunk" field, it's partial.
+    /// If not, it's final.
+    fn is_chunked_reply(reply_id: &RecordId) -> bool {
+        // reply_id.id can be a string, number or object.
+        // For chunked replies we assume: reply:{"id": "someid", "chunk": number}
+        // For final replies we assume: reply:{"id": "someid"}
+        //
+        // Let's check if "chunk" exists in the object.
+        match reply_id.key() {
+            RecordIdKey::Object(obj) => {
+                // Check if obj has a key "chunk"
+                obj.contains_key("chunk")
+            }
+            _ => false,
+        }
+    }
+
+    /// Wait for a final reply to a sent message
+    ///
+    /// This method will consume replies until it finds one without a `chunk` field in its ID,
+    /// which is considered the final reply. All intermediate replies with `chunk` fields are
+    /// partial (chunked) replies and are ignored here.
     async fn wait_for_reply<RT>(&self, reply_id: &RecordId, options: SendOptions) -> Result<RT, SystemActorError>
     where
         RT: MessageType,
     {
         let mut stream = self.engine().db().select(reply_id).live().await?;
+        let start = std::time::Instant::now();
 
-        let notification = tokio::time::timeout(options.timeout, stream.next())
-            .await
-            .map_err(|_| SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout))?
-            .ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
-
-        let notification: Notification<FrameReply> = notification?;
-        let response = match notification.action {
-            Action::Create => {
-                let data = &notification.data;
-                debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
-                Ok(data.clone())
+        loop {
+            let elapsed = start.elapsed();
+            if elapsed > options.timeout {
+                return Err(SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout));
             }
-            _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
-        }?;
 
-        if !response.err.is_null() {
-            return Err(SystemActorError::MessageReply(response.err.to_string().into()));
+            let delay = options.timeout.saturating_sub(elapsed);
+            let notification = tokio::time::timeout(delay, stream.next())
+                .await
+                .map_err(|_| SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout))?;
+
+            let notification = notification.ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
+            let notification: Notification<FrameReply> = notification?;
+
+            match notification.action {
+                Action::Create => {
+                    let data = &notification.data;
+                    debug!(
+                        "[{}] msg-done {} {} {} {:?}",
+                        &self.id().record_id(),
+                        &data.name,
+                        &data.id,
+                        &data.rx,
+                        &data.msg
+                    );
+
+                    if !data.err.is_null() {
+                        return Err(SystemActorError::MessageReply(data.err.to_string().into()));
+                    }
+
+                    // Check if final reply (no chunk) or partial reply (chunk)
+                    if Self::is_chunked_reply(&data.id) {
+                        // Partial reply with chunk, ignore and continue
+                        continue;
+                    } else {
+                        // Final reply
+                        let response = serde_json::from_value::<RT>(data.msg.clone())?;
+                        return Ok(response);
+                    }
+                }
+                _ => {
+                    return Err(SystemActorError::LiveStream("Unexpected action".into()));
+                }
+            }
         }
-
-        let response = response.msg;
-        let response = serde_json::from_value(response)?;
-        Ok(response)
     }
 
-    /// Reply to a received message
+    /// Reply to a received message, either partially or finally, by constructing a new RecordId.
     ///
-    /// This method sends a reply to a previously received message.
+    /// If `chunk` is `Some(...)`, we create a RecordId with a chunk field:
+    /// `reply:{"id":"original_msg_id","chunk":N}`.
     ///
-    /// # Type Parameters
-    ///
-    /// * `M`: The message handler type, which must implement `Message<MT>`.
-    /// * `MT`: The message type, which must implement `MessageType`.
+    /// If `chunk` is `None`, we create a final reply id:
+    /// `reply:{"id":"original_msg_id"}` (no chunk field).
     ///
     /// # Arguments
     ///
-    /// * `request`: A reference to the original `FrameMessage` that is being replied to.
-    /// * `message`: A reference to the `Result` containing either the response or an error.
+    /// * request: A reference to the original FrameMessage that is being replied to.
+    /// * message: A reference to the Result containing either the response or an error.
+    /// * chunk: Some(chunk_number) for partial replies, None for final reply.
     ///
     /// # Returns
     ///
-    /// A `Result` which is:
-    /// - `Ok(())` if the reply was successfully sent.
-    /// - `Err(SystemActorError)` if there was an error in sending the reply.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if:
-    /// - The receiver ID in the request doesn't match the current actor's ID.
-    /// - There's an issue with serializing the response or error.
-    /// - The database query to store the reply fails.
-    async fn reply<M, MT>(
+    /// A Result which is:
+    /// - Ok(()) if the reply was successfully sent.
+    /// - Err(SystemActorError) if there was an error in sending the reply.
+    pub async fn reply_chunked<M, MT>(
         &self,
         request: &FrameMessage,
         message: &Result<M::Response, T::Error>,
+        chunk: Option<usize>,
     ) -> Result<(), SystemActorError>
     where
         M: Message<MT>,
@@ -770,24 +739,35 @@ impl<T: Actor> ActorContext<T> {
             Err(err) => serde_json::to_value(&err.to_string())?,
         };
 
-        // Use the request id as the reply id
-        let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
+        // Construct a reply_id based on whether chunk is provided or not
+        let base_id = request.id.key().to_string();
+        let reply_id = if let Some(c) = chunk {
+            RecordId::from((DB_TABLE_REPLY, serde_json::json!({"id": base_id, "chunk": c})))
+        } else {
+            // Final reply
+            RecordId::from((DB_TABLE_REPLY, serde_json::json!({"id": base_id})))
+        };
 
-        // Assert request.rx == self, can only reply to messages sent to us
+        // Ensure we're replying to a message intended for us
         if request.rx != self.id().record_id() {
             return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().record_id()));
         }
+
+        let (msg_val, err_val) = match message {
+            Ok(_) => (msg_value.clone(), serde_json::Value::Null),
+            Err(_) => (serde_json::Value::Null, msg_value.clone()),
+        };
 
         let reply = FrameReply {
             id: reply_id.clone(),
             name: std::any::type_name::<M::Response>().into(),
             tx: request.rx.clone(),
             rx: request.tx.clone(),
-            msg: msg_value.clone(),
-            err: serde_json::Value::Null,
+            msg: msg_val,
+            err: err_val,
         };
 
-        debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &reply.msg);
+        debug!("[{}] msg-rply {} {} {} {:?}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &reply.msg);
 
         let reply_query = include_str!("../sql/reply.surql");
 
@@ -813,16 +793,9 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing:
-    /// - `Ok(MessageStream)`: A pinned box containing a stream of `Result<FrameMessage, SystemActorError>`.
-    /// - `Err(SystemActorError)`: If there's an error setting up the message stream.
-    ///
-    /// # Errors
-    ///
-    /// This method can return an error if:
-    /// - There's an issue retrieving unreplied messages.
-    /// - The live query setup fails.
-    /// - There's an error in the database query.
+    /// Returns a Result containing:
+    /// - Ok(MessageStream): A pinned box containing a stream of Result<FrameMessage, SystemActorError>.
+    /// - Err(SystemActorError): If there's an error setting up the message stream.
     pub async fn recv(&self) -> Result<MessageStream, SystemActorError> {
         let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().record_id());
         debug!("[{}] msg-live {}", &self.id().record_id(), &query);
@@ -866,6 +839,7 @@ impl<T: Actor> ActorContext<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::dbg_export_db;
     use crate::prelude::*;
     use futures::StreamExt;
