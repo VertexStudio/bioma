@@ -17,9 +17,10 @@ use tokio_stream::StreamExt;
 use tracing::{error, info};
 use url::Url;
 
-// Add a variant to OllamaError to handle unknown errors
-// If OllamaError is part of an external crate you may need to create your own error type
-// and unify error types differently. If you can edit OllamaError:
+const DEFAULT_MODEL_NAME: &str = "llama3.2";
+const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
+const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
+
 #[derive(thiserror::Error, Debug)]
 pub enum ChatError {
     #[error("System error: {0}")]
@@ -34,8 +35,6 @@ pub enum ChatError {
 
 impl ActorError for ChatError {}
 
-// Add an Unknown variant in OllamaError if not present
-// If you cannot modify OllamaError, create your own error type and wrap OllamaError
 #[derive(thiserror::Error, Debug)]
 pub enum MyOllamaError {
     #[error("Unknown Ollama error: {0}")]
@@ -48,12 +47,12 @@ type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatMessageResponse, MyOllama
 
 #[derive(bon::Builder, Serialize, Deserialize)]
 pub struct Chat {
-    #[builder(default = "llama3.2".into())]
+    #[builder(default = DEFAULT_MODEL_NAME.into())]
     pub model: Cow<'static, str>,
     pub generation_options: Option<GenerationOptions>,
-    #[builder(default = Url::parse("http://localhost:11434").unwrap())]
+    #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
     pub endpoint: Url,
-    #[builder(default = 10)]
+    #[builder(default = DEFAULT_MESSAGES_NUMBER_LIMIT)]
     pub messages_number_limit: usize,
     #[builder(default)]
     pub history: Vec<ChatMessage>,
@@ -82,10 +81,10 @@ impl std::fmt::Debug for Chat {
 impl Default for Chat {
     fn default() -> Self {
         Self {
-            model: "llama3.2".into(),
+            model: DEFAULT_MODEL_NAME.into(),
             generation_options: None,
-            endpoint: Url::parse("http://localhost:11434").unwrap(),
-            messages_number_limit: 10,
+            endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
+            messages_number_limit: DEFAULT_MESSAGES_NUMBER_LIMIT,
             history: Vec::new(),
             ollama: Ollama::default(),
             stream: Arc::new(Mutex::new(None)),
