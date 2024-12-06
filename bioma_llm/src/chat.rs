@@ -134,10 +134,8 @@ impl Message<ChatStreamStart> for Chat {
             chat_message_request = chat_message_request.options(generation_options.clone());
         }
 
-        // This presumably returns Stream<Item=Result<ChatMessageResponse, ()>>
         let raw_stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
 
-        // Map the () error to MyOllamaError::Unknown:
         let mapped_stream = raw_stream.map(|res: Result<ChatMessageResponse, ()>| {
             res.map_err(|_| MyOllamaError::Unknown("Unknown error from Ollama".into()))
         });
