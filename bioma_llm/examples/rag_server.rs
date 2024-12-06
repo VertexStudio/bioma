@@ -467,8 +467,8 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     match response {
         Ok(result) => {
             info!(
-                "Deleted {} embeddings. Successfully deleted sources: {:?}. Not found sources: {:?}",
-                result.deleted_embeddings, result.deleted_sources, result.not_found_sources
+                "Deleted {} embeddings. Successfully deleted sources: {:?}",
+                result.deleted_embeddings, result.deleted_sources
             );
             HttpResponse::Ok().json(result)
         }

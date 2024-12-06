@@ -6,7 +6,7 @@ use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use surrealdb::{sql::Thing, RecordId};
+use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{error, info, warn};
 use walkdir::WalkDir;
@@ -139,8 +139,7 @@ pub struct DeleteSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
-    pub deleted_sources: Vec<String>,
-    pub not_found_sources: Vec<String>,
+    pub deleted_sources: Vec<ContentSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,13 +455,6 @@ impl Message<IndexGlobs> for Indexer {
     }
 }
 
-#[derive(Deserialize)]
-struct DeleteQueryResult {
-    total_deleted: usize,
-    #[serde(rename = "deleted_sources")]
-    deleted_sources: Vec<Thing>,
-}
-
 impl Message<DeleteSource> for Indexer {
     type Response = DeletedSource;
 
@@ -474,43 +466,28 @@ impl Message<DeleteSource> for Indexer {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
         let db = ctx.engine().db();
 
-        let mut deleted_sources = Vec::new();
-        let mut not_found_sources = Vec::new();
-
         let mut results =
             db.query(&query).bind(("source", message.source.clone())).await.map_err(SystemActorError::from)?;
 
-        let delete_result: DeleteQueryResult = results
-            .take::<Vec<DeleteQueryResult>>(0)
+        let delete_result: DeletedSource = results
+            .take::<Vec<DeletedSource>>(0)
             .map_err(IndexerError::from)?
             .pop()
             .ok_or(IndexerError::Other("No delete result found".to_string()))?;
 
-        // Extract URIs from Thing objects
-        for thing in delete_result.deleted_sources {
-            match thing.id {
-                surrealdb::sql::Id::Object(obj) => {
-                    if let Some(surrealdb::sql::Value::Strand(uri)) = obj.get("uri") {
-                        let source = uri.to_string();
-                        let source_path = std::path::Path::new(&source);
-
-                        if source_path.exists() {
-                            if source_path.is_dir() {
-                                tokio::fs::remove_dir_all(source_path).await.ok();
-                            } else {
-                                tokio::fs::remove_file(source_path).await.ok();
-                            }
-                            deleted_sources.push(source);
-                        } else {
-                            not_found_sources.push(source);
-                        }
-                    }
+        // Process file deletions
+        for source in &delete_result.deleted_sources {
+            let source_path = std::path::Path::new(&source.uri);
+            if source_path.exists() {
+                if source_path.is_dir() {
+                    tokio::fs::remove_dir_all(source_path).await.ok();
+                } else {
+                    tokio::fs::remove_file(source_path).await.ok();
                 }
-                _ => continue,
             }
         }
 
-        Ok(DeletedSource { deleted_embeddings: delete_result.total_deleted, deleted_sources, not_found_sources })
+        Ok(delete_result)
     }
 }
 
