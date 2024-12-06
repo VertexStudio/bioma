@@ -31,7 +31,7 @@ ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "56d7ec24e
 ] }
 hf-hub = "0.3.2"
 fastembed = "4.3"
-tokio-stream = "0.1.10"
+tokio-stream = { version = "0.1.10", features = ["sync"] }
 # fastembed = { path = "../../fastembed-rs" }
 # fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "feature/nomic-embed-vision-v1.5" }
 

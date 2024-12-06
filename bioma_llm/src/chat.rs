@@ -1,4 +1,5 @@
 use bioma_actor::prelude::*;
+use futures::Stream;
 use ollama_rs::{
     error::OllamaError,
     generation::{
@@ -10,15 +11,15 @@ use ollama_rs::{
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use url::Url;
 
-const DEFAULT_MODEL_NAME: &str = "llama3.2";
-const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
-const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
-
-/// Enumerates the types of errors that can occur
+// Add a variant to OllamaError to handle unknown errors
+// If OllamaError is part of an external crate you may need to create your own error type
+// and unify error types differently. If you can edit OllamaError:
 #[derive(thiserror::Error, Debug)]
 pub enum ChatError {
     #[error("System error: {0}")]
@@ -33,14 +34,26 @@ pub enum ChatError {
 
 impl ActorError for ChatError {}
 
+// Add an Unknown variant in OllamaError if not present
+// If you cannot modify OllamaError, create your own error type and wrap OllamaError
+#[derive(thiserror::Error, Debug)]
+pub enum MyOllamaError {
+    #[error("Unknown Ollama error: {0}")]
+    Unknown(String),
+    #[error("Ollama error: {0}")]
+    Original(#[from] OllamaError),
+}
+
+type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatMessageResponse, MyOllamaError>> + Send>>;
+
 #[derive(bon::Builder, Serialize, Deserialize)]
 pub struct Chat {
-    #[builder(default = DEFAULT_MODEL_NAME.into())]
+    #[builder(default = "llama3.2".into())]
     pub model: Cow<'static, str>,
     pub generation_options: Option<GenerationOptions>,
-    #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
+    #[builder(default = Url::parse("http://localhost:11434").unwrap())]
     pub endpoint: Url,
-    #[builder(default = DEFAULT_MESSAGES_NUMBER_LIMIT)]
+    #[builder(default = 10)]
     pub messages_number_limit: usize,
     #[builder(default)]
     pub history: Vec<ChatMessage>,
@@ -48,21 +61,8 @@ pub struct Chat {
     #[builder(default)]
     ollama: Ollama,
     #[serde(skip)]
-    stream: Option<Pin<Box<dyn futures::Stream<Item = Result<ChatMessageResponse, OllamaError>> + Send + Sync>>>,
-}
-
-impl Default for Chat {
-    fn default() -> Self {
-        Self {
-            model: DEFAULT_MODEL_NAME.into(),
-            generation_options: None,
-            endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
-            messages_number_limit: DEFAULT_MESSAGES_NUMBER_LIMIT,
-            history: Vec::new(),
-            ollama: Ollama::default(),
-            stream: None,
-        }
-    }
+    #[builder(default)]
+    stream: Arc<Mutex<Option<ChatStream>>>,
 }
 
 impl std::fmt::Debug for Chat {
@@ -76,6 +76,20 @@ impl std::fmt::Debug for Chat {
             .field("ollama", &self.ollama)
             .field("stream", &"<stream>")
             .finish()
+    }
+}
+
+impl Default for Chat {
+    fn default() -> Self {
+        Self {
+            model: "llama3.2".into(),
+            generation_options: None,
+            endpoint: Url::parse("http://localhost:11434").unwrap(),
+            messages_number_limit: 10,
+            history: Vec::new(),
+            ollama: Ollama::default(),
+            stream: Arc::new(Mutex::new(None)),
+        }
     }
 }
 
@@ -119,11 +133,17 @@ impl Message<ChatStreamStart> for Chat {
             chat_message_request = chat_message_request.options(generation_options.clone());
         }
 
-        // Start streaming
-        let stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
-        self.stream = Some(Box::pin(stream));
+        // This presumably returns Stream<Item=Result<ChatMessageResponse, ()>>
+        let raw_stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
 
-        // We do not consume any chunk yet, we just return a status that we're ready
+        // Map the () error to MyOllamaError::Unknown:
+        let mapped_stream = raw_stream.map(|res: Result<ChatMessageResponse, ()>| {
+            res.map_err(|_| MyOllamaError::Unknown("Unknown error from Ollama".into()))
+        });
+
+        let mut lock = self.stream.lock().await;
+        *lock = Some(Box::pin(mapped_stream));
+
         Ok(ChatStreamChunk { response: None, done: false })
     }
 }
@@ -136,32 +156,37 @@ impl Message<ChatStreamNext> for Chat {
         ctx: &mut ActorContext<Self>,
         _next: &ChatStreamNext,
     ) -> Result<ChatStreamChunk, ChatError> {
-        let stream = match &mut self.stream {
+        let mut lock = self.stream.lock().await;
+        let stream = match lock.as_mut() {
             Some(s) => s,
             None => return Err(ChatError::StreamNotStarted),
         };
 
         match stream.next().await {
             Some(Ok(chunk)) => {
-                // We got a new chunk
+                println!("Chunk: {:?}", chunk);
                 let done = chunk.done;
                 if done {
-                    // If done, add to history
                     if let Some(message) = &chunk.message {
                         self.history.push(ChatMessage::assistant(message.content.clone()));
                     }
-                    // You could choose to clear the stream here or leave it
-                    self.stream = None;
+                    *lock = None;
                 }
                 Ok(ChatStreamChunk { response: Some(chunk), done })
             }
             Some(Err(e)) => {
                 error!("Error fetching stream chunk: {:?}", e);
-                Err(ChatError::Ollama(e))
+                // Convert MyOllamaError back to ChatError if needed
+                // If e is MyOllamaError::Original(err), convert to ChatError::Ollama
+                // If MyOllamaError::Unknown(...), you can handle accordingly.
+                match e {
+                    MyOllamaError::Original(err) => Err(ChatError::Ollama(err)),
+                    MyOllamaError::Unknown(msg) => Err(ChatError::Ollama(OllamaError::from(msg))),
+                }
             }
             None => {
-                // No more chunks
-                self.stream = None;
+                // Stream ended
+                *lock = None;
                 Ok(ChatStreamChunk { response: None, done: true })
             }
         }
@@ -177,7 +202,6 @@ impl Actor for Chat {
 
         let mut frames = ctx.recv().await?;
         while let Some(Ok(frame)) = frames.next().await {
-            // Handle stream start
             if let Some(start) = frame.is::<ChatStreamStart>() {
                 let response = self.reply(ctx, &start, &frame).await;
                 if let Err(e) = response {
@@ -185,7 +209,6 @@ impl Actor for Chat {
                 }
             }
 
-            // Handle next chunk request
             if let Some(next) = frame.is::<ChatStreamNext>() {
                 let response = self.reply(ctx, &next, &frame).await;
                 if let Err(e) = response {

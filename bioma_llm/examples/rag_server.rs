@@ -242,218 +242,261 @@ struct ChatQuery {
     source: Option<String>,
 }
 
-async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
-    // Build query from all user messages
-    let query = body
-        .messages
-        .iter()
-        .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
-        .map(|message| message.content.clone())
-        .collect::<Vec<String>>()
-        .join("\n");
-    info!("Received chat query: {:#?}", query);
+// async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+//     // Build query from all user messages
+//     let query = body
+//         .messages
+//         .iter()
+//         .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
+//         .map(|message| message.content.clone())
+//         .collect::<Vec<String>>()
+//         .join("\n");
+//     info!("Received chat query: {:#?}", query);
 
-    info!("Sending message to retriever actor");
-    let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext {
-            query: RetrieveQuery::Text(query.clone()),
-            limit: 5,
-            threshold: 0.0,
-            source: body.source.clone(),
-        };
-        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
-    };
+//     info!("Sending message to retriever actor");
+//     let retrieved = {
+//         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+//         let mut retriever_actor = data.retriever_actor.actor.lock().await;
+//         let retrieve_context = RetrieveContext {
+//             query: RetrieveQuery::Text(query.clone()),
+//             limit: 5,
+//             threshold: 0.0,
+//             source: body.source.clone(),
+//         };
+//         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
+//     };
 
-    match retrieved {
-        Ok(mut context) => {
-            context.context.reverse();
-            info!("Context fetched: {:#?}", context);
-            let context_content = context.to_markdown();
+//     match retrieved {
+//         Ok(mut context) => {
+//             context.context.reverse();
+//             info!("Context fetched: {:#?}", context);
+//             let context_content = context.to_markdown();
 
-            // Create system message with text context
-            let mut context_message = ChatMessage::system(
-                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
-                    .to_string()
-                    + &context_content,
-            );
+//             // Create system message with text context
+//             let mut context_message = ChatMessage::system(
+//                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
+//                     .to_string()
+//                     + &context_content,
+//             );
 
-            // If there's an image in the context, use only the first one
-            if let Some(ctx) = context
-                .context
-                .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
-            {
-                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
-                    match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
-                            Ok(image_data) => {
-                                match tokio::task::spawn_blocking(move || {
-                                    base64::engine::general_purpose::STANDARD.encode(image_data)
-                                })
-                                .await
-                                {
-                                    Ok(base64_data) => {
-                                        context_message.images =
-                                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
-                                    }
-                                    Err(e) => {
-                                        error!("Error encoding image: {:?}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error reading image file: {:?}", e);
-                            }
-                        },
-                        _ => {}
+//             // If there's an image in the context, use only the first one
+//             if let Some(ctx) = context
+//                 .context
+//                 .iter()
+//                 .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+//             {
+//                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+//                     match &metadata {
+//                         Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
+//                             Ok(image_data) => {
+//                                 match tokio::task::spawn_blocking(move || {
+//                                     base64::engine::general_purpose::STANDARD.encode(image_data)
+//                                 })
+//                                 .await
+//                                 {
+//                                     Ok(base64_data) => {
+//                                         context_message.images =
+//                                             Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+//                                     }
+//                                     Err(e) => {
+//                                         error!("Error encoding image: {:?}", e);
+//                                     }
+//                                 }
+//                             }
+//                             Err(e) => {
+//                                 error!("Error reading image file: {:?}", e);
+//                             }
+//                         },
+//                         _ => {}
+//                     }
+//                 }
+//             }
+
+//             let mut conversation = body.messages.clone();
+//             if conversation.len() > 0 {
+//                 conversation.insert(conversation.len() - 1, context_message);
+//             } else {
+//                 conversation.push(context_message);
+//             }
+
+//             info!("Sending context to chat actor");
+//             let chat_response = {
+//                 let mut chat_ctx = data.chat_actor.ctx.lock().await;
+//                 let mut chat_actor = data.chat_actor.actor.lock().await;
+//                 chat_actor
+//                     .handle(
+//                         &mut chat_ctx,
+//                         &ChatMessages { messages: conversation.clone(), restart: false, persist: true },
+//                     )
+//                     .await
+//             };
+//             match chat_response {
+//                 Ok(response) => {
+//                     info!("Chat response: {:#?}", response);
+//                     HttpResponse::Ok().json(response)
+//                 }
+//                 Err(e) => {
+//                     error!("Error fetching chat response: {:?}", e);
+//                     HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
+//                 }
+//             }
+//         }
+//         Err(e) => {
+//             error!("Error fetching context: {:?}", e);
+//             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
+//         }
+//     }
+// }
+
+async fn chat_stream(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+    let mut chat_ctx = data.chat_actor.ctx.lock().await;
+    let mut chat_actor = data.chat_actor.actor.lock().await;
+
+    // Start the stream
+    let start_msg = ChatStreamStart { messages: body.messages.clone(), restart: false, persist: true };
+
+    match chat_actor.handle(&mut chat_ctx, &start_msg).await {
+        Ok(start_chunk) => {
+            // Create a stream that repeatedly calls handle with ChatStreamNext
+            let chat_actor = data.chat_actor.clone();
+            let stream = futures::stream::unfold(false, move |done| {
+                let chat_actor = chat_actor.clone();
+                async move {
+                    if done {
+                        return None;
+                    }
+
+                    let mut actor = chat_actor.actor.lock().await;
+                    let mut ctx = chat_actor.ctx.lock().await;
+
+                    match actor.handle(&mut ctx, &ChatStreamNext).await {
+                        Ok(chunk) => {
+                            let json = serde_json::to_string(&chunk).unwrap_or_default();
+                            Some((Ok::<web::Bytes, actix_web::Error>(web::Bytes::from(json)), chunk.done))
+                        }
+                        Err(e) => {
+                            warn!("Error fetching next chunk: {}", e);
+                            Some((Ok::<web::Bytes, actix_web::Error>(web::Bytes::from(format!("Error: {}", e))), true))
+                        }
                     }
                 }
-            }
+            });
 
-            let mut conversation = body.messages.clone();
-            if conversation.len() > 0 {
-                conversation.insert(conversation.len() - 1, context_message);
-            } else {
-                conversation.push(context_message);
-            }
-
-            info!("Sending context to chat actor");
-            let chat_response = {
-                let mut chat_ctx = data.chat_actor.ctx.lock().await;
-                let mut chat_actor = data.chat_actor.actor.lock().await;
-                chat_actor
-                    .handle(
-                        &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: false, persist: true },
-                    )
-                    .await
-            };
-            match chat_response {
-                Ok(response) => {
-                    info!("Chat response: {:#?}", response);
-                    HttpResponse::Ok().json(response)
-                }
-                Err(e) => {
-                    error!("Error fetching chat response: {:?}", e);
-                    HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
-                }
-            }
+            HttpResponse::Ok().content_type("text/event-stream").streaming(stream)
         }
         Err(e) => {
-            error!("Error fetching context: {:?}", e);
-            HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
+            warn!("Chat start error: {}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
         }
     }
 }
 
-#[derive(Deserialize)]
-struct AskQuery {
-    query: String,
-    source: Option<String>,
-}
+// #[derive(Deserialize)]
+// struct AskQuery {
+//     query: String,
+//     source: Option<String>,
+// }
 
-async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
-    info!("Received ask query: {:#?}", &body.query);
+// async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
+//     info!("Received ask query: {:#?}", &body.query);
 
-    info!("Sending message to retriever actor");
-    let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext {
-            query: RetrieveQuery::Text(body.query.clone()),
-            limit: 5,
-            threshold: 0.0,
-            source: body.source.clone(),
-        };
-        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
-    };
+//     info!("Sending message to retriever actor");
+//     let retrieved = {
+//         let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
+//         let mut retriever_actor = data.retriever_actor.actor.lock().await;
+//         let retrieve_context = RetrieveContext {
+//             query: RetrieveQuery::Text(body.query.clone()),
+//             limit: 5,
+//             threshold: 0.0,
+//             source: body.source.clone(),
+//         };
+//         retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
+//     };
 
-    match retrieved {
-        Ok(context) => {
-            info!("Context fetched: {:#?}", context);
-            let context_content = context.to_markdown();
+//     match retrieved {
+//         Ok(context) => {
+//             info!("Context fetched: {:#?}", context);
+//             let context_content = context.to_markdown();
 
-            // Create chat conversation
-            let mut conversation = vec![];
+//             // Create chat conversation
+//             let mut conversation = vec![];
 
-            // Add context to conversation as a system message
-            let mut context_message = ChatMessage::system(
-                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
-                    .to_string()
-                    + &context_content,
-            );
+//             // Add context to conversation as a system message
+//             let mut context_message = ChatMessage::system(
+//                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
+//                     .to_string()
+//                     + &context_content,
+//             );
 
-            // Add images to the system message if available
-            let mut images = Vec::new();
-            for ctx in context.context {
-                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
-                    match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
-                            Ok(image_data) => {
-                                match tokio::task::spawn_blocking(move || {
-                                    base64::engine::general_purpose::STANDARD.encode(image_data)
-                                })
-                                .await
-                                {
-                                    Ok(base64_data) => {
-                                        images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
-                                    }
-                                    Err(e) => {
-                                        error!("Error encoding image: {:?}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error reading image file: {:?}", e);
-                            }
-                        },
-                        _ => {}
-                    }
-                }
-            }
-            if !images.is_empty() {
-                context_message.images = Some(images);
-            }
+//             // Add images to the system message if available
+//             let mut images = Vec::new();
+//             for ctx in context.context {
+//                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+//                     match &metadata {
+//                         Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
+//                             Ok(image_data) => {
+//                                 match tokio::task::spawn_blocking(move || {
+//                                     base64::engine::general_purpose::STANDARD.encode(image_data)
+//                                 })
+//                                 .await
+//                                 {
+//                                     Ok(base64_data) => {
+//                                         images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
+//                                     }
+//                                     Err(e) => {
+//                                         error!("Error encoding image: {:?}", e);
+//                                     }
+//                                 }
+//                             }
+//                             Err(e) => {
+//                                 error!("Error reading image file: {:?}", e);
+//                             }
+//                         },
+//                         _ => {}
+//                     }
+//                 }
+//             }
+//             if !images.is_empty() {
+//                 context_message.images = Some(images);
+//             }
 
-            conversation.push(context_message);
+//             conversation.push(context_message);
 
-            // Add user's query to conversation
-            let user_query = ChatMessage::user(body.query.clone());
-            conversation.push(user_query);
+//             // Add user's query to conversation
+//             let user_query = ChatMessage::user(body.query.clone());
+//             conversation.push(user_query);
 
-            // Sending context and user query to chat actor
-            info!("Sending context to chat actor");
-            let chat_response = {
-                let mut chat_ctx = data.chat_actor.ctx.lock().await;
-                let mut chat_actor = data.chat_actor.actor.lock().await;
-                chat_actor
-                    .handle(
-                        &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: true, persist: false },
-                    )
-                    .await
-            };
-            match chat_response {
-                Ok(response) => {
-                    info!("Chat response for query: {:#?} is: \n{:#?}", body.query, response);
-                    HttpResponse::Ok().json(json!({
-                        "response": response,
-                    }))
-                }
-                Err(e) => {
-                    error!("Error fetching chat response: {:?}", e);
-                    HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            error!("Error fetching context: {:?}", e);
-            HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
-        }
-    }
-}
+//             // Sending context and user query to chat actor
+//             info!("Sending context to chat actor");
+//             let chat_response = {
+//                 let mut chat_ctx = data.chat_actor.ctx.lock().await;
+//                 let mut chat_actor = data.chat_actor.actor.lock().await;
+//                 chat_actor
+//                     .handle(
+//                         &mut chat_ctx,
+//                         &ChatMessages { messages: conversation.clone(), restart: true, persist: false },
+//                     )
+//                     .await
+//             };
+//             match chat_response {
+//                 Ok(response) => {
+//                     info!("Chat response for query: {:#?} is: \n{:#?}", body.query, response);
+//                     HttpResponse::Ok().json(json!({
+//                         "response": response,
+//                     }))
+//                 }
+//                 Err(e) => {
+//                     error!("Error fetching chat response: {:?}", e);
+//                     HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
+//                 }
+//             }
+//         }
+//         Err(e) => {
+//             error!("Error fetching context: {:?}", e);
+//             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
+//         }
+//     }
+// }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
     let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
@@ -691,12 +734,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
-            .route("/ask", web::post().to(self::ask))
-            .route("/api/chat", web::post().to(self::chat))
+            // .route("/ask", web::post().to(self::ask))
+            // .route("/api/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/api/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            .route("/chat/stream", web::post().to(chat_stream))
     })
     .bind("0.0.0.0:5766")?
     .run()
