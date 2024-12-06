@@ -186,16 +186,12 @@ impl Message<ChatStreamNext> for Chat {
             }
             Some(Err(e)) => {
                 error!("Error fetching stream chunk: {:?}", e);
-                // Convert MyOllamaError back to ChatError if needed
-                // If e is MyOllamaError::Original(err), convert to ChatError::Ollama
-                // If MyOllamaError::Unknown(...), you can handle accordingly.
                 match e {
                     MyOllamaError::Original(err) => Err(ChatError::Ollama(err)),
                     MyOllamaError::Unknown(msg) => Err(ChatError::Ollama(OllamaError::from(msg))),
                 }
             }
             None => {
-                // Stream ended
                 println!("Stream ended");
                 *lock = None;
                 Ok(ChatStreamChunk { response: None, done: true })
