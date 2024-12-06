@@ -64,7 +64,7 @@ async fn test_delete_source_with_files() -> Result<(), TestError> {
     // Verify deletion results
     assert!(delete_result.deleted_embeddings > 0, "Expected at least one embedding to be deleted");
     assert!(
-        delete_result.deleted_sources.contains(&file_path1.to_string_lossy().into_owned()),
+        delete_result.deleted_sources.iter().any(|s| s.uri == file_path1.to_string_lossy()),
         "Expected file1 to be in deleted sources"
     );
 

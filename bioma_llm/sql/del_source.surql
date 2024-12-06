@@ -14,11 +14,11 @@ DELETE NomicEmbedTextV15_model_embeddings WHERE out IN $flat_embeddings;
 DELETE NomicEmbedTextV15_source_embeddings WHERE in IN $matching_sources;
 DELETE NomicEmbedTextV15_embedding WHERE id IN $flat_embeddings;
 
--- Delete sources and capture their paths
-LET $deleted_sources = (DELETE $matching_sources RETURN BEFORE).id;
+-- Delete sources and capture their paths with structured information
+LET $deleted_sources = SELECT VALUE id.{source, uri} FROM (DELETE $matching_sources RETURN BEFORE);
 
 RETURN {
-    total_deleted: count($flat_embeddings),
+    deleted_embeddings: count($flat_embeddings),
     deleted_sources: $deleted_sources
 };
 
