@@ -1,18 +1,25 @@
 BEGIN;
 
-LET $source = source:{ source: $source };
+-- Get all sources matching the regex pattern
+LET $matching_sources = SELECT * FROM source WHERE string::matches(id.uri, $source);
 
-LET $image_embeddings = SELECT ->{prefix}_source_embeddings.out as embedding FROM $source;
+-- Get all embeddings connected to matching sources 
+LET $embeddings = SELECT ->NomicEmbedTextV15_source_embeddings.out AS embedding 
+FROM $matching_sources;
 
-LET $flat_image_embeddings = array::flatten($image_embeddings.embedding);
+LET $flat_embeddings = array::flatten($embeddings.embedding);
 
-DELETE {prefix}_model_embeddings WHERE out IN $flat_image_embeddings;
-DELETE {prefix}_source_embeddings WHERE in = $source;
-DELETE {prefix}_embedding WHERE id IN $flat_image_embeddings;
-DELETE $source;
+-- Delete all related records
+DELETE NomicEmbedTextV15_model_embeddings WHERE out IN $flat_embeddings;
+DELETE NomicEmbedTextV15_source_embeddings WHERE in IN $matching_sources;
+DELETE NomicEmbedTextV15_embedding WHERE id IN $flat_embeddings;
 
-LET $total_deleted = count($flat_image_embeddings);
+-- Delete sources and capture their paths with structured information
+LET $deleted_sources = SELECT VALUE id.{source, uri} FROM (DELETE $matching_sources RETURN BEFORE);
 
-RETURN $total_deleted;
+RETURN {
+    deleted_embeddings: count($flat_embeddings),
+    deleted_sources: $deleted_sources
+};
 
 COMMIT;

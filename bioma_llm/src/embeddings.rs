@@ -13,6 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use crate::indexer::ContentSource;
+
 lazy_static! {
     static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -95,6 +97,8 @@ pub enum Query {
 pub struct TopK {
     /// The query to search for
     pub query: Query,
+    /// The source regex pattern to match against
+    pub source: Option<String>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -106,6 +110,7 @@ pub struct TopK {
 pub struct Similarity {
     pub text: Option<String>,
     pub similarity: f32,
+    pub source: Option<ContentSource>,
     pub metadata: Option<Value>,
 }
 
@@ -188,6 +193,7 @@ impl Message<TopK> for Embeddings {
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("threshold", message.threshold))
+            .bind(("source", message.source.clone().unwrap_or(".*".to_string())))
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;

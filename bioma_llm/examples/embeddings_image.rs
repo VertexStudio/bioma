@@ -59,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         query: embeddings::Query::Image("assets/images/rust-pet.png".to_string()),
         threshold: 0.5,
         k: 3,
+        source: None,
     };
     info!("Image query: {:?}", top_k);
     let similarities =

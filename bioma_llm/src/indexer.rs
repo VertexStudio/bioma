@@ -40,6 +40,10 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
+    #[error("SurrealDB error: {0}")]
+    SurrealDB(#[from] surrealdb::Error),
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl ActorError for IndexerError {}
@@ -129,14 +133,13 @@ pub struct ContentSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSource {
-    pub sources: Vec<String>,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
-    pub deleted_sources: Vec<String>,
-    pub not_found_sources: Vec<String>,
+    pub deleted_sources: Vec<ContentSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -461,44 +464,30 @@ impl Message<DeleteSource> for Indexer {
         message: &DeleteSource,
     ) -> Result<DeletedSource, IndexerError> {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
-        let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
-        let mut total_deleted = 0;
-        let mut deleted_sources = Vec::new();
-        let mut not_found_sources = Vec::new();
+        let mut results =
+            db.query(&query).bind(("source", message.source.clone())).await.map_err(SystemActorError::from)?;
 
-        for source in &message.sources {
-            // If source is not absolute, make it relative to local_store_dir
-            let full_source = if std::path::Path::new(source).is_absolute() {
-                source.clone()
-            } else {
-                local_store_dir.join(source).to_string_lossy().into_owned()
-            };
+        let delete_result: DeletedSource = results
+            .take::<Vec<DeletedSource>>(0)
+            .map_err(IndexerError::from)?
+            .pop()
+            .ok_or(IndexerError::Other("No delete result found".to_string()))?;
 
-            // Delete from database
-            let mut results =
-                db.query(&query).bind(("source", full_source.clone())).await.map_err(SystemActorError::from)?;
-
-            let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
-            total_deleted += deleted_count;
-
-            // Check if file/directory exists before attempting deletion
-            let source_path = std::path::Path::new(&full_source);
+        // Process file deletions
+        for source in &delete_result.deleted_sources {
+            let source_path = std::path::Path::new(&source.uri);
             if source_path.exists() {
-                // Handle both files and directories
                 if source_path.is_dir() {
                     tokio::fs::remove_dir_all(source_path).await.ok();
                 } else {
                     tokio::fs::remove_file(source_path).await.ok();
                 }
-                deleted_sources.push(source.clone());
-            } else {
-                not_found_sources.push(source.clone());
             }
         }
 
-        Ok(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources })
+        Ok(delete_result)
     }
 }
 
