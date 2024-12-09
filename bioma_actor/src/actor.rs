@@ -1153,7 +1153,7 @@ impl<T: Actor> ActorContext<T> {
     /// A `Result` containing either:
     /// - `Ok(M::Response)`: The single reply
     /// - `Err(SystemActorError)`: If sending fails, no reply is received, or multiple replies are received
-    pub async fn wait_reply<M, MT>(
+    pub async fn send_and_wait_reply<M, MT>(
         &self,
         message: MT,
         to: &ActorId,
