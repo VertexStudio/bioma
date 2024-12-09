@@ -289,25 +289,24 @@ impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de>
 pub trait Message<MT>: Actor
 where
     MT: MessageType,
-    Self::Response: 'static,
 {
     /// The type of response this message handler produces.
-    type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
+    type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync + 'static;
 
-    /// Handles an incoming message of type `MT`.
+    /// Handles a message of type `MT` for this actor.
     ///
-    /// This method processes the message and can send multiple responses using
-    /// the context's `reply()` method before completing.
+    /// This function must be implemented for any actor that wants to handle messages of type `MT`.
+    /// It defines how the actor processes the incoming message and what response it generates.
     ///
     /// # Arguments
     ///
-    /// * `self` - A mutable reference to the actor instance
-    /// * `ctx` - The actor's context, used for sending replies
-    /// * `message` - The message to process
+    /// * `self` - A mutable reference to the actor instance.
+    /// * `ctx` - A mutable reference to the actor's context, providing access to the actor's state and environment. You can use `ctx.reply()` to send responses.   
+    /// * `message` - A reference to the message of type `MT` to be handled.
     ///
     /// # Returns
     ///
-    /// Returns a `Result` which is:
+    /// A `Result` which is:
     /// - `Ok(())` if message processing completed successfully
     /// - `Err(Self::Error)` if an error occurred during processing
     fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &MT) -> impl Future<Output = Result<(), Self::Error>>;
@@ -1205,6 +1204,11 @@ impl<T: Actor> ActorContext<T> {
                 let response: RT = serde_json::from_value(reply.msg)?;
                 Ok(response)
             });
+        // TODO: Add artificial delay for testing timeout
+        // .then(|r| async move {
+        //     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        //     r
+        // });
 
         // Apply timeout to the entire stream
         let stream = Box::pin(stream);
