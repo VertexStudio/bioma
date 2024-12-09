@@ -110,7 +110,6 @@ impl Message<GameState> for PlayerActor {
         let mut state = state.clone();
         info!("{} Analyzing GameState", ctx.id());
         if state.current_player == player_type {
-
             if state.board.is_empty() {
                 state.board = vec![PlayerType::Null; 9];
             }

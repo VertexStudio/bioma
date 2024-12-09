@@ -242,6 +242,13 @@ struct ChatQuery {
     source: Option<String>,
 }
 
+#[derive(Serialize)]
+struct ChatResponse {
+    #[serde(flatten)]
+    response: ChatMessageResponse,
+    context: Vec<ChatMessage>,
+}
+
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
     // Build query from all user messages
     let query = body
@@ -268,6 +275,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     match retrieved {
         Ok(mut context) => {
+            // Reverse the context so most relevant results appear last in the prompt.
+            // This leverages LLM's recency bias - it tends to pay more attention to
+            // information that appears closer to the query.
             context.context.reverse();
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
@@ -314,9 +324,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             let mut conversation = body.messages.clone();
             if conversation.len() > 0 {
-                conversation.insert(conversation.len() - 1, context_message);
+                conversation.insert(conversation.len() - 1, context_message.clone());
             } else {
-                conversation.push(context_message);
+                conversation.push(context_message.clone());
             }
 
             info!("Sending context to chat actor");
@@ -326,14 +336,15 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 chat_actor
                     .handle(
                         &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: false, persist: true },
+                        &ChatMessages { messages: conversation.clone(), restart: false, persist: false },
                     )
                     .await
             };
+
             match chat_response {
                 Ok(response) => {
-                    info!("Chat response: {:#?}", response);
-                    HttpResponse::Ok().json(response)
+                    info!("Chat response: {:#?}", &response);
+                    HttpResponse::Ok().json(ChatResponse { response, context: conversation })
                 }
                 Err(e) => {
                     error!("Error fetching chat response: {:?}", e);
@@ -616,7 +627,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let retriever_actor =
         Arc::new(ActorHandle::<Retriever> { ctx: Mutex::new(retriever_ctx), actor: Mutex::new(retriever_actor) });
 
-    let chat = Chat::builder().model("llama3.2-vision".into()).build();
+    let chat = Chat::builder().model("llama3.2".into()).build();
 
     let chat_actor_id = ActorId::of::<Chat>("/rag/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
