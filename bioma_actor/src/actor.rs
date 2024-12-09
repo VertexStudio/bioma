@@ -109,16 +109,28 @@ impl FrameMessage {
     }
 }
 
+/// Identifier for a reply message that may be part of a stream.
+///
+/// Reply IDs contain both a base message ID and an optional chunk number
+/// to support streaming replies.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplyId {
+    /// Base message identifier
     id: String,
+    /// Optional chunk number for streaming replies.
+    /// - `Some(n)` indicates this is chunk `n` of an ongoing stream
+    /// - `None` indicates this is the final reply in the stream
     chunk: Option<u64>,
 }
 
-/// The message frame that is sent between actors
+/// A frame containing a reply message from an actor.
+///
+/// Reply frames can represent either:
+/// - A chunk of an ongoing reply stream (when `id.chunk` is `Some`)
+/// - The final reply in a stream (when `id.chunk` is `None`)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrameReply {
-    /// Message id created with a ULID
+    /// Reply identifier containing the message ID and optional chunk number
     id: ReplyId,
     /// Message name (usually a type name)
     pub name: Cow<'static, str>,
@@ -134,63 +146,131 @@ pub struct FrameReply {
     pub err: Value,
 }
 
+/// Type representing a stream of messages to an actor.
+///
+/// A MessageStream provides an ordered sequence of incoming messages that can be
+/// processed asynchronously. It combines:
+/// - Existing unreplied messages from the database
+/// - New messages as they arrive
 pub type MessageStream = Pin<Box<dyn Stream<Item = Result<FrameMessage, SystemActorError>> + Send>>;
 
-/// A trait for message types that can be sent between actors.
+/// A trait for types that can be sent as messages between actors.
+///
+/// This trait is automatically implemented for types that meet the requirements:
+/// - Clone for message passing
+/// - Serialize/Deserialize for transport
+/// - Send + Sync for thread safety
+///
+/// # Example
+///
+/// ```rust
+/// #[derive(Clone, Serialize, Deserialize)]
+/// struct MyMessage {
+///     data: String,
+///     timestamp: u64,
+/// }
+///
+/// // MyMessage automatically implements MessageType
+/// ```
 pub trait MessageType: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync {}
 // Blanket implementation for all types that meet the criteria
 impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync {}
 
-/// Defines message handling behavior for actors.
+/// A trait for actors that can handle specific message types.
 ///
-/// This trait should be implemented by actors that want to handle specific message types.
-/// It provides methods for processing incoming messages and generating responses.
+/// This trait should be implemented by actors that want to handle messages of type `MT`.
+/// The implementation defines how the actor processes messages and sends responses
+/// through its context.
 ///
 /// # Type Parameters
 ///
-/// * `MT`: The specific message type this implementation handles.
+/// * `MT`: The specific message type this implementation handles
+///
+/// # Examples
+///
+/// ```rust
+/// struct MyActor {
+///     counter: usize,
+/// }
+///
+/// #[derive(Clone, Serialize, Deserialize)]
+/// struct IncrementMessage(usize);
+///
+/// #[derive(Clone, Serialize, Deserialize)]
+/// struct CounterResponse {
+///     previous: usize,
+///     current: usize,
+/// }
+///
+/// impl Message<IncrementMessage> for MyActor {
+///     type Response = CounterResponse;
+///
+///     async fn handle(
+///         &mut self,
+///         ctx: &mut ActorContext<Self>,
+///         message: &IncrementMessage
+///     ) -> Result<(), Self::Error> {
+///         let previous = self.counter;
+///         self.counter += message.0;
+///         
+///         // Send the response through the context
+///         ctx.reply(CounterResponse {
+///             previous,
+///             current: self.counter
+///         }).await?;
+///         
+///         Ok(())
+///     }
+/// }
+/// ```
 pub trait Message<MT>: Actor
 where
     MT: MessageType,
     Self::Response: 'static,
 {
+    /// The type of response this message handler produces.
     type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
 
-    /// Handles a message of type `MT` for this actor.
+    /// Handles an incoming message of type `MT`.
     ///
-    /// This function must be implemented for any actor that wants to handle messages of type `MT`.
-    /// It defines how the actor processes the incoming message and what response it generates.
+    /// This method processes the message and can send multiple responses using
+    /// the context's `reply()` method before completing.
     ///
     /// # Arguments
     ///
-    /// * `self` - A mutable reference to the actor instance.
-    /// * `ctx` - A mutable reference to the actor's context, providing access to the actor's state and environment.
-    /// * `message` - A reference to the message of type `MT` to be handled.
+    /// * `self` - A mutable reference to the actor instance
+    /// * `ctx` - The actor's context, used for sending replies
+    /// * `message` - The message to process
     ///
     /// # Returns
     ///
-    /// An implementation of `Future` that resolves to a `Result` containing either:
-    /// - `Ok(Self::Response)`: The successful response to the message.
-    /// - `Err(Self::Error)`: An error that occurred during message handling.
-    /// Handles a message. Returns Result<(), Error>
-    /// Uses ctx.reply() to send responses during processing
+    /// Returns a `Result` which is:
+    /// - `Ok(())` if message processing completed successfully
+    /// - `Err(Self::Error)` if an error occurred during processing
     fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &MT) -> impl Future<Output = Result<(), Self::Error>>;
 
-    /// Handle and reply to a message.
+    /// Processes a message and manages the reply stream lifecycle.
     ///
-    /// This method will:
-    /// 1. Call the actor's `handle` method for this message type
-    /// 2. Reply to the sender of the message with the response
+    /// This method:
+    /// 1. Sets up the reply stream
+    /// 2. Calls `handle()` to process the message
+    /// 3. Cleans up the reply stream
+    /// 4. Ensures the final reply is sent
+    ///
+    /// Typically, you won't need to override this method as the default
+    /// implementation handles the message processing lifecycle.
     ///
     /// # Arguments
     ///
-    /// * `ctx` - A mutable reference to the actor context
-    /// * `message` - A reference to the message to be handled
-    /// * `frame` - A reference to the original message frame
+    /// * `ctx` - The actor's context
+    /// * `message` - The message to process
+    /// * `frame` - The original message frame
     ///
     /// # Returns
     ///
-    /// A future that resolves to a `Result` containing the response or an error
+    /// Returns a `Result` which is:
+    /// - `Ok(())` if the message was processed and all replies sent successfully
+    /// - `Err(Self::Error)` if an error occurred during processing
     fn reply(
         &mut self,
         ctx: &mut ActorContext<Self>,
@@ -249,7 +329,26 @@ where
     }
 }
 
-/// Options for configuring message sending behavior.
+/// Configuration options for message sending behavior.
+///
+/// Controls aspects of message delivery and reply handling such as:
+/// - Timeout duration
+///
+/// # Example
+///
+/// ```rust
+/// // Custom timeout for important message
+/// let options = SendOptions::builder()
+///     .timeout(std::time::Duration::from_secs(60))
+///     .build();
+///
+/// // Send with custom options
+/// let reply = ctx.send::<TargetActor, MyMessage>(
+///     message,
+///     &target_id,
+///     options
+/// ).await?;
+/// ```
 #[derive(bon::Builder)]
 pub struct SendOptions {
     /// The maximum duration to wait for a reply before timing out.
@@ -262,10 +361,29 @@ impl Default for SendOptions {
     }
 }
 
-/// A unique identifier for a distributed actor
+/// A unique identifier for an actor in the system.
+///
+/// Actor IDs combine:
+/// - A unique name within namespace
+/// - The actor's type tag
+///
+/// This ensures each actor has a globally unique identifier that
+/// also carries type information.
+///
+/// # Examples
+///
+/// ```rust
+/// // Create ID for specific actor type
+/// let id = ActorId::of::<MyActor>("/my-actor-1");
+///
+/// // Create ID with custom type tag
+/// let id = ActorId::with_tag("/my-actor-2", "custom.actor.type");
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash, Eq)]
 pub struct ActorId {
+    /// Unique name within namespace
     name: Cow<'static, str>,
+    /// Actor type identifier
     tag: Cow<'static, str>,
 }
 
@@ -313,9 +431,27 @@ impl ActorId {
     }
 }
 
-/// Options for spawning an actor.
+/// Options for configuring actor spawn behavior.
 ///
-/// Configuration options for the actor spawning process.
+/// These options control how the system handles cases where an actor
+/// with the same ID already exists when spawning.
+///
+/// # Examples
+///
+/// ```rust
+/// // Error if actor exists
+/// let options = SpawnOptions::default();
+///
+/// // Reset existing actor
+/// let options = SpawnOptions::builder()
+///     .exists(SpawnExistsOptions::Reset)
+///     .build();
+///
+/// // Restore existing actor state
+/// let options = SpawnOptions::builder()
+///     .exists(SpawnExistsOptions::Restore)
+///     .build();
+/// ```
 #[derive(bon::Builder, Clone)]
 pub struct SpawnOptions {
     /// Specifies how to handle the case when an actor with the same ID already exists.
@@ -351,8 +487,55 @@ pub enum SpawnExistsOptions {
     Restore,
 }
 
-/// Implement this trait to define an actor
+/// A trait that defines the core functionality of an actor in the system.
+///
+/// Actors are isolated units of computation that communicate through message passing.
+/// Each actor:
+/// - Has unique identity (ActorId)
+/// - Maintains private state
+/// - Communicates only through messages
+/// - Can be spawned, saved, and stopped
+///
+/// # Examples
+///
+/// ```rust
+/// use serde::{Serialize, Deserialize};
+///
+/// #[derive(Debug, Serialize, Deserialize)]
+/// struct CounterActor {
+///     count: usize,
+/// }
+///
+/// #[derive(Debug, thiserror::Error)]
+/// enum CounterError {
+///     #[error("System error: {0}")]
+///     System(#[from] SystemActorError),
+/// }
+///
+/// impl ActorError for CounterError {}
+///
+/// impl Actor for CounterActor {
+///     type Error = CounterError;
+///
+///     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+///         // Actor's main loop
+///         let mut stream = ctx.recv().await?;
+///         while let Some(Ok(message)) = stream.next().await {
+///             // Process messages...
+///         }
+///         Ok(())
+///     }
+/// }
+///
+/// // Spawn the actor
+/// let engine = Engine::new().await?;
+/// let id = ActorId::of::<CounterActor>("/counter");
+/// let (ctx, actor) = CounterActor { count: 0 }
+///     .spawn(engine, id, SpawnOptions::default())
+///     .await?;
+/// ```
 pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + Sync {
+    /// The error type returned by this actor's operations.
     type Error: ActorError;
 
     /// Spawns a new actor in the system or handles an existing one based on the provided options.
@@ -493,15 +676,35 @@ pub struct ActorRecord {
     state: Value,
 }
 
-/// Context for an actor, that binds an actor to its engine
+/// The context for an actor, providing access to the actor system.
+///
+/// The context allows an actor to:
+/// - Send and receive messages
+/// - Stream replies to messages
+/// - Access the underlying database
+/// - Manage actor lifecycle
+///
+/// Each actor instance has its own context that is created when the
+/// actor is spawned.
 #[derive(Debug)]
 pub struct ActorContext<T: Actor> {
+    /// The actor system engine
     engine: Engine,
+    /// The actor's unique identifier
     id: ActorId,
+    /// Channel for sending reply chunks during message processing
     tx: Option<mpsc::UnboundedSender<Value>>,
+    /// Type marker for the actor
     _marker: std::marker::PhantomData<T>,
 }
 
+/// A stream of replies from an actor in response to a message.
+///
+/// This type represents an asynchronous stream of responses that can be consumed
+/// one at a time. The stream will continue until either:
+/// - A final reply is received (indicated by `chunk = None`)
+/// - An error occurs
+/// - The stream times out
 pub type ReplyStream<T> = Pin<Box<dyn Stream<Item = Result<T, SystemActorError>> + Send>>;
 
 impl<T: Actor> ActorContext<T> {
@@ -510,7 +713,20 @@ impl<T: Actor> ActorContext<T> {
         Self { engine, id, tx: None, _marker: std::marker::PhantomData }
     }
 
-    // Called at the start of message processing to set up reply stream
+    /// Begins processing an incoming message and sets up reply streaming.
+    ///
+    /// This method:
+    /// 1. Creates a channel for streaming replies
+    /// 2. Spawns task to handle reply sending
+    /// 3. Sets up message context for replies
+    ///
+    /// # Arguments
+    ///
+    /// * `frame` - The message frame being processed
+    ///
+    /// # Returns
+    ///
+    /// Returns a JoinHandle for the reply processing task
     async fn begin_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let engine = self.engine.clone();
@@ -684,33 +900,44 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
-    /// Send a message to an actor and wait for a reply
-    ///
-    /// This method sends a message to another actor and waits for a response.
+    /// Send a message and receive a stream of replies.
     ///
     /// # Type Parameters
     ///
-    /// * `M`: The message handler type, which must implement `Message<MT>`.
-    /// * `MT`: The message type, which must implement `MessageType`.
+    /// * `M` - Message handler type
+    /// * `MT` - Message content type
     ///
     /// # Arguments
     ///
-    /// * `message`: The message to be sent.
-    /// * `to`: The `ActorId` of the recipient actor.
-    /// * `options`: The `SendOptions` for this message.
+    /// * `message` - Message to send
+    /// * `to` - Recipient actor's ID
+    /// * `options` - Send configuration options
     ///
     /// # Returns
     ///
-    /// A `Result` containing either:
-    /// - `Ok(M::Response)`: The successfully received reply.
-    /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
+    /// Returns a `Result` containing:
+    /// - `Ok(ReplyStream<M::Response>)` - Stream of replies
+    /// - `Err(SystemActorError)` - If send fails
     ///
-    /// # Errors
+    /// # Example
     ///
-    /// This method will return an error if:
-    /// - The message preparation fails.
-    /// - The message sending fails.
-    /// - Waiting for the reply times out or encounters other issues.
+    /// ```rust
+    /// async fn query_data(&self, ctx: &mut ActorContext<Self>) -> Result<(), Error> {
+    ///     let mut replies = ctx.send::<DataActor, QueryMessage>(
+    ///         QueryMessage::new("user.*"),
+    ///         &data_actor_id,
+    ///         SendOptions::default()
+    ///     ).await?;
+    ///
+    ///     while let Some(reply) = replies.next().await {
+    ///         match reply {
+    ///             Ok(data) => println!("Received: {:?}", data),
+    ///             Err(e) => break
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn send<M, MT>(
         &self,
         message: MT,
@@ -793,8 +1020,63 @@ impl<T: Actor> ActorContext<T> {
         self.wait_for_replies::<RT>(&reply_id, options).await
     }
 
-    /// Wait for a reply to a sent message
-    /// Wait for and stream all replies to a sent message
+    /// Waits for and streams all replies to a sent message.
+    ///
+    /// This method establishes a live query to receive replies as they arrive. The reply
+    /// stream will continue until a final reply (with `chunk = None`) is received or an
+    /// error occurs.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `RT` - The expected type of the reply messages.
+    ///
+    /// # Arguments
+    ///
+    /// * `reply_id` - The ID of the reply to wait for
+    /// * `options` - Options controlling timeout and other behaviors
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing either:
+    /// - `Ok(ReplyStream<RT>)` - A stream of reply messages that can be consumed
+    /// - `Err(SystemActorError)` - If setting up the reply stream fails
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// async fn handle_replies(ctx: &ActorContext<MyActor>) -> Result<(), SystemActorError> {
+    ///     // Send message and get reply stream
+    ///     let mut replies = ctx.send::<TargetActor, MyMessage>(
+    ///         message,
+    ///         &target_id,
+    ///         SendOptions::default()
+    ///     ).await?;
+    ///
+    ///     // Process replies as they arrive
+    ///     while let Some(reply) = replies.next().await {
+    ///         match reply {
+    ///             Ok(response) => println!("Got response: {:?}", response),
+    ///             Err(e) => {
+    ///                 eprintln!("Error: {}", e);
+    ///                 break;
+    ///             }
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Error Handling
+    ///
+    /// This method will return an error if:
+    /// - The live query setup fails
+    /// - Database connection is lost
+    /// - Query timeout is reached
+    ///
+    /// Individual stream items may contain errors if:
+    /// - Reply deserialization fails
+    /// - Reply contains an error message
+    /// - Stream timeout is reached while waiting for next reply
     async fn wait_for_replies<RT: MessageType + 'static>(
         &self,
         reply_id: &RecordId,
@@ -847,32 +1129,32 @@ impl<T: Actor> ActorContext<T> {
         Ok(Box::pin(stream))
     }
 
-    /// Reply to a received message
+    /// Send a reply as part of processing a message.
     ///
-    /// This method sends a reply to a previously received message.
+    /// This method can be called multiple times during message processing to
+    /// send a stream of replies. The replies will be sent in order and each
+    /// will be assigned a chunk number.
     ///
     /// # Type Parameters
     ///
-    /// * `M`: The message handler type, which must implement `Message<MT>`.
-    /// * `MT`: The message type, which must implement `MessageType`.
+    /// * `R` - The type of the reply content
     ///
     /// # Arguments
     ///
-    /// * `request`: A reference to the original `FrameMessage` that is being replied to.
-    /// * `message`: A reference to the `Result` containing either the response or an error.
+    /// * `response` - The reply content to send
     ///
     /// # Returns
     ///
-    /// A `Result` which is:
-    /// - `Ok(())` if the reply was successfully sent.
-    /// - `Err(SystemActorError)` if there was an error in sending the reply.
+    /// Returns a `Result` which is:
+    /// - `Ok(())` if the reply was sent successfully
+    /// - `Err(SystemActorError)` if sending failed
     ///
     /// # Errors
     ///
     /// This method will return an error if:
-    /// - The receiver ID in the request doesn't match the current actor's ID.
-    /// - There's an issue with serializing the response or error.
-    /// - The database query to store the reply fails.
+    /// - No message is currently being processed
+    /// - The reply channel has been closed
+    /// - Serialization of the reply content fails
     pub async fn reply<R: MessageType>(&self, response: R) -> Result<(), SystemActorError> {
         if let Some(tx) = &self.tx {
             let value = serde_json::to_value(&response)?;
@@ -1002,11 +1284,17 @@ mod tests {
             loop {
                 info!("{} Ping", ctx.id());
                 attempts += 1;
-                let pong = ctx.send::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
-                info!("{} Pong {}", ctx.id(), pong.times);
-                if pong.times == 0 {
-                    break;
+                let mut pong_stream = ctx.send::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
+
+                // Collect response from stream
+                if let Some(pong) = pong_stream.next().await {
+                    let pong = pong?;
+                    info!("{} Pong {}", ctx.id(), pong.times);
+                    if pong.times == 0 {
+                        break;
+                    }
                 }
+
                 if attempts >= self.max_attempts {
                     return Err(PingActorError::PingFailed(attempts));
                 }
