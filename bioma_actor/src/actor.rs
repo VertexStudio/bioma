@@ -2,6 +2,11 @@ use crate::engine::{Engine, Record};
 use futures::{future, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use surrealdb::RecordIdKey;
+use surrealdb::{
+    sql::{Number, Strand, Value as SqlValue},
+    Object,
+};
 use tokio::sync::mpsc;
 // use std::any::type_name;
 use std::fmt::Debug;
@@ -146,6 +151,15 @@ pub struct FrameReply {
     pub err: Value,
 }
 
+/// A stream of replies from an actor in response to a message.
+///
+/// This type represents an asynchronous stream of responses that can be consumed
+/// one at a time. The stream will continue until either:
+/// - A final reply is received (indicated by `chunk = None`)
+/// - An error occurs
+/// - The stream times out
+pub type ReplyStream<T> = Pin<Box<dyn Stream<Item = Result<T, SystemActorError>> + Send>>;
+
 /// Type representing a stream of messages to an actor.
 ///
 /// A MessageStream provides an ordered sequence of incoming messages that can be
@@ -278,23 +292,26 @@ where
         frame: &FrameMessage,
     ) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
-            // Begin message processing
-            let handle = ctx.begin_message_processing(frame.clone()).await;
+            // Set up reply stream first - if this fails, we fail early
+            let handle = ctx.start_message_processing(frame.clone()).await;
 
-            // Call handle() which will use ctx.reply() to send responses
+            // Process message and store result
             let result = self.handle(ctx, message).await;
 
-            // Clean up the reply stream - this sends the final message
-            ctx.finish_message_processing().await;
+            // Ensure cleanup happens regardless of handle result
+            let cleanup_result = {
+                // Clean up reply stream first
+                ctx.finish_message_processing().await;
 
-            // Wait for the reply stream to finish
-            handle.await.map_err(SystemActorError::from)?;
+                // Then wait for final reply to be sent
+                handle.await
+            };
 
-            // Map the result to the expected response type
-            match result {
-                Ok(()) => Ok(()),
-                Err(e) => Err(e),
+            if let Err(e) = cleanup_result {
+                error!("Error during reply cleanup: {}", e);
             }
+
+            result
         }
     }
 
@@ -698,89 +715,11 @@ pub struct ActorContext<T: Actor> {
     _marker: std::marker::PhantomData<T>,
 }
 
-/// A stream of replies from an actor in response to a message.
-///
-/// This type represents an asynchronous stream of responses that can be consumed
-/// one at a time. The stream will continue until either:
-/// - A final reply is received (indicated by `chunk = None`)
-/// - An error occurs
-/// - The stream times out
-pub type ReplyStream<T> = Pin<Box<dyn Stream<Item = Result<T, SystemActorError>> + Send>>;
-
 impl<T: Actor> ActorContext<T> {
     /// Create a new actor context
     fn new(engine: Engine, id: ActorId) -> Self {
+        debug!("[{}] ctx-new", id.record_id());
         Self { engine, id, tx: None, _marker: std::marker::PhantomData }
-    }
-
-    /// Begins processing an incoming message and sets up reply streaming.
-    ///
-    /// This method:
-    /// 1. Creates a channel for streaming replies
-    /// 2. Spawns task to handle reply sending
-    /// 3. Sets up message context for replies
-    ///
-    /// # Arguments
-    ///
-    /// * `frame` - The message frame being processed
-    ///
-    /// # Returns
-    ///
-    /// Returns a JoinHandle for the reply processing task
-    async fn begin_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let engine = self.engine.clone();
-        let frame_clone = frame.clone();
-
-        let handle = tokio::spawn(async move {
-            let chunk_counter = AtomicU64::new(1);
-
-            while let Some(value) = rx.recv().await {
-                let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let reply = FrameReply {
-                    id: ReplyId { id: frame_clone.id.key().to_string(), chunk: Some(chunk) },
-                    name: frame_clone.name.clone(),
-                    tx: frame_clone.rx.clone(),
-                    rx: frame_clone.tx.clone(),
-                    msg: value,
-                    err: serde_json::Value::Null,
-                };
-
-                let reply_query = include_str!("../sql/reply.surql");
-                let _ = engine
-                    .db()
-                    .query(reply_query)
-                    .bind((
-                        "reply_id",
-                        RecordId::from_table_key(DB_TABLE_REPLY, format!("{}-{}", frame_clone.id.key(), chunk)),
-                    ))
-                    .bind(("reply", reply))
-                    .bind(("msg_id", frame_clone.id.clone()))
-                    .await;
-            }
-
-            // Send final reply when channel closes
-            let reply = FrameReply {
-                id: ReplyId { id: frame_clone.id.key().to_string(), chunk: None },
-                name: frame_clone.name,
-                tx: frame_clone.rx,
-                rx: frame_clone.tx,
-                msg: serde_json::Value::Null,
-                err: serde_json::Value::Null,
-            };
-
-            let reply_query = include_str!("../sql/reply.surql");
-            let _ = engine
-                .db()
-                .query(reply_query)
-                .bind(("reply_id", RecordId::from_table_key(DB_TABLE_REPLY, frame_clone.id.key().to_string())))
-                .bind(("reply", reply))
-                .bind(("msg_id", frame_clone.id))
-                .await;
-        });
-
-        self.tx = Some(tx);
-        handle
     }
 
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
@@ -818,6 +757,116 @@ impl<T: Actor> ActorContext<T> {
         let _: Option<ActorRecord> =
             self.engine().db().delete(&self.id.record_id()).await.map_err(SystemActorError::from)?;
         Ok(())
+    }
+
+    /// Begins processing an incoming message and sets up reply streaming.
+    ///
+    /// This method:
+    /// 1. Creates a channel for streaming replies
+    /// 2. Spawns task to handle reply sending
+    /// 3. Sets up message context for replies
+    ///
+    /// # Arguments
+    ///
+    /// * `frame` - The message frame being processed
+    ///
+    /// # Returns
+    ///
+    /// Returns a JoinHandle for the reply processing task
+    async fn start_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
+        debug!("[{}] msg-process-start {} {}", self.id().record_id(), frame.name, frame.id);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let engine = self.engine.clone();
+        let frame_clone = frame.clone();
+
+        let handle = tokio::spawn(async move {
+            let chunk_counter = AtomicU64::new(1);
+
+            while let Some(value) = rx.recv().await {
+                let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                debug!("[{}] msg-chunk {} {}-{}", frame_clone.rx, frame_clone.name, frame_clone.id.key(), chunk);
+
+                let reply = FrameReply {
+                    id: ReplyId { id: frame_clone.id.key().to_string(), chunk: Some(chunk) },
+                    name: frame_clone.name.clone(),
+                    tx: frame_clone.rx.clone(),
+                    rx: frame_clone.tx.clone(),
+                    msg: value,
+                    err: serde_json::Value::Null,
+                };
+
+                let mut reply_id_obj = Object::new();
+                reply_id_obj.insert(
+                    "id".to_string(),
+                    surrealdb::Value::from_inner(SqlValue::Strand(Strand::from(frame_clone.id.key().to_string()))),
+                );
+                reply_id_obj.insert(
+                    "chunk".to_string(),
+                    surrealdb::Value::from_inner(SqlValue::Number(Number::Int(chunk as i64))),
+                );
+
+                let key = RecordIdKey::from(reply_id_obj);
+                let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, key);
+
+                let reply_query = include_str!("../sql/reply.surql");
+                let result = engine
+                    .db()
+                    .query(reply_query)
+                    .bind(("reply_id", reply_id))
+                    .bind(("reply", reply))
+                    .bind(("msg_id", frame_clone.id.clone()))
+                    .await;
+                if let Err(e) = result {
+                    error!(
+                        "[{}] msg-chunk-error {} {}-{} {}",
+                        frame_clone.rx,
+                        frame_clone.name,
+                        frame_clone.id.key(),
+                        chunk,
+                        e
+                    );
+                }
+            }
+
+            // Store the values we'll need for logging before using frame_clone
+            let rx = frame_clone.rx.clone();
+            let name = frame_clone.name.clone();
+            let id_key = frame_clone.id.key().to_string();
+
+            debug!("[{}] msg-final {} {}", rx, name, id_key);
+            let reply = FrameReply {
+                id: ReplyId { id: id_key.clone(), chunk: None },
+                name: frame_clone.name,
+                tx: frame_clone.rx,
+                rx: frame_clone.tx,
+                msg: serde_json::Value::Null,
+                err: serde_json::Value::Null,
+            };
+
+            // Construct reply_id_obj the same way as for chunks
+            let mut reply_id_obj = Object::new();
+            reply_id_obj
+                .insert("id".to_string(), surrealdb::Value::from_inner(SqlValue::Strand(Strand::from(id_key.clone()))));
+            reply_id_obj.insert("chunk".to_string(), surrealdb::Value::from_inner(SqlValue::None));
+
+            let key = RecordIdKey::from(reply_id_obj);
+            let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, key);
+
+            let reply_query = include_str!("../sql/reply.surql");
+            if let Err(e) = engine
+                .db()
+                .query(reply_query)
+                .bind(("reply_id", reply_id))
+                .bind(("reply", reply))
+                .bind(("msg_id", frame_clone.id))
+                .await
+            {
+                error!("[{}] msg-final-error {} {} {}", rx, name, id_key, e);
+            }
+        });
+
+        self.tx = Some(tx);
+        handle
     }
 
     /// Internal method to prepare and send a message
@@ -1082,11 +1131,17 @@ impl<T: Actor> ActorContext<T> {
         reply_id: &RecordId,
         options: SendOptions,
     ) -> Result<ReplyStream<RT>, SystemActorError> {
+        // Debug print for starting to wait for replies
+        debug!("[{}] reply-wait {} {}", self.id().record_id(), std::any::type_name::<RT>(), reply_id.key());
+
         // Set up the live query for replies
-        let query = format!("LIVE SELECT * FROM {} WHERE id.id = '{}'", DB_TABLE_REPLY, reply_id.key());
+        let query =
+            format!("LIVE SELECT id.{{id, chunk}}, * FROM {} WHERE id.id = '{}'", DB_TABLE_REPLY, reply_id.key());
+        debug!("[{}] reply-live {}", self.id().record_id(), query);
 
         let mut res = self.engine().db().query(&query).await?;
         let notification_stream = res.stream::<Notification<FrameReply>>(0)?;
+        let self_id = self.id().clone();
 
         // Transform the notification stream into a reply stream
         let stream = notification_stream
@@ -1106,6 +1161,15 @@ impl<T: Actor> ActorContext<T> {
             // Process each reply
             .map(move |reply| -> Result<RT, SystemActorError> {
                 let reply = reply?;
+
+                // Debug print for each received reply
+                debug!(
+                    "[{}] reply-recv {} {} chunk={:?}",
+                    self_id.record_id(),
+                    std::any::type_name::<RT>(),
+                    reply.id.id,
+                    reply.id.chunk
+                );
 
                 // Check for error responses
                 if !reply.err.is_null() {
