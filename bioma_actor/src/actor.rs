@@ -1091,6 +1091,94 @@ impl<T: Actor> ActorContext<T> {
         self.wait_for_replies::<RT>(&reply_id, options).await
     }
 
+    /// Sends a message and collects all replies into a Vec.
+    ///
+    /// This is a convenience method that handles the boilerplate of collecting
+    /// all items from a reply stream after sending a message.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M`: The message handler type
+    /// * `MT`: The message type being sent
+    ///
+    /// # Arguments
+    ///
+    /// * `message`: The message to send
+    /// * `to`: The recipient actor ID  
+    /// * `options`: Send options controlling timeout and other behaviors
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing either:
+    /// - `Ok(Vec<M::Response>)`: All collected replies
+    /// - `Err(SystemActorError)`: If sending or collecting fails
+    pub async fn send_and_collect<M, MT>(
+        &self,
+        message: MT,
+        to: &ActorId,
+        options: SendOptions,
+    ) -> Result<Vec<M::Response>, SystemActorError>
+    where
+        M: Message<MT>,
+        MT: MessageType,
+    {
+        let mut stream = self.send::<M, MT>(message, to, options).await?;
+        let mut results = Vec::new();
+
+        while let Some(result) = stream.next().await {
+            results.push(result?);
+        }
+
+        Ok(results)
+    }
+
+    /// Sends a message and waits for exactly one reply.
+    ///
+    /// This is a convenience method for cases where only a single reply is expected.
+    /// It will return an error if more than one reply is received.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M`: The message handler type
+    /// * `MT`: The message type being sent
+    ///
+    /// # Arguments
+    ///
+    /// * `message`: The message to send
+    /// * `to`: The recipient actor ID
+    /// * `options`: Send options controlling timeout and other behaviors
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing either:
+    /// - `Ok(M::Response)`: The single reply
+    /// - `Err(SystemActorError)`: If sending fails, no reply is received, or multiple replies are received
+    pub async fn wait_reply<M, MT>(
+        &self,
+        message: MT,
+        to: &ActorId,
+        options: SendOptions,
+    ) -> Result<M::Response, SystemActorError>
+    where
+        M: Message<MT>,
+        MT: MessageType,
+    {
+        let mut stream = self.send::<M, MT>(message, to, options).await?;
+
+        if let Some(first) = stream.next().await {
+            let result = first?;
+
+            // Ensure there are no additional replies
+            if stream.next().await.is_some() {
+                return Err(SystemActorError::MessageReply("Expected single reply but received multiple".into()));
+            }
+
+            Ok(result)
+        } else {
+            Err(SystemActorError::MessageReply("No reply received".into()))
+        }
+    }
+
     /// Waits for and streams all replies to a sent message.
     ///
     /// This method establishes a live query to receive replies as they arrive. The reply
