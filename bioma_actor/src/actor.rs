@@ -3,10 +3,6 @@ use futures::{future, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use surrealdb::RecordIdKey;
-use surrealdb::{
-    sql::{Number, Strand, Value as SqlValue},
-    Object,
-};
 use tokio::sync::mpsc;
 // use std::any::type_name;
 use std::fmt::Debug;
@@ -141,19 +137,19 @@ impl ReplyId {
 
     /// Converts the ReplyId to a SurrealDB record ID
     pub fn to_record_id(&self) -> surrealdb::RecordId {
-        use surrealdb::{
-            sql::{Number, Strand, Value as SqlValue},
-            Object, RecordIdKey,
-        };
-
-        let mut obj = Object::new();
-        obj.insert("id".to_string(), surrealdb::Value::from_inner(SqlValue::Strand(Strand::from(self.id.clone()))));
+        let mut obj = surrealdb::Object::new();
+        obj.insert(
+            "id".to_string(),
+            surrealdb::Value::from_inner(surrealdb::sql::Value::Strand(surrealdb::sql::Strand::from(self.id.clone()))),
+        );
 
         obj.insert(
             "chunk".to_string(),
             match self.chunk {
-                Some(chunk) => surrealdb::Value::from_inner(SqlValue::Number(Number::Int(chunk as i64))),
-                None => surrealdb::Value::from_inner(SqlValue::None),
+                Some(chunk) => surrealdb::Value::from_inner(surrealdb::sql::Value::Number(
+                    surrealdb::sql::Number::Int(chunk as i64),
+                )),
+                None => surrealdb::Value::from_inner(surrealdb::sql::Value::None),
             },
         );
 
