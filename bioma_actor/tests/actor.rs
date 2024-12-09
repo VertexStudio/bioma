@@ -3,7 +3,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use test_log::test;
 use tokio::time::{sleep, Duration};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 // Custom error type for test actors
 #[derive(Debug, thiserror::Error)]
@@ -37,10 +37,11 @@ struct TestActor {
 impl Message<TestMessage> for TestActor {
     type Response = TestResponse;
 
-    async fn handle(&mut self, _ctx: &mut ActorContext<Self>, msg: &TestMessage) -> Result<Self::Response, TestError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &TestMessage) -> Result<(), TestError> {
         self.count += 1;
         let response = TestResponse { content: format!("Received: {}", msg.content), count: self.count };
-        Ok(response)
+        ctx.reply(response).await?;
+        Ok(())
     }
 }
 
@@ -123,14 +124,19 @@ async fn test_actor_message_handling() -> Result<(), TestError> {
     let (relay_actor_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_actor_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Send a message and check the response
+    // Send a message and collect response from stream
     let message = TestMessage { content: "Hello, Actor!".to_string() };
-    let response =
+    let mut response_stream =
         relay_actor_ctx.send::<TestActor, TestMessage>(message, &test_actor_id, SendOptions::default()).await?;
 
-    info!("Received response: {:?}", response);
-    assert_eq!(response.content, "Received: Hello, Actor!");
-    assert_eq!(response.count, 1);
+    // Get first (and only) response from stream
+    if let Some(Ok(response)) = response_stream.next().await {
+        info!("Received response: {:?}", response);
+        assert_eq!(response.content, "Received: Hello, Actor!");
+        assert_eq!(response.count, 1);
+    } else {
+        panic!("No response received");
+    }
 
     // Terminate the actor
     test_handle.abort();
@@ -161,18 +167,22 @@ async fn test_actor_multiple_messages() -> Result<(), TestError> {
     // Send multiple messages
     for i in 1..=5 {
         let message = TestMessage { content: format!("Message {}", i) };
-        let response =
+        let mut response_stream =
             relay_actor_ctx.send::<TestActor, TestMessage>(message, &test_actor_id, SendOptions::default()).await?;
-        info!("Received response: {:?}", response);
-        assert_eq!(response.content, format!("Received: Message {}", i));
-        assert_eq!(response.count, i);
+
+        if let Some(Ok(response)) = response_stream.next().await {
+            info!("Received response: {:?}", response);
+            assert_eq!(response.content, format!("Received: Message {}", i));
+            assert_eq!(response.count, i);
+        } else {
+            panic!("No response received for message {}", i);
+        }
     }
 
     // Terminate the actor
     test_handle.abort();
 
     dbg_export_db!(engine);
-
     Ok(())
 }
 
@@ -196,11 +206,16 @@ async fn test_actor_lifecycle() -> Result<(), TestError> {
 
     // Send a message to ensure the actor is working
     let message = TestMessage { content: "Lifecycle test".to_string() };
-    let response =
+    let mut response_stream =
         relay_actor_ctx.send::<TestActor, TestMessage>(message, &test_actor_id, SendOptions::default()).await?;
-    info!("Received response: {:?}", response);
-    assert_eq!(response.content, "Received: Lifecycle test");
-    assert_eq!(response.count, 1);
+
+    if let Some(Ok(response)) = response_stream.next().await {
+        info!("Received response: {:?}", response);
+        assert_eq!(response.content, "Received: Lifecycle test");
+        assert_eq!(response.count, 1);
+    } else {
+        panic!("No response received");
+    }
 
     // Terminate the actor
     test_handle.abort();
@@ -210,11 +225,10 @@ async fn test_actor_lifecycle() -> Result<(), TestError> {
     let message = TestMessage { content: "After termination".to_string() };
     let options = SendOptions::builder().timeout(Duration::from_secs(1)).build();
     let result = relay_actor_ctx.send::<TestActor, TestMessage>(message, &test_actor_id, options).await;
-    info!("{:?}", result);
+
     assert!(result.is_err());
 
     dbg_export_db!(engine);
-
     Ok(())
 }
 
@@ -237,16 +251,17 @@ async fn test_actor_error_handling() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_actor_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Trigger the error
-    let response =
-        relay_actor_ctx.send::<ErrorActor, TriggerError>(TriggerError, &error_actor_id, SendOptions::default()).await;
-    info!("{:?}", response);
-    assert!(response.is_err());
+    let mut response_stream =
+        relay_actor_ctx.send::<ErrorActor, TriggerError>(TriggerError, &error_actor_id, SendOptions::default()).await?;
+
+    // Should receive error or no response
+    let result = response_stream.next().await;
+    assert!(result.is_none() || result.unwrap().is_err());
 
     // Wait for actor to finish
     let _ = error_handle.await;
 
     dbg_export_db!(engine);
-
     Ok(())
 }
 
@@ -276,13 +291,10 @@ impl Actor for StatefulActor {
 impl Message<IncrementCount> for StatefulActor {
     type Response = u32;
 
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        _msg: &IncrementCount,
-    ) -> Result<Self::Response, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &IncrementCount) -> Result<(), Self::Error> {
         self.count += 1;
-        Ok(self.count)
+        ctx.reply(self.count).await?;
+        Ok(())
     }
 }
 
@@ -311,11 +323,16 @@ async fn test_actor_state_persistence() -> Result<(), TestError> {
     let (relay_actor_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Increment the count
-    let response: u32 = relay_actor_ctx
+    // Increment the count and get response
+    let mut response_stream = relay_actor_ctx
         .send::<StatefulActor, IncrementCount>(IncrementCount, &actor_id, SendOptions::default())
         .await?;
-    assert_eq!(response, 1);
+
+    if let Some(Ok(count)) = response_stream.next().await {
+        assert_eq!(count, 1);
+    } else {
+        panic!("No response received");
+    }
 
     // Terminate the actor
     actor_handle.abort();
@@ -338,9 +355,15 @@ async fn test_actor_state_persistence() -> Result<(), TestError> {
     });
 
     // Increment the count again
-    let response: u32 = relay_actor_ctx
+    let mut response_stream = relay_actor_ctx
         .send::<StatefulActor, IncrementCount>(IncrementCount, &actor_id, SendOptions::default())
         .await?;
+
+    let response = if let Some(Ok(count)) = response_stream.next().await {
+        count
+    } else {
+        panic!("No response received");
+    };
     assert_eq!(response, 2);
 
     // Terminate the restored actor
@@ -361,12 +384,9 @@ struct LargeMessage {
 impl Message<LargeMessage> for StatefulActor {
     type Response = usize;
 
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        msg: &LargeMessage,
-    ) -> Result<Self::Response, Self::Error> {
-        Ok(msg.data.len())
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &LargeMessage) -> Result<(), Self::Error> {
+        ctx.reply(msg.data.len()).await?;
+        Ok(())
     }
 }
 
@@ -399,12 +419,16 @@ async fn test_large_message_mem_db() -> Result<(), TestError> {
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
     // Send the large message
-    let response: usize = relay_actor_ctx
+    let mut response_stream = relay_actor_ctx
         .send::<StatefulActor, LargeMessage>(large_message, &stateful_actor_id, SendOptions::default())
         .await?;
 
     // Verify the response
-    assert_eq!(response, 5_000_000);
+    if let Some(Ok(response)) = response_stream.next().await {
+        assert_eq!(response, 5_000_000);
+    } else {
+        panic!("No response received");
+    }
 
     // Terminate the stateful actor
     stateful_actor_handle.abort();
@@ -451,11 +475,15 @@ async fn test_large_message_db() -> Result<(), TestError> {
     .await?;
 
     // Send the large message
-    let response: usize = relay_actor_ctx
+    let mut response_stream = relay_actor_ctx
         .send::<StatefulActor, LargeMessage>(large_message, &stateful_actor_id, SendOptions::default())
         .await?;
 
-    // Verify the response
+    let response = if let Some(Ok(size)) = response_stream.next().await {
+        size
+    } else {
+        panic!("No response received");
+    };
     assert_eq!(response, msg_size);
 
     // Terminate the stateful actor
