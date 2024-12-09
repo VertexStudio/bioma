@@ -2,11 +2,12 @@ use crate::engine::{Engine, Record};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::mpsc;
 // use std::any::type_name;
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
+use std::{borrow::Cow, sync::atomic::AtomicU64};
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
 use tracing::{debug, error, trace};
 
@@ -107,11 +108,17 @@ impl FrameMessage {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReplyId {
+    id: String,
+    chunk: Option<u64>,
+}
+
 /// The message frame that is sent between actors
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FrameReply {
     /// Message id created with a ULID
-    id: RecordId,
+    id: ReplyId,
     /// Message name (usually a type name)
     pub name: Cow<'static, str>,
     /// Sender
@@ -163,11 +170,9 @@ where
     /// An implementation of `Future` that resolves to a `Result` containing either:
     /// - `Ok(Self::Response)`: The successful response to the message.
     /// - `Err(Self::Error)`: An error that occurred during message handling.
-    fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &MT,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>>;
+    /// Handles a message. Returns Result<(), Error>
+    /// Uses ctx.reply() to send responses during processing
+    fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &MT) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Handle and reply to a message.
     ///
@@ -189,11 +194,22 @@ where
         ctx: &mut ActorContext<Self>,
         message: &MT,
         frame: &FrameMessage,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+    ) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
-            let response = self.handle(ctx, message).await;
-            ctx.reply::<Self, MT>(frame, &response).await?;
-            response
+            // Begin message processing
+            ctx.begin_message_processing(frame.clone()).await;
+
+            // Call handle() which will use ctx.reply() to send responses
+            let result = self.handle(ctx, message).await;
+
+            // Clean up the reply stream - this sends the final message
+            ctx.finish_message_processing().await;
+
+            // Map the result to the expected response type
+            match result {
+                Ok(()) => Ok(()),
+                Err(e) => Err(e),
+            }
         }
     }
 
@@ -220,7 +236,7 @@ where
     ) -> impl Future<Output = Result<Self::Response, SystemActorError>> {
         async move {
             let (_, reply_id, _) = ctx.prepare_and_send_message::<MT>(&message, to).await?;
-            ctx.wait_for_reply::<Self::Response>(&reply_id, options).await
+            ctx.wait_for_replies::<Self::Response>(&reply_id, options).await
         }
     }
 }
@@ -384,8 +400,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                         let actor_state = actor_record.state;
                         let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
-                        let ctx =
-                            ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
+                        let ctx = ActorContext::new(engine.clone(), id.clone());
                         return Ok((ctx, actor));
                     }
                 }
@@ -402,7 +417,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                 engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
 
             // Create and return the actor context
-            let ctx = ActorContext { engine: engine.clone(), id: id.clone(), _marker: std::marker::PhantomData };
+            let ctx = ActorContext::new(engine.clone(), id.clone());
             Ok((ctx, actor))
         }
     }
@@ -475,10 +490,72 @@ pub struct ActorRecord {
 pub struct ActorContext<T: Actor> {
     engine: Engine,
     id: ActorId,
+    tx: Option<mpsc::UnboundedSender<Value>>,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: Actor> ActorContext<T> {
+    /// Create a new actor context
+    fn new(engine: Engine, id: ActorId) -> Self {
+        Self { engine, id, tx: None, _marker: std::marker::PhantomData }
+    }
+
+    // Called at the start of message processing to set up reply stream
+    async fn begin_message_processing(&mut self, frame: FrameMessage) {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let engine = self.engine.clone();
+        let frame_clone = frame.clone();
+
+        tokio::spawn(async move {
+            let chunk_counter = AtomicU64::new(1);
+
+            while let Some(value) = rx.recv().await {
+                let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let reply = FrameReply {
+                    id: ReplyId { id: frame_clone.id.key().to_string(), chunk: Some(chunk) },
+                    name: frame_clone.name.clone(),
+                    tx: frame_clone.rx.clone(),
+                    rx: frame_clone.tx.clone(),
+                    msg: value,
+                    err: serde_json::Value::Null,
+                };
+
+                let reply_query = include_str!("../sql/reply.surql");
+                let _ = engine
+                    .db()
+                    .query(reply_query)
+                    .bind((
+                        "reply_id",
+                        RecordId::from_table_key(DB_TABLE_REPLY, format!("{}-{}", frame_clone.id.key(), chunk)),
+                    ))
+                    .bind(("reply", reply))
+                    .bind(("msg_id", frame_clone.id.clone()))
+                    .await;
+            }
+
+            // Send final reply when channel closes
+            let reply = FrameReply {
+                id: ReplyId { id: frame_clone.id.key().to_string(), chunk: None },
+                name: frame_clone.name,
+                tx: frame_clone.rx,
+                rx: frame_clone.tx,
+                msg: serde_json::Value::Null,
+                err: serde_json::Value::Null,
+            };
+
+            let reply_query = include_str!("../sql/reply.surql");
+            let _ = engine
+                .db()
+                .query(reply_query)
+                .bind(("reply_id", RecordId::from_table_key(DB_TABLE_REPLY, frame_clone.id.key().to_string())))
+                .bind(("reply", reply))
+                .bind(("msg_id", frame_clone.id))
+                .await;
+        });
+
+        self.tx = Some(tx);
+    }
+
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
         let query = include_str!("../sql/unreplied_messages.surql");
         let mut res = self.engine().db().query(query).bind(("rx", self.id.record_id())).await?;
@@ -634,7 +711,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
-        self.wait_for_reply::<M::Response>(&reply_id, options).await
+        self.wait_for_replies::<M::Response>(&reply_id, options).await
     }
 
     /// Send a message to an actor without waiting for a reply.
@@ -696,14 +773,15 @@ impl<T: Actor> ActorContext<T> {
         RT: MessageType,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to).await?;
-        self.wait_for_reply::<RT>(&reply_id, options).await
+        self.wait_for_replies::<RT>(&reply_id, options).await
     }
 
     /// Wait for a reply to a sent message
-    async fn wait_for_reply<RT>(&self, reply_id: &RecordId, options: SendOptions) -> Result<RT, SystemActorError>
-    where
-        RT: MessageType,
-    {
+    async fn wait_for_replies<RT: MessageType>(
+        &self,
+        reply_id: &RecordId,
+        options: SendOptions,
+    ) -> Result<RT, SystemActorError> {
         let mut stream = self.engine().db().select(reply_id).live().await?;
 
         let notification = tokio::time::timeout(options.timeout, stream.next())
@@ -715,7 +793,7 @@ impl<T: Actor> ActorContext<T> {
         let response = match notification.action {
             Action::Create => {
                 let data = &notification.data;
-                debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
+                // debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
                 Ok(data.clone())
             }
             _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
@@ -756,54 +834,20 @@ impl<T: Actor> ActorContext<T> {
     /// - The receiver ID in the request doesn't match the current actor's ID.
     /// - There's an issue with serializing the response or error.
     /// - The database query to store the reply fails.
-    async fn reply<M, MT>(
-        &self,
-        request: &FrameMessage,
-        message: &Result<M::Response, T::Error>,
-    ) -> Result<(), SystemActorError>
-    where
-        M: Message<MT>,
-        MT: MessageType,
-    {
-        let msg_value = match message {
-            Ok(msg) => serde_json::to_value(&msg)?,
-            Err(err) => serde_json::to_value(&err.to_string())?,
-        };
-
-        // Use the request id as the reply id
-        let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, request.id.key().to_string());
-
-        // Assert request.rx == self, can only reply to messages sent to us
-        if request.rx != self.id().record_id() {
-            return Err(SystemActorError::IdMismatch(request.tx.clone(), self.id().record_id()));
+    pub async fn reply<R: MessageType>(&self, response: R) -> Result<(), SystemActorError> {
+        if let Some(tx) = &self.tx {
+            let value = serde_json::to_value(&response)?;
+            tx.send(value).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
+            Ok(())
+        } else {
+            Err(SystemActorError::MessageReply("No active message processing".into()))
         }
+    }
 
-        let reply = FrameReply {
-            id: reply_id.clone(),
-            name: std::any::type_name::<M::Response>().into(),
-            tx: request.rx.clone(),
-            rx: request.tx.clone(),
-            msg: msg_value.clone(),
-            err: serde_json::Value::Null,
-        };
-
-        debug!("[{}] msg-rply {} {} {} {}", &self.id().record_id(), &reply.name, &reply_id, &reply.tx, &reply.msg);
-
-        let reply_query = include_str!("../sql/reply.surql");
-
-        let response = self
-            .engine()
-            .db()
-            .query(reply_query)
-            .bind(("reply_id", reply_id))
-            .bind(("reply", reply))
-            .bind(("msg_id", request.id.clone()))
-            .await?;
-        let response = response.check();
-        if let Err(e) = response {
-            error!("msg-rply {:?}", e);
-        }
-        Ok(())
+    // Called when handle() returns to clean up
+    async fn finish_message_processing(&mut self) {
+        // Drop channel to trigger final reply
+        self.tx = None;
     }
 
     /// Receive messages for this actor
@@ -961,16 +1005,12 @@ mod tests {
     impl Message<Ping> for PongActor {
         type Response = Pong;
 
-        async fn handle(
-            &mut self,
-            _ctx: &mut ActorContext<Self>,
-            _message: &Ping,
-        ) -> Result<Self::Response, Self::Error> {
+        async fn handle(&mut self, _ctx: &mut ActorContext<Self>, _message: &Ping) -> Result<(), Self::Error> {
             if self.times == 0 {
                 Err(PongActorError::PongLimitReached)
             } else {
                 self.times -= 1;
-                Ok(Pong { times: self.times })
+                Ok(())
             }
         }
     }
