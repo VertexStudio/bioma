@@ -128,6 +128,40 @@ pub struct ReplyId {
     chunk: Option<u64>,
 }
 
+impl ReplyId {
+    /// Creates a new ReplyId for a chunk in a stream
+    pub fn new_chunk(id: String, chunk: u64) -> Self {
+        Self { id, chunk: Some(chunk) }
+    }
+
+    /// Creates a new ReplyId for a final reply
+    pub fn new_final(id: String) -> Self {
+        Self { id, chunk: None }
+    }
+
+    /// Converts the ReplyId to a SurrealDB record ID
+    pub fn to_record_id(&self) -> surrealdb::RecordId {
+        use surrealdb::{
+            sql::{Number, Strand, Value as SqlValue},
+            Object, RecordIdKey,
+        };
+
+        let mut obj = Object::new();
+        obj.insert("id".to_string(), surrealdb::Value::from_inner(SqlValue::Strand(Strand::from(self.id.clone()))));
+
+        obj.insert(
+            "chunk".to_string(),
+            match self.chunk {
+                Some(chunk) => surrealdb::Value::from_inner(SqlValue::Number(Number::Int(chunk as i64))),
+                None => surrealdb::Value::from_inner(SqlValue::None),
+            },
+        );
+
+        let key = RecordIdKey::from(obj);
+        surrealdb::RecordId::from_table_key(DB_TABLE_REPLY, key)
+    }
+}
+
 /// A frame containing a reply message from an actor.
 ///
 /// Reply frames can represent either:
@@ -149,6 +183,25 @@ pub struct FrameReply {
     /// Error message
     #[serde(default)]
     pub err: Value,
+}
+
+impl FrameReply {
+    /// Creates a new reply frame for a chunk in a streaming response
+    pub fn new_chunk(
+        id: String,
+        chunk_num: u64,
+        name: Cow<'static, str>,
+        tx: surrealdb::RecordId,
+        rx: surrealdb::RecordId,
+        msg: Value,
+    ) -> Self {
+        Self { id: ReplyId::new_chunk(id, chunk_num), name, tx, rx, msg, err: Value::Null }
+    }
+
+    /// Creates a new reply frame for a final response
+    pub fn new_final(id: String, name: Cow<'static, str>, tx: surrealdb::RecordId, rx: surrealdb::RecordId) -> Self {
+        Self { id: ReplyId::new_final(id), name, tx, rx, msg: Value::Null, err: Value::Null }
+    }
 }
 
 /// A stream of replies from an actor in response to a message.
@@ -786,27 +839,16 @@ impl<T: Actor> ActorContext<T> {
                 let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 debug!("[{}] msg-chunk {} {}-{}", frame_clone.rx, frame_clone.name, frame_clone.id.key(), chunk);
 
-                let reply = FrameReply {
-                    id: ReplyId { id: frame_clone.id.key().to_string(), chunk: Some(chunk) },
-                    name: frame_clone.name.clone(),
-                    tx: frame_clone.rx.clone(),
-                    rx: frame_clone.tx.clone(),
-                    msg: value,
-                    err: serde_json::Value::Null,
-                };
-
-                let mut reply_id_obj = Object::new();
-                reply_id_obj.insert(
-                    "id".to_string(),
-                    surrealdb::Value::from_inner(SqlValue::Strand(Strand::from(frame_clone.id.key().to_string()))),
-                );
-                reply_id_obj.insert(
-                    "chunk".to_string(),
-                    surrealdb::Value::from_inner(SqlValue::Number(Number::Int(chunk as i64))),
+                let reply = FrameReply::new_chunk(
+                    frame_clone.id.key().to_string(),
+                    chunk,
+                    frame_clone.name.clone(),
+                    frame_clone.rx.clone(),
+                    frame_clone.tx.clone(),
+                    value,
                 );
 
-                let key = RecordIdKey::from(reply_id_obj);
-                let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, key);
+                let reply_id = reply.id.to_record_id();
 
                 let reply_query = include_str!("../sql/reply.surql");
                 let result = engine
@@ -834,23 +876,10 @@ impl<T: Actor> ActorContext<T> {
             let id_key = frame_clone.id.key().to_string();
 
             debug!("[{}] msg-final {} {}", rx, name, id_key);
-            let reply = FrameReply {
-                id: ReplyId { id: id_key.clone(), chunk: None },
-                name: frame_clone.name,
-                tx: frame_clone.rx,
-                rx: frame_clone.tx,
-                msg: serde_json::Value::Null,
-                err: serde_json::Value::Null,
-            };
 
-            // Construct reply_id_obj the same way as for chunks
-            let mut reply_id_obj = Object::new();
-            reply_id_obj
-                .insert("id".to_string(), surrealdb::Value::from_inner(SqlValue::Strand(Strand::from(id_key.clone()))));
-            reply_id_obj.insert("chunk".to_string(), surrealdb::Value::from_inner(SqlValue::None));
+            let reply = FrameReply::new_final(id_key.clone(), frame_clone.name, frame_clone.rx, frame_clone.tx);
 
-            let key = RecordIdKey::from(reply_id_obj);
-            let reply_id = RecordId::from_table_key(DB_TABLE_REPLY, key);
+            let reply_id = reply.id.to_record_id();
 
             let reply_query = include_str!("../sql/reply.surql");
             if let Err(e) = engine
