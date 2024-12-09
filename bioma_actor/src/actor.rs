@@ -1,5 +1,5 @@
 use crate::engine::{Engine, Record};
-use futures::{Stream, StreamExt};
+use futures::{future, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -9,6 +9,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::{borrow::Cow, sync::atomic::AtomicU64};
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
+use tokio::time::timeout;
 use tracing::{debug, error, trace};
 
 // Constants for database table names
@@ -151,6 +152,7 @@ impl<T> MessageType for T where T: Clone + Serialize + for<'de> Deserialize<'de>
 pub trait Message<MT>: Actor
 where
     MT: MessageType,
+    Self::Response: 'static,
 {
     type Response: Clone + Serialize + for<'de> Deserialize<'de> + Send + Sync;
 
@@ -236,7 +238,10 @@ where
         message: MT,
         to: &ActorId,
         options: SendOptions,
-    ) -> impl Future<Output = Result<Self::Response, SystemActorError>> {
+    ) -> impl Future<Output = Result<ReplyStream<Self::Response>, SystemActorError>>
+    where
+        Self::Response: 'static,
+    {
         async move {
             let (_, reply_id, _) = ctx.prepare_and_send_message::<MT>(&message, to).await?;
             ctx.wait_for_replies::<Self::Response>(&reply_id, options).await
@@ -497,6 +502,8 @@ pub struct ActorContext<T: Actor> {
     _marker: std::marker::PhantomData<T>,
 }
 
+pub type ReplyStream<T> = Pin<Box<dyn Stream<Item = Result<T, SystemActorError>> + Send>>;
+
 impl<T: Actor> ActorContext<T> {
     /// Create a new actor context
     fn new(engine: Engine, id: ActorId) -> Self {
@@ -709,10 +716,11 @@ impl<T: Actor> ActorContext<T> {
         message: MT,
         to: &ActorId,
         options: SendOptions,
-    ) -> Result<M::Response, SystemActorError>
+    ) -> Result<ReplyStream<M::Response>, SystemActorError>
     where
         M: Message<MT>,
         MT: MessageType,
+        M::Response: 'static,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
         self.wait_for_replies::<M::Response>(&reply_id, options).await
@@ -771,45 +779,72 @@ impl<T: Actor> ActorContext<T> {
     /// A `Result` containing either:
     /// - `Ok(RT)`: The successfully received reply of type `RT`.
     /// - `Err(SystemActorError)`: An error if the sending or receiving process fails.
-    pub async fn send_as<MT, RT>(&self, message: MT, to: ActorId, options: SendOptions) -> Result<RT, SystemActorError>
+    pub async fn send_as<MT, RT>(
+        &self,
+        message: MT,
+        to: ActorId,
+        options: SendOptions,
+    ) -> Result<ReplyStream<RT>, SystemActorError>
     where
         MT: MessageType,
-        RT: MessageType,
+        RT: MessageType + 'static,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to).await?;
         self.wait_for_replies::<RT>(&reply_id, options).await
     }
 
     /// Wait for a reply to a sent message
-    async fn wait_for_replies<RT: MessageType>(
+    /// Wait for and stream all replies to a sent message
+    async fn wait_for_replies<RT: MessageType + 'static>(
         &self,
         reply_id: &RecordId,
         options: SendOptions,
-    ) -> Result<RT, SystemActorError> {
-        let mut stream = self.engine().db().select(reply_id).live().await?;
+    ) -> Result<ReplyStream<RT>, SystemActorError> {
+        // Set up the live query for replies
+        let query = format!("LIVE SELECT * FROM {} WHERE id.id = '{}'", DB_TABLE_REPLY, reply_id.key());
 
-        let notification = tokio::time::timeout(options.timeout, stream.next())
-            .await
-            .map_err(|_| SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout))?
-            .ok_or_else(|| SystemActorError::LiveStream("Empty stream".into()))?;
+        let mut res = self.engine().db().query(&query).await?;
+        let notification_stream = res.stream::<Notification<FrameReply>>(0)?;
 
-        let notification: Notification<FrameReply> = notification?;
-        let response = match notification.action {
-            Action::Create => {
-                let data = &notification.data;
-                // debug!("[{}] msg-done {} {} {} {}", &self.id().record_id(), &data.name, &data.id, &data.rx, &data.msg);
-                Ok(data.clone())
+        // Transform the notification stream into a reply stream
+        let stream = notification_stream
+            // Only process Create actions
+            .filter(|n| future::ready(matches!(n, Ok(n) if n.action == Action::Create)))
+            .map(|n| -> Result<FrameReply, SystemActorError> {
+                let n = n?;
+                Ok(n.data)
+            })
+            // Take messages until we get final message (chunk = None)
+            .take_while(|reply| {
+                future::ready(match reply {
+                    Ok(reply) => reply.id.chunk.is_some(), // Continue while we have chunks
+                    Err(_) => false,                       // Stop on error
+                })
+            })
+            // Process each reply
+            .map(move |reply| -> Result<RT, SystemActorError> {
+                let reply = reply?;
+
+                // Check for error responses
+                if !reply.err.is_null() {
+                    return Err(SystemActorError::MessageReply(reply.err.to_string().into()));
+                }
+
+                // Deserialize the message content
+                let response: RT = serde_json::from_value(reply.msg)?;
+                Ok(response)
+            });
+
+        // Apply timeout to the entire stream
+        let stream = Box::pin(stream);
+        let stream = stream.then(move |r| async move {
+            match timeout(options.timeout, future::ready(r)).await {
+                Ok(msg) => msg,
+                Err(_) => Err(SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout)),
             }
-            _ => Err(SystemActorError::LiveStream("Unexpected action".into())),
-        }?;
+        });
 
-        if !response.err.is_null() {
-            return Err(SystemActorError::MessageReply(response.err.to_string().into()));
-        }
-
-        let response = response.msg;
-        let response = serde_json::from_value(response)?;
-        Ok(response)
+        Ok(Box::pin(stream))
     }
 
     /// Reply to a received message
