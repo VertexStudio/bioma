@@ -215,7 +215,7 @@ impl Message<RetrieveContext> for Retriever {
                 // Take only the contexts, limited by the requested amount
                 let contexts = ranked_contexts.into_iter().map(|(context, _)| context).take(message.limit).collect();
 
-                ctx.reply(RetrievedContext { context: contexts });
+                ctx.reply(RetrievedContext { context: contexts }).await?;
                 Ok(())
             }
         }

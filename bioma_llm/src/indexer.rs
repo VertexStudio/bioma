@@ -448,7 +448,7 @@ impl Message<IndexGlobs> for Indexer {
         }
 
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
-        ctx.reply(Indexed { indexed, cached });
+        ctx.reply(Indexed { indexed, cached }).await?;
         Ok(())
     }
 }
@@ -495,7 +495,7 @@ impl Message<DeleteSource> for Indexer {
             }
         }
 
-        ctx.reply(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources });
+        ctx.reply(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources }).await?;
         Ok(())
     }
 }

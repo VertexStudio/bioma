@@ -108,7 +108,7 @@ impl Message<ChatMessages> for Chat {
             self.save(ctx).await?;
         }
 
-        ctx.reply(result);
+        ctx.reply(result).await?;
         Ok(())
     }
 }

@@ -89,7 +89,7 @@ impl Message<AnalyzePdf> for PdfAnalyzer {
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &AnalyzePdf) -> Result<(), PdfAnalyzerError> {
         info!("path {:?}", msg.file_path);
         let markdown = self.post_pdf_analyzer(&msg.file_path).await?;
-        ctx.reply(markdown);
+        ctx.reply(markdown).await?;
         Ok(())
     }
 }
