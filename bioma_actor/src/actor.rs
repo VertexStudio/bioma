@@ -341,7 +341,7 @@ where
         frame: &FrameMessage,
     ) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
-            // Set up reply stream first - if this fails, we fail early
+            // Set up reply stream first
             let handle = ctx.start_message_processing(frame.clone()).await;
 
             // Process message and store result
