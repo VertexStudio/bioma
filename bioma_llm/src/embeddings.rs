@@ -187,8 +187,8 @@ impl Message<TopK> for Embeddings {
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
-        let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
-        ctx.reply(results.map_err(EmbeddingsError::from));
+        let results: Vec<Similarity> = results.take(0).map_err(SystemActorError::from)?;
+        ctx.reply(results).await?;
         Ok(())
     }
 }
@@ -243,7 +243,7 @@ impl Message<StoreEmbeddings> for Embeddings {
             }
         }
 
-        ctx.reply(StoredEmbeddings { ids: embeddings_ids });
+        ctx.reply(StoredEmbeddings { ids: embeddings_ids }).await?;
         Ok(())
     }
 }
@@ -264,7 +264,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
         embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
 
         let embeddings = rx.await??;
-        ctx.reply(GeneratedEmbeddings { embeddings });
+        ctx.reply(GeneratedEmbeddings { embeddings }).await?;
         Ok(())
     }
 }

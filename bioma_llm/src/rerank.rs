@@ -49,7 +49,7 @@ impl Message<RankTexts> for Rerank {
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, rank_texts: &RankTexts) -> Result<(), RerankError> {
         if rank_texts.texts.is_empty() {
             warn!("No texts to rerank");
-            ctx.reply(RankedTexts { texts: vec![] });
+            ctx.reply(RankedTexts { texts: vec![] }).await?;
             return Ok(());
         }
 
@@ -62,7 +62,7 @@ impl Message<RankTexts> for Rerank {
             .send(RerankRequest { sender: tx, query: rank_texts.query.clone(), texts: rank_texts.texts.clone() })
             .await?;
 
-        ctx.reply(rx.await??);
+        ctx.reply(rx.await??).await?;
         Ok(())
     }
 }

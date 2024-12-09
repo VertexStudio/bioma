@@ -52,20 +52,29 @@ impl ActorFactory for TimeoutFactory {
 impl Message<BehaviorTick> for Timeout {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         let Some(child) = self.node.child(ctx, SpawnOptions::default()).await? else {
-            return Ok(BehaviorStatus::Success);
+            ctx.reply(BehaviorStatus::Success).await?;
+            return Ok(());
         };
 
-        match timeout(self.duration, ctx.send_as(BehaviorTick, child.clone(), SendOptions::default())).await {
-            Ok(Ok(status)) => Ok(status),
-            Ok(Err(e)) => Err(e.into()),
-            Err(_) => Ok(BehaviorStatus::Failure), // Timeout occurred
-        }
+        let status = match timeout(
+            self.duration,
+            ctx.send_as_and_wait_reply::<BehaviorTick, BehaviorStatus>(
+                BehaviorTick,
+                child.clone(),
+                SendOptions::default(),
+            ),
+        )
+        .await
+        {
+            Ok(Ok(status)) => status,
+            Ok(Err(_)) => BehaviorStatus::Failure,
+            Err(_) => BehaviorStatus::Failure,
+        };
+
+        ctx.reply(status).await?;
+        Ok(())
     }
 }
 

@@ -49,21 +49,24 @@ impl ActorFactory for SequenceFactory {
 impl Message<BehaviorTick> for Sequence {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         // Iterate over all children until one fails
         for child in self.node.children(ctx, SpawnOptions::default()).await? {
-            let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
+            let status = ctx.send_as_and_wait_reply(BehaviorTick, child, SendOptions::default()).await;
             match status {
                 Ok(BehaviorStatus::Success) => continue,
-                Ok(BehaviorStatus::Failure) => return Ok(BehaviorStatus::Failure),
-                Err(_e) => return Ok(BehaviorStatus::Failure),
+                Ok(BehaviorStatus::Failure) => {
+                    ctx.reply(BehaviorStatus::Failure).await?;
+                    return Ok(());
+                }
+                Err(_e) => {
+                    ctx.reply(BehaviorStatus::Failure).await?;
+                    return Ok(());
+                }
             }
         }
-        Ok(BehaviorStatus::Success)
+        ctx.reply(BehaviorStatus::Success).await?;
+        Ok(())
     }
 }
 
