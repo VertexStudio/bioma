@@ -197,13 +197,16 @@ where
     ) -> impl Future<Output = Result<(), Self::Error>> {
         async move {
             // Begin message processing
-            ctx.begin_message_processing(frame.clone()).await;
+            let handle = ctx.begin_message_processing(frame.clone()).await;
 
             // Call handle() which will use ctx.reply() to send responses
             let result = self.handle(ctx, message).await;
 
             // Clean up the reply stream - this sends the final message
             ctx.finish_message_processing().await;
+
+            // Wait for the reply stream to finish
+            handle.await.map_err(SystemActorError::from)?;
 
             // Map the result to the expected response type
             match result {
@@ -501,12 +504,12 @@ impl<T: Actor> ActorContext<T> {
     }
 
     // Called at the start of message processing to set up reply stream
-    async fn begin_message_processing(&mut self, frame: FrameMessage) {
+    async fn begin_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let engine = self.engine.clone();
         let frame_clone = frame.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let chunk_counter = AtomicU64::new(1);
 
             while let Some(value) = rx.recv().await {
@@ -554,6 +557,7 @@ impl<T: Actor> ActorContext<T> {
         });
 
         self.tx = Some(tx);
+        handle
     }
 
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
