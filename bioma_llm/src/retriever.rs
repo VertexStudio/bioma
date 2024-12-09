@@ -115,11 +115,7 @@ impl RetrievedContext {
 impl Message<RetrieveContext> for Retriever {
     type Response = RetrievedContext;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &RetrieveContext,
-    ) -> Result<RetrievedContext, RetrieverError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &RetrieveContext) -> Result<(), RetrieverError> {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(RetrieverError::EmbeddingsIdNotFound);
         };
@@ -139,7 +135,7 @@ impl Message<RetrieveContext> for Retriever {
                 info!("Searching for similarities");
                 let start = std::time::Instant::now();
                 let similarities = match ctx
-                    .send::<Embeddings, embeddings::TopK>(
+                    .send_and_wait_reply::<Embeddings, embeddings::TopK>(
                         embeddings_req,
                         embeddings_id,
                         SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -169,7 +165,7 @@ impl Message<RetrieveContext> for Retriever {
 
                     let rerank_req = RankTexts { query: text.clone(), texts };
                     let ranked_texts = ctx
-                        .send::<Rerank, RankTexts>(
+                        .send_and_wait_reply::<Rerank, RankTexts>(
                             rerank_req,
                             rerank_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -219,7 +215,8 @@ impl Message<RetrieveContext> for Retriever {
                 // Take only the contexts, limited by the requested amount
                 let contexts = ranked_contexts.into_iter().map(|(context, _)| context).take(message.limit).collect();
 
-                Ok(RetrievedContext { context: contexts })
+                ctx.reply(RetrievedContext { context: contexts });
+                Ok(())
             }
         }
     }
