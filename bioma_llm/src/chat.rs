@@ -68,11 +68,7 @@ pub struct ChatMessages {
 impl Message<ChatMessages> for Chat {
     type Response = ChatMessageResponse;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        messages: &ChatMessages,
-    ) -> Result<ChatMessageResponse, ChatError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, messages: &ChatMessages) -> Result<(), ChatError> {
         if messages.restart {
             self.history.clear();
         }
@@ -112,7 +108,8 @@ impl Message<ChatMessages> for Chat {
             self.save(ctx).await?;
         }
 
-        Ok(result)
+        ctx.reply(result);
+        Ok(())
     }
 }
 
