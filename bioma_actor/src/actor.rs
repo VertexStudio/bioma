@@ -324,13 +324,13 @@ where
     ///
     /// # Arguments
     ///
-    /// * `ctx` - The actor's context
-    /// * `message` - The message to process
-    /// * `frame` - The original message frame
+    /// * `ctx` - A mutable reference to the actor context
+    /// * `message` - A reference to the message to be handled
+    /// * `frame` - A reference to the original message frame
     ///
     /// # Returns
     ///
-    /// Returns a `Result` which is:
+    /// A `Result` which is:
     /// - `Ok(())` if the message was processed and all replies sent successfully
     /// - `Err(Self::Error)` if an error occurred during processing
     fn reply(
@@ -473,7 +473,7 @@ impl ActorId {
     ///
     /// # Returns
     ///
-    /// Returns a new `ActorId` instance with the generated id and the type name of the actor.
+    /// A new `ActorId` instance with the generated id and the type name of the actor.
     pub fn of<T: Actor>(uid: impl Into<Cow<'static, str>>) -> Self {
         let name = uid.into();
         Self { tag: std::any::type_name::<T>().into(), name }
@@ -690,7 +690,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
     ///
     /// # Returns
     ///
-    /// Returns a `Result<(), Self::Error>`:
+    /// A `Result<(), Self::Error>`:
     /// - `Ok(())` if the actor completes its work successfully.
     /// - `Err(Self::Error)` if an error occurs during the actor's execution.
     fn start(&mut self, ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>>;
@@ -820,7 +820,7 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Returns
     ///
-    /// Returns a JoinHandle for the reply processing task
+    /// A JoinHandle for the reply processing task
     async fn start_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
         debug!("[{}] msg-process-start {} {}", self.id().record_id(), frame.name, frame.id);
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -977,18 +977,18 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Type Parameters
     ///
-    /// * `M` - Message handler type
-    /// * `MT` - Message content type
+    /// * `M`: The message handler type, which must implement `Message<MT>`.
+    /// * `MT`: The message type, which must implement `MessageType`.
     ///
     /// # Arguments
     ///
-    /// * `message` - Message to send
-    /// * `to` - Recipient actor's ID
-    /// * `options` - Send configuration options
+    /// * `message`: The message to be sent.
+    /// * `to`: The `ActorId` of the recipient actor.
+    /// * `options`: The `SendOptions` for this message.
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing:
+    /// A `Result` containing:
     /// - `Ok(ReplyStream<M::Response>)` - Stream of replies
     /// - `Err(SystemActorError)` - If send fails
     ///
@@ -1020,7 +1020,6 @@ impl<T: Actor> ActorContext<T> {
     where
         M: Message<MT>,
         MT: MessageType,
-        M::Response: 'static,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
         self.wait_for_replies::<M::Response>(&reply_id, options).await
@@ -1110,7 +1109,7 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing either:
+    /// A `Result` containing either:
     /// - `Ok(ReplyStream<RT>)` - A stream of reply messages that can be consumed
     /// - `Err(SystemActorError)` - If setting up the reply stream fails
     ///
@@ -1238,7 +1237,7 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Returns
     ///
-    /// Returns a `Result` which is:
+    /// A `Result` which is:
     /// - `Ok(())` if the reply was sent successfully
     /// - `Err(SystemActorError)` if sending failed
     ///
@@ -1271,7 +1270,7 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing:
+    /// A `Result` containing:
     /// - `Ok(MessageStream)`: A pinned box containing a stream of `Result<FrameMessage, SystemActorError>`.
     /// - `Err(SystemActorError)`: If there's an error setting up the message stream.
     ///
