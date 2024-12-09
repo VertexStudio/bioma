@@ -3,7 +3,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use test_log::test;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 // Custom error type for test actors
 #[derive(Debug, thiserror::Error)]
