@@ -44,7 +44,7 @@ impl Actor for MainActor {
             info!("{} Sending message: {}", ctx.id(), starter);
             let chat_message = ChatMessage::user(starter.to_string());
             let response: ChatMessageResponse = ctx
-                .send::<Chat, ChatMessages>(
+                .send_and_wait_reply::<Chat, ChatMessages>(
                     ChatMessages { messages: vec![chat_message], restart: false, persist: false },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
