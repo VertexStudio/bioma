@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send the PDF for analysis
     let pdf_content = relay_ctx
-        .send::<PdfAnalyzer, AnalyzePdf>(
+        .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
             AnalyzePdf { file_path: file_path.clone() },
             &pdf_analyzer_id,
             SendOptions::default(),

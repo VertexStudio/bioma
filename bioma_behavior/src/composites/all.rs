@@ -50,17 +50,13 @@ impl ActorFactory for AllFactory {
 impl Message<BehaviorTick> for All {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         let children = self.node.children(ctx, SpawnOptions::default()).await?;
 
         // Create a future for each child and pin it
         let futures = children
             .iter()
-            .map(|child| Box::pin(ctx.send_as(BehaviorTick, child.clone(), SendOptions::default())))
+            .map(|child| Box::pin(ctx.send_as_and_wait_reply(BehaviorTick, child.clone(), SendOptions::default())))
             .collect::<Vec<_>>();
 
         // Use futures::future::select_all to run all futures concurrently
@@ -92,7 +88,8 @@ impl Message<BehaviorTick> for All {
             }
         }
 
-        Ok(overall_status)
+        ctx.reply(overall_status).await?;
+        Ok(())
     }
 }
 

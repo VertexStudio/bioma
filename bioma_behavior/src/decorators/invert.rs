@@ -47,23 +47,24 @@ impl ActorFactory for InvertFactory {
 impl Message<BehaviorTick> for Invert {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         let Some(child) = self.node.child(ctx, SpawnOptions::default()).await? else {
-            return Ok(BehaviorStatus::Failure);
+            ctx.reply(BehaviorStatus::Failure).await?;
+            return Ok(());
         };
-        // Execute the child node and invert its result
-        let status: Result<BehaviorStatus, SystemActorError> =
-            ctx.send_as(BehaviorTick, child.clone(), SendOptions::default()).await;
 
-        Ok(match status {
+        // Execute the child node and invert its result
+        let status = match ctx
+            .send_as_and_wait_reply::<BehaviorTick, BehaviorStatus>(BehaviorTick, child.clone(), SendOptions::default())
+            .await
+        {
             Ok(BehaviorStatus::Success) => BehaviorStatus::Failure,
             Ok(BehaviorStatus::Failure) => BehaviorStatus::Success,
-            Err(_) => BehaviorStatus::Success,
-        })
+            Err(_) => BehaviorStatus::Failure,
+        };
+
+        ctx.reply(status).await?;
+        Ok(())
     }
 }
 

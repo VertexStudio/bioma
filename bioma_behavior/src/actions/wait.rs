@@ -50,13 +50,10 @@ impl ActorFactory for WaitFactory {
 impl Message<BehaviorTick> for Wait {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         tokio::time::sleep(self.duration).await;
-        Ok(BehaviorStatus::Success)
+        ctx.reply(BehaviorStatus::Success).await?;
+        Ok(())
     }
 }
 

@@ -215,13 +215,18 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
 }
 
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
-    let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-    let mut retriever_actor = data.retriever_actor.actor.lock().await;
+    let retriever_ctx = data.retriever_actor.ctx.lock().await;
 
     let retrieve_context = body.clone();
 
     info!("Sending message to retriever actor");
-    let response = retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await;
+    let response = retriever_ctx
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            retriever_ctx.id(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
 
     match response {
         Ok(context) => {
@@ -250,7 +255,6 @@ struct ChatResponse {
 }
 
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
-    // Build query from all user messages
     let query = body
         .messages
         .iter()
@@ -262,34 +266,35 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.actor.lock().await;
+        let retriever_ctx = data.retriever_actor.ctx.lock().await;
         let retrieve_context = RetrieveContext {
             query: RetrieveQuery::Text(query.clone()),
             limit: 5,
             threshold: 0.0,
             source: body.source.clone(),
         };
-        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
+
+        retriever_ctx
+            .send_and_wait_reply::<Retriever, RetrieveContext>(
+                retrieve_context,
+                retriever_ctx.id(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
+            .await
     };
 
     match retrieved {
-        Ok(mut context) => {
-            // Reverse the context so most relevant results appear last in the prompt.
-            // This leverages LLM's recency bias - it tends to pay more attention to
-            // information that appears closer to the query.
-            context.context.reverse();
+        Ok(context) => {
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Create system message with text context
             let mut context_message = ChatMessage::system(
                 "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
                     .to_string()
                     + &context_content,
             );
 
-            // If there's an image in the context, use only the first one
+            // Handle image context if present
             if let Some(ctx) = context
                 .context
                 .iter()
@@ -297,7 +302,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             {
                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                     match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.source).await {
+                        Metadata::Image(_) => match tokio::fs::read(&source.source).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -323,7 +328,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             }
 
             let mut conversation = body.messages.clone();
-            if conversation.len() > 0 {
+            if !conversation.is_empty() {
                 conversation.insert(conversation.len() - 1, context_message.clone());
             } else {
                 conversation.push(context_message.clone());
@@ -331,12 +336,12 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             info!("Sending context to chat actor");
             let chat_response = {
-                let mut chat_ctx = data.chat_actor.ctx.lock().await;
-                let mut chat_actor = data.chat_actor.actor.lock().await;
-                chat_actor
-                    .handle(
-                        &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: false, persist: false },
+                let chat_ctx = data.chat_actor.ctx.lock().await;
+                chat_ctx
+                    .send_and_wait_reply::<Chat, ChatMessages>(
+                        ChatMessages { messages: conversation.clone(), restart: false, persist: false },
+                        chat_ctx.id(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                     )
                     .await
             };
@@ -370,15 +375,20 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.actor.lock().await;
+        let retriever_ctx = data.retriever_actor.ctx.lock().await;
         let retrieve_context = RetrieveContext {
             query: RetrieveQuery::Text(body.query.clone()),
             limit: 5,
             threshold: 0.0,
             source: body.source.clone(),
         };
-        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
+        retriever_ctx
+            .send_and_wait_reply::<Retriever, RetrieveContext>(
+                retrieve_context,
+                retriever_ctx.id(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
+            .await
     };
 
     match retrieved {
@@ -467,13 +477,18 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.actor.lock().await;
+    let indexer_ctx = data.indexer_actor.ctx.lock().await;
 
     let delete_source = body.clone();
 
     info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
-    let response = indexer_actor.handle(&mut indexer_ctx, &delete_source).await;
+    let response = indexer_ctx
+        .send_and_wait_reply::<Indexer, DeleteSource>(
+            delete_source,
+            indexer_ctx.id(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
 
     match response {
         Ok(result) => {
@@ -497,8 +512,7 @@ struct EmbeddingsQuery {
 }
 
 async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
-    let mut embeddings_actor = data.embeddings_actor.actor.lock().await;
-    let mut embeddings_ctx = data.embeddings_actor.ctx.lock().await;
+    let embeddings_ctx = data.embeddings_actor.ctx.lock().await;
 
     if body.model != "nomic-embed-text" {
         return HttpResponse::BadRequest().body("Invalid model");
@@ -518,8 +532,12 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
 
     // Process texts in chunks
     for chunk in texts.chunks(CHUNK_SIZE) {
-        match embeddings_actor
-            .handle(&mut embeddings_ctx, &GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) })
+        match embeddings_ctx
+            .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
+                GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
+                embeddings_ctx.id(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
             .await
         {
             Ok(chunk_response) => {
@@ -547,14 +565,18 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
 
-    let mut rerank_actor = data.rerank_actor.actor.lock().await;
-    let mut rerank_ctx = data.rerank_actor.ctx.lock().await;
+    let rerank_ctx = data.rerank_actor.ctx.lock().await;
 
     println!("Rerank query: {:#?}", body.query);
     println!("Rerank texts: {:#?}", body.texts);
 
-    let response =
-        rerank_actor.handle(&mut rerank_ctx, &RankTexts { query: body.query.clone(), texts: body.texts.clone() }).await;
+    let response = rerank_ctx
+        .send_and_wait_reply::<Rerank, RankTexts>(
+            RankTexts { query: body.query.clone(), texts: body.texts.clone() },
+            rerank_ctx.id(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
 
     println!("Rerank response: {:#?}", response);
 

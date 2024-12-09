@@ -48,19 +48,17 @@ impl ActorFactory for AlwaysFactory {
 impl Message<BehaviorTick> for Always {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         let Some(child) = self.node.child(ctx, SpawnOptions::default()).await? else {
-            return Ok(self.get_configured_status());
+            ctx.reply(self.get_configured_status()).await?;
+            return Ok(());
         };
         // Execute the child node but ignore its result
         let _status: Result<BehaviorStatus, SystemActorError> =
-            ctx.send_as(BehaviorTick, child.clone(), SendOptions::default()).await;
+            ctx.send_as_and_wait_reply(BehaviorTick, child.clone(), SendOptions::default()).await;
         // Return the configured status
-        Ok(self.get_configured_status())
+        ctx.reply(self.get_configured_status()).await?;
+        Ok(())
     }
 }
 

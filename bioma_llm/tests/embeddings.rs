@@ -40,7 +40,7 @@ async fn test_embeddings_generate_nomic_v15() -> Result<(), TestError> {
 
     // Generate embeddings for the Nomic v1.5 embeddings actor
     let nomic_embeddings = nomic_relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()) },
             &embeddings_nomic_id,
             SendOptions::default(),
@@ -98,7 +98,7 @@ async fn test_embeddings_generate_clipvit32() -> Result<(), TestError> {
 
     // Generate embeddings for the CLIP-ViT-32 embeddings actor
     let clipvit32_embeddings = clipvit32_relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()) },
             &embeddings_clipvit32_id,
             SendOptions::default(),
@@ -172,7 +172,7 @@ async fn test_embeddings_generate_multiple_types() -> Result<(), TestError> {
 
     // Generate embeddings for the Nomic v1.5 embeddings actor
     let nomic_embeddings = nomic_relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()) },
             &embeddings_nomic_id,
             SendOptions::default(),
@@ -181,7 +181,7 @@ async fn test_embeddings_generate_multiple_types() -> Result<(), TestError> {
 
     // Generate embeddings for the CLIP-ViT-32 embeddings actor
     let clipvit32_embeddings = clipvit32_relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()) },
             &embeddings_clipvit32_id,
             SendOptions::default(),
@@ -248,7 +248,7 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
     ];
 
     let _ = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: None,
@@ -262,8 +262,9 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
     let query = "How are you doing?";
     let top_k = embeddings::TopK { query: embeddings::Query::Text(query.to_string()), threshold: -0.5, k: 2 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     // Check the results
     assert_eq!(similarities.len(), 2);
@@ -305,7 +306,7 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
     // Generate embeddings
     let texts = vec!["Persistent embedding test"];
     let _ = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: None,
@@ -337,8 +338,9 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
     let top_k =
         embeddings::TopK { query: embeddings::Query::Text("Persistent test".to_string()), threshold: -0.5, k: 1 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     assert_eq!(similarities.len(), 1);
     assert_eq!(similarities[0].text, Some("Persistent embedding test".to_string()));
@@ -376,7 +378,7 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
     let texts = vec!["Text with metadata"];
     let metadata = vec![serde_json::json!({"key": "value"})];
     let _ = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
                 metadata: Some(metadata),
@@ -390,8 +392,9 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
     let top_k =
         embeddings::TopK { query: embeddings::Query::Text("Text with metadata".to_string()), threshold: -0.5, k: 1 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     assert_eq!(similarities.len(), 1);
     assert_eq!(similarities[0].text, Some("Text with metadata".to_string()));
@@ -467,7 +470,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
 
     for (i, chunk) in chunks.iter().enumerate() {
         let embeddings_id = &embeddings_actors[i];
-        let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
+        let future = relay_ctx.send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Text(chunk.clone()), metadata: None },
             embeddings_id,
             SendOptions::default(),
@@ -494,7 +497,8 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
             threshold: -0.5,
             k: 2,
         };
-        let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
+        let future =
+            relay_ctx.send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
         similarity_futures.push(future);
     }
 
@@ -540,7 +544,7 @@ async fn test_image_embeddings_generate() -> Result<(), TestError> {
     // Generate embeddings for the image
     let image_paths = vec!["../assets/images/rust-pet.png".to_string()];
     let generated = relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Image(image_paths.clone()) },
             &embeddings_id,
             SendOptions::default(),
@@ -587,7 +591,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
     })];
 
     let stored = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: Some(metadata) },
             &embeddings_id,
             SendOptions::default(),
@@ -603,8 +607,9 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         k: 1,
     };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     // Check search results
     assert_eq!(similarities.len(), 1);
@@ -646,7 +651,7 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
     // Store image embeddings
     let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
     let _ = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Image(image_paths), metadata: None },
             &embeddings_id,
             SendOptions::default(),
@@ -656,8 +661,9 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
     // Search using text query
     let top_k = embeddings::TopK { query: embeddings::Query::Text("an elephant".to_string()), threshold: 0.2, k: 1 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     // Check if text query found the image
     assert_eq!(similarities.len(), 1);
@@ -693,7 +699,7 @@ async fn test_embeddings_multiple_images_batch() -> Result<(), TestError> {
     let image_paths = vec!["../assets/images/elephant.jpg".to_string(), "../assets/images/rust-pet.png".to_string()];
 
     let generated = relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Image(image_paths) },
             &embeddings_id,
             SendOptions::default(),
@@ -735,7 +741,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
 
     // Store both images and text
     let _ = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
                 metadata: Some(vec![serde_json::json!({"type": "image"})]),
@@ -746,7 +752,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
         .await?;
 
     let _ = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(vec!["an elephant in the wild".to_string()]),
                 metadata: Some(vec![serde_json::json!({"type": "text"})]),
@@ -758,7 +764,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
 
     // Search across both modalities
     let similarities = relay_ctx
-        .send::<Embeddings, embeddings::TopK>(
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(
             embeddings::TopK { query: embeddings::Query::Text("elephant".to_string()), threshold: 0.2, k: 2 },
             &embeddings_id,
             SendOptions::default(),
@@ -804,7 +810,7 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     // Store all embeddings
     for (source, texts) in &sources_and_texts {
         let _ = relay_ctx
-            .send::<Embeddings, StoreEmbeddings>(
+            .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                 StoreEmbeddings {
                     content: EmbeddingContent::Text(texts.iter().map(|t| t.to_string()).collect()),
                     metadata: Some(vec![serde_json::json!({"source": source})]),
@@ -819,8 +825,9 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     let top_k =
         embeddings::TopK { query: embeddings::Query::Text("content from document".to_string()), threshold: -0.5, k: 4 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     // Verify only document1.pdf results are returned
     assert!(!similarities.is_empty());
@@ -836,8 +843,9 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     // Test 2: Query with multiple source filters
     let top_k = embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 4 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     // Verify only document1.pdf and document2.pdf results are returned
     assert!(!similarities.is_empty());
@@ -855,8 +863,9 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     // Test 3: Query without source filter (should return all results)
     let top_k = embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 6 };
 
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     // Verify results from all documents are returned
     assert!(similarities.len() > 4); // Should get results from all documents

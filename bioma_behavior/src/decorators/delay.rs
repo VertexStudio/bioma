@@ -50,20 +50,23 @@ impl ActorFactory for DelayFactory {
 impl Message<BehaviorTick> for Delay {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         tokio::time::sleep(self.duration).await;
+
         let Some(child) = self.node.child(ctx, SpawnOptions::default()).await? else {
-            return Ok(BehaviorStatus::Success);
+            ctx.reply(BehaviorStatus::Success).await?;
+            return Ok(());
         };
-        let status = ctx.send_as(BehaviorTick, child.clone(), SendOptions::default()).await;
-        match status {
-            Ok(status) => Ok(status),
-            Err(e) => Err(e.into()),
+
+        match ctx
+            .send_as_and_wait_reply::<BehaviorTick, BehaviorStatus>(BehaviorTick, child.clone(), SendOptions::default())
+            .await
+        {
+            Ok(status) => ctx.reply(status).await?,
+            Err(_) => ctx.reply(BehaviorStatus::Failure).await?,
         }
+
+        Ok(())
     }
 }
 

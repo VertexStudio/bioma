@@ -49,21 +49,21 @@ impl ActorFactory for FallbackFactory {
 impl Message<BehaviorTick> for Fallback {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         // Iterate over all children until one succeeds
         for child in self.node.children(ctx, SpawnOptions::default()).await? {
-            let status = ctx.send_as(BehaviorTick, child, SendOptions::default()).await;
+            let status = ctx.send_as_and_wait_reply(BehaviorTick, child, SendOptions::default()).await;
             match status {
-                Ok(BehaviorStatus::Success) => return Ok(BehaviorStatus::Success),
+                Ok(BehaviorStatus::Success) => {
+                    ctx.reply(BehaviorStatus::Success).await?;
+                    return Ok(());
+                }
                 Ok(BehaviorStatus::Failure) => continue,
                 Err(_e) => continue,
             }
         }
-        Ok(BehaviorStatus::Failure)
+        ctx.reply(BehaviorStatus::Failure).await?;
+        Ok(())
     }
 }
 

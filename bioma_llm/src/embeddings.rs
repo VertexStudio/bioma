@@ -152,11 +152,7 @@ impl Default for Embeddings {
 impl Message<TopK> for Embeddings {
     type Response = Vec<Similarity>;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &TopK,
-    ) -> Result<Vec<Similarity>, EmbeddingsError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &TopK) -> Result<(), EmbeddingsError> {
         let query_embedding = match &message.query {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
@@ -191,19 +187,16 @@ impl Message<TopK> for Embeddings {
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
-        let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
-        results.map_err(EmbeddingsError::from)
+        let results: Vec<Similarity> = results.take(0).map_err(SystemActorError::from)?;
+        ctx.reply(results).await?;
+        Ok(())
     }
 }
 
 impl Message<StoreEmbeddings> for Embeddings {
     type Response = StoredEmbeddings;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &StoreEmbeddings,
-    ) -> Result<StoredEmbeddings, EmbeddingsError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &StoreEmbeddings) -> Result<(), EmbeddingsError> {
         let Some(embedding_tx) = self.embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
@@ -250,7 +243,8 @@ impl Message<StoreEmbeddings> for Embeddings {
             }
         }
 
-        Ok(StoredEmbeddings { ids: embeddings_ids })
+        ctx.reply(StoredEmbeddings { ids: embeddings_ids }).await?;
+        Ok(())
     }
 }
 
@@ -259,9 +253,9 @@ impl Message<GenerateEmbeddings> for Embeddings {
 
     async fn handle(
         &mut self,
-        _ctx: &mut ActorContext<Self>,
+        ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
-    ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
+    ) -> Result<(), EmbeddingsError> {
         let Some(embedding_tx) = self.embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
@@ -270,7 +264,8 @@ impl Message<GenerateEmbeddings> for Embeddings {
         embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
 
         let embeddings = rx.await??;
-        Ok(GeneratedEmbeddings { embeddings })
+        ctx.reply(GeneratedEmbeddings { embeddings }).await?;
+        Ok(())
     }
 }
 
