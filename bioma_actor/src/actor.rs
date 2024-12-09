@@ -10,7 +10,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::{borrow::Cow, sync::atomic::AtomicU64};
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
-use tokio::time::timeout;
 use tracing::{debug, error, trace};
 
 // Constants for database table names
@@ -1184,8 +1183,6 @@ impl<T: Actor> ActorContext<T> {
             // Process each reply
             .map(move |reply| -> Result<RT, SystemActorError> {
                 let reply = reply?;
-
-                // Debug print for each received reply
                 debug!(
                     "[{}] reply-recv {} {} chunk={:?}",
                     self_id.record_id(),
@@ -1194,29 +1191,34 @@ impl<T: Actor> ActorContext<T> {
                     reply.id.chunk
                 );
 
-                // Check for error responses
                 if !reply.err.is_null() {
                     return Err(SystemActorError::MessageReply(reply.err.to_string().into()));
                 }
 
-                // Deserialize the message content
                 let response: RT = serde_json::from_value(reply.msg)?;
                 Ok(response)
             });
-        // TODO: Add artificial delay for testing timeout
-        // .then(|r| async move {
-        //     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        //     r
-        // });
 
-        // Apply timeout to the entire stream
-        let stream = Box::pin(stream);
-        let stream = stream.then(move |r| async move {
-            match timeout(options.timeout, future::ready(r)).await {
-                Ok(msg) => msg,
-                Err(_) => Err(SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), options.timeout)),
-            }
-        });
+        // Timeout stream that maps all items through a timeout
+        let timeout_duration = options.timeout;
+        let stream =
+            futures::stream::unfold((Box::pin(stream), timeout_duration), |(mut stream, timeout)| async move {
+                match tokio::time::timeout(timeout, stream.next()).await {
+                    Ok(Some(item)) => Some((item, (stream, timeout))),
+                    Ok(None) => None,
+                    Err(_) => {
+                        error!(
+                            "Stream item timeout after {:?} for message type {}",
+                            timeout,
+                            std::any::type_name::<RT>()
+                        );
+                        Some((
+                            Err(SystemActorError::MessageTimeout(std::any::type_name::<RT>().into(), timeout)),
+                            (stream, timeout),
+                        ))
+                    }
+                }
+            });
 
         Ok(Box::pin(stream))
     }
