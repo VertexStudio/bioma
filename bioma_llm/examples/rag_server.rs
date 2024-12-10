@@ -366,7 +366,11 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                         while let Some(response) = stream.next().await {
                             match response {
                                 Ok(chunk) => {
-                                    let response = ChatResponse { response: chunk, context: conversation.clone() };
+                                    let response = ChatResponse {
+                                        response: chunk.clone(),
+                                        // Only include context in the final message
+                                        context: if chunk.done { conversation.clone() } else { vec![] },
+                                    };
                                     if tx.send(Ok::<_, String>(web::Json(response))).await.is_err() {
                                         break;
                                     }
