@@ -43,7 +43,11 @@ async fn test_delete_source_with_files() -> Result<(), TestError> {
     // Index the files
     let globs = vec![temp_dir.path().join("*.txt").to_string_lossy().into_owned()];
     let index_result = relay_ctx
-        .send::<Indexer, IndexGlobs>(IndexGlobs::builder().globs(globs).build(), &indexer_id, SendOptions::default())
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
+            IndexGlobs::builder().globs(globs).build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
         .await?;
 
     println!("index_result: {:?}", index_result);
@@ -52,14 +56,12 @@ async fn test_delete_source_with_files() -> Result<(), TestError> {
 
     // Delete one of the files and its source
     let delete_result = relay_ctx
-        .send::<Indexer, DeleteSource>(
+        .send_and_wait_reply::<Indexer, DeleteSource>(
             DeleteSource { source: file_path1.to_string_lossy().into_owned() },
             &indexer_id,
             SendOptions::default(),
         )
         .await?;
-
-    println!("delete_result: {:?}", delete_result);
 
     // Verify deletion results
     assert!(delete_result.deleted_embeddings > 0, "Expected at least one embedding to be deleted");
