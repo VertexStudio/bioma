@@ -51,6 +51,7 @@ impl Actor for TestActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestError> {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
+            println!("frame: {:#?}", frame);
             if let Some(msg) = frame.is::<TestMessage>() {
                 self.reply(ctx, &msg, &frame).await?;
             }
@@ -224,7 +225,7 @@ async fn test_actor_lifecycle() -> Result<(), TestError> {
     // Try to send a message to the terminated actor
     let message = TestMessage { content: "After termination".to_string() };
     let options = SendOptions::builder().timeout(Duration::from_secs(1)).build();
-    let result = relay_actor_ctx.send::<TestActor, TestMessage>(message, &test_actor_id, options).await;
+    let result = relay_actor_ctx.send_and_wait_reply::<TestActor, TestMessage>(message, &test_actor_id, options).await;
 
     assert!(result.is_err());
 
