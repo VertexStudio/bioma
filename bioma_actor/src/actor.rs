@@ -1528,8 +1528,6 @@ impl<T: Actor> ActorContext<T> {
                 }
             });
 
-        println!("Returning stream");
-
         Ok(Box::pin(stream))
     }
 }

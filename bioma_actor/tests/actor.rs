@@ -51,7 +51,6 @@ impl Actor for TestActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), TestError> {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            println!("frame: {:#?}", frame);
             if let Some(msg) = frame.is::<TestMessage>() {
                 self.reply(ctx, &msg, &frame).await?;
             }
