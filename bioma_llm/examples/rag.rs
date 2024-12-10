@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let retrieve_context =
         RetrieveContext { query: RetrieveQuery::Text(query.to_string()), limit: 10, threshold: 0.0, source: None };
     let context = relay_ctx
-        .send::<Retriever, RetrieveContext>(
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &retriever_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the context to the chat actor
     info!("Sending context to chat actor");
     let chat_response = relay_ctx
-        .send::<Chat, ChatMessages>(
+        .send_and_wait_reply::<Chat, ChatMessages>(
             ChatMessages { messages: conversation.clone(), restart: false, persist: false },
             &chat_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),

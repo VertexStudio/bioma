@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store image embeddings
     let embeddings_ids = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: None },
             &embeddings_id,
             SendOptions::default(),
@@ -62,8 +62,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source: None,
     };
     info!("Image query: {:?}", top_k);
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     for similarity in similarities {
         info!("Similarity score: {}", similarity.similarity);
@@ -74,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate embeddings without storing them
     let generated = relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Image(vec!["assets/images/rust-pet.png".to_string()]) },
             &embeddings_id,
             SendOptions::default(),

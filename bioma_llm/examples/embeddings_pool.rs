@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (i, chunk) in chunks.iter().enumerate() {
         let embeddings_id = &embeddings_actors[i];
-        let future = relay_ctx.send::<Embeddings, StoreEmbeddings>(
+        let future = relay_ctx.send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Text(chunk.clone()), metadata: None },
             embeddings_id,
             SendOptions::default(),
@@ -102,7 +102,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             source: None,
         };
         info!("Query for actor {}: {:?}", i, top_k);
-        let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
+        let future =
+            relay_ctx.send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
         similarity_futures.push(future);
     }
 

@@ -193,7 +193,7 @@ impl Indexer {
                 .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
                 let result = ctx
-                    .send::<Embeddings, StoreEmbeddings>(
+                    .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                         StoreEmbeddings {
                             content: EmbeddingContent::Image(vec![path_clone]),
                             metadata: metadata.map(|m| vec![m]),
@@ -269,7 +269,7 @@ impl Indexer {
 
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
-                        .send::<Embeddings, StoreEmbeddings>(
+                        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                             StoreEmbeddings {
                                 content: EmbeddingContent::Text(chunk_batch.to_vec()),
                                 metadata: Some(metadata_batch.to_vec()),
@@ -296,7 +296,7 @@ impl Indexer {
 impl Message<IndexGlobs> for Indexer {
     type Response = Indexed;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexGlobs) -> Result<Indexed, IndexerError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexGlobs) -> Result<(), IndexerError> {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(IndexerError::EmbeddingsActorNotInitialized);
         };
@@ -380,7 +380,7 @@ impl Message<IndexGlobs> for Indexer {
                         // Special handling for PDF
                         if ext == "pdf" {
                             match ctx
-                                .send::<PdfAnalyzer, AnalyzePdf>(
+                                .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
                                     AnalyzePdf { file_path: pathbuf.clone() },
                                     pdf_analyzer_id,
                                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -451,18 +451,15 @@ impl Message<IndexGlobs> for Indexer {
         }
 
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
-        Ok(Indexed { indexed, cached })
+        ctx.reply(Indexed { indexed, cached }).await?;
+        Ok(())
     }
 }
 
 impl Message<DeleteSource> for Indexer {
     type Response = DeletedSource;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &DeleteSource,
-    ) -> Result<DeletedSource, IndexerError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &DeleteSource) -> Result<(), IndexerError> {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
         let db = ctx.engine().db();
 
@@ -487,7 +484,8 @@ impl Message<DeleteSource> for Indexer {
             }
         }
 
-        Ok(delete_result)
+        ctx.reply(delete_result).await?;
+        Ok(())
     }
 }
 
