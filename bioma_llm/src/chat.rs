@@ -89,6 +89,7 @@ impl Message<ChatMessages> for Chat {
 
         // Get streaming response from Ollama
         let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
+        let mut accumulated_content = String::new();
 
         // Stream responses back to caller
         while let Some(response) = stream.next().await {
@@ -97,10 +98,15 @@ impl Message<ChatMessages> for Chat {
                     // Send chunk through actor's reply mechanism
                     ctx.reply(chunk.clone()).await?;
 
-                    // If this is the final message, add it to history
+                    // Accumulate message content
+                    if let Some(message) = &chunk.message {
+                        accumulated_content.push_str(&message.content);
+                    }
+
+                    // If this is the final message, add the complete message to history
                     if chunk.done {
-                        if let Some(message) = chunk.message {
-                            self.history.push(ChatMessage::assistant(message.content.clone()));
+                        if !accumulated_content.is_empty() {
+                            self.history.push(ChatMessage::assistant(accumulated_content.clone()));
                         }
 
                         // Persist if requested
