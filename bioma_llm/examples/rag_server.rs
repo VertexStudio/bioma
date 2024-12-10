@@ -5,9 +5,11 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
+use futures_util::StreamExt;
 use indexer::Metadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::error::Error as StdError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -339,28 +341,58 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             }
 
             info!("Sending context to chat actor");
-            let chat_response = {
-                let chat_ctx = data.chat.ctx.lock().await;
-                let chat_actor = data.chat.actor_id.clone();
-                chat_ctx
-                    .send_and_wait_reply::<Chat, ChatMessages>(
-                        ChatMessages { messages: conversation.clone(), restart: false, persist: false },
+            let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: false };
+
+            // Clone the necessary parts before spawning the task
+            let (tx, rx) = tokio::sync::mpsc::channel(100);
+            let chat_state = data.chat.clone();
+
+            // Spawn task to handle chat stream
+            tokio::spawn(async move {
+                let chat_ctx = chat_state.ctx.lock().await;
+                let chat_actor = chat_state.actor_id.clone();
+
+                let result = chat_ctx
+                    .send::<Chat, ChatMessages>(
+                        chat_request,
                         &chat_actor,
                         SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                     )
-                    .await
-            };
+                    .await;
 
-            match chat_response {
-                Ok(response) => {
-                    info!("Chat response: {:#?}", &response);
-                    HttpResponse::Ok().json(ChatResponse { response, context: conversation })
+                match result {
+                    Ok(mut stream) => {
+                        while let Some(response) = stream.next().await {
+                            match response {
+                                Ok(chunk) => {
+                                    let response = ChatResponse { response: chunk, context: conversation.clone() };
+                                    if tx.send(Ok::<_, String>(web::Json(response))).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(Err(e.to_string())).await;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e.to_string())).await;
+                    }
                 }
-                Err(e) => {
-                    error!("Error fetching chat response: {:?}", e);
-                    HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
-                }
-            }
+            });
+
+            // Return streaming response
+            HttpResponse::Ok().content_type("text/event-stream").streaming::<_, Box<dyn StdError>>(
+                tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
+                    Ok(response) => {
+                        let json = serde_json::to_string(&response).unwrap_or_default();
+                        Ok(web::Bytes::from(format!("data: {}\n\n", json)))
+                    }
+                    Err(e) => Ok(web::Bytes::from(format!("error: {}\n\n", e))),
+                }),
+            )
         }
         Err(e) => {
             error!("Error fetching context: {:?}", e);
