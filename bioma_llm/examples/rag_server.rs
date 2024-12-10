@@ -626,7 +626,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         engine.clone(),
         indexer_id.clone(),
         Indexer::default(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
     )
     .await?;
 
