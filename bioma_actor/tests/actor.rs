@@ -494,8 +494,7 @@ async fn test_actor_large_message_db() -> Result<(), TestError> {
 
 #[test(tokio::test)]
 async fn test_actor_streaming_messages() -> Result<(), Box<dyn std::error::Error>> {
-    let engine_options = EngineOptions::builder().build();
-    let engine = Engine::connect(engine_options).await?;
+    let engine = Engine::test().await?;
 
     // Simple streaming actor that generates numbered messages
     #[derive(Debug, Serialize, Deserialize)]
