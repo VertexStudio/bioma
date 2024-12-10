@@ -3808,6 +3808,8 @@ dependencies = [
  "serde",
  "serde_json",
  "text-splitter 0.13.3",
+ "tokio",
+ "tokio-stream",
  "url",
 ]
 

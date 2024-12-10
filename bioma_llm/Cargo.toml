@@ -24,7 +24,7 @@ lazy_static = "1.5.0"
 walkdir = { workspace = true }
 zip = { workspace = true }
 
-ollama-rs = { version = "0.2.1", features = ["function-calling"] }
+ollama-rs = { version = "0.2.1", features = ["function-calling", "stream"] }
 hf-hub = "0.3.2"
 fastembed = "4.3"
 
