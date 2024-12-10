@@ -10,24 +10,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
 /// CURL (examples)[docs/examples.sh]
 
-struct ActorHandle<T: Actor> {
-    ctx: Mutex<ActorContext<T>>,
-    actor: Mutex<T>,
+struct ActorState {
+    ctx: Mutex<ActorContext<Relay>>,
+    actor_id: ActorId,
 }
 
 struct AppState {
     engine: Engine,
-    indexer_actor: Arc<ActorHandle<Indexer>>,
-    retriever_actor: Arc<ActorHandle<Retriever>>,
-    embeddings_actor: Arc<ActorHandle<Embeddings>>,
-    rerank_actor: Arc<ActorHandle<Rerank>>,
-    chat_actor: Arc<ActorHandle<Chat>>,
+    indexer: Arc<ActorState>,
+    retriever: Arc<ActorState>,
+    embeddings: Arc<ActorState>,
+    rerank: Arc<ActorState>,
+    chat: Arc<ActorState>,
 }
 
 async fn health() -> impl Responder {
@@ -201,13 +201,15 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
 }
 
 async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.actor.lock().await;
+    let indexer_ctx = data.indexer.ctx.lock().await;
+    let indexer_actor = data.indexer.actor_id.clone();
 
     let index_globs = body.clone();
 
     info!("Sending message to indexer actor");
-    let response = indexer_actor.handle(&mut indexer_ctx, &index_globs).await;
+    let response = indexer_ctx
+        .send_and_wait_reply::<Indexer, IndexGlobs>(index_globs, &indexer_actor, SendOptions::default())
+        .await;
     match response {
         Ok(_) => HttpResponse::Ok().body("OK"),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
@@ -215,7 +217,8 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
 }
 
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
-    let retriever_ctx = data.retriever_actor.ctx.lock().await;
+    let retriever_ctx = data.retriever.ctx.lock().await;
+    let retriever_actor = data.retriever.actor_id.clone();
 
     let retrieve_context = body.clone();
 
@@ -223,7 +226,7 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
     let response = retriever_ctx
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
-            retriever_ctx.id(),
+            &retriever_actor,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
         .await;
@@ -266,7 +269,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let retriever_ctx = data.retriever_actor.ctx.lock().await;
+        let retriever_ctx = data.retriever.ctx.lock().await;
+        let retriever_actor = data.retriever.actor_id.clone();
         let retrieve_context = RetrieveContext {
             query: RetrieveQuery::Text(query.clone()),
             limit: 5,
@@ -277,7 +281,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         retriever_ctx
             .send_and_wait_reply::<Retriever, RetrieveContext>(
                 retrieve_context,
-                retriever_ctx.id(),
+                &retriever_actor,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
             )
             .await
@@ -336,11 +340,12 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             info!("Sending context to chat actor");
             let chat_response = {
-                let chat_ctx = data.chat_actor.ctx.lock().await;
+                let chat_ctx = data.chat.ctx.lock().await;
+                let chat_actor = data.chat.actor_id.clone();
                 chat_ctx
                     .send_and_wait_reply::<Chat, ChatMessages>(
                         ChatMessages { messages: conversation.clone(), restart: false, persist: false },
-                        chat_ctx.id(),
+                        &chat_actor,
                         SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                     )
                     .await
@@ -375,7 +380,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let retriever_ctx = data.retriever_actor.ctx.lock().await;
+        let retriever_ctx = data.retriever.ctx.lock().await;
+        let retriever_actor = data.retriever.actor_id.clone();
         let retrieve_context = RetrieveContext {
             query: RetrieveQuery::Text(body.query.clone()),
             limit: 5,
@@ -385,7 +391,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
         retriever_ctx
             .send_and_wait_reply::<Retriever, RetrieveContext>(
                 retrieve_context,
-                retriever_ctx.id(),
+                &retriever_actor,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
             )
             .await
@@ -447,12 +453,13 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             // Sending context and user query to chat actor
             info!("Sending context to chat actor");
             let chat_response = {
-                let mut chat_ctx = data.chat_actor.ctx.lock().await;
-                let mut chat_actor = data.chat_actor.actor.lock().await;
-                chat_actor
-                    .handle(
-                        &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: true, persist: false },
+                let chat_ctx = data.chat.ctx.lock().await;
+                let chat_actor = data.chat.actor_id.clone();
+                chat_ctx
+                    .send_and_wait_reply::<Chat, ChatMessages>(
+                        ChatMessages { messages: conversation.clone(), restart: true, persist: false },
+                        &chat_actor,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                     )
                     .await
             };
@@ -477,7 +484,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
-    let indexer_ctx = data.indexer_actor.ctx.lock().await;
+    let indexer_ctx = data.indexer.ctx.lock().await;
+    let indexer_actor = data.indexer.actor_id.clone();
 
     let delete_source = body.clone();
 
@@ -485,7 +493,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     let response = indexer_ctx
         .send_and_wait_reply::<Indexer, DeleteSource>(
             delete_source,
-            indexer_ctx.id(),
+            &indexer_actor,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
         .await;
@@ -512,7 +520,8 @@ struct EmbeddingsQuery {
 }
 
 async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
-    let embeddings_ctx = data.embeddings_actor.ctx.lock().await;
+    let embeddings_ctx = data.embeddings.ctx.lock().await;
+    let embeddings_actor = data.embeddings.actor_id.clone();
 
     if body.model != "nomic-embed-text" {
         return HttpResponse::BadRequest().body("Invalid model");
@@ -535,7 +544,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
         match embeddings_ctx
             .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                 GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
-                embeddings_ctx.id(),
+                &embeddings_actor,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
             )
             .await
@@ -565,24 +574,36 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
 
-    let rerank_ctx = data.rerank_actor.ctx.lock().await;
+    let rank_texts = RankTexts { query: body.query.clone(), texts: body.texts.clone() };
 
-    println!("Rerank query: {:#?}", body.query);
-    println!("Rerank texts: {:#?}", body.texts);
+    let relay_ctx = data.rerank.ctx.lock().await;
+    let rerank_actor_id = data.rerank.actor_id.clone();
 
-    let response = rerank_ctx
-        .send_and_wait_reply::<Rerank, RankTexts>(
-            RankTexts { query: body.query.clone(), texts: body.texts.clone() },
-            rerank_ctx.id(),
+    match relay_ctx
+        .send::<Rerank, RankTexts>(
+            rank_texts,
+            &rerank_actor_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
-        .await;
-
-    println!("Rerank response: {:#?}", response);
-
-    match response {
-        Ok(response) => HttpResponse::Ok().json(response.texts),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+        .await
+    {
+        Ok(mut stream) => {
+            if let Some(result) = stream.next().await {
+                match result {
+                    Ok(ranked_texts) => HttpResponse::Ok().json(ranked_texts),
+                    Err(e) => {
+                        error!("Rerank error in stream: {}", e);
+                        HttpResponse::InternalServerError().body(e.to_string())
+                    }
+                }
+            } else {
+                HttpResponse::InternalServerError().body("No response received from rerank actor")
+            }
+        }
+        Err(e) => {
+            error!("Rerank error: {}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
     }
 }
 
@@ -593,121 +614,162 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    // Install color backtrace
-    color_backtrace::install();
-    color_backtrace::BacktracePrinter::new().message("BOOM! 💥").install(color_backtrace::default_output_stream());
+    // Initialize engine
+    let engine = Engine::connect(EngineOptions::builder().endpoint("ws://localhost:9123".into()).build()).await?;
 
-    // Initialize the actor system
-    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
-    let engine = Engine::connect(engine_options).await?;
+    // Spawn main actors and their relays
+    let mut actor_handles = Vec::new();
 
-    // Indexer
-    let indexer_actor_id = ActorId::of::<Indexer>("/rag/indexer");
-    let (mut indexer_ctx, mut indexer_actor) = match Actor::spawn(
+    // Indexer setup
+    let indexer_id = ActorId::of::<Indexer>("/rag/indexer");
+    let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
         engine.clone(),
-        indexer_actor_id.clone(),
+        indexer_id.clone(),
         Indexer::default(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    {
-        Ok(result) => {
-            info!("Indexer actor restored");
-            result
+    .await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
         }
-        Err(err) => {
-            warn!("Error restoring indexer actor: {}, creating new", err);
-            Actor::spawn(
-                engine.clone(),
-                indexer_actor_id.clone(),
-                Indexer::default(),
-                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-            )
-            .await
-            .unwrap()
-        }
-    };
+    });
+    actor_handles.push(indexer_handle);
 
-    indexer_actor.init(&mut indexer_ctx).await.unwrap();
+    // Indexer relay setup
+    let indexer_relay_id = ActorId::of::<Relay>("/relay/indexer");
+    let (indexer_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        indexer_relay_id,
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
 
-    let indexer_actor =
-        Arc::new(ActorHandle::<Indexer> { ctx: Mutex::new(indexer_ctx), actor: Mutex::new(indexer_actor) });
+    let indexer_state = Arc::new(ActorState { ctx: Mutex::new(indexer_relay_ctx), actor_id: indexer_id });
 
-    // Retriever
-    let retriever_actor_id = ActorId::of::<Retriever>("/rag/retriever");
+    // Retriever setup
+    let retriever_id = ActorId::of::<Retriever>("/rag/retriever");
     let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
         engine.clone(),
-        retriever_actor_id.clone(),
+        retriever_id.clone(),
         Retriever::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    retriever_actor.init(&mut retriever_ctx).await.unwrap();
+    let retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+    actor_handles.push(retriever_handle);
 
-    let retriever_actor =
-        Arc::new(ActorHandle::<Retriever> { ctx: Mutex::new(retriever_ctx), actor: Mutex::new(retriever_actor) });
-
-    let chat = Chat::builder().model("llama3.2".into()).build();
-
-    let chat_actor_id = ActorId::of::<Chat>("/rag/chat");
-    let (mut chat_ctx, mut chat_actor) = Actor::spawn(
+    let retriever_relay_id = ActorId::of::<Relay>("/relay/retriever");
+    let (retriever_relay_ctx, _) = Actor::spawn(
         engine.clone(),
-        chat_actor_id.clone(),
-        chat,
+        retriever_relay_id.clone(),
+        Relay,
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    chat_actor.init(&mut chat_ctx).await.unwrap();
+    let retriever_state = Arc::new(ActorState { ctx: Mutex::new(retriever_relay_ctx), actor_id: retriever_id });
 
-    let chat_actor = Arc::new(ActorHandle::<Chat> { ctx: Mutex::new(chat_ctx), actor: Mutex::new(chat_actor) });
-
-    // Embeddings
-    let embeddings_actor_id = ActorId::of::<Embeddings>("/rag/embeddings");
+    let embeddings_id = ActorId::of::<Embeddings>("/rag/embeddings");
     let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
         engine.clone(),
-        embeddings_actor_id.clone(),
+        embeddings_id.clone(),
         Embeddings::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    embeddings_actor.init(&mut embeddings_ctx).await.unwrap();
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+    actor_handles.push(embeddings_handle);
 
-    let embeddings_actor =
-        Arc::new(ActorHandle::<Embeddings> { ctx: Mutex::new(embeddings_ctx), actor: Mutex::new(embeddings_actor) });
+    let embeddings_relay_id = ActorId::of::<Relay>("/relay/embeddings");
+    let (embeddings_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        embeddings_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
 
-    // Rerank
-    let rerank_actor_id = ActorId::of::<Rerank>("/rag/rerank");
+    let embeddings_state = Arc::new(ActorState { ctx: Mutex::new(embeddings_relay_ctx), actor_id: embeddings_id });
+
+    let rerank_id = ActorId::of::<Rerank>("/rag/rerank");
     let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
         engine.clone(),
-        rerank_actor_id.clone(),
+        rerank_id.clone(),
         Rerank::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    rerank_actor.init(&mut rerank_ctx).await.unwrap();
+    let rerank_handle = tokio::spawn(async move {
+        if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
+            error!("Rerank actor error: {}", e);
+        }
+    });
+    actor_handles.push(rerank_handle);
 
-    let rerank_actor = Arc::new(ActorHandle::<Rerank> { ctx: Mutex::new(rerank_ctx), actor: Mutex::new(rerank_actor) });
+    let rerank_relay_id = ActorId::of::<Relay>("/relay/rerank");
+    let (rerank_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        rerank_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
 
-    // Create the app state
+    let rerank_state = Arc::new(ActorState { ctx: Mutex::new(rerank_relay_ctx), actor_id: rerank_id });
+
+    let chat_id = ActorId::of::<Chat>("/rag/chat");
+    let (mut chat_ctx, mut chat_actor) = Actor::spawn(
+        engine.clone(),
+        chat_id.clone(),
+        Chat::default(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let chat_handle = tokio::spawn(async move {
+        if let Err(e) = chat_actor.start(&mut chat_ctx).await {
+            error!("Chat actor error: {}", e);
+        }
+    });
+    actor_handles.push(chat_handle);
+
+    let chat_relay_id = ActorId::of::<Relay>("/relay/chat");
+    let (chat_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        chat_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let chat_state = Arc::new(ActorState { ctx: Mutex::new(chat_relay_ctx), actor_id: chat_id });
+
+    // Create app state
     let data = web::Data::new(AppState {
         engine: engine.clone(),
-        indexer_actor,
-        retriever_actor,
-        embeddings_actor,
-        rerank_actor,
-        chat_actor,
+        indexer: indexer_state,
+        retriever: retriever_state,
+        embeddings: embeddings_state,
+        rerank: rerank_state,
+        chat: chat_state,
     });
 
-    // Create the server
-    let server_task = HttpServer::new(move || {
+    // Create and run server
+    let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
@@ -732,12 +794,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/rerank", web::post().to(rerank))
     })
     .bind("0.0.0.0:5766")?
-    .run()
-    .await;
+    .run();
 
-    match server_task {
+    // Run the server
+    match server.await {
         Ok(_) => info!("Server stopped"),
         Err(e) => error!("Server error: {}", e),
+    }
+
+    // Clean up
+    for handle in actor_handles {
+        handle.abort();
     }
 
     Ok(())
