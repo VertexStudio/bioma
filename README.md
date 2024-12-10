@@ -205,6 +205,14 @@ curl -X POST http://localhost:5766/api/chat \
     }'
 ```
 
+### Ask a question:
+
+```bash
+curl -X POST http://localhost:5766/ask \
+    -H "Content-Type: application/json" \
+    -d '{"messages": [{"role": "user", "content": "Why is the sky blue?"}]}'
+```
+
 ### Delete indexed sources:
 
 ```bash
