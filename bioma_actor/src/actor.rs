@@ -1189,6 +1189,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
     {
         let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
+        println!("reply_id: {:?}", reply_id);
         self.wait_for_replies::<M::Response>(&reply_id, options).await
     }
 
