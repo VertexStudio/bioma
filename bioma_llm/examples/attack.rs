@@ -9,7 +9,7 @@ use once_cell::sync::Lazy;
 use serde_json::json;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use tracing::info;
 
 // We will have a global variation count and a global map to track each endpoint's current variation
@@ -68,9 +68,9 @@ impl FromStr for TestType {
 }
 
 // Add a helper function to get the next variation index for a given endpoint type
-fn get_next_variation(endpoint_type: TestType) -> usize {
-    let variations = *VARIATIONS_COUNT.lock().unwrap();
-    let mut map = ENDPOINT_VARIATION_STATE.lock().unwrap();
+async fn get_next_variation(endpoint_type: TestType) -> usize {
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut map = ENDPOINT_VARIATION_STATE.lock().await;
     let entry = map.entry(endpoint_type).or_insert(0);
     let current = *entry;
     *entry = (current + 1) % variations;
@@ -99,10 +99,10 @@ async fn make_request<T: serde::Serialize>(
     endpoint_type: TestType,
     payload: Option<T>,
 ) -> TransactionResult {
-    println!("ORDERING STATE: {:#?}", ORDERING_STATE.lock().unwrap());
     // Check ordering using global state but don't update yet
+    let mut state = ORDERING_STATE.lock().await;
+
     let should_execute = {
-        let state = ORDERING_STATE.lock().unwrap();
         info!(
             "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
             state.current_index, state.endpoint_order[state.current_index], endpoint_type
@@ -130,12 +130,11 @@ async fn make_request<T: serde::Serialize>(
     let mut goose = user.request(goose_request).await?;
 
     // Update state after request is complete
-    {
-        let mut state = ORDERING_STATE.lock().unwrap();
-        let old_index = state.current_index;
-        state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-        info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, state.current_index, endpoint_type);
-    }
+
+    // let mut state = ORDERING_STATE.lock().await;
+    let old_index = state.current_index;
+    state.current_index = (state.current_index + 1) % state.endpoint_order.len();
+    info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, state.current_index, endpoint_type);
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
@@ -165,7 +164,7 @@ pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
-    let variation = get_next_variation(TestType::Index);
+    let variation = get_next_variation(TestType::Index).await;
     let file_name = format!("uploads/test{}.txt", variation);
     let payload = IndexGlobs {
         globs: vec![file_name],
@@ -188,8 +187,8 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
+    let mut state = ORDERING_STATE.lock().await;
     let should_execute = {
-        let state = ORDERING_STATE.lock().unwrap();
         info!(
             "Upload Order Check - Current Index: {}, Expected: {:?}, Actual: Upload",
             state.current_index, state.endpoint_order[state.current_index]
@@ -204,7 +203,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     info!("Executing Upload");
 
-    let variation = get_next_variation(TestType::Upload);
+    let variation = get_next_variation(TestType::Upload).await;
     let file_name = format!("uploads/test{}.txt", variation);
 
     let boundary = "----WebKitFormBoundaryABC123";
@@ -249,12 +248,10 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     let mut goose = user.request(goose_request).await?;
 
     // Update state after request is complete
-    {
-        let mut state = ORDERING_STATE.lock().unwrap();
-        let old_index = state.current_index;
-        state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-        info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, state.current_index);
-    }
+
+    let old_index = state.current_index;
+    state.current_index = (state.current_index + 1) % state.endpoint_order.len();
+    info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, state.current_index);
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
@@ -275,7 +272,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    let variation = get_next_variation(TestType::DeleteSource);
+    let variation = get_next_variation(TestType::DeleteSource).await;
     let file_name = format!("uploads/test{}.txt", variation);
     let payload = DeleteSource { sources: vec![file_name] };
 
@@ -396,7 +393,7 @@ async fn main() -> Result<(), GooseError> {
 
     // Set the variations count globally
     {
-        let mut v = VARIATIONS_COUNT.lock().unwrap();
+        let mut v = VARIATIONS_COUNT.lock().await;
         *v = args.variations;
     }
 
@@ -408,7 +405,7 @@ async fn main() -> Result<(), GooseError> {
     if args.order {
         // Initialize the global ordering state with the endpoint order
         let endpoint_order: Vec<TestType> = args.endpoints.iter().map(|we| we.endpoint.clone()).collect();
-        ORDERING_STATE.lock().unwrap().endpoint_order = endpoint_order;
+        ORDERING_STATE.lock().await.endpoint_order = endpoint_order;
     }
 
     // Helper to register transactions to the scenario
