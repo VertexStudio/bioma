@@ -238,9 +238,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::connect(options).await?;
 
     // Create actor IDs
-    let generator_id = ActorId::of::<ElementsGeneratorActor>("/generator");
-    let weaver_id = ActorId::of::<StoryWeaverActor>("/weaver");
-    let coordinator_id = ActorId::of::<StoryCoordinatorActor>("/coordinator");
+    let generator_id = ActorId::of::<ElementsGeneratorActor>("/story/generator");
+    let weaver_id = ActorId::of::<StoryWeaverActor>("/story/weaver");
+    let coordinator_id = ActorId::of::<StoryCoordinatorActor>("/story/coordinator");
 
     // Spawn the actors
     let (mut generator_ctx, mut generator_actor) = Actor::spawn(
