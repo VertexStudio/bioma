@@ -99,7 +99,7 @@ async fn make_request<T: serde::Serialize>(
     endpoint_type: TestType,
     payload: Option<T>,
 ) -> TransactionResult {
-    println!("ORDERING STATE: {:#?}", ORDERING_STATE.lock().unwrap());
+    
     // Check ordering using global state but don't update yet
     let should_execute = {
         let state = ORDERING_STATE.lock().unwrap();
