@@ -117,6 +117,36 @@
             margin-bottom: 5px;
             color: #555;
         }
+
+        .context-content .source-separator {
+            border-top: 1px solid #ccc;
+            margin: 10px 0;
+        }
+
+        .context-content .uri {
+            font-style: italic;
+            color: #666;
+            font-size: 0.85em;
+            margin: 5px 0;
+        }
+
+        .context-content .chunk {
+            margin-top: 5px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+
+        .context-content .source {
+            color: #666;
+            font-size: 0.85em;
+            margin: 5px 0;
+        }
+
+        .context-content .chunk-number {
+            color: #666;
+            font-size: 0.85em;
+            margin: 5px 0;
+        }
     </style>
 </head>
 
@@ -155,17 +185,33 @@
                 return '';
             }
 
-            // Transform each context message into HTML elements
-            const contextMessages = context.map(msg => {
-                // Create CSS class based on the message role (e.g., 'user-message', 'assistant-message')
+            const contextMessages = context.map((msg, index) => {
                 const roleClass = msg.role + '-message';
-                // Convert markdown content to HTML, handle empty content gracefully
-                const content = msg.content ? md.render(msg.content) : '';
-                // Return a message div with role label and formatted content
+                
+                // Parse the content string to extract Source, URI, and Chunk
+                let source = '', uri = '', chunk = '', content = '';
+                if (msg.content) {
+                    const lines = msg.content.split('\n');
+                    lines.forEach(line => {
+                        if (line.startsWith('Source:')) source = line.replace('Source:', '').trim();
+                        else if (line.startsWith('URI:')) uri = line.replace('URI:', '').trim();
+                        else if (line.startsWith('Chunk:')) chunk = line.replace('Chunk:', '').trim();
+                        else content += line + '\n';
+                    });
+                }
+
+                const separator = index > 0 ? '<div class="source-separator"></div>' : '';
+                
                 return `
+                    ${separator}
                     <div class="message ${roleClass}">
                         <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
-                        ${content}
+                        ${source ? `<div class="source">Source: ${source}</div>` : ''}
+                        ${uri ? `<div class="uri">URI: ${uri}</div>` : ''}
+                        ${chunk ? `<div class="chunk-number">Chunk: ${chunk}</div>` : ''}
+                        <div class="chunk">
+                            ${content ? md.render(content) : ''}
+                        </div>
                     </div>
                 `;
             }).join('');
