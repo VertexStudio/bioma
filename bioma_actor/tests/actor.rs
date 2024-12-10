@@ -224,7 +224,7 @@ async fn test_actor_lifecycle() -> Result<(), TestError> {
     // Try to send a message to the terminated actor
     let message = TestMessage { content: "After termination".to_string() };
     let options = SendOptions::builder().timeout(Duration::from_secs(1)).build();
-    let result = relay_actor_ctx.send::<TestActor, TestMessage>(message, &test_actor_id, options).await;
+    let result = relay_actor_ctx.send_and_wait_reply::<TestActor, TestMessage>(message, &test_actor_id, options).await;
 
     assert!(result.is_err());
 
