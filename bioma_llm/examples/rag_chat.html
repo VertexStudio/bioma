@@ -274,18 +274,65 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                const data = await response.json();
+                // Create message container for streaming response
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message assistant-message';
+                chatContainer.appendChild(messageDiv);
 
-                // Display AI response if valid, otherwise show error
-                if (data.message && data.message.content) {
-                    // Append AI response with any context/sources used
-                    appendMessage('assistant', data.message.content, data.context);
-                } else {
-                    appendMessage('system', 'Received an empty or invalid response from the server.');
+                let contentDiv = document.createElement('div');
+                messageDiv.appendChild(contentDiv);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedContent = '';
+
+                while (true) {
+                    const {value, done} = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                
+                                // Handle streaming content
+                                if (data.message?.content) {
+                                    accumulatedContent += data.message.content;
+                                    contentDiv.innerHTML = md.render(accumulatedContent);
+                                }
+
+                                // Handle context when streaming is done
+                                if (data.done && data.context?.length > 0) {
+                                    const contextSection = createContextSection(data.context);
+                                    const contextDiv = document.createElement('div');
+                                    contextDiv.innerHTML = contextSection;
+                                    messageDiv.appendChild(contextDiv);
+                                }
+
+                                // Add the message to history only when done
+                                if (data.done) {
+                                    messageHistory.push({
+                                        role: 'assistant',
+                                        content: accumulatedContent
+                                    });
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e);
+                            }
+                        }
+                    }
+                    
+                    // Scroll to bottom as content streams in
+                    window.scrollTo(0, document.body.scrollHeight);
                 }
 
+                // Re-initialize mermaid diagrams after complete response
+                mermaid.init(undefined, messageDiv.querySelectorAll('.mermaid'));
+
             } catch (error) {
-                // Log error and display user-friendly message
                 console.error('Error:', error);
                 appendMessage('system', 'An error occurred while fetching the response.');
             }
