@@ -4,8 +4,13 @@ SELECT
     id,
     text,
     vector::similarity::cosine(embedding, $query) AS similarity,
-    metadata
+    metadata,
+    <-NomicEmbedTextV15_source_embeddings.in[0].id.{source, uri} AS source
 FROM type::table($prefix + "_embedding")
 WHERE embedding <|{top_k}|> $query
--- AND string::matches(source, $source)
--- ORDER BY similarity DESC;
+AND id IN (
+    SELECT out AS embeddings
+    FROM type::table($prefix + "_source_embeddings")
+    WHERE string::matches(in.id.uri, $source)
+).embeddings
+ORDER BY similarity DESC

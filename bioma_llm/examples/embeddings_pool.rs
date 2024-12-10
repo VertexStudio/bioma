@@ -99,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             query: embeddings::Query::Text("Hello, how are you?".to_string()),
             threshold: -0.5,
             k: 5,
+            source: None,
         };
         info!("Query for actor {}: {:?}", i, top_k);
         let future = relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());

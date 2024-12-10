@@ -134,6 +134,7 @@ impl Message<RetrieveContext> for Retriever {
                     query: embeddings::Query::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
+                    source: message.source.clone(),
                 };
 
                 info!("Searching for similarities");
@@ -184,7 +185,7 @@ impl Message<RetrieveContext> for Retriever {
                             (
                                 Context {
                                     text: text_similarities[t.index].0.text.clone(),
-                                    source: None,
+                                    source: text_similarities[t.index].0.source.clone(),
                                     metadata: text_similarities[t.index]
                                         .0
                                         .metadata
@@ -204,7 +205,7 @@ impl Message<RetrieveContext> for Retriever {
                     (
                         Context {
                             text: s.text,
-                            source: None,
+                            source: s.source.clone(),
                             metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
                         },
                         score,
