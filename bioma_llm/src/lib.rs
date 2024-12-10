@@ -1,3 +1,4 @@
+pub mod ask;
 pub mod chat;
 pub mod embeddings;
 pub mod indexer;
@@ -6,6 +7,7 @@ pub mod rerank;
 pub mod retriever;
 
 pub mod prelude {
+    pub use crate::ask::{self, Ask, AskError, AskMessages};
     pub use crate::chat::{self, Chat, ChatError, ChatMessages};
     pub use crate::embeddings::{
         self, EmbeddingContent, Embeddings, EmbeddingsError, GenerateEmbeddings, GeneratedEmbeddings, StoreEmbeddings,
