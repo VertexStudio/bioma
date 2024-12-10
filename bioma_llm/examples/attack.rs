@@ -6,19 +6,56 @@ use clap::{Parser, ValueEnum};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
 use once_cell::sync::Lazy;
+use rand::Rng;
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
+use tokio::fs;
+use tokio::io;
 use tokio::sync::Mutex;
 use tracing::info;
 
 // We will have a global variation count and a global map to track each endpoint's current variation
 static VARIATIONS_COUNT: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(1));
-static ENDPOINT_VARIATION_STATE: Lazy<Mutex<HashMap<TestType, usize>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static ENDPOINT_VARIATION_STATE: Lazy<Mutex<HashMap<TestType, TestVariation>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
+
+#[derive(Debug, Clone)]
+struct TestVariation {
+    index: usize,
+    file_path: String,
+}
+
+impl TestVariation {
+    async fn new() -> Self {
+        let file_names = get_test_file_names().await.unwrap();
+        println!("Found {} test files", file_names.len());
+
+        // Create a random number generator
+        let mut rng = rand::thread_rng();
+        let random_number: u32 = rng.gen_range(0..file_names.len() as u32);
+        println!("Random number: {}", random_number);
+
+        Self { index: 0, file_path: file_names[random_number as usize].clone() }
+    }
+
+    async fn get_new_file_name(&mut self) {
+        let file_names = get_test_file_names().await.unwrap();
+        println!("Found {} test files", file_names.len());
+
+        // Create a random number generator
+        let mut rng = rand::thread_rng();
+        let random_number: u32 = rng.gen_range(0..file_names.len() as u32);
+        println!("Random number: {}", random_number);
+
+        self.file_path = file_names[random_number as usize].clone()
+    }
+}
 
 // Global ordering state
 static ORDERING_STATE: Lazy<Mutex<OrderingState>> =
@@ -68,13 +105,34 @@ impl FromStr for TestType {
 }
 
 // Add a helper function to get the next variation index for a given endpoint type
-async fn get_next_variation(endpoint_type: TestType) -> usize {
+async fn get_next_variation(endpoint_type: TestType) -> TestVariation {
     let variations = *VARIATIONS_COUNT.lock().await;
     let mut map = ENDPOINT_VARIATION_STATE.lock().await;
-    let entry = map.entry(endpoint_type).or_insert(0);
-    let current = *entry;
-    *entry = (current + 1) % variations;
-    current
+    let entry = map.entry(endpoint_type).or_insert(TestVariation::new().await);
+    entry.get_new_file_name().await;
+    println!("Using variation: {}", entry.file_path);
+    entry.index = (entry.index + 1) % variations;
+    entry.clone()
+}
+
+async fn get_test_file_names() -> io::Result<Vec<String>> {
+    // Specify the directory path
+    let path = "./assets/test_files";
+    let mut names = vec![];
+
+    // Read the directory contents
+    let mut entries = fs::read_dir(path).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+
+        // Check if it's a file
+        if path.is_file() {
+            names.push(path.to_string_lossy().to_string());
+        }
+    }
+
+    Ok(names)
 }
 
 // Modify initialize_goose to set up initial session data
@@ -131,7 +189,6 @@ async fn make_request<T: serde::Serialize>(
 
     // Update state after request is complete
 
-    // let mut state = ORDERING_STATE.lock().await;
     let old_index = state.current_index;
     state.current_index = (state.current_index + 1) % state.endpoint_order.len();
     info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, state.current_index, endpoint_type);
@@ -165,7 +222,7 @@ pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::Index).await;
-    let file_name = format!("uploads/test{}.txt", variation);
+    let file_name = format!("uploads/test{}.txt", variation.file_path);
     let payload = IndexGlobs {
         globs: vec![file_name],
         chunk_capacity: DEFAULT_CHUNK_CAPACITY,
@@ -204,25 +261,27 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     info!("Executing Upload");
 
     let variation = get_next_variation(TestType::Upload).await;
-    let file_name = format!("uploads/test{}.txt", variation);
+    let variation_file_name = PathBuf::from(&variation.file_path).file_name().unwrap().to_string_lossy().to_string();
+    dbg!(&variation_file_name);
+    let file_name = format!("uploads/{}_{}", variation.index, variation_file_name);
 
     let boundary = "----WebKitFormBoundaryABC123";
 
-    // Create a temporary file with some content
-    let file_content = "Sample file content for testing";
-    let temp_dir = std::env::temp_dir();
-    let temp_file_path = temp_dir.join("test.txt");
-    std::fs::write(&temp_file_path, file_content).unwrap();
+    // // Create a temporary file with some content
+    // let file_content = "Sample file content for testing";
+    // let temp_dir = std::env::temp_dir();
+    // let temp_file_path = temp_dir.join("test.txt");
+    // std::fs::write(&temp_file_path, file_content).unwrap();
 
     // Read the file content
-    let file_bytes = std::fs::read(&temp_file_path).unwrap();
+    let file_bytes = std::fs::read(&variation.file_path).unwrap();
 
     // Create the multipart form data
     let mut form_data = Vec::new();
 
     // Add file part
     form_data.extend_from_slice(format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\n",
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: text/plain\r\n\r\n",
     ).as_bytes());
     form_data.extend_from_slice(&file_bytes);
     form_data.extend_from_slice(b"\r\n");
@@ -273,7 +332,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::DeleteSource).await;
-    let file_name = format!("uploads/test{}.txt", variation);
+    let file_name = format!("uploads/test{}.txt", variation.file_path);
     let payload = DeleteSource { sources: vec![file_name] };
 
     make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", TestType::DeleteSource, Some(payload))
