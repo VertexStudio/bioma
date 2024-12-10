@@ -1,5 +1,6 @@
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
@@ -23,7 +24,7 @@ impl Actor for MainActor {
         info!("{} Starting conversation with LLM", ctx.id());
 
         // Start the chat actor
-        let chat_handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             if let Err(e) = chat_actor.start(&mut chat_ctx).await {
                 error!("LLM actor error: {}", e);
             }
@@ -43,23 +44,42 @@ impl Actor for MainActor {
 
             info!("{} Sending message: {}", ctx.id(), starter);
             let chat_message = ChatMessage::user(starter.to_string());
-            let response: ChatMessageResponse = ctx
-                .send_and_wait_reply::<Chat, ChatMessages>(
+
+            // Get streaming response
+            let mut response_stream = ctx
+                .send::<Chat, ChatMessages>(
                     ChatMessages { messages: vec![chat_message], restart: false, persist: false },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
                 .await?;
 
-            if let Some(assistant_message) = response.message {
-                info!("{} Received response: {}", ctx.id(), assistant_message.content);
-                exchanges += 1;
-            } else {
-                error!("{} No response received from LLM", ctx.id());
-            }
-        }
+            // Process streaming response
+            let mut full_response = String::new();
+            while let Some(chunk) = response_stream.next().await {
+                match chunk {
+                    Ok(response) => {
+                        if let Some(message) = &response.message {
+                            print!("{}", message.content);
+                            full_response.push_str(&message.content);
+                        }
 
-        chat_handle.abort();
+                        // Break if this is the final message
+                        if response.done {
+                            println!(); // New line after completion
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("{} Error receiving response: {}", ctx.id(), e);
+                        break;
+                    }
+                }
+            }
+
+            info!("{} Full response received: {}", ctx.id(), full_response);
+            exchanges += 1;
+        }
 
         info!("{} Conversation ended", ctx.id());
         Ok(())
