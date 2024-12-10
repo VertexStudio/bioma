@@ -341,7 +341,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             }
 
             info!("Sending context to chat actor");
-            let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: false };
+            let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: true };
 
             // Clone the necessary parts before spawning the task
             let (tx, rx) = tokio::sync::mpsc::channel(100);
