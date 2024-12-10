@@ -68,47 +68,60 @@ pub struct ChatMessages {
 impl Message<ChatMessages> for Chat {
     type Response = ChatMessageResponse;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, messages: &ChatMessages) -> Result<(), ChatError> {
-        if messages.restart {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, request: &ChatMessages) -> Result<(), ChatError> {
+        if request.restart {
             self.history.clear();
         }
 
-        for message in messages.messages.iter() {
-            // Add the message to the history
+        // Add new messages to history
+        for message in &request.messages {
             self.history.push(message.clone());
-
-            // Truncate history if it exceeds the limit
             if self.history.len() > self.messages_number_limit {
                 self.history.drain(..self.history.len() - self.messages_number_limit);
             }
         }
 
+        // Prepare chat request
         let mut chat_message_request = ChatMessageRequest::new(self.model.to_string(), self.history.clone());
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
         }
 
-        // Send the messages to the ollama client
-        let result = self.ollama.send_chat_messages(chat_message_request).await?;
+        // Get streaming response from Ollama
+        let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
 
-        // Add the assistant's message to the history
-        if let Some(message) = &result.message {
-            self.history.push(ChatMessage::assistant(message.content.clone()));
+        // Stream responses back to caller
+        while let Some(response) = stream.next().await {
+            match response {
+                Ok(chunk) => {
+                    // Send chunk through actor's reply mechanism
+                    ctx.reply(chunk.clone()).await?;
+
+                    // If this is the final message, add it to history
+                    if chunk.done {
+                        if let Some(message) = chunk.message {
+                            self.history.push(ChatMessage::assistant(message.content.clone()));
+                        }
+
+                        // Persist if requested
+                        if request.persist {
+                            self.history = self
+                                .history
+                                .iter()
+                                .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
+                                .cloned()
+                                .collect();
+                            self.save(ctx).await?;
+                        }
+                    }
+                }
+                Err(_) => {
+                    error!("Error in chat stream");
+                    break;
+                }
+            }
         }
 
-        if messages.persist {
-            // Filter out system messages before saving
-            self.history = self
-                .history
-                .iter()
-                .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
-                .cloned()
-                .collect();
-
-            self.save(ctx).await?;
-        }
-
-        ctx.reply(result).await?;
         Ok(())
     }
 }
