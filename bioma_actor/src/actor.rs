@@ -23,46 +23,119 @@ pub trait ActorError: std::error::Error + Debug + Send + Sync + From<SystemActor
 /// Enumerates the types of errors that can occur in Actor framework
 #[derive(thiserror::Error, Debug)]
 pub enum SystemActorError {
-    // IO error
+    /// Underlying IO error from the system.
+    ///
+    /// This typically occurs during file operations or network communication.
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    // SurrealDB error
+
+    /// Error from the SurrealDB database operations.
+    ///
+    /// Occurs during database queries, transactions, or connection issues with SurrealDB.
     #[error("Engine error: {0}")]
     EngineError(#[from] surrealdb::Error),
-    // Message are not of the same type
+
+    /// Error when attempting to deserialize a message into an incorrect type.
+    ///
+    /// This happens when a received message's type name doesn't match the expected type
+    /// during message handling or reply processing.
     #[error("MessageTypeMismatch: {0}")]
     MessageTypeMismatch(&'static str),
-    // LIVE query error
+
+    /// Error in the live query subscription stream.
+    ///
+    /// Occurs when there are issues with the real-time message or reply streams,
+    /// typically during actor communication.
     #[error("LiveStream error: {0}")]
     LiveStream(Cow<'static, str>),
-    // json_serde::Error
+
+    /// JSON serialization/deserialization error for messages or actor state.
+    ///
+    /// This occurs when converting between Rust types and JSON representation
+    /// for message content or actor persistence.
     #[error("JsonSerde error: {0}")]
     JsonSerde(#[from] serde_json::Error),
-    // Id mismatch a and b
+
+    /// Mismatch between expected and actual record IDs.
+    ///
+    /// This error occurs when database record IDs don't match during actor
+    /// operations, typically indicating a consistency issue.
     #[error("Id mismatch: {0:?} {1:?}")]
     IdMismatch(RecordId, RecordId),
+
+    /// Mismatch between actor type tags.
+    ///
+    /// Occurs when an actor's type tag doesn't match its expected type,
+    /// usually during actor spawning or message routing.
     #[error("Actor tag mismatch: {0} {1}")]
     ActorTagMismatch(Cow<'static, str>, Cow<'static, str>),
-    // Actor already exists
+
+    /// Attempt to spawn an actor with an ID that already exists.
+    ///
+    /// This error occurs when trying to create a new actor instance with
+    /// SpawnOptions::Error and the actor ID is already in use.
     #[error("Actor already exists: {0}")]
     ActorAlreadyExists(ActorId),
-    // Message reply error
+
+    /// Error in the message reply process.
+    ///
+    /// Occurs during reply handling, such as when a reply channel is closed
+    /// or when trying to reply without an active message context.
     #[error("Message reply error: {0}")]
     MessageReply(Cow<'static, str>),
+
+    /// Timeout while waiting for a message reply.
+    ///
+    /// This error occurs when a reply to a message isn't received within
+    /// the specified timeout duration in SendOptions.
     #[error("Message timeout {0} {1:?}")]
     MessageTimeout(Cow<'static, str>, std::time::Duration),
+
+    /// Task execution timeout.
+    ///
+    /// Occurs when an actor task exceeds its allocated execution time.
     #[error("Tasked timeout after {0:?}")]
     TaskTimeout(std::time::Duration),
+
+    /// Error from the object store operations.
+    ///
+    /// This occurs during interactions with the object storage system,
+    /// such as saving or loading large objects.
     #[error("Object store error: {0}")]
     ObjectStore(#[from] object_store::Error),
+
+    /// Invalid path in object store operations.
+    ///
+    /// Occurs when attempting to use an invalid path format
+    /// in object store operations.
     #[error("Object store error: {0}")]
     PathError(#[from] object_store::path::Error),
+
+    /// URL parsing error.
+    ///
+    /// Occurs when trying to parse invalid URLs, typically
+    /// for external resource access or configuration.
     #[error("Url error: {0}")]
     UrlError(#[from] url::ParseError),
+
+    /// Error from a Tokio task join handle.
+    ///
+    /// This occurs when a spawned task fails to complete or
+    /// is cancelled, typically during actor lifecycle operations.
     #[error("Join handle error: {0}")]
     JoinHandle(#[from] tokio::task::JoinError),
+
+    /// Attempt to register an actor tag that is already registered.
+    ///
+    /// This error occurs during actor system initialization when
+    /// trying to register duplicate actor types.
     #[error("Actor tag already registered: {0}")]
     ActorTagAlreadyRegistered(Cow<'static, str>),
+
+    /// Referenced actor tag is not registered in the system.
+    ///
+    /// This occurs when trying to interact with an actor type
+    /// that hasn't been registered with the actor system.
     #[error("Actor tag not found: {0}")]
     ActorTagNotFound(Cow<'static, str>),
 }
@@ -74,7 +147,7 @@ impl ActorError for SystemActorError {}
 pub struct FrameMessage {
     /// Message id created with a ULID
     id: RecordId,
-    /// Message name (usually a type name)
+    /// Message name (usually message type name)
     pub name: Cow<'static, str>,
     /// Sender
     pub tx: RecordId,
