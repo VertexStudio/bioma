@@ -6,6 +6,7 @@ use object_store::local::LocalFileSystem;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::{
     engine::any::{Any, IntoEndpoint},
@@ -13,6 +14,7 @@ use surrealdb::{
     value::RecordId,
     Surreal,
 };
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
@@ -23,7 +25,7 @@ macro_rules! dbg_export_db {
         std::fs::create_dir_all(&output_dir).unwrap();
         let file_name = format!("dbg_{}_{}", file!().replace("/", "_").replace(".", "_"), line!());
         let file_path = output_dir.join(format!("{}.surql", file_name));
-        $engine.db().export(file_path.to_str().unwrap()).await.unwrap();
+        $engine.db().lock().await.export(file_path.to_str().unwrap()).await.unwrap();
     }};
 }
 
@@ -93,14 +95,14 @@ impl EngineOptions {
 /// Responsible for creating and managing the database connection.
 #[derive(Clone, Debug)]
 pub struct Engine {
-    db: Box<Surreal<Any>>,
+    db: Arc<Mutex<Surreal<Any>>>,
     options: EngineOptions,
     registry: ActorTagRegistry,
 }
 
 impl Engine {
-    pub fn db(&self) -> &Surreal<Any> {
-        &self.db
+    pub fn db(&self) -> Arc<Mutex<Surreal<Any>>> {
+        Arc::clone(&self.db)
     }
 
     pub async fn connect(options: EngineOptions) -> Result<Engine, SystemActorError> {
@@ -127,7 +129,7 @@ impl Engine {
         db.signin(Root { username: &options.username, password: &options.password }).await?;
         db.use_ns(options.namespace.clone()).use_db(options.database.clone()).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db), options: options.clone(), registry: ActorTagRegistry::default() })
+        Ok(Engine { db: Arc::new(Mutex::new(db)), options: options.clone(), registry: ActorTagRegistry::default() })
     }
 
     pub async fn test() -> Result<Engine, SystemActorError> {
@@ -137,11 +139,11 @@ impl Engine {
         db.connect("memory").await?;
         db.use_ns(options.namespace.clone()).use_db(options.database.clone()).await?;
         Engine::define(&db).await?;
-        Ok(Engine { db: Box::new(db), options, registry: ActorTagRegistry::default() })
+        Ok(Engine { db: Arc::new(Mutex::new(db)), options, registry: ActorTagRegistry::default() })
     }
 
     pub async fn reset(&self) -> Result<(), SystemActorError> {
-        let db = self.db.clone();
+        let db = self.db.lock().await;
         let db_name = self.options.database.clone();
         let ns_name = self.options.namespace.clone();
         db.query(format!("REMOVE DATABASE `{}`;", db_name)).await?;
@@ -151,7 +153,7 @@ impl Engine {
     }
 
     pub async fn health(&self) -> bool {
-        self.db.health().await.is_ok()
+        self.db.lock().await.health().await.is_ok()
     }
 
     async fn define(db: &Surreal<Any>) -> Result<(), SystemActorError> {
