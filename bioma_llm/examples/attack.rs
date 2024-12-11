@@ -32,7 +32,7 @@ struct TestVariation {
 }
 
 impl TestVariation {
-    async fn get_new_file_name(&mut self) {
+    async fn set_new_random_file_name(&mut self) {
         let file_names = get_test_file_names().await.unwrap();
         println!("Found {} test files", file_names.len());
 
@@ -92,13 +92,18 @@ impl FromStr for TestType {
     }
 }
 
-// Add a helper function to get the next variation index for a given endpoint type
+/// Add a helper function to get the next variation index for a given endpoint type
 async fn get_next_variation(endpoint_type: TestType) -> TestVariation {
+    // Lock guard on tracking variables
     let variations = *VARIATIONS_COUNT.lock().await;
     let mut map = ENDPOINT_VARIATION_STATE.lock().await;
+
+    // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
     let entry = map.entry(endpoint_type).or_insert(TestVariation { index: 0, file_path: "".to_string() });
-    entry.get_new_file_name().await;
+    entry.set_new_random_file_name().await;
     println!("Using variation: {}", entry.file_path);
+
+    // This ensures that the index is always within 0 and (variations - 1)
     entry.index = (entry.index + 1) % variations;
     entry.clone()
 }
@@ -176,7 +181,6 @@ async fn make_request<T: serde::Serialize>(
     let mut goose = user.request(goose_request).await?;
 
     // Update state after request is complete
-
     let old_index = state.current_index;
     state.current_index = (state.current_index + 1) % state.endpoint_order.len();
     info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, state.current_index, endpoint_type);
@@ -249,8 +253,6 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     info!("Executing Upload");
 
     let variation = get_next_variation(TestType::Upload).await;
-    let variation_file_name = PathBuf::from(&variation.file_path).file_name().unwrap().to_string_lossy().to_string();
-    dbg!(&variation_file_name);
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
 
     let boundary = "----WebKitFormBoundaryABC123";
