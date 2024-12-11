@@ -951,18 +951,32 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// A JoinHandle for the reply processing task
     async fn start_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
+        // Set up message processing and logging
         debug!("[{}] msg-process-start {} {}", self.id().record_id(), frame.name, frame.id);
+
+        // Create an unbounded channel for streaming replies
+        // tx: sender that will be stored in actor context
+        // rx: receiver that will be used in spawned task
         let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // Clone database and frame for use in spawned task
         let db = self.engine.db().clone();
         let frame_clone = frame.clone();
 
+        // Load SQL query template for reply insertion
+        let reply_query = include_str!("../sql/reply.surql");
+
+        // Spawn async task to handle reply processing
         let handle = tokio::spawn(async move {
+            // Counter for tracking reply chunks in stream
             let chunk_counter = AtomicU64::new(1);
 
+            // Process each reply value sent through channel
             while let Some(value) = rx.recv().await {
                 let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 debug!("[{}] msg-chunk {} {}-{}", frame_clone.rx, frame_clone.name, frame_clone.id.key(), chunk);
 
+                // Create reply frame for this chunk
                 let reply = FrameReply::new_chunk(
                     frame_clone.id.key().to_string(),
                     chunk,
@@ -972,15 +986,19 @@ impl<T: Actor> ActorContext<T> {
                     value,
                 );
 
+                // Get database ID for reply
                 let reply_id = reply.id.to_record_id();
 
-                let reply_query = include_str!("../sql/reply.surql");
+                // Insert reply chunk into database
+                // This query likely creates a new reply record and links it to original message
                 let result = db
                     .query(reply_query)
                     .bind(("reply_id", reply_id))
                     .bind(("reply", reply))
                     .bind(("msg_id", frame_clone.id.clone()))
                     .await;
+
+                // Log any errors during reply insertion
                 if let Err(e) = result {
                     error!(
                         "[{}] msg-chunk-error {} {}-{} {}",
@@ -993,18 +1011,20 @@ impl<T: Actor> ActorContext<T> {
                 }
             }
 
-            // Store the values we'll need for logging before using frame_clone
+            // After channel closes (all replies sent), send final reply
+            // Store values needed for logging
             let rx = frame_clone.rx.clone();
             let name = frame_clone.name.clone();
             let id_key = frame_clone.id.key().to_string();
 
             debug!("[{}] msg-final {} {}", rx, name, id_key);
 
+            // Create final reply frame (chunk = None indicates end of stream)
             let reply = FrameReply::new_final(id_key.clone(), frame_clone.name, frame_clone.rx, frame_clone.tx);
-
             let reply_id = reply.id.to_record_id();
 
-            let reply_query = include_str!("../sql/reply.surql");
+            // Insert final reply into database
+            // Uses same query template but marks this as final reply
             if let Err(e) = db
                 .query(reply_query)
                 .bind(("reply_id", reply_id))
@@ -1016,6 +1036,7 @@ impl<T: Actor> ActorContext<T> {
             }
         });
 
+        // Store sender in context for later reply sending
         self.tx = Some(tx);
         handle
     }
