@@ -228,6 +228,8 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -247,7 +249,7 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
         "The quick brown fox jumps over the lazy dog.",
     ];
 
-    let _ = relay_ctx
+    let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
@@ -257,6 +259,20 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
             SendOptions::default(),
         )
         .await?;
+
+    let source_query = include_str!("../sql/source.surql");
+    let source = "test_source.test";
+    let uri = "test_uri.test";
+
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", source))
+        .bind(("uri", uri))
+        .bind(("emb_ids", stored.ids))
+        .bind(("prefix", table_prefix))
+        .await
+        .map_err(SystemActorError::from)?;
 
     // Test top-k similarities
     let query = "How are you doing?";
@@ -293,6 +309,8 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -306,7 +324,7 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
 
     // Generate embeddings
     let texts = vec!["Persistent embedding test"];
-    let _ = relay_ctx
+    let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
@@ -316,6 +334,20 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
             SendOptions::default(),
         )
         .await?;
+
+    let source_query = include_str!("../sql/source.surql");
+    let source = "test_source.test";
+    let uri = "test_uri.test";
+
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", source))
+        .bind(("uri", uri))
+        .bind(("emb_ids", stored.ids))
+        .bind(("prefix", table_prefix))
+        .await
+        .map_err(SystemActorError::from)?;
 
     // Terminate the actor
     embeddings_handle.abort();
@@ -368,6 +400,8 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -382,7 +416,7 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
     // Generate embeddings with metadata
     let texts = vec!["Text with metadata"];
     let metadata = vec![serde_json::json!({"key": "value"})];
-    let _ = relay_ctx
+    let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(texts.iter().map(|text| text.to_string()).collect()),
@@ -392,6 +426,21 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
             SendOptions::default(),
         )
         .await?;
+
+    // Create source record directly using engine
+    let source_query = include_str!("../sql/source.surql");
+    let source = "test_source.test";
+    let uri = "test_uri.test";
+
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", source))
+        .bind(("uri", uri))
+        .bind(("emb_ids", stored.ids))
+        .bind(("prefix", table_prefix))
+        .await
+        .map_err(SystemActorError::from)?;
 
     // Query for the embedding
     let top_k = embeddings::TopK {
@@ -427,11 +476,15 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
     let num_embeddings_actors = 3;
     let mut embeddings_actors = Vec::new();
     let mut embeddings_handles = Vec::new();
+    let mut table_prefixes = Vec::new();
 
     for i in 0..num_embeddings_actors {
         let embeddings_id = ActorId::of::<Embeddings>(format!("/embeddings_{}", i));
         let (mut embeddings_ctx, mut embeddings_actor) =
             Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+        let table_prefix = embeddings_actor.table_prefix();
+        table_prefixes.push(table_prefix);
 
         let embeddings_handle = tokio::spawn(async move {
             if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
@@ -487,14 +540,32 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
         embedding_futures.push(future);
     }
 
-    let all_embeddings = futures::future::join_all(embedding_futures).await;
+    let source_query = include_str!("../sql/source.surql");
 
-    for embeddings_result in all_embeddings {
-        let embeddings = embeddings_result?;
-        assert!(!embeddings.ids.is_empty());
-        // for id in &embeddings.ids {
-        //     assert_eq!(id.table(), "embedding");
-        // }
+    // Process embeddings and create sources one at a time
+    for (i, embedding_future) in embedding_futures.into_iter().enumerate() {
+        let embedding_result = embedding_future.await?;
+
+        {
+            // Create a new scope for the query execution with owned values
+            let source = format!("pool_source_{}.test", i).to_string();
+            let uri = format!("pool_uri_{}.test", i).to_string();
+            let ids = embedding_result.ids.clone();
+            let prefix = table_prefixes[i].clone();
+
+            engine
+                .db()
+                .query(source_query)
+                .bind(("source", source))
+                .bind(("uri", uri))
+                .bind(("emb_ids", ids))
+                .bind(("prefix", prefix))
+                .await
+                .map_err(SystemActorError::from)?;
+        }
+
+        // Verify the embeddings
+        assert!(!embedding_result.ids.is_empty());
     }
 
     // Get similarities from all actors
@@ -582,6 +653,8 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -609,6 +682,17 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         .await?;
 
     assert_eq!(stored.ids.len(), 1);
+
+    let source_query = include_str!("../sql/source.surql");
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", "test_source.test"))
+        .bind(("uri", "test_uri.test"))
+        .bind(("emb_ids", stored.ids))
+        .bind(("prefix", table_prefix.clone()))
+        .await
+        .map_err(SystemActorError::from)?;
 
     // Search using the same image
     let top_k = embeddings::TopK {
@@ -648,6 +732,8 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
     )
     .await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -661,13 +747,25 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
 
     // Store image embeddings
     let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
-    let _ = relay_ctx
+    let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings { content: EmbeddingContent::Image(image_paths), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )
         .await?;
+
+    let source_query = include_str!("../sql/source.surql");
+
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", "test_source.test"))
+        .bind(("uri", "test_uri.test"))
+        .bind(("emb_ids", stored.ids))
+        .bind(("prefix", table_prefix.clone()))
+        .await
+        .map_err(SystemActorError::from)?;
 
     // Search using text query
     let top_k = embeddings::TopK {
@@ -745,6 +843,8 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     )
     .await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -755,8 +855,8 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Store both images and text
-    let _ = relay_ctx
+    // Store image embeddings
+    let stored_image = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
@@ -767,7 +867,19 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
         )
         .await?;
 
-    let _ = relay_ctx
+    let source_query = include_str!("../sql/source.surql");
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", "test_source_image.test"))
+        .bind(("uri", "test_uri_image.test"))
+        .bind(("emb_ids", stored_image.ids))
+        .bind(("prefix", table_prefix.clone()))
+        .await
+        .map_err(SystemActorError::from)?;
+
+    // Store text embeddings
+    let stored_text = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
                 content: EmbeddingContent::Text(vec!["an elephant in the wild".to_string()]),
@@ -777,6 +889,16 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
             SendOptions::default(),
         )
         .await?;
+
+    engine
+        .db()
+        .query(source_query)
+        .bind(("source", "test_source_text.test"))
+        .bind(("uri", "test_uri_text.test"))
+        .bind(("emb_ids", stored_text.ids))
+        .bind(("prefix", table_prefix))
+        .await
+        .map_err(SystemActorError::from)?;
 
     // Search across both modalities
     let similarities = relay_ctx
@@ -810,6 +932,8 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
+    let table_prefix = embeddings_actor.table_prefix();
+
     let embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
@@ -829,17 +953,29 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     ];
 
     // Store all embeddings
-    for (source, texts) in &sources_and_texts {
-        let _ = relay_ctx
+    for (source, texts) in sources_and_texts.clone() {
+        let stored = relay_ctx
             .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                 StoreEmbeddings {
                     content: EmbeddingContent::Text(texts.iter().map(|t| t.to_string()).collect()),
-                    metadata: Some(vec![serde_json::json!({"source": source})]),
+                    metadata: Some(texts.iter().map(|_| serde_json::json!({"source": source})).collect()),
                 },
                 &embeddings_id,
                 SendOptions::default(),
             )
             .await?;
+
+        // Create source record for each source
+        let source_query = include_str!("../sql/source.surql");
+        engine
+            .db()
+            .query(source_query)
+            .bind(("source", source))
+            .bind(("uri", source))
+            .bind(("emb_ids", stored.ids))
+            .bind(("prefix", table_prefix.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
     }
 
     // Test 1: Query with specific source filter
