@@ -108,7 +108,13 @@
             queryInput.value = '';
             resizeTextarea();
 
-            const queryObject = { query: queryText };
+            const queryObject = {
+                messages: [{
+                    role: "user",
+                    content: queryText
+                }],
+                source: null
+            };
 
             try {
                 const response = await fetch('http://localhost:5766/ask', {
@@ -125,15 +131,15 @@
 
                 const data = await response.json();
 
-                if (data.response && data.response.message && data.response.message.content) {
-                    appendMessage('Bot', data.response.message.content);
+                if (data.message && data.message.content) {
+                    appendMessage('Bot', data.message.content);
                 } else {
                     appendMessage('System', 'Received an empty or invalid response from the server.');
                 }
 
-                if (data.response.done && data.response.final_data) {
-                    console.log('Final data:', data.response.final_data);
-                    // You can display or use the final data as needed
+                if (data.done) {
+                    console.log('Final data:', data);
+                    // You can handle any final data processing here
                 }
             } catch (error) {
                 console.error('Error:', error);
