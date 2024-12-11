@@ -6,8 +6,9 @@ use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use walkdir::WalkDir;
 
 use crate::embeddings::EmbeddingContent;
@@ -39,30 +40,13 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
+    #[error("SurrealDB error: {0}")]
+    SurrealDB(#[from] surrealdb::Error),
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl ActorError for IndexerError {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourcedText {
-    pub source: String,
-    pub text: String,
-    pub text_type: TextType,
-}
-
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
-pub struct IndexTexts {
-    pub texts: Vec<SourcedText>,
-    #[builder(default = default_chunk_capacity())]
-    #[serde(default = "default_chunk_capacity")]
-    pub chunk_capacity: std::ops::Range<usize>,
-    #[builder(default = default_chunk_overlap())]
-    #[serde(default = "default_chunk_overlap")]
-    pub chunk_overlap: usize,
-    #[builder(default = default_chunk_batch_size())]
-    #[serde(default = "default_chunk_batch_size")]
-    pub chunk_batch_size: usize,
-}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
@@ -114,29 +98,13 @@ pub enum TextType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseMetadata {
-    pub source: String,
-    pub uri: String,
-    pub content_type: ContentType,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ContentType {
-    Text(TextType),
-    Image,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextChunkMetadata {
-    #[serde(flatten)]
-    pub base: BaseMetadata,
+pub struct TextMetadata {
+    pub content: TextType,
     pub chunk_number: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageMetadata {
-    #[serde(flatten)]
-    pub base: BaseMetadata,
     pub format: String,
     pub dimensions: ImageDimensions,
     pub size_bytes: u64,
@@ -145,27 +113,33 @@ pub struct ImageMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SourceEmbeddings {
-    pub source: String,
+pub enum Metadata {
+    Text(TextMetadata),
+    Image(ImageMetadata),
 }
 
 #[derive(Debug)]
 enum IndexResult {
-    Indexed(usize),
-    Cached,
+    Indexed(Vec<RecordId>),
     Failed,
+}
+
+/// The source of the embeddings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentSource {
+    pub source: String,
+    pub uri: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSource {
-    pub sources: Vec<String>,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
-    pub deleted_sources: Vec<String>,
-    pub not_found_sources: Vec<String>,
+    pub deleted_sources: Vec<ContentSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,38 +158,14 @@ impl Indexer {
     async fn index_content(
         &self,
         ctx: &mut ActorContext<Self>,
-        source: String,
-        uri: String,
+        source: ContentSource,
         content: Content,
         embeddings_id: &ActorId,
     ) -> Result<IndexResult, IndexerError> {
-        let edge_name = format!(
-            "{}_source_embeddings",
-            self.embeddings.table_name_prefix.as_ref().unwrap_or(&self.embeddings.model.to_string())
-        );
-        let query = format!(
-            "SELECT source, ->{}.out AS embeddings FROM source:{{source:$source}} WHERE ->{}.out.metadata.uri CONTAINS $uri",
-            edge_name, edge_name
-        );
-
-        let source_embeddings =
-            ctx.engine().db().query(&query).bind(("source", source.clone())).bind(("uri", uri.clone())).await;
-
-        let Ok(mut source_embeddings) = source_embeddings else {
-            error!("Failed to query source embeddings: {} {}", source, uri);
-            return Ok(IndexResult::Failed);
-        };
-
-        let source_embeddings: Vec<SourceEmbeddings> = source_embeddings.take(0).map_err(SystemActorError::from)?;
-        if !source_embeddings.is_empty() {
-            debug!("Content already indexed with URI: {} {}", source, uri);
-            return Ok(IndexResult::Cached);
-        }
-
         match content {
             Content::Image { path } => {
-                let source_clone = source.clone();
                 let path_clone = path.clone();
+                // let source_clone = source.clone();
                 let metadata = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::open(&path).ok()?;
                     let reader = std::io::BufReader::new(file);
@@ -229,18 +179,13 @@ impl Indexer {
 
                     let file_metadata = std::fs::metadata(&path).ok()?;
 
-                    let image_metadata = ImageMetadata {
-                        base: BaseMetadata {
-                            source: source.clone(),
-                            uri: uri.clone(),
-                            content_type: ContentType::Image,
-                        },
+                    let image_metadata = Metadata::Image(ImageMetadata {
                         format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
                         dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
                         size_bytes: file_metadata.len(),
                         modified: file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
                         created: file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-                    };
+                    });
 
                     Some(serde_json::to_value(image_metadata).ok()?)
                 })
@@ -248,9 +193,8 @@ impl Indexer {
                 .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
 
                 let result = ctx
-                    .send::<Embeddings, StoreEmbeddings>(
+                    .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                         StoreEmbeddings {
-                            source: source_clone,
                             content: EmbeddingContent::Image(vec![path_clone]),
                             metadata: metadata.map(|m| vec![m]),
                         },
@@ -259,8 +203,13 @@ impl Indexer {
                     )
                     .await;
 
+                let mut embeddings_ids: Vec<RecordId> = Vec::new();
+
                 match result {
-                    Ok(_) => Ok(IndexResult::Indexed(1)),
+                    Ok(stored_embeddings) => {
+                        embeddings_ids.extend(stored_embeddings.ids);
+                        Ok(IndexResult::Indexed(embeddings_ids))
+                    }
                     Err(e) => {
                         error!("Failed to generate image embedding: {}", e);
                         Ok(IndexResult::Failed)
@@ -310,26 +259,18 @@ impl Indexer {
                 let metadata = chunks
                     .iter()
                     .enumerate()
-                    .map(|(i, _)| TextChunkMetadata {
-                        base: BaseMetadata {
-                            source: source.clone(),
-                            uri: uri.clone(),
-                            content_type: ContentType::Text(text_type.clone()),
-                        },
-                        chunk_number: i,
-                    })
+                    .map(|(i, _)| Metadata::Text(TextMetadata { content: text_type.clone(), chunk_number: i }))
                     .map(|metadata| serde_json::to_value(metadata).unwrap_or_default())
                     .collect::<Vec<Value>>();
 
                 let chunk_batches = chunks.chunks(chunk_batch_size);
                 let metadata_batches = metadata.chunks(chunk_batch_size);
-                let mut embeddings_count = 0;
+                let mut embeddings_ids: Vec<RecordId> = Vec::new();
 
                 for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
                     let result = ctx
-                        .send::<Embeddings, StoreEmbeddings>(
+                        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                             StoreEmbeddings {
-                                source: source.clone(),
                                 content: EmbeddingContent::Text(chunk_batch.to_vec()),
                                 metadata: Some(metadata_batch.to_vec()),
                             },
@@ -339,63 +280,23 @@ impl Indexer {
                         .await;
 
                     match result {
-                        Ok(_) => embeddings_count += 1,
-                        Err(e) => error!("Failed to generate embeddings: {} {}", e, source),
+                        Ok(stored_embeddings) => {
+                            embeddings_ids.extend(stored_embeddings.ids);
+                        }
+                        Err(e) => error!("Failed to generate embeddings: {} {}", e, source.source),
                     }
                 }
 
-                Ok(IndexResult::Indexed(embeddings_count))
+                Ok(IndexResult::Indexed(embeddings_ids))
             }
         }
-    }
-}
-
-impl Message<IndexTexts> for Indexer {
-    type Response = Indexed;
-
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexTexts) -> Result<Indexed, IndexerError> {
-        let Some(embeddings_id) = &self.embeddings_id else {
-            return Err(IndexerError::EmbeddingsActorNotInitialized);
-        };
-
-        let total_index_texts_time = std::time::Instant::now();
-        let mut indexed = 0;
-        let mut cached = 0;
-
-        for SourcedText { source, text, text_type } in message.texts.iter() {
-            match self
-                .index_content(
-                    ctx,
-                    source.clone(),
-                    String::new(),
-                    Content::Text {
-                        content: text.clone(),
-                        text_type: text_type.clone(),
-                        chunk_config: (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size),
-                    },
-                    embeddings_id,
-                )
-                .await?
-            {
-                IndexResult::Indexed(count) => {
-                    if count > 0 {
-                        indexed += 1;
-                    }
-                }
-                IndexResult::Cached => cached += 1,
-                IndexResult::Failed => continue,
-            }
-        }
-
-        info!("Indexed {} texts, cached {} paths, in {:?}", indexed, cached, total_index_texts_time.elapsed());
-        Ok(Indexed { indexed, cached })
     }
 }
 
 impl Message<IndexGlobs> for Indexer {
     type Response = Indexed;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexGlobs) -> Result<Indexed, IndexerError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexGlobs) -> Result<(), IndexerError> {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(IndexerError::EmbeddingsActorNotInitialized);
         };
@@ -443,10 +344,31 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             for pathbuf in paths {
+                let uri = pathbuf.to_string_lossy().to_string();
+                let source = ContentSource { source: full_glob_clone.clone(), uri: uri.clone() };
+
+                // Check if source already exists before processing
+                let query =
+                    format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
+                let sources = ctx
+                    .engine()
+                    .db()
+                    .query(&query)
+                    .bind(("source", source.source.clone()))
+                    .bind(("uri", source.uri.clone()))
+                    .await;
+
+                if let Ok(mut sources) = sources {
+                    let sources: Vec<ContentSource> = sources.take(0).map_err(SystemActorError::from)?;
+                    if !sources.is_empty() {
+                        info!("Content already indexed with URI: {} {}", source.source, source.uri);
+                        cached += 1;
+                        continue;
+                    }
+                }
+
                 info!("Indexing path: {}", &pathbuf.display());
                 let ext = pathbuf.extension().and_then(|ext| ext.to_str());
-                let source = full_glob_clone.clone();
-                let uri = pathbuf.to_string_lossy().to_string();
 
                 let content = if let Some(ext) = ext {
                     if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
@@ -458,7 +380,7 @@ impl Message<IndexGlobs> for Indexer {
                         // Special handling for PDF
                         if ext == "pdf" {
                             match ctx
-                                .send::<PdfAnalyzer, AnalyzePdf>(
+                                .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
                                     AnalyzePdf { file_path: pathbuf.clone() },
                                     pdf_analyzer_id,
                                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -480,7 +402,7 @@ impl Message<IndexGlobs> for Indexer {
                                 "cue" => TextType::Code(CodeLanguage::Cue),
                                 "html" => TextType::Code(CodeLanguage::Html),
                                 "cpp" => TextType::Code(CodeLanguage::Cpp),
-                                "h" => TextType::Text,
+                                "h" => TextType::Code(CodeLanguage::Cpp),
                                 _ => TextType::Text,
                             };
 
@@ -500,70 +422,70 @@ impl Message<IndexGlobs> for Indexer {
                     }
                 };
 
-                match self.index_content(ctx, source, uri, content, embeddings_id).await? {
-                    IndexResult::Indexed(count) => {
-                        if count > 0 {
+                let mut embeddings_ids: Vec<RecordId> = Vec::new();
+
+                match self.index_content(ctx, source.clone(), content, embeddings_id).await? {
+                    IndexResult::Indexed(ids) => {
+                        embeddings_ids.extend(ids);
+                        if !embeddings_ids.is_empty() {
                             indexed += 1;
                         }
                     }
-                    IndexResult::Cached => cached += 1,
                     IndexResult::Failed => continue,
+                }
+
+                if !embeddings_ids.is_empty() {
+                    let source_query = include_str!("../sql/source.surql");
+                    ctx.engine()
+                        .db()
+                        .query(*&source_query)
+                        .bind(("source", source.source.clone()))
+                        .bind(("uri", source.uri.clone()))
+                        .bind(("emb_ids", embeddings_ids))
+                        .bind(("prefix", self.embeddings.table_prefix()))
+                        .await
+                        .map_err(SystemActorError::from)
+                        .unwrap();
                 }
             }
         }
 
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
-        Ok(Indexed { indexed, cached })
+        ctx.reply(Indexed { indexed, cached }).await?;
+        Ok(())
     }
 }
 
 impl Message<DeleteSource> for Indexer {
     type Response = DeletedSource;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &DeleteSource,
-    ) -> Result<DeletedSource, IndexerError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &DeleteSource) -> Result<(), IndexerError> {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
-        let local_store_dir = ctx.engine().local_store_dir();
         let db = ctx.engine().db();
 
-        let mut total_deleted = 0;
-        let mut deleted_sources = Vec::new();
-        let mut not_found_sources = Vec::new();
+        let mut results =
+            db.query(&query).bind(("source", message.source.clone())).await.map_err(SystemActorError::from)?;
 
-        for source in &message.sources {
-            // If source is not absolute, make it relative to local_store_dir
-            let full_source = if std::path::Path::new(source).is_absolute() {
-                source.clone()
-            } else {
-                local_store_dir.join(source).to_string_lossy().into_owned()
-            };
+        let delete_result: DeletedSource = results
+            .take::<Vec<DeletedSource>>(0)
+            .map_err(IndexerError::from)?
+            .pop()
+            .ok_or(IndexerError::Other("No delete result found".to_string()))?;
 
-            // Delete from database
-            let mut results =
-                db.query(&query).bind(("source", full_source.clone())).await.map_err(SystemActorError::from)?;
-
-            let deleted_count = results.take::<Option<usize>>(0).map_err(SystemActorError::from)?.unwrap_or(0);
-            total_deleted += deleted_count;
-
-            // Check if file/directory exists before attempting deletion
-            let source_path = std::path::Path::new(&full_source);
+        // Process file deletions
+        for source in &delete_result.deleted_sources {
+            let source_path = std::path::Path::new(&source.uri);
             if source_path.exists() {
-                // Handle both files and directories
                 if source_path.is_dir() {
                     tokio::fs::remove_dir_all(source_path).await.ok();
                 } else {
                     tokio::fs::remove_file(source_path).await.ok();
                 }
-                deleted_sources.push(source.clone());
-            } else {
-                not_found_sources.push(source.clone());
             }
         }
 
-        Ok(DeletedSource { deleted_embeddings: total_deleted, deleted_sources, not_found_sources })
+        ctx.reply(delete_result).await?;
+        Ok(())
     }
 }
 

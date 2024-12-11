@@ -55,17 +55,14 @@ impl ActorFactory for LogFactory {
 impl Message<BehaviorTick> for Log {
     type Response = BehaviorStatus;
 
-    async fn handle(
-        &mut self,
-        _ctx: &mut ActorContext<Self>,
-        _msg: &BehaviorTick,
-    ) -> Result<BehaviorStatus, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _msg: &BehaviorTick) -> Result<(), Self::Error> {
         match self.level {
             LogLevel::Error => error!("{}", self.text),
             LogLevel::Warn => warn!("{}", self.text),
             LogLevel::Info => info!("{}", self.text),
         }
-        Ok(BehaviorStatus::Success)
+        ctx.reply(BehaviorStatus::Success).await?;
+        Ok(())
     }
 }
 

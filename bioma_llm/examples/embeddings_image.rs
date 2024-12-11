@@ -42,20 +42,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<String>>();
 
     // Store image embeddings
-    let embeddings_lengths = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings {
-                source: "test_images".to_string(),
-                content: EmbeddingContent::Image(image_paths.clone()),
-                metadata: None,
-            },
+    let embeddings_ids = relay_ctx
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )
         .await?;
 
-    for (i, length) in embeddings_lengths.lengths.iter().enumerate() {
-        info!("Stored embeddings for image: {} with length: {}", image_paths[i], length);
+    for id in embeddings_ids.ids.iter() {
+        info!("Stored embeddings for image: {}", id);
     }
 
     // Search for similar images using an image query
@@ -66,8 +62,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source: None,
     };
     info!("Image query: {:?}", top_k);
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     for similarity in similarities {
         info!("Similarity score: {}", similarity.similarity);
@@ -78,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate embeddings without storing them
     let generated = relay_ctx
-        .send::<Embeddings, GenerateEmbeddings>(
+        .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
             GenerateEmbeddings { content: EmbeddingContent::Image(vec!["assets/images/rust-pet.png".to_string()]) },
             &embeddings_id,
             SendOptions::default(),

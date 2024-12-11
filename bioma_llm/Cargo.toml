@@ -12,7 +12,6 @@ thiserror = { workspace = true }
 derive_more = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-indexmap = { version = "2.4", features = ["serde"] }
 futures = { workspace = true }
 humantime = { workspace = true }
 humantime-serde = { workspace = true }
@@ -25,15 +24,14 @@ lazy_static = "1.5.0"
 walkdir = { workspace = true }
 zip = { workspace = true }
 
-ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs", rev = "56d7ec24e656840a9a81437ea4324d0fcc2189c6", features = [
+ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "b20a99857da206288210cf53c0e1de44b59894db", features = [
     "function-calling",
+    "stream",
 ] }
 hf-hub = "0.3.2"
 fastembed = "4.3"
-# fastembed = { path = "../../fastembed-rs" }
-# fastembed = { git = "https://github.com/rozgo/fastembed-rs", branch = "feature/nomic-embed-vision-v1.5" }
 
-text-splitter = { version = "0.16.0", features = ["code", "markdown"] }
+text-splitter = { version = "0.19.0", features = ["code", "markdown"] }
 tree-sitter-rust = "0.23.0"
 tree-sitter-python = "0.23.2"
 tree-sitter-cpp = "0.23.0"
@@ -81,4 +79,7 @@ actix-multipart = "0.7.2"
 anyhow = "1.0"
 goose = "0.17.2"
 strum = "0.26.0"
-once_cell = "1.19.0"
+tokio-stream = "0.1"
+futures-util = "0.3"
+tempfile = "3.6.0"
+once_cell = "1.20.0"
