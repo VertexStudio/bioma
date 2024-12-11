@@ -4,9 +4,13 @@ use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
+use std::time::Duration;
+use tokio::time::sleep;
 
 const DEFAULT_RETRIEVER_LIMIT: usize = 10;
 const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
+const MAX_RETRIES: u32 = 3;
+const BASE_DELAY_MS: u64 = 100;
 
 #[derive(thiserror::Error, Debug)]
 pub enum RetrieverError {
@@ -115,7 +119,11 @@ impl RetrievedContext {
 impl Message<RetrieveContext> for Retriever {
     type Response = RetrievedContext;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &RetrieveContext) -> Result<(), RetrieverError> {
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &RetrieveContext,
+    ) -> Result<RetrievedContext, RetrieverError> {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(RetrieverError::EmbeddingsIdNotFound);
         };
@@ -135,89 +143,104 @@ impl Message<RetrieveContext> for Retriever {
 
                 info!("Searching for similarities");
                 let start = std::time::Instant::now();
-                let similarities = match ctx
-                    .send_and_wait_reply::<Embeddings, embeddings::TopK>(
-                        embeddings_req,
-                        embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                    )
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(e) => {
-                        error!("Failed to get similarities: {}", e);
-                        return Err(RetrieverError::ComputingSimilarity(e.to_string()));
-                    }
-                };
-                info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
-
-                // Separate text and image content based on ContentType
-                let (text_similarities, image_similarities): (Vec<_>, Vec<_>) =
-                    similarities.into_iter().map(|s| (s.clone(), s.similarity)).partition(|(s, _)| {
-                        s.metadata
-                            .as_ref()
-                            .and_then(|m| serde_json::from_value::<Metadata>(m.clone()).ok())
-                            .map_or(false, |metadata| matches!(metadata, Metadata::Text(_)))
-                    });
-
-                // Process text content with reranking
-                let mut ranked_contexts = if !text_similarities.is_empty() {
-                    let texts: Vec<String> = text_similarities.iter().filter_map(|(s, _)| s.text.clone()).collect();
-
-                    let rerank_req = RankTexts { query: text.clone(), texts };
-                    let ranked_texts = ctx
-                        .send_and_wait_reply::<Rerank, RankTexts>(
-                            rerank_req,
-                            rerank_id,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                
+                let mut retry_count = 0;
+                let mut last_error = None;
+                
+                while retry_count < MAX_RETRIES {
+                    match ctx
+                        .send::<Embeddings, embeddings::TopK>(
+                            embeddings_req.clone(),
+                            embeddings_id,
+                            SendOptions::builder()
+                                .timeout(std::time::Duration::from_secs(100))
+                                .build(),
                         )
-                        .await?;
-
-                    // Create contexts with rerank scores
-                    ranked_texts
-                        .texts
-                        .into_iter()
-                        .map(|t| {
-                            (
-                                Context {
-                                    text: text_similarities[t.index].0.text.clone(),
-                                    source: text_similarities[t.index].0.source.clone(),
-                                    metadata: text_similarities[t.index]
-                                        .0
-                                        .metadata
+                        .await
+                    {
+                        Ok(similarities) => {
+                            info!("Similarities: {} in {:?}", similarities.len(), start.elapsed());
+                            
+                            let (text_similarities, image_similarities): (Vec<_>, Vec<_>) =
+                                similarities.into_iter().map(|s| (s.clone(), s.similarity)).partition(|(s, _)| {
+                                    s.metadata
                                         .as_ref()
-                                        .and_then(|m| serde_json::from_value(m.clone()).ok()),
-                                },
-                                t.score,
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
+                                        .and_then(|m| serde_json::from_value::<Metadata>(m.clone()).ok())
+                                        .map_or(false, |metadata| matches!(metadata, Metadata::Text(_)))
+                                });
 
-                // Add image contexts with their similarity scores
-                ranked_contexts.extend(image_similarities.into_iter().map(|(s, score)| {
-                    (
-                        Context {
-                            text: s.text,
-                            source: s.source.clone(),
-                            metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
-                        },
-                        score,
-                    )
-                }));
+                            // Process text content with reranking
+                            let mut ranked_contexts = if !text_similarities.is_empty() {
+                                let texts: Vec<String> = text_similarities.iter().filter_map(|(s, _)| s.text.clone()).collect();
 
-                // Sort all contexts by score in descending order
-                ranked_contexts.sort_by(|(_, a_score), (_, b_score)| {
-                    b_score.partial_cmp(a_score).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                                let rerank_req = RankTexts { query: text.clone(), texts };
+                                let ranked_texts = ctx
+                                    .send::<Rerank, RankTexts>(
+                                        rerank_req,
+                                        rerank_id,
+                                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                    )
+                                    .await?;
 
-                // Take only the contexts, limited by the requested amount
-                let contexts = ranked_contexts.into_iter().map(|(context, _)| context).take(message.limit).collect();
+                                ranked_texts
+                                    .texts
+                                    .into_iter()
+                                    .map(|t| {
+                                        (
+                                            Context {
+                                                text: text_similarities[t.index].0.text.clone(),
+                                                source: text_similarities[t.index].0.source.clone(),
+                                                metadata: text_similarities[t.index]
+                                                    .0
+                                                    .metadata
+                                                    .as_ref()
+                                                    .and_then(|m| serde_json::from_value(m.clone()).ok()),
+                                            },
+                                            t.score,
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            } else {
+                                Vec::new()
+                            };
 
-                ctx.reply(RetrievedContext { context: contexts }).await?;
-                Ok(())
+                            // Add image contexts with their similarity scores
+                            ranked_contexts.extend(image_similarities.into_iter().map(|(s, score)| {
+                                (
+                                    Context {
+                                        text: s.text,
+                                        source: s.source.clone(),
+                                        metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
+                                    },
+                                    score,
+                                )
+                            }));
+
+                            // Sort all contexts by score in descending order
+                            ranked_contexts.sort_by(|(_, a_score), (_, b_score)| {
+                                b_score.partial_cmp(a_score).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+
+                            // Take only the contexts, limited by the requested amount
+                            let contexts = ranked_contexts.into_iter().map(|(context, _)| context).take(message.limit).collect();
+
+                            return Ok(RetrievedContext { context: contexts });
+                        }
+                        Err(e) => {
+                            last_error = Some(e);
+                            let delay = BASE_DELAY_MS * 2u64.pow(retry_count);
+                            error!("Attempt {} failed, retrying in {}ms: {}", retry_count + 1, delay, last_error.as_ref().unwrap());
+                            sleep(Duration::from_millis(delay)).await;
+                            retry_count += 1;
+                        }
+                    }
+                }
+                
+                Err(RetrieverError::ComputingSimilarity(format!(
+                    "Failed after {} retries: {}",
+                    MAX_RETRIES,
+                    last_error.unwrap()
+                )))
             }
         }
     }
