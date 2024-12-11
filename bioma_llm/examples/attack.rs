@@ -32,18 +32,6 @@ struct TestVariation {
 }
 
 impl TestVariation {
-    async fn new() -> Self {
-        let file_names = get_test_file_names().await.unwrap();
-        println!("Found {} test files", file_names.len());
-
-        // Create a random number generator
-        let mut rng = rand::thread_rng();
-        let random_number: u32 = rng.gen_range(0..file_names.len() as u32);
-        println!("Random number: {}", random_number);
-
-        Self { index: 0, file_path: file_names[random_number as usize].clone() }
-    }
-
     async fn get_new_file_name(&mut self) {
         let file_names = get_test_file_names().await.unwrap();
         println!("Found {} test files", file_names.len());
@@ -108,7 +96,7 @@ impl FromStr for TestType {
 async fn get_next_variation(endpoint_type: TestType) -> TestVariation {
     let variations = *VARIATIONS_COUNT.lock().await;
     let mut map = ENDPOINT_VARIATION_STATE.lock().await;
-    let entry = map.entry(endpoint_type).or_insert(TestVariation::new().await);
+    let entry = map.entry(endpoint_type).or_insert(TestVariation { index: 0, file_path: "".to_string() });
     entry.get_new_file_name().await;
     println!("Using variation: {}", entry.file_path);
     entry.index = (entry.index + 1) % variations;
@@ -263,15 +251,9 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::Upload).await;
     let variation_file_name = PathBuf::from(&variation.file_path).file_name().unwrap().to_string_lossy().to_string();
     dbg!(&variation_file_name);
-    let file_name = format!("uploads/{}_{}", variation.index, variation_file_name);
+    let file_name = format!("uploads/stress_tests/{}.md", variation.index);
 
     let boundary = "----WebKitFormBoundaryABC123";
-
-    // // Create a temporary file with some content
-    // let file_content = "Sample file content for testing";
-    // let temp_dir = std::env::temp_dir();
-    // let temp_file_path = temp_dir.join("test.txt");
-    // std::fs::write(&temp_file_path, file_content).unwrap();
 
     // Read the file content
     let file_bytes = std::fs::read(&variation.file_path).unwrap();
