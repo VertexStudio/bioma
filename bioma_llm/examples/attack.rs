@@ -323,9 +323,14 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
+    let variation = get_next_variation(TestType::Upload).await;
+
+    // Read the file content
+    let file_bytes = std::fs::read(&variation.file_path).unwrap();
+
     let payload = json!({
         "model": "nomic-embed-text",
-        "input": "Sample text to embed"
+        "input": String::from_utf8_lossy(&file_bytes).to_string(),
     });
 
     make_request(user, GooseMethod::Post, "/api/embed", "Embed Text", TestType::Embed, Some(payload)).await
@@ -339,7 +344,7 @@ pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
     let payload = RetrieveContext {
-        query: RetrieveQuery::Text("How to use actors?".to_string()),
+        query: RetrieveQuery::Text("Explain About ubuntu, surrealdb and Rust?".to_string()),
         limit: 5,
         threshold: 0.0,
         source: None,
@@ -350,7 +355,7 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
     let payload = RankTexts {
-        query: "What is the weather?".to_string(),
+        query: "Explain About ubuntu, surrealdb and Rust?".to_string(),
         texts: vec![
             "The weather is sunny today".to_string(),
             "It's raining outside".to_string(),
