@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Prepare globs
     let globs = if args.globs.is_empty() {
-        vec![format!("{}/bioma_*/**/*.toml", workspace_root)]
+        vec![format!("{}/bioma_actor/**/*.toml", workspace_root)]
     } else {
         args.globs.into_iter().map(|glob| format!("{}/{}", workspace_root, glob)).collect()
     };
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let retrieve_context =
         RetrieveContext { query: RetrieveQuery::Text(args.query), limit: 10, threshold: 0.0, source: None };
     let context = relay_ctx
-        .send::<Retriever, RetrieveContext>(
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &retriever_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
