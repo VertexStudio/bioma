@@ -214,7 +214,7 @@ pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::Index).await;
-    let file_name = format!("uploads/test{}.txt", variation.file_path);
+    let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = IndexGlobs {
         globs: vec![file_name],
         chunk_capacity: DEFAULT_CHUNK_CAPACITY,
@@ -316,7 +316,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::DeleteSource).await;
-    let file_name = format!("uploads/test{}.txt", variation.file_path);
+    let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = DeleteSource { sources: vec![file_name] };
 
     make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", TestType::DeleteSource, Some(payload))
