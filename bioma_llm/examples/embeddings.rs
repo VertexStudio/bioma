@@ -47,20 +47,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .collect::<Vec<String>>();
 
     // Send the texts to the embeddings actor
-    let embeddings_lentghs = relay_ctx
-        .send::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings {
-                source: "test".to_string(),
-                content: EmbeddingContent::Text(texts.clone()),
-                metadata: None,
-            },
+    let embeddings_ids = relay_ctx
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings { content: EmbeddingContent::Text(texts.clone()), metadata: None },
             &embeddings_id,
             SendOptions::default(),
         )
         .await?;
 
-    for (i, length) in embeddings_lentghs.lengths.iter().enumerate() {
-        info!("Stored embeddings for text: {} with length: {}", texts[i], length);
+    for id in embeddings_ids.ids.iter() {
+        info!("Stored embeddings for text: {}", id);
     }
 
     // Get similarities
@@ -71,8 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source: None,
     };
     info!("Query: {:?}", top_k);
-    let similarities =
-        relay_ctx.send::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default()).await?;
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
 
     for similarity in similarities {
         info!("Similarity: {:?}   {}", similarity.text, similarity.similarity);

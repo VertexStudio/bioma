@@ -35,11 +35,12 @@ pub struct Echo {
 impl Message<EchoText> for Echo {
     type Response = EchoedText;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &EchoText) -> Result<EchoedText, Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &EchoText) -> Result<(), Self::Error> {
         info!("{} Received message: {:?}", ctx.id(), msg);
         self.max_echoes = self.max_echoes.saturating_sub(1);
         let echoed_text = EchoedText { text: msg.text.clone(), echoes_left: self.max_echoes };
-        Ok(echoed_text)
+        ctx.reply(echoed_text).await?;
+        Ok(())
     }
 }
 
