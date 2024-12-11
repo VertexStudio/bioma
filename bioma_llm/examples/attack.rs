@@ -332,7 +332,7 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
-    let payload = json!({ "query": "What is Bioma?" });
+    let payload = json!({ "query": "What is ubuntu, surrealdb and rust? Please divide the answer in sections." });
 
     make_request(user, GooseMethod::Post, "/ask", "RAG Ask", TestType::Ask, Some(payload)).await
 }
