@@ -82,18 +82,19 @@ impl RetrievedContext {
     pub fn to_markdown(&self) -> String {
         let mut context_content = String::new();
 
-        for (index, context) in self.context.iter().enumerate() {
+        for (_index, context) in self.context.iter().enumerate() {
+            context_content.push_str("---\n\n");
+
             if let Some(source) = &context.source {
-                context_content.push_str(&format!("Source: {}\n", source.source));
-                context_content.push_str(&format!("URI: {}\n", source.uri));
+                context_content.push_str(&format!("[URI:{}]\n\n", source.uri));
             }
 
             match &context.metadata {
                 Some(Metadata::Text(text_metadata)) => {
-                    context_content.push_str(&format!("Chunk: {}\n", text_metadata.chunk_number))
+                    context_content.push_str(&format!("[CHUNK:{}]\n\n", text_metadata.chunk_number))
                 }
                 Some(Metadata::Image(image_metadata)) => {
-                    context_content.push_str(&format!("Image: {}\n", image_metadata.format))
+                    context_content.push_str(&format!("[IMAGE:{}]\n\n", image_metadata.format))
                 }
                 None => (),
             }
@@ -102,10 +103,6 @@ impl RetrievedContext {
                 context_content.push_str(text);
             }
             context_content.push_str("\n\n");
-
-            if index < self.context.len() - 1 {
-                context_content.push_str("---\n\n");
-            }
         }
 
         context_content

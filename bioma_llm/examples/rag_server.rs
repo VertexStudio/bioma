@@ -18,6 +18,8 @@ use tracing::{error, info};
 ///
 /// CURL (examples)[docs/examples.sh]
 
+const CHAT_DEFAULT_PROMPT: &str = "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n";
+
 struct ActorState {
     ctx: Mutex<ActorContext<Relay>>,
     actor_id: ActorId,
@@ -262,17 +264,18 @@ struct ChatResponse {
 }
 
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
-    // 1. Optimize query construction - use String's capacity hint
+    // Combine all user messages into a single query string
+    // Pre-allocate capacity to avoid reallocations
     let query = {
         let user_messages: Vec<_> = body
             .messages
             .iter()
             .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
             .collect();
-        
+
         let total_len: usize = user_messages.iter().map(|msg| msg.content.len()).sum();
         let mut result = String::with_capacity(total_len + user_messages.len());
-        
+
         for (i, message) in user_messages.iter().enumerate() {
             if i > 0 {
                 result.push('\n');
@@ -282,7 +285,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         result
     };
 
-    // 2. Context retrieval
+    // Retrieve relevant context based on the user's query
     let context = {
         let retriever_ctx = data.retriever.ctx.lock().await;
         let retriever_actor = data.retriever.actor_id.clone();
@@ -297,24 +300,18 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             .send_and_wait_reply::<Retriever, RetrieveContext>(
                 retrieve_context,
                 &retriever_actor,
-                SendOptions::builder()
-                    .timeout(std::time::Duration::from_secs(30))
-                    .build(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
             )
             .await
     };
 
     match context {
         Ok(context) => {
-            // 3. Optimize message construction
+            // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
-            let context_message = ChatMessage::system(
-                String::with_capacity(context_content.len() + 100) + 
-                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n" +
-                &context_content
-            );
+            let context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
 
-            // 4. Optimize conversation construction
+            // Build the conversation by inserting the context message before the last user message
             let conversation = {
                 let mut conv = Vec::with_capacity(body.messages.len() + 1);
                 if !body.messages.is_empty() {
@@ -327,28 +324,22 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 conv
             };
 
-            // 5. Use a larger channel buffer for better throughput
+            // Set up streaming channel with sufficient buffer for chat responses
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
             let chat_state = data.chat.clone();
 
-            // 6. Optimize chat stream handling
+            // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 let chat_ctx = chat_state.ctx.lock().await;
                 let chat_actor = chat_state.actor_id.clone();
 
-                let chat_request = ChatMessages {
-                    messages: conversation.clone(),
-                    restart: false,
-                    persist: true,
-                };
+                let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: true };
 
                 match chat_ctx
                     .send::<Chat, ChatMessages>(
                         chat_request,
                         &chat_actor,
-                        SendOptions::builder()
-                            .timeout(std::time::Duration::from_secs(60))
-                            .build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                     )
                     .await
                 {
@@ -356,7 +347,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                         while let Some(response) = stream.next().await {
                             match response {
                                 Ok(chunk) => {
-                                    // 7. Minimize allocations in response construction
+                                    // Include full conversation context only in the final message
                                     let response = ChatResponse {
                                         response: chunk.clone(),
                                         context: if chunk.done { conversation.clone() } else { vec![] },
@@ -379,29 +370,25 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 }
             });
 
-            // 8. Optimize response streaming
-            HttpResponse::Ok()
-                .content_type("text/event-stream")
-                .streaming::<_, Box<dyn StdError>>(
-                    tokio_stream::wrappers::ReceiverStream::new(rx)
-                        .map(|result| match result {
-                            Ok(response) => {
-                                // Pre-allocate the data string
-                                let mut data = String::with_capacity(256);
-                                data.push_str("data: ");
-                                data.push_str(&serde_json::to_string(&response).unwrap_or_default());
-                                data.push_str("\n\n");
-                                Ok(web::Bytes::from(data))
-                            }
-                            Err(e) => {
-                                let mut error = String::with_capacity(e.len() + 8);
-                                error.push_str("error: ");
-                                error.push_str(&e);
-                                error.push_str("\n\n");
-                                Ok(web::Bytes::from(error))
-                            }
-                        })
-                )
+            // Stream responses as Server-Sent Events (SSE)
+            HttpResponse::Ok().content_type("text/event-stream").streaming::<_, Box<dyn StdError>>(
+                tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
+                    Ok(response) => {
+                        let mut data = String::with_capacity(256);
+                        data.push_str("data: ");
+                        data.push_str(&serde_json::to_string(&response).unwrap_or_default());
+                        data.push_str("\n\n");
+                        Ok(web::Bytes::from(data))
+                    }
+                    Err(e) => {
+                        let mut error = String::with_capacity(e.len() + 8);
+                        error.push_str("error: ");
+                        error.push_str(&e);
+                        error.push_str("\n\n");
+                        Ok(web::Bytes::from(error))
+                    }
+                }),
+            )
         }
         Err(e) => {
             error!("Error fetching context: {:?}", e);
@@ -409,6 +396,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         }
     }
 }
+
 #[derive(Deserialize)]
 struct AskQuery {
     messages: Vec<ChatMessage>,
@@ -457,11 +445,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            let mut context_message = ChatMessage::system(
-                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
-                    .to_string()
-                    + &context_content,
-            );
+            let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
 
             // Handle image context if present
             if let Some(ctx) = context

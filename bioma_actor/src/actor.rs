@@ -953,7 +953,7 @@ impl<T: Actor> ActorContext<T> {
     async fn start_message_processing(&mut self, frame: FrameMessage) -> tokio::task::JoinHandle<()> {
         debug!("[{}] msg-process-start {} {}", self.id().record_id(), frame.name, frame.id);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let engine = self.engine.clone();
+        let db = self.engine.db().clone();
         let frame_clone = frame.clone();
 
         let handle = tokio::spawn(async move {
@@ -975,8 +975,7 @@ impl<T: Actor> ActorContext<T> {
                 let reply_id = reply.id.to_record_id();
 
                 let reply_query = include_str!("../sql/reply.surql");
-                let result = engine
-                    .db()
+                let result = db
                     .query(reply_query)
                     .bind(("reply_id", reply_id))
                     .bind(("reply", reply))
@@ -1006,8 +1005,7 @@ impl<T: Actor> ActorContext<T> {
             let reply_id = reply.id.to_record_id();
 
             let reply_query = include_str!("../sql/reply.surql");
-            if let Err(e) = engine
-                .db()
+            if let Err(e) = db
                 .query(reply_query)
                 .bind(("reply_id", reply_id))
                 .bind(("reply", reply))
