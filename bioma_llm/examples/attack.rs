@@ -316,7 +316,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::DeleteSource).await;
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
-    let payload = DeleteSource { sources: vec![file_name] };
+    let payload = DeleteSource { source: file_name };
 
     make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", TestType::DeleteSource, Some(payload))
         .await
