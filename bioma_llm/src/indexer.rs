@@ -353,6 +353,8 @@ impl Message<IndexGlobs> for Indexer {
                 let sources = ctx
                     .engine()
                     .db()
+                    .lock()
+                    .await
                     .query(&query)
                     .bind(("source", source.source.clone()))
                     .bind(("uri", source.uri.clone()))
@@ -438,6 +440,8 @@ impl Message<IndexGlobs> for Indexer {
                     let source_query = include_str!("../sql/source.surql");
                     ctx.engine()
                         .db()
+                        .lock()
+                        .await
                         .query(*&source_query)
                         .bind(("source", source.source.clone()))
                         .bind(("uri", source.uri.clone()))
@@ -463,8 +467,13 @@ impl Message<DeleteSource> for Indexer {
         let query = include_str!("../sql/del_source.surql").replace("{prefix}", &self.embeddings.table_prefix());
         let db = ctx.engine().db();
 
-        let mut results =
-            db.query(&query).bind(("source", message.source.clone())).await.map_err(SystemActorError::from)?;
+        let mut results = db
+            .lock()
+            .await
+            .query(&query)
+            .bind(("source", message.source.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
 
         let delete_result: DeletedSource = results
             .take::<Vec<DeletedSource>>(0)
