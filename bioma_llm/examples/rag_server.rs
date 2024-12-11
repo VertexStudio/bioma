@@ -25,6 +25,12 @@ struct ActorState {
     actor_id: ActorId,
 }
 
+impl ActorState {
+    fn new(ctx: ActorContext<Relay>, actor_id: ActorId) -> Arc<Self> {
+        Arc::new(ActorState { ctx: Mutex::new(ctx), actor_id })
+    }
+}
+
 struct AppState {
     engine: Engine,
     indexer: Arc<ActorState>,
@@ -682,7 +688,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let indexer_state = Arc::new(ActorState { ctx: Mutex::new(indexer_relay_ctx), actor_id: indexer_id });
+    let indexer_state = ActorState::new(indexer_relay_ctx, indexer_id);
 
     // Retriever setup
     let retriever_id = ActorId::of::<Retriever>("/rag/retriever");
@@ -710,7 +716,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let retriever_state = Arc::new(ActorState { ctx: Mutex::new(retriever_relay_ctx), actor_id: retriever_id });
+    let retriever_state = ActorState::new(retriever_relay_ctx, retriever_id);
 
     let embeddings_id = ActorId::of::<Embeddings>("/rag/embeddings");
     let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
@@ -737,7 +743,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let embeddings_state = Arc::new(ActorState { ctx: Mutex::new(embeddings_relay_ctx), actor_id: embeddings_id });
+    let embeddings_state = ActorState::new(embeddings_relay_ctx, embeddings_id);
 
     let rerank_id = ActorId::of::<Rerank>("/rag/rerank");
     let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
@@ -764,7 +770,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let rerank_state = Arc::new(ActorState { ctx: Mutex::new(rerank_relay_ctx), actor_id: rerank_id });
+    let rerank_state = ActorState::new(rerank_relay_ctx, rerank_id);
 
     let chat_id = ActorId::of::<Chat>("/rag/chat");
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
@@ -791,7 +797,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let chat_state = Arc::new(ActorState { ctx: Mutex::new(chat_relay_ctx), actor_id: chat_id });
+    let chat_state = ActorState::new(chat_relay_ctx, chat_id);
 
     let ask_id = ActorId::of::<Ask>("/rag/ask");
     let (mut ask_ctx, mut ask_actor) = Actor::spawn(
@@ -818,7 +824,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    let ask_state = Arc::new(ActorState { ctx: Mutex::new(ask_relay_ctx), actor_id: ask_id });
+    let ask_state = ActorState::new(ask_relay_ctx, ask_id);
 
     // Create app state
     let data = web::Data::new(AppState {
