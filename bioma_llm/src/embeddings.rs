@@ -13,6 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use crate::indexer::ContentSource;
+
 lazy_static! {
     static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -44,6 +46,12 @@ pub enum EmbeddingsError {
 
 impl ActorError for EmbeddingsError {}
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EmbeddingContent {
+    Text(Vec<String>),
+    Image(Vec<String>),
+}
+
 pub struct EmbeddingRequest {
     response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
     content: EmbeddingContent,
@@ -52,18 +60,10 @@ pub struct EmbeddingRequest {
 /// Store embeddings for texts or images
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreEmbeddings {
-    /// Source of the embeddings
-    pub source: String,
     /// The content to embed (either texts or images)
     pub content: EmbeddingContent,
     /// Metadata to store with the embeddings
     pub metadata: Option<Vec<Value>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EmbeddingContent {
-    Text(Vec<String>),
-    Image(Vec<String>),
 }
 
 /// Generate embeddings for texts or images
@@ -81,7 +81,7 @@ pub struct GeneratedEmbeddings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredEmbeddings {
-    pub lengths: Vec<usize>,
+    pub ids: Vec<RecordId>,
 }
 
 /// The query to search for
@@ -97,7 +97,7 @@ pub enum Query {
 pub struct TopK {
     /// The query to search for
     pub query: Query,
-    /// A source regex pattern to filter the search
+    /// The source regex pattern to match against
     pub source: Option<String>,
     /// Number of similar embeddings to return
     pub k: usize,
@@ -110,6 +110,7 @@ pub struct TopK {
 pub struct Similarity {
     pub text: Option<String>,
     pub similarity: f32,
+    pub source: Option<ContentSource>,
     pub metadata: Option<Value>,
 }
 
@@ -156,11 +157,7 @@ impl Default for Embeddings {
 impl Message<TopK> for Embeddings {
     type Response = Vec<Similarity>;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &TopK,
-    ) -> Result<Vec<Similarity>, EmbeddingsError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &TopK) -> Result<(), EmbeddingsError> {
         let query_embedding = match &message.query {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
@@ -186,32 +183,26 @@ impl Message<TopK> for Embeddings {
         };
 
         let db = ctx.engine().db();
-        let query_sql = include_str!("../sql/similarities.surql");
-
-        let source = message.source.clone().unwrap_or(".*".to_string());
+        let query_sql = include_str!("../sql/similarities.surql").replace("{top_k}", &message.k.to_string());
 
         let mut results = db
             .query(query_sql)
             .bind(("query", query_embedding))
-            .bind(("top_k", message.k.clone()))
-            .bind(("source", source))
             .bind(("threshold", message.threshold))
+            .bind(("source", message.source.clone().unwrap_or(".*".to_string())))
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
-        let results: Result<Vec<Similarity>, _> = results.take(0).map_err(SystemActorError::from);
-        results.map_err(EmbeddingsError::from)
+        let results: Vec<Similarity> = results.take(0).map_err(SystemActorError::from)?;
+        ctx.reply(results).await?;
+        Ok(())
     }
 }
 
 impl Message<StoreEmbeddings> for Embeddings {
     type Response = StoredEmbeddings;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &StoreEmbeddings,
-    ) -> Result<StoredEmbeddings, EmbeddingsError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &StoreEmbeddings) -> Result<(), EmbeddingsError> {
         let Some(embedding_tx) = self.embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
@@ -221,19 +212,10 @@ impl Message<StoreEmbeddings> for Embeddings {
 
         let embeddings = rx.await??;
 
-        // Check if metadata length matches content length
-        if let Some(metadata) = &message.metadata {
-            let content_len = match &message.content {
-                EmbeddingContent::Text(texts) => texts.len(),
-                EmbeddingContent::Image(paths) => paths.len(),
-            };
-            if metadata.len() != content_len {
-                error!("Metadata length does not match content length");
-            }
-        }
-
         let db = ctx.engine().db();
         let emb_query = include_str!("../sql/embeddings.surql");
+
+        let mut embeddings_ids: Vec<RecordId> = Vec::new();
 
         // Store embeddings
         for (i, embedding) in embeddings.iter().enumerate() {
@@ -249,18 +231,26 @@ impl Message<StoreEmbeddings> for Embeddings {
                 EmbeddingContent::Image(_) => None,
             };
 
-            db.query(emb_query)
+            let mut results = db
+                .query(emb_query)
                 .bind(("embedding", embedding))
                 .bind(("metadata", metadata))
                 .bind(("model_id", model_id))
-                .bind(("source", message.source.clone()))
                 .bind(("prefix", self.table_prefix()))
                 .bind(("text", text))
                 .await
                 .map_err(SystemActorError::from)?;
+
+            let id: Result<Option<RecordId>, _> = results.take(3).map_err(SystemActorError::from);
+            if let Some(id) = id.map_err(EmbeddingsError::from)? {
+                embeddings_ids.push(id);
+            } else {
+                return Err(EmbeddingsError::NoEmbeddingsGenerated);
+            }
         }
 
-        Ok(StoredEmbeddings { lengths: embeddings.iter().map(|e| e.len()).collect() })
+        ctx.reply(StoredEmbeddings { ids: embeddings_ids }).await?;
+        Ok(())
     }
 }
 
@@ -269,9 +259,9 @@ impl Message<GenerateEmbeddings> for Embeddings {
 
     async fn handle(
         &mut self,
-        _ctx: &mut ActorContext<Self>,
+        ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
-    ) -> Result<GeneratedEmbeddings, EmbeddingsError> {
+    ) -> Result<(), EmbeddingsError> {
         let Some(embedding_tx) = self.embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
         };
@@ -280,7 +270,8 @@ impl Message<GenerateEmbeddings> for Embeddings {
         embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
 
         let embeddings = rx.await??;
-        Ok(GeneratedEmbeddings { embeddings })
+        ctx.reply(GeneratedEmbeddings { embeddings }).await?;
+        Ok(())
     }
 }
 

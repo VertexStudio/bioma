@@ -1,5 +1,5 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
-use crate::indexer::{BaseMetadata, ContentType};
+use crate::indexer::{ContentSource, Metadata};
 use crate::rerank::{RankTexts, Rerank, RerankError};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,8 @@ fn default_retriever_threshold() -> f32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
     pub text: Option<String>,
-    pub metadata: Option<BaseMetadata>,
+    pub source: Option<ContentSource>,
+    pub metadata: Option<Metadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,28 +82,27 @@ impl RetrievedContext {
     pub fn to_markdown(&self) -> String {
         let mut context_content = String::new();
 
-        for (index, context) in self.context.iter().enumerate() {
-            if let Some(metadata) = &context.metadata {
-                context_content.push_str(&format!("Source: {}\n", metadata.source));
-                context_content.push_str(&format!("URI: {}\n", metadata.uri));
-                match &metadata.content_type {
-                    ContentType::Text(text_type) => {
-                        context_content.push_str(&format!("Type: {}\n", text_type));
-                    }
-                    ContentType::Image => {
-                        context_content.push_str("Type: Image\n");
-                    }
+        for (_index, context) in self.context.iter().enumerate() {
+            context_content.push_str("---\n\n");
+
+            if let Some(source) = &context.source {
+                context_content.push_str(&format!("[URI:{}]\n\n", source.uri));
+            }
+
+            match &context.metadata {
+                Some(Metadata::Text(text_metadata)) => {
+                    context_content.push_str(&format!("[CHUNK:{}]\n\n", text_metadata.chunk_number))
                 }
+                Some(Metadata::Image(image_metadata)) => {
+                    context_content.push_str(&format!("[IMAGE:{}]\n\n", image_metadata.format))
+                }
+                None => (),
             }
 
             if let Some(text) = &context.text {
                 context_content.push_str(text);
             }
             context_content.push_str("\n\n");
-
-            if index < self.context.len() - 1 {
-                context_content.push_str("---\n\n");
-            }
         }
 
         context_content
@@ -112,11 +112,7 @@ impl RetrievedContext {
 impl Message<RetrieveContext> for Retriever {
     type Response = RetrievedContext;
 
-    async fn handle(
-        &mut self,
-        ctx: &mut ActorContext<Self>,
-        message: &RetrieveContext,
-    ) -> Result<RetrievedContext, RetrieverError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &RetrieveContext) -> Result<(), RetrieverError> {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(RetrieverError::EmbeddingsIdNotFound);
         };
@@ -137,7 +133,7 @@ impl Message<RetrieveContext> for Retriever {
                 info!("Searching for similarities");
                 let start = std::time::Instant::now();
                 let similarities = match ctx
-                    .send::<Embeddings, embeddings::TopK>(
+                    .send_and_wait_reply::<Embeddings, embeddings::TopK>(
                         embeddings_req,
                         embeddings_id,
                         SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -157,8 +153,8 @@ impl Message<RetrieveContext> for Retriever {
                     similarities.into_iter().map(|s| (s.clone(), s.similarity)).partition(|(s, _)| {
                         s.metadata
                             .as_ref()
-                            .and_then(|m| serde_json::from_value::<BaseMetadata>(m.clone()).ok())
-                            .map_or(false, |metadata| matches!(metadata.content_type, ContentType::Text(_)))
+                            .and_then(|m| serde_json::from_value::<Metadata>(m.clone()).ok())
+                            .map_or(false, |metadata| matches!(metadata, Metadata::Text(_)))
                     });
 
                 // Process text content with reranking
@@ -167,7 +163,7 @@ impl Message<RetrieveContext> for Retriever {
 
                     let rerank_req = RankTexts { query: text.clone(), texts };
                     let ranked_texts = ctx
-                        .send::<Rerank, RankTexts>(
+                        .send_and_wait_reply::<Rerank, RankTexts>(
                             rerank_req,
                             rerank_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -182,6 +178,7 @@ impl Message<RetrieveContext> for Retriever {
                             (
                                 Context {
                                     text: text_similarities[t.index].0.text.clone(),
+                                    source: text_similarities[t.index].0.source.clone(),
                                     metadata: text_similarities[t.index]
                                         .0
                                         .metadata
@@ -198,7 +195,14 @@ impl Message<RetrieveContext> for Retriever {
 
                 // Add image contexts with their similarity scores
                 ranked_contexts.extend(image_similarities.into_iter().map(|(s, score)| {
-                    (Context { text: s.text, metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()) }, score)
+                    (
+                        Context {
+                            text: s.text,
+                            source: s.source.clone(),
+                            metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
+                        },
+                        score,
+                    )
                 }));
 
                 // Sort all contexts by score in descending order
@@ -209,7 +213,8 @@ impl Message<RetrieveContext> for Retriever {
                 // Take only the contexts, limited by the requested amount
                 let contexts = ranked_contexts.into_iter().map(|(context, _)| context).take(message.limit).collect();
 
-                Ok(RetrievedContext { context: contexts })
+                ctx.reply(RetrievedContext { context: contexts }).await?;
+                Ok(())
             }
         }
     }

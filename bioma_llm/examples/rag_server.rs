@@ -5,29 +5,40 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use embeddings::EmbeddingContent;
-use indexer::ContentType;
+use futures_util::StreamExt;
+use indexer::Metadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::error::Error as StdError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
 /// CURL (examples)[docs/examples.sh]
 
-struct ActorHandle<T: Actor> {
-    ctx: Mutex<ActorContext<T>>,
-    actor: Mutex<T>,
+const CHAT_DEFAULT_PROMPT: &str = "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n";
+
+struct ActorState {
+    ctx: Mutex<ActorContext<Relay>>,
+    actor_id: ActorId,
+}
+
+impl ActorState {
+    fn new(ctx: ActorContext<Relay>, actor_id: ActorId) -> Arc<Self> {
+        Arc::new(ActorState { ctx: Mutex::new(ctx), actor_id })
+    }
 }
 
 struct AppState {
     engine: Engine,
-    indexer_actor: Arc<ActorHandle<Indexer>>,
-    retriever_actor: Arc<ActorHandle<Retriever>>,
-    embeddings_actor: Arc<ActorHandle<Embeddings>>,
-    rerank_actor: Arc<ActorHandle<Rerank>>,
-    chat_actor: Arc<ActorHandle<Chat>>,
+    indexer: Arc<ActorState>,
+    retriever: Arc<ActorState>,
+    embeddings: Arc<ActorState>,
+    rerank: Arc<ActorState>,
+    chat: Arc<ActorState>,
+    ask: Arc<ActorState>,
 }
 
 async fn health() -> impl Responder {
@@ -55,7 +66,7 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct Metadata {
+struct UploadMetadata {
     path: std::path::PathBuf,
 }
 
@@ -64,7 +75,7 @@ struct Upload {
     #[multipart(limit = "100MB")]
     file: TempFile,
     #[multipart(rename = "metadata")]
-    metadata: MpJson<Metadata>,
+    metadata: MpJson<UploadMetadata>,
 }
 
 #[derive(Debug, Serialize)]
@@ -201,13 +212,15 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
 }
 
 async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.actor.lock().await;
+    let indexer_ctx = data.indexer.ctx.lock().await;
+    let indexer_actor = data.indexer.actor_id.clone();
 
     let index_globs = body.clone();
 
     info!("Sending message to indexer actor");
-    let response = indexer_actor.handle(&mut indexer_ctx, &index_globs).await;
+    let response = indexer_ctx
+        .send_and_wait_reply::<Indexer, IndexGlobs>(index_globs, &indexer_actor, SendOptions::default())
+        .await;
     match response {
         Ok(_) => HttpResponse::Ok().body("OK"),
         Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
@@ -215,13 +228,19 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
 }
 
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
-    let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-    let mut retriever_actor = data.retriever_actor.actor.lock().await;
+    let retriever_ctx = data.retriever.ctx.lock().await;
+    let retriever_actor = data.retriever.actor_id.clone();
 
     let retrieve_context = body.clone();
 
     info!("Sending message to retriever actor");
-    let response = retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await;
+    let response = retriever_ctx
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &retriever_actor,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
 
     match response {
         Ok(context) => {
@@ -242,8 +261,162 @@ struct ChatQuery {
     source: Option<String>,
 }
 
+#[derive(Serialize)]
+struct ChatResponse {
+    #[serde(flatten)]
+    response: ChatMessageResponse,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    context: Vec<ChatMessage>,
+}
+
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
-    // Build query from all user messages
+    // Combine all user messages into a single query string
+    // Pre-allocate capacity to avoid reallocations
+    let query = {
+        let user_messages: Vec<_> = body
+            .messages
+            .iter()
+            .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
+            .collect();
+
+        let total_len: usize = user_messages.iter().map(|msg| msg.content.len()).sum();
+        let mut result = String::with_capacity(total_len + user_messages.len());
+
+        for (i, message) in user_messages.iter().enumerate() {
+            if i > 0 {
+                result.push('\n');
+            }
+            result.push_str(&message.content);
+        }
+        result
+    };
+
+    // Retrieve relevant context based on the user's query
+    let context = {
+        let retriever_ctx = data.retriever.ctx.lock().await;
+        let retriever_actor = data.retriever.actor_id.clone();
+        let retrieve_context = RetrieveContext {
+            query: RetrieveQuery::Text(query.clone()),
+            limit: 5,
+            threshold: 0.0,
+            source: body.source.clone(),
+        };
+
+        retriever_ctx
+            .send_and_wait_reply::<Retriever, RetrieveContext>(
+                retrieve_context,
+                &retriever_actor,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
+            .await
+    };
+
+    match context {
+        Ok(context) => {
+            // Create a system message containing the retrieved context
+            let context_content = context.to_markdown();
+            let context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+
+            // Build the conversation by inserting the context message before the last user message
+            let conversation = {
+                let mut conv = Vec::with_capacity(body.messages.len() + 1);
+                if !body.messages.is_empty() {
+                    conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
+                    conv.push(context_message);
+                    conv.push(body.messages[body.messages.len() - 1].clone());
+                } else {
+                    conv.push(context_message);
+                }
+                conv
+            };
+
+            // Set up streaming channel with sufficient buffer for chat responses
+            let (tx, rx) = tokio::sync::mpsc::channel(1000);
+            let chat_state = data.chat.clone();
+
+            // Spawn a task to handle the chat stream processing
+            tokio::spawn(async move {
+                let chat_ctx = chat_state.ctx.lock().await;
+                let chat_actor = chat_state.actor_id.clone();
+
+                let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: true };
+
+                match chat_ctx
+                    .send::<Chat, ChatMessages>(
+                        chat_request,
+                        &chat_actor,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    )
+                    .await
+                {
+                    Ok(mut stream) => {
+                        while let Some(response) = stream.next().await {
+                            match response {
+                                Ok(chunk) => {
+                                    // Include full conversation context only in the final message
+                                    let response = ChatResponse {
+                                        response: chunk.clone(),
+                                        context: if chunk.done { conversation.clone() } else { vec![] },
+                                    };
+
+                                    if tx.send(Ok::<_, String>(web::Json(response))).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(Err(e.to_string())).await;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e.to_string())).await;
+                    }
+                }
+            });
+
+            // Stream responses as Server-Sent Events (SSE)
+            HttpResponse::Ok().content_type("text/event-stream").streaming::<_, Box<dyn StdError>>(
+                tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
+                    Ok(response) => {
+                        let mut data = String::with_capacity(256);
+                        data.push_str("data: ");
+                        data.push_str(&serde_json::to_string(&response).unwrap_or_default());
+                        data.push_str("\n\n");
+                        Ok(web::Bytes::from(data))
+                    }
+                    Err(e) => {
+                        let mut error = String::with_capacity(e.len() + 8);
+                        error.push_str("error: ");
+                        error.push_str(&e);
+                        error.push_str("\n\n");
+                        Ok(web::Bytes::from(error))
+                    }
+                }),
+            )
+        }
+        Err(e) => {
+            error!("Error fetching context: {:?}", e);
+            HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AskQuery {
+    messages: Vec<ChatMessage>,
+    source: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AskResponse {
+    #[serde(flatten)]
+    response: ChatMessageResponse,
+    context: Vec<ChatMessage>,
+}
+
+async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     let query = body
         .messages
         .iter()
@@ -255,39 +428,40 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     info!("Sending message to retriever actor");
     let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.actor.lock().await;
+        let retriever_ctx = data.retriever.ctx.lock().await;
+        let retriever_actor = data.retriever.actor_id.clone();
         let retrieve_context = RetrieveContext {
             query: RetrieveQuery::Text(query.clone()),
             limit: 5,
             threshold: 0.0,
             source: body.source.clone(),
         };
-        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
+
+        retriever_ctx
+            .send_and_wait_reply::<Retriever, RetrieveContext>(
+                retrieve_context,
+                &retriever_actor,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
+            .await
     };
 
     match retrieved {
-        Ok(mut context) => {
-            context.context.reverse();
+        Ok(context) => {
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Create system message with text context
-            let mut context_message = ChatMessage::system(
-                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
-                    .to_string()
-                    + &context_content,
-            );
+            let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
 
-            // If there's an image in the context, use only the first one
+            // Handle image context if present
             if let Some(ctx) = context
                 .context
                 .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m.content_type, ContentType::Image)))
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
             {
-                if let Some(metadata) = &ctx.metadata {
-                    match &metadata.content_type {
-                        ContentType::Image => match tokio::fs::read(&metadata.source).await {
+                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+                    match &metadata {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -313,138 +487,33 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             }
 
             let mut conversation = body.messages.clone();
-            if conversation.len() > 0 {
-                conversation.insert(conversation.len() - 1, context_message);
+            if !conversation.is_empty() {
+                conversation.insert(conversation.len() - 1, context_message.clone());
             } else {
-                conversation.push(context_message);
+                conversation.push(context_message.clone());
             }
 
             info!("Sending context to chat actor");
-            let chat_response = {
-                let mut chat_ctx = data.chat_actor.ctx.lock().await;
-                let mut chat_actor = data.chat_actor.actor.lock().await;
-                chat_actor
-                    .handle(
-                        &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: false, persist: true },
+            let ask_response = {
+                let ask_ctx = data.ask.ctx.lock().await;
+                let ask_actor = data.ask.actor_id.clone();
+                ask_ctx
+                    .send_and_wait_reply::<Ask, AskMessages>(
+                        AskMessages { messages: conversation.clone(), restart: false, persist: false },
+                        &ask_actor,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                     )
                     .await
             };
-            match chat_response {
+
+            match ask_response {
                 Ok(response) => {
-                    info!("Chat response: {:#?}", response);
-                    HttpResponse::Ok().json(response)
+                    info!("Ask response: {:#?}", &response);
+                    HttpResponse::Ok().json(AskResponse { response, context: conversation })
                 }
                 Err(e) => {
-                    error!("Error fetching chat response: {:?}", e);
-                    HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            error!("Error fetching context: {:?}", e);
-            HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct AskQuery {
-    query: String,
-    source: Option<String>,
-}
-
-async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
-    info!("Received ask query: {:#?}", &body.query);
-
-    info!("Sending message to retriever actor");
-    let retrieved = {
-        let mut retriever_ctx = data.retriever_actor.ctx.lock().await;
-        let mut retriever_actor = data.retriever_actor.actor.lock().await;
-        let retrieve_context = RetrieveContext {
-            query: RetrieveQuery::Text(body.query.clone()),
-            limit: 5,
-            threshold: 0.0,
-            source: body.source.clone(),
-        };
-        retriever_actor.handle(&mut retriever_ctx, &retrieve_context).await
-    };
-
-    match retrieved {
-        Ok(context) => {
-            info!("Context fetched: {:#?}", context);
-            let context_content = context.to_markdown();
-
-            // Create chat conversation
-            let mut conversation = vec![];
-
-            // Add context to conversation as a system message
-            let mut context_message = ChatMessage::system(
-                "You are a helpful programming assistant. Format your response in markdown. Use the following context to answer the user's query: \n\n"
-                    .to_string()
-                    + &context_content,
-            );
-
-            // Add images to the system message if available
-            let mut images = Vec::new();
-            for ctx in context.context {
-                if let Some(metadata) = &ctx.metadata {
-                    match &metadata.content_type {
-                        ContentType::Image => match tokio::fs::read(&metadata.source).await {
-                            Ok(image_data) => {
-                                match tokio::task::spawn_blocking(move || {
-                                    base64::engine::general_purpose::STANDARD.encode(image_data)
-                                })
-                                .await
-                                {
-                                    Ok(base64_data) => {
-                                        images.push(ollama_rs::generation::images::Image::from_base64(&base64_data));
-                                    }
-                                    Err(e) => {
-                                        error!("Error encoding image: {:?}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error reading image file: {:?}", e);
-                            }
-                        },
-                        _ => {}
-                    }
-                }
-            }
-            if !images.is_empty() {
-                context_message.images = Some(images);
-            }
-
-            conversation.push(context_message);
-
-            // Add user's query to conversation
-            let user_query = ChatMessage::user(body.query.clone());
-            conversation.push(user_query);
-
-            // Sending context and user query to chat actor
-            info!("Sending context to chat actor");
-            let chat_response = {
-                let mut chat_ctx = data.chat_actor.ctx.lock().await;
-                let mut chat_actor = data.chat_actor.actor.lock().await;
-                chat_actor
-                    .handle(
-                        &mut chat_ctx,
-                        &ChatMessages { messages: conversation.clone(), restart: true, persist: false },
-                    )
-                    .await
-            };
-            match chat_response {
-                Ok(response) => {
-                    info!("Chat response for query: {:#?} is: \n{:#?}", body.query, response);
-                    HttpResponse::Ok().json(json!({
-                        "response": response,
-                    }))
-                }
-                Err(e) => {
-                    error!("Error fetching chat response: {:?}", e);
-                    HttpResponse::InternalServerError().body(format!("Error fetching chat response: {}", e))
+                    error!("Error fetching ask response: {:?}", e);
+                    HttpResponse::InternalServerError().body(format!("Error fetching ask response: {}", e))
                 }
             }
         }
@@ -456,19 +525,25 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 }
 
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
-    let mut indexer_ctx = data.indexer_actor.ctx.lock().await;
-    let mut indexer_actor = data.indexer_actor.actor.lock().await;
+    let indexer_ctx = data.indexer.ctx.lock().await;
+    let indexer_actor = data.indexer.actor_id.clone();
 
     let delete_source = body.clone();
 
-    info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
-    let response = indexer_actor.handle(&mut indexer_ctx, &delete_source).await;
+    info!("Sending delete message to indexer actor for sources: {:?}", body.source);
+    let response = indexer_ctx
+        .send_and_wait_reply::<Indexer, DeleteSource>(
+            delete_source,
+            &indexer_actor,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
 
     match response {
         Ok(result) => {
             info!(
-                "Deleted {} embeddings. Successfully deleted sources: {:?}. Not found sources: {:?}",
-                result.deleted_embeddings, result.deleted_sources, result.not_found_sources
+                "Deleted {} embeddings. Successfully deleted sources: {:?}",
+                result.deleted_embeddings, result.deleted_sources
             );
             HttpResponse::Ok().json(result)
         }
@@ -486,8 +561,8 @@ struct EmbeddingsQuery {
 }
 
 async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
-    let mut embeddings_actor = data.embeddings_actor.actor.lock().await;
-    let mut embeddings_ctx = data.embeddings_actor.ctx.lock().await;
+    let embeddings_ctx = data.embeddings.ctx.lock().await;
+    let embeddings_actor = data.embeddings.actor_id.clone();
 
     if body.model != "nomic-embed-text" {
         return HttpResponse::BadRequest().body("Invalid model");
@@ -507,8 +582,12 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
 
     // Process texts in chunks
     for chunk in texts.chunks(CHUNK_SIZE) {
-        match embeddings_actor
-            .handle(&mut embeddings_ctx, &GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) })
+        match embeddings_ctx
+            .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
+                GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
+                &embeddings_actor,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
             .await
         {
             Ok(chunk_response) => {
@@ -536,20 +615,36 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
 
-    let mut rerank_actor = data.rerank_actor.actor.lock().await;
-    let mut rerank_ctx = data.rerank_actor.ctx.lock().await;
+    let rank_texts = RankTexts { query: body.query.clone(), texts: body.texts.clone() };
 
-    println!("Rerank query: {:#?}", body.query);
-    println!("Rerank texts: {:#?}", body.texts);
+    let relay_ctx = data.rerank.ctx.lock().await;
+    let rerank_actor_id = data.rerank.actor_id.clone();
 
-    let response =
-        rerank_actor.handle(&mut rerank_ctx, &RankTexts { query: body.query.clone(), texts: body.texts.clone() }).await;
-
-    println!("Rerank response: {:#?}", response);
-
-    match response {
-        Ok(response) => HttpResponse::Ok().json(response.texts),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    match relay_ctx
+        .send::<Rerank, RankTexts>(
+            rank_texts,
+            &rerank_actor_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await
+    {
+        Ok(mut stream) => {
+            if let Some(result) = stream.next().await {
+                match result {
+                    Ok(ranked_texts) => HttpResponse::Ok().json(ranked_texts),
+                    Err(e) => {
+                        error!("Rerank error in stream: {}", e);
+                        HttpResponse::InternalServerError().body(e.to_string())
+                    }
+                }
+            } else {
+                HttpResponse::InternalServerError().body("No response received from rerank actor")
+            }
+        }
+        Err(e) => {
+            error!("Rerank error: {}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
     }
 }
 
@@ -560,121 +655,190 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    // Install color backtrace
-    color_backtrace::install();
-    color_backtrace::BacktracePrinter::new().message("BOOM! 💥").install(color_backtrace::default_output_stream());
+    // Initialize engine
+    let engine = Engine::connect(EngineOptions::builder().endpoint("ws://localhost:9123".into()).build()).await?;
 
-    // Initialize the actor system
-    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
-    let engine = Engine::connect(engine_options).await?;
+    // Spawn main actors and their relays
+    let mut actor_handles = Vec::new();
 
-    // Indexer
-    let indexer_actor_id = ActorId::of::<Indexer>("/rag/indexer");
-    let (mut indexer_ctx, mut indexer_actor) = match Actor::spawn(
+    // Indexer setup
+    let indexer_id = ActorId::of::<Indexer>("/rag/indexer");
+    let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
         engine.clone(),
-        indexer_actor_id.clone(),
+        indexer_id.clone(),
         Indexer::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
     )
-    .await
-    {
-        Ok(result) => {
-            info!("Indexer actor restored");
-            result
+    .await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
         }
-        Err(err) => {
-            warn!("Error restoring indexer actor: {}, creating new", err);
-            Actor::spawn(
-                engine.clone(),
-                indexer_actor_id.clone(),
-                Indexer::default(),
-                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-            )
-            .await
-            .unwrap()
-        }
-    };
+    });
+    actor_handles.push(indexer_handle);
 
-    indexer_actor.init(&mut indexer_ctx).await.unwrap();
+    // Indexer relay setup
+    let indexer_relay_id = ActorId::of::<Relay>("/relay/indexer");
+    let (indexer_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        indexer_relay_id,
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
 
-    let indexer_actor =
-        Arc::new(ActorHandle::<Indexer> { ctx: Mutex::new(indexer_ctx), actor: Mutex::new(indexer_actor) });
+    let indexer_state = ActorState::new(indexer_relay_ctx, indexer_id);
 
-    // Retriever
-    let retriever_actor_id = ActorId::of::<Retriever>("/rag/retriever");
+    // Retriever setup
+    let retriever_id = ActorId::of::<Retriever>("/rag/retriever");
     let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
         engine.clone(),
-        retriever_actor_id.clone(),
+        retriever_id.clone(),
         Retriever::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    retriever_actor.init(&mut retriever_ctx).await.unwrap();
+    let retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+    actor_handles.push(retriever_handle);
 
-    let retriever_actor =
-        Arc::new(ActorHandle::<Retriever> { ctx: Mutex::new(retriever_ctx), actor: Mutex::new(retriever_actor) });
-
-    let chat = Chat::builder().model("llama3.2-vision".into()).build();
-
-    let chat_actor_id = ActorId::of::<Chat>("/chat");
-    let (mut chat_ctx, mut chat_actor) = Actor::spawn(
+    let retriever_relay_id = ActorId::of::<Relay>("/relay/retriever");
+    let (retriever_relay_ctx, _) = Actor::spawn(
         engine.clone(),
-        chat_actor_id.clone(),
-        chat,
+        retriever_relay_id.clone(),
+        Relay,
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    chat_actor.init(&mut chat_ctx).await.unwrap();
+    let retriever_state = ActorState::new(retriever_relay_ctx, retriever_id);
 
-    let chat_actor = Arc::new(ActorHandle::<Chat> { ctx: Mutex::new(chat_ctx), actor: Mutex::new(chat_actor) });
-
-    // Embeddings
-    let embeddings_actor_id = ActorId::of::<Embeddings>("/rag/embeddings");
+    let embeddings_id = ActorId::of::<Embeddings>("/rag/embeddings");
     let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
         engine.clone(),
-        embeddings_actor_id.clone(),
+        embeddings_id.clone(),
         Embeddings::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    embeddings_actor.init(&mut embeddings_ctx).await.unwrap();
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+    actor_handles.push(embeddings_handle);
 
-    let embeddings_actor =
-        Arc::new(ActorHandle::<Embeddings> { ctx: Mutex::new(embeddings_ctx), actor: Mutex::new(embeddings_actor) });
+    let embeddings_relay_id = ActorId::of::<Relay>("/relay/embeddings");
+    let (embeddings_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        embeddings_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
 
-    // Rerank
-    let rerank_actor_id = ActorId::of::<Rerank>("/rag/rerank");
+    let embeddings_state = ActorState::new(embeddings_relay_ctx, embeddings_id);
+
+    let rerank_id = ActorId::of::<Rerank>("/rag/rerank");
     let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
         engine.clone(),
-        rerank_actor_id.clone(),
+        rerank_id.clone(),
         Rerank::default(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    rerank_actor.init(&mut rerank_ctx).await.unwrap();
+    let rerank_handle = tokio::spawn(async move {
+        if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
+            error!("Rerank actor error: {}", e);
+        }
+    });
+    actor_handles.push(rerank_handle);
 
-    let rerank_actor = Arc::new(ActorHandle::<Rerank> { ctx: Mutex::new(rerank_ctx), actor: Mutex::new(rerank_actor) });
+    let rerank_relay_id = ActorId::of::<Relay>("/relay/rerank");
+    let (rerank_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        rerank_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
 
-    // Create the app state
+    let rerank_state = ActorState::new(rerank_relay_ctx, rerank_id);
+
+    let chat_id = ActorId::of::<Chat>("/rag/chat");
+    let (mut chat_ctx, mut chat_actor) = Actor::spawn(
+        engine.clone(),
+        chat_id.clone(),
+        Chat::default(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let chat_handle = tokio::spawn(async move {
+        if let Err(e) = chat_actor.start(&mut chat_ctx).await {
+            error!("Chat actor error: {}", e);
+        }
+    });
+    actor_handles.push(chat_handle);
+
+    let chat_relay_id = ActorId::of::<Relay>("/relay/chat");
+    let (chat_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        chat_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let chat_state = ActorState::new(chat_relay_ctx, chat_id);
+
+    let ask_id = ActorId::of::<Ask>("/rag/ask");
+    let (mut ask_ctx, mut ask_actor) = Actor::spawn(
+        engine.clone(),
+        ask_id.clone(),
+        Ask::default(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let ask_handle = tokio::spawn(async move {
+        if let Err(e) = ask_actor.start(&mut ask_ctx).await {
+            error!("Ask actor error: {}", e);
+        }
+    });
+    actor_handles.push(ask_handle);
+
+    let ask_relay_id = ActorId::of::<Relay>("/relay/ask");
+    let (ask_relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        ask_relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let ask_state = ActorState::new(ask_relay_ctx, ask_id);
+
+    // Create app state
     let data = web::Data::new(AppState {
         engine: engine.clone(),
-        indexer_actor,
-        retriever_actor,
-        embeddings_actor,
-        rerank_actor,
-        chat_actor,
+        indexer: indexer_state,
+        retriever: retriever_state,
+        embeddings: embeddings_state,
+        rerank: rerank_state,
+        chat: chat_state,
+        ask: ask_state,
     });
 
-    // Create the server
-    let server_task = HttpServer::new(move || {
+    // Create and run server
+    let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
@@ -699,12 +863,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/rerank", web::post().to(rerank))
     })
     .bind("0.0.0.0:5766")?
-    .run()
-    .await;
+    .run();
 
-    match server_task {
+    // Run the server
+    match server.await {
         Ok(_) => info!("Server stopped"),
         Err(e) => error!("Server error: {}", e),
+    }
+
+    // Clean up
+    for handle in actor_handles {
+        handle.abort();
     }
 
     Ok(())

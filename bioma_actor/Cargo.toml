@@ -11,7 +11,6 @@ thiserror = { workspace = true }
 derive_more = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-indexmap = { workspace = true, features = ["serde"] }
 futures = { workspace = true }
 humantime = { workspace = true }
 humantime-serde = { workspace = true }
@@ -32,3 +31,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 rand = { workspace = true }
 console-subscriber = { workspace = true }
+futures-util = { workspace = true }
