@@ -8,7 +8,6 @@ use goose::prelude::*;
 use once_cell::sync::Lazy;
 use rand::Rng;
 use serde_json::json;
-use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::fs;
 use tokio::io;
@@ -17,8 +16,8 @@ use tracing::info;
 
 // We will have a global variation count and a global map to track each endpoint's current variation
 static VARIATIONS_COUNT: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(1));
-static ENDPOINT_VARIATION_STATE: Lazy<Mutex<HashMap<TestType, TestVariation>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static VARIATION_STATE: Lazy<Mutex<TestVariation>> =
+    Lazy::new(|| Mutex::new(TestVariation { index: 0, file_path: "".to_string() }));
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
@@ -33,12 +32,10 @@ struct TestVariation {
 impl TestVariation {
     async fn set_new_random_file_name(&mut self) {
         let file_names = get_test_file_names().await.unwrap();
-        println!("Found {} test files", file_names.len());
 
         // Create a random number generator
         let mut rng = rand::thread_rng();
         let random_number: u32 = rng.gen_range(0..file_names.len() as u32);
-        println!("Random number: {}", random_number);
 
         self.file_path = file_names[random_number as usize].clone()
     }
@@ -95,16 +92,24 @@ impl FromStr for TestType {
 async fn get_next_variation(endpoint_type: TestType) -> TestVariation {
     // Lock guard on tracking variables
     let variations = *VARIATIONS_COUNT.lock().await;
-    let mut map = ENDPOINT_VARIATION_STATE.lock().await;
+    let mut state = VARIATION_STATE.lock().await;
+    let ordering_state = ORDERING_STATE.lock().await;
 
-    // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
-    let entry = map.entry(endpoint_type).or_insert(TestVariation { index: 0, file_path: "".to_string() });
-    entry.set_new_random_file_name().await;
-    println!("Using variation: {}", entry.file_path);
+    dbg!(&ordering_state.endpoint_order[0], &endpoint_type, ordering_state.endpoint_order[0].eq(&endpoint_type));
 
-    // This ensures that the index is always within 0 and (variations - 1)
-    entry.index = (entry.index + 1) % variations;
-    entry.clone()
+    if ordering_state.endpoint_order[0].eq(&endpoint_type) {
+        // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
+        state.set_new_random_file_name().await;
+
+        // This ensures that the index is always within 0 and (variations - 1)
+        state.index = (state.index + 1) % variations;
+
+        println!("Changed variation to: {}", state.index);
+        state.clone()
+    } else {
+        println!("Same variation: {}", state.index);
+        state.clone()
+    }
 }
 
 async fn get_test_file_names() -> io::Result<Vec<String>> {
@@ -203,16 +208,21 @@ async fn make_request<T: serde::Serialize>(
 }
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
+    get_next_variation(TestType::Health).await;
+
     make_request::<()>(user, GooseMethod::Get, "/health", "Health Check", TestType::Health, None).await
 }
 
 pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
+    get_next_variation(TestType::Hello).await;
+
     let payload = json!("");
     make_request(user, GooseMethod::Post, "/hello", "Hello", TestType::Hello, Some(payload)).await
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::Index).await;
+
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = IndexGlobs {
         globs: vec![file_name],
@@ -225,6 +235,8 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
+    get_next_variation(TestType::Chat).await;
+
     let payload = ChatMessages {
         messages: vec![ChatMessage::user("Hello, how are you?".to_string())],
         restart: false,
@@ -235,7 +247,10 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
+    let variation = get_next_variation(TestType::Upload).await;
+
     let mut state = ORDERING_STATE.lock().await;
+
     let should_execute = {
         info!(
             "Upload Order Check - Current Index: {}, Expected: {:?}, Actual: Upload",
@@ -251,7 +266,6 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     info!("Executing Upload");
 
-    let variation = get_next_variation(TestType::Upload).await;
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
 
     let boundary = "----WebKitFormBoundaryABC123";
@@ -323,7 +337,7 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
-    let variation = get_next_variation(TestType::Upload).await;
+    let variation = get_next_variation(TestType::Embed).await;
 
     // Read the file content
     let file_bytes = std::fs::read(&variation.file_path).unwrap();
@@ -337,12 +351,16 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
+    get_next_variation(TestType::Ask).await;
+
     let payload = json!({ "query": "What is ubuntu, surrealdb and rust? Please divide the answer in sections." });
 
     make_request(user, GooseMethod::Post, "/ask", "RAG Ask", TestType::Ask, Some(payload)).await
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
+    get_next_variation(TestType::Retrieve).await;
+
     let payload = RetrieveContext {
         query: RetrieveQuery::Text("Explain About ubuntu, surrealdb and Rust?".to_string()),
         limit: 5,
@@ -354,6 +372,8 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
+    get_next_variation(TestType::Rerank).await;
+
     let payload = RankTexts {
         query: "Explain About ubuntu, surrealdb and Rust?".to_string(),
         texts: vec![
