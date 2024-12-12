@@ -266,6 +266,8 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
 
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", source))
         .bind(("uri", uri))
@@ -341,6 +343,8 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
 
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", source))
         .bind(("uri", uri))
@@ -434,6 +438,8 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
 
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", source))
         .bind(("uri", uri))
@@ -555,6 +561,8 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
 
             engine
                 .db()
+                .lock()
+                .await
                 .query(source_query)
                 .bind(("source", source))
                 .bind(("uri", uri))
@@ -686,6 +694,8 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
     let source_query = include_str!("../sql/source.surql");
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", "test_source.test"))
         .bind(("uri", "test_uri.test"))
@@ -759,6 +769,8 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
 
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", "test_source.test"))
         .bind(("uri", "test_uri.test"))
@@ -870,6 +882,8 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     let source_query = include_str!("../sql/source.surql");
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", "test_source_image.test"))
         .bind(("uri", "test_uri_image.test"))
@@ -892,6 +906,8 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
 
     engine
         .db()
+        .lock()
+        .await
         .query(source_query)
         .bind(("source", "test_source_text.test"))
         .bind(("uri", "test_uri_text.test"))
@@ -969,6 +985,8 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         let source_query = include_str!("../sql/source.surql");
         engine
             .db()
+            .lock()
+            .await
             .query(source_query)
             .bind(("source", source))
             .bind(("uri", source))

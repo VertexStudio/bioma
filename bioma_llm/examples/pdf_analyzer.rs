@@ -33,8 +33,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
+    // Get workspace root
+    let workspace_root = std::env::var("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .and_then(|path| path.parent().map(|p| p.to_path_buf()))
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
     // PDF file to analyze
-    let file_path = PathBuf::from("path/to/your/document.pdf");
+    let file_path = PathBuf::from(format!("{}/assets/files/README.pdf", workspace_root));
 
     // Send the PDF for analysis
     let pdf_content = relay_ctx
