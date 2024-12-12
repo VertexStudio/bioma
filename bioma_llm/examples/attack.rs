@@ -8,7 +8,6 @@ use goose::prelude::*;
 use once_cell::sync::Lazy;
 use rand::Rng;
 use serde_json::json;
-use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::fs;
 use tokio::io;
@@ -17,8 +16,8 @@ use tracing::info;
 
 // We will have a global variation count and a global map to track each endpoint's current variation
 static VARIATIONS_COUNT: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(1));
-static ENDPOINT_VARIATION_STATE: Lazy<Mutex<HashMap<TestType, TestVariation>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static VARIATION_STATE: Lazy<Mutex<TestVariation>> =
+    Lazy::new(|| Mutex::new(TestVariation { index: 0, file_path: "".to_string() }));
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
@@ -33,12 +32,10 @@ struct TestVariation {
 impl TestVariation {
     async fn set_new_random_file_name(&mut self) {
         let file_names = get_test_file_names().await.unwrap();
-        println!("Found {} test files", file_names.len());
 
         // Create a random number generator
         let mut rng = rand::thread_rng();
         let random_number: u32 = rng.gen_range(0..file_names.len() as u32);
-        println!("Random number: {}", random_number);
 
         self.file_path = file_names[random_number as usize].clone()
     }
@@ -92,19 +89,28 @@ impl FromStr for TestType {
 }
 
 /// Add a helper function to get the next variation index for a given endpoint type
-async fn get_next_variation(endpoint_type: TestType) -> TestVariation {
-    // Lock guard on tracking variables
-    let variations = *VARIATIONS_COUNT.lock().await;
-    let mut map = ENDPOINT_VARIATION_STATE.lock().await;
+async fn get_next_variation(
+    endpoint_type: TestType,
+    variation_state: &mut tokio::sync::MutexGuard<'_, TestVariation>,
+    variations: usize,
+    ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
+) -> TestVariation {
+    // If the array is empty (no --order flag), always get a new variation, if is not empty, will check for the following:
+    // If the current endpoint is the first in the list AND it is the time to execute it, change the variation,
+    // otherwise, return current variation
+    if ordering_state.endpoint_order.is_empty()
+        || (ordering_state.endpoint_order[0].eq(&endpoint_type) && should_execute(&endpoint_type, ordering_state).await)
+    {
+        // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
+        variation_state.set_new_random_file_name().await;
 
-    // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
-    let entry = map.entry(endpoint_type).or_insert(TestVariation { index: 0, file_path: "".to_string() });
-    entry.set_new_random_file_name().await;
-    println!("Using variation: {}", entry.file_path);
+        // This ensures that the index is always within 0 and (variations - 1), ensuring the exact variations
+        variation_state.index = (variation_state.index + 1) % variations;
 
-    // This ensures that the index is always within 0 and (variations - 1)
-    entry.index = (entry.index + 1) % variations;
-    entry.clone()
+        variation_state.clone()
+    } else {
+        variation_state.clone()
+    }
 }
 
 async fn get_test_file_names() -> io::Result<Vec<String>> {
@@ -140,7 +146,23 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     GooseAttack::initialize_with_config(config)
 }
 
-// Modify make_request to use global state
+/// Check if the endpoint_type should execute, according to the ordering state
+async fn should_execute(
+    endpoint_type: &TestType,
+    ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
+) -> bool {
+    if ordering_state.endpoint_order.is_empty() {
+        return true;
+    }
+
+    info!(
+        "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
+        ordering_state.current_index, ordering_state.endpoint_order[ordering_state.current_index], endpoint_type
+    );
+    endpoint_type == &ordering_state.endpoint_order[ordering_state.current_index]
+}
+
+/// Modify make_request to use global state
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
     method: GooseMethod,
@@ -148,17 +170,9 @@ async fn make_request<T: serde::Serialize>(
     name: &str,
     endpoint_type: TestType,
     payload: Option<T>,
+    ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
 ) -> TransactionResult {
-    // Check ordering using global state but don't update yet
-    let mut state = ORDERING_STATE.lock().await;
-
-    let should_execute = {
-        info!(
-            "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
-            state.current_index, state.endpoint_order[state.current_index], endpoint_type
-        );
-        endpoint_type == state.endpoint_order[state.current_index]
-    };
+    let should_execute = should_execute(&endpoint_type, ordering_state).await;
 
     if !should_execute {
         info!("Skipping {:?} - out of order", endpoint_type);
@@ -179,10 +193,16 @@ async fn make_request<T: serde::Serialize>(
 
     let mut goose = user.request(goose_request).await?;
 
-    // Update state after request is complete
-    let old_index = state.current_index;
-    state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-    info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, state.current_index, endpoint_type);
+    // Update ordering_state after request is complete
+    if !ordering_state.endpoint_order.is_empty() {
+        let old_index = ordering_state.current_index;
+        ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
+
+        info!(
+            "Order Update - Index: {} -> {}, Completed: {:?}",
+            old_index, ordering_state.current_index, endpoint_type
+        );
+    }
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
@@ -203,16 +223,34 @@ async fn make_request<T: serde::Serialize>(
 }
 
 pub async fn load_test_health(user: &mut GooseUser) -> TransactionResult {
-    make_request::<()>(user, GooseMethod::Get, "/health", "Health Check", TestType::Health, None).await
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    get_next_variation(TestType::Health, &mut variation_state, variations, &mut ordering_state).await;
+
+    make_request::<()>(user, GooseMethod::Get, "/health", "Health Check", TestType::Health, None, &mut ordering_state)
+        .await
 }
 
 pub async fn load_test_hello(user: &mut GooseUser) -> TransactionResult {
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    get_next_variation(TestType::Hello, &mut variation_state, variations, &mut ordering_state).await;
+
     let payload = json!("");
-    make_request(user, GooseMethod::Post, "/hello", "Hello", TestType::Hello, Some(payload)).await
+    make_request(user, GooseMethod::Post, "/hello", "Hello", TestType::Hello, Some(payload), &mut ordering_state).await
 }
 
 pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
-    let variation = get_next_variation(TestType::Index).await;
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    let variation = get_next_variation(TestType::Index, &mut variation_state, variations, &mut ordering_state).await;
+
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = IndexGlobs {
         globs: vec![file_name],
@@ -221,28 +259,34 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
     };
 
-    make_request(user, GooseMethod::Post, "/index", "Index Files", TestType::Index, Some(payload)).await
+    make_request(user, GooseMethod::Post, "/index", "Index Files", TestType::Index, Some(payload), &mut ordering_state)
+        .await
 }
 
 pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    get_next_variation(TestType::Chat, &mut variation_state, variations, &mut ordering_state).await;
+
     let payload = ChatMessages {
         messages: vec![ChatMessage::user("Hello, how are you?".to_string())],
         restart: false,
         persist: false,
     };
 
-    make_request(user, GooseMethod::Post, "/api/chat", "Chat", TestType::Chat, Some(payload)).await
+    make_request(user, GooseMethod::Post, "/api/chat", "Chat", TestType::Chat, Some(payload), &mut ordering_state).await
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
-    let mut state = ORDERING_STATE.lock().await;
-    let should_execute = {
-        info!(
-            "Upload Order Check - Current Index: {}, Expected: {:?}, Actual: Upload",
-            state.current_index, state.endpoint_order[state.current_index]
-        );
-        TestType::Upload == state.endpoint_order[state.current_index]
-    };
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    let variation = get_next_variation(TestType::Upload, &mut variation_state, variations, &mut ordering_state).await;
+
+    let should_execute = should_execute(&TestType::Upload, &mut ordering_state).await;
 
     if !should_execute {
         info!("Skipping Upload - out of order");
@@ -251,7 +295,6 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     info!("Executing Upload");
 
-    let variation = get_next_variation(TestType::Upload).await;
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
 
     let boundary = "----WebKitFormBoundaryABC123";
@@ -291,9 +334,11 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     // Update state after request is complete
 
-    let old_index = state.current_index;
-    state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-    info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, state.current_index);
+    if !ordering_state.endpoint_order.is_empty() {
+        let old_index = ordering_state.current_index;
+        ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
+        info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, ordering_state.current_index);
+    }
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
@@ -314,16 +359,34 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    let variation = get_next_variation(TestType::DeleteSource).await;
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    let variation =
+        get_next_variation(TestType::DeleteSource, &mut variation_state, variations, &mut ordering_state).await;
+
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = DeleteSource { source: file_name };
 
-    make_request(user, GooseMethod::Post, "/delete_source", "Delete Source", TestType::DeleteSource, Some(payload))
-        .await
+    make_request(
+        user,
+        GooseMethod::Post,
+        "/delete_source",
+        "Delete Source",
+        TestType::DeleteSource,
+        Some(payload),
+        &mut ordering_state,
+    )
+    .await
 }
 
 pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
-    let variation = get_next_variation(TestType::Upload).await;
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    let variation = get_next_variation(TestType::Embed, &mut variation_state, variations, &mut ordering_state).await;
 
     // Read the file content
     let file_bytes = std::fs::read(&variation.file_path).unwrap();
@@ -333,16 +396,37 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
         "input": String::from_utf8_lossy(&file_bytes).to_string(),
     });
 
-    make_request(user, GooseMethod::Post, "/api/embed", "Embed Text", TestType::Embed, Some(payload)).await
+    make_request(
+        user,
+        GooseMethod::Post,
+        "/api/embed",
+        "Embed Text",
+        TestType::Embed,
+        Some(payload),
+        &mut ordering_state,
+    )
+    .await
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    get_next_variation(TestType::Ask, &mut variation_state, variations, &mut ordering_state).await;
+
     let payload = json!({ "query": "What is ubuntu, surrealdb and rust? Please divide the answer in sections." });
 
-    make_request(user, GooseMethod::Post, "/ask", "RAG Ask", TestType::Ask, Some(payload)).await
+    make_request(user, GooseMethod::Post, "/ask", "RAG Ask", TestType::Ask, Some(payload), &mut ordering_state).await
 }
 
 pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    get_next_variation(TestType::Retrieve, &mut variation_state, variations, &mut ordering_state).await;
+
     let payload = RetrieveContext {
         query: RetrieveQuery::Text("Explain About ubuntu, surrealdb and Rust?".to_string()),
         limit: 5,
@@ -350,10 +434,25 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
         source: None,
     };
 
-    make_request(user, GooseMethod::Post, "/retrieve", "RAG Retrieve", TestType::Retrieve, Some(payload)).await
+    make_request(
+        user,
+        GooseMethod::Post,
+        "/retrieve",
+        "RAG Retrieve",
+        TestType::Retrieve,
+        Some(payload),
+        &mut ordering_state,
+    )
+    .await
 }
 
 pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
+    let mut variation_state: tokio::sync::MutexGuard<'_, TestVariation> = VARIATION_STATE.lock().await;
+    let variations = *VARIATIONS_COUNT.lock().await;
+    let mut ordering_state = ORDERING_STATE.lock().await;
+
+    get_next_variation(TestType::Rerank, &mut variation_state, variations, &mut ordering_state).await;
+
     let payload = RankTexts {
         query: "Explain About ubuntu, surrealdb and Rust?".to_string(),
         texts: vec![
@@ -363,7 +462,8 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
         ],
     };
 
-    make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", TestType::Rerank, Some(payload)).await
+    make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", TestType::Rerank, Some(payload), &mut ordering_state)
+        .await
 }
 
 #[derive(Debug, Clone)]
