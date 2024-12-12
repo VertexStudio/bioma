@@ -1,70 +1,125 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Bioma Rag Ask Interface with Markdown and Mermaid</title>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
-        <style>
-            body { 
-                font-family: Arial, sans-serif; 
-                max-width: 800px; 
-                margin: 0 auto; 
-                padding: 20px; 
-                padding-bottom: 80px;
-            }
-            #chat-container { 
-                margin-bottom: 10px; 
-                display: flex;
-                flex-direction: column;
-            }
-            #input-container {
-                max-width: 800px;
-                position: fixed;
-                bottom: 0;
-                left: 50%;
-                transform: translateX(-50%);
-                padding: 20px;
-                background-color: white;
-                box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-                width: 100%;
-                box-sizing: border-box;
-                border-radius: 10px 10px 0 0;
-            }
-            #query-input { 
-                width: 100%; 
-                padding: 10px; 
-                box-sizing: border-box;
-                border-radius: 5px;
-                border: 1px solid #ccc;
-                resize: none;
-                min-height: 40px;
-                max-height: 200px;
-                overflow-y: auto;
-            }
-            .message { 
-                margin-bottom: 10px; 
-                padding: 10px; 
-                border-radius: 10px; 
-                max-width: 80%; 
-            }
-            .user-message { 
-                background-color: #d1e8ff; 
-                align-self: flex-end; 
-                margin-left: auto; 
-                border-radius: 10px;
-            }
-            .bot-message { 
-                background-color: #dbdbdb; 
-                align-self: flex-start; 
-            }
-            .system-message { 
-                background-color: #ffeeee; 
-                align-self: flex-start; 
-            }
-        </style>
-    </head>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rag Server Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
+    <style>
+        /* Main container styling - centers content and adds padding */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;  /* Center the content */
+            padding: 20px;
+            padding-bottom: 80px;  /* Extra padding for fixed input container */
+        }
+
+        /* Chat messages container - vertical flex layout */
+        #chat-container {
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Fixed input container at bottom of screen */
+        #input-container {
+            max-width: 800px;
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);  /* Center the container */
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);  /* Subtle shadow above */
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 10px 10px 0 0;  /* Rounded top corners */
+        }
+
+        /* Textarea input styling with auto-resize capability */
+        #query-input {
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            resize: none;
+            min-height: 40px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        /* Base message styling */
+        .message {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 10px;
+            max-width: 80%;
+        }
+
+        /* Message variants for different roles */
+        .user-message {
+            background-color: #d1e8ff;  /* Light blue */
+            align-self: flex-end;  /* Align to right */
+            margin-left: auto;
+        }
+
+        .assistant-message {
+            background-color: #dbdbdb;  /* Light gray */
+            align-self: flex-start;  /* Align to left */
+        }
+
+        .system-message {
+            background-color: #ffeeee;  /* Light red */
+            align-self: flex-start;
+        }
+
+        /* Context section styling */
+        .context-toggle {
+            font-size: 0.8em;
+            color: #666;
+            cursor: pointer;
+            margin-top: 8px;
+            padding: 4px 8px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            display: inline-block;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+
+        .context-toggle:hover {
+            background-color: #e0e0e0;
+        }
+
+        /* Hidden by default, shown when toggled */
+        .context-content {
+            display: none;
+            margin-top: 8px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+
+        /* Context message styling */
+        .context-content .message {
+            margin: 5px 0;
+            padding: 8px;
+            font-size: 0.9em;
+            max-width: 100%;
+        }
+
+        .context-content .message strong {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+        }
+    </style>
+</head>
+
 <body>
     <div id="chat-container"></div>
     <div id="input-container">
@@ -75,48 +130,137 @@
         const md = window.markdownit();
         const chatContainer = document.getElementById('chat-container');
         const queryInput = document.getElementById('query-input');
+        let messageHistory = [];
 
         mermaid.initialize({ startOnLoad: true });
 
-        // Custom renderer for code blocks
-        md.renderer.rules.fence = function(tokens, idx, options, env, self) {
+        // Custom renderer for code fence blocks in markdown
+        md.renderer.rules.fence = function (tokens, idx, options, env, self) {
             const token = tokens[idx];
             const code = token.content.trim();
+            // Special handling for mermaid diagrams
             if (token.info.trim() === 'mermaid') {
+                // Wrap mermaid syntax in special div for diagram rendering
                 return '<div class="mermaid">' + code + '</div>';
             }
+            // Default handling for all other code blocks
+            // Escapes HTML to prevent XSS and wraps in pre/code tags
             return '<pre><code>' + md.utils.escapeHtml(code) + '</code></pre>';
         };
 
-        function appendMessage(sender, content) {
+        // Creates a collapsible section to display the context/sources used for the AI's response
+        function createContextSection(context) {
+            // Return empty string if no context is provided or if it's invalid
+            if (!context || !Array.isArray(context) || context.length === 0) {
+                return '';
+            }
+
+            // Transform each context message into HTML elements
+            const contextMessages = context.map(msg => {
+                // Create CSS class based on the message role (e.g., 'user-message', 'assistant-message')
+                const roleClass = msg.role + '-message';
+                // Convert markdown content to HTML, handle empty content gracefully
+                const content = msg.content ? md.render(msg.content) : '';
+                // Return a message div with role label and formatted content
+                return `
+                    <div class="message ${roleClass}">
+                        <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
+                        ${content}
+                    </div>
+                `;
+            }).join('');
+
+            // Create a collapsible container with toggle button and content
+            return `
+                <div class="context-container">
+                    <div class="context-toggle" onclick="toggleContext(this)">Show Context ▼</div>
+                    <div class="context-content">
+                        ${contextMessages}
+                    </div>
+                </div>
+            `;
+        }
+
+        function appendMessage(sender, content, context = null) {
+            // Determine the message role based on sender type
+            // Can be 'user', 'system', or 'assistant' (default)
+            const role = sender.toLowerCase() === 'user' ? 'user' :
+                sender.toLowerCase() === 'system' ? 'system' : 'assistant';
+
+            // Add the new message to the chat history array
+            // This history is used when making new API requests
+            messageHistory.push({
+                role: role,
+                content: content
+            });
+
+            // Create a new div element for the message
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender.toLowerCase()}-message`;
-            const renderedContent = sender === 'Bot' ? md.render(content) : md.render(md.utils.escapeHtml(content));
-            messageDiv.innerHTML = renderedContent;
+            // Apply appropriate CSS classes for styling based on the sender
+            messageDiv.className = `message ${role}-message`;
+
+            // Convert message content to HTML:
+            // - User messages: escape HTML first to prevent XSS attacks
+            // - Other messages: render markdown directly (trusted content)
+            const mainContent = md.render(sender === 'User' ? md.utils.escapeHtml(content) : content);
+            
+            // For assistant messages only, add collapsible context/sources section
+            const contextSection = role === 'assistant' ? createContextSection(context) : '';
+            
+            // Combine main message and context into the message div
+            messageDiv.innerHTML = mainContent + contextSection;
+
+            // Add the message to the chat container and scroll to bottom
             chatContainer.appendChild(messageDiv);
             window.scrollTo(0, document.body.scrollHeight);
 
-            // Re-run Mermaid rendering
+            // Re-initialize any Mermaid diagrams in the new message
             mermaid.init(undefined, document.querySelectorAll('.mermaid'));
         }
 
+        // Define a global function that toggles the visibility of context sections
+        // This needs to be on the window object since it's called from inline HTML onclick handlers
+        window.toggleContext = function(toggleElement) {
+            // Get the content div that follows the toggle button
+            const contextContent = toggleElement.nextElementSibling;
+            
+            // Check if content is currently hidden
+            // Content is hidden if display is 'none' or if no display style is set
+            const isHidden = contextContent.style.display === 'none' || !contextContent.style.display;
+            
+            // Toggle visibility by setting display to either 'block' or 'none'
+            contextContent.style.display = isHidden ? 'block' : 'none';
+            
+            // Update the toggle button text and arrow direction (▲/▼)
+            // to indicate current state
+            toggleElement.textContent = isHidden ? 'Hide Context ▲' : 'Show Context ▼';
+        };
+
+        // Handles sending user queries to the backend and displaying responses
         async function sendQuery() {
+            // Get the user's input and remove whitespace
             const queryText = queryInput.value.trim();
             if (!queryText) return;
 
+            // Construct the request object with chat history and new message
+            const queryObject = {
+                messages: [
+                    ...messageHistory,  // Include all previous messages (TODO: prune)
+                    {
+                        role: "user",
+                        content: queryText
+                    }
+                ]
+            };
+
+            // Display user's message in the chat UI
             appendMessage('User', queryText);
+            // Clear input field and resize it
             queryInput.value = '';
             resizeTextarea();
 
-            const queryObject = {
-                messages: [{
-                    role: "user",
-                    content: queryText
-                }],
-                source: null
-            };
-
             try {
+                // Send POST request to local API endpoint
                 const response = await fetch('http://localhost:5766/ask', {
                     method: 'POST',
                     headers: {
@@ -125,40 +269,48 @@
                     body: JSON.stringify(queryObject),
                 });
 
+                // Check if request was successful
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
 
+                // Display AI response if valid, otherwise show error
                 if (data.message && data.message.content) {
-                    appendMessage('Bot', data.message.content);
+                    // Append AI response with any context/sources used
+                    appendMessage('assistant', data.message.content, data.context);
                 } else {
-                    appendMessage('System', 'Received an empty or invalid response from the server.');
+                    appendMessage('system', 'Received an empty or invalid response from the server.');
                 }
 
-                if (data.done) {
-                    console.log('Final data:', data);
-                    // You can handle any final data processing here
-                }
             } catch (error) {
+                // Log error and display user-friendly message
                 console.error('Error:', error);
-                appendMessage('System', 'An error occurred while fetching the response.');
+                appendMessage('system', 'An error occurred while fetching the response.');
             }
         }
 
+        // Dynamically adjusts the height of the textarea based on its content
         function resizeTextarea() {
+            // Reset height to auto to get the correct scrollHeight
             queryInput.style.height = 'auto';
+            // Set the height to match the content (scrollHeight)
             queryInput.style.height = (queryInput.scrollHeight) + 'px';
         }
 
+        // Call resizeTextarea whenever user types or modifies the input
         queryInput.addEventListener('input', resizeTextarea);
 
+        // Handle keyboard events for the textarea
         queryInput.addEventListener('keydown', (e) => {
+            // Enter without Shift: Send the message
             if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
+                e.preventDefault();  // Prevent default newline
                 sendQuery();
-            } else if (e.key === 'Enter' && e.shiftKey) {
+            } 
+            // Enter with Shift: Allow multiline input
+            else if (e.key === 'Enter' && e.shiftKey) {
                 resizeTextarea();
             }
         });
