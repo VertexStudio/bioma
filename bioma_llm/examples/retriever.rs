@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Indexing");
     let index_globs = IndexGlobs::builder().globs(globs).build();
     let _indexer = relay_ctx
-        .send::<Indexer, IndexGlobs>(
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
             index_globs,
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
