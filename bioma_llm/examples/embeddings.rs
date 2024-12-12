@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut embeddings_ctx, mut embeddings_actor) =
         Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
 
-    let embeddings_handle = tokio::spawn(async move {
+    let _embeddings_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
         }
@@ -74,8 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for similarity in similarities {
         info!("Similarity: {:?}   {}", similarity.text, similarity.similarity);
     }
-
-    embeddings_handle.abort();
 
     // Export the database for debugging
     dbg_export_db!(engine);
