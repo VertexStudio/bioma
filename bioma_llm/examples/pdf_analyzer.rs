@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut pdf_analyzer_ctx, mut pdf_analyzer_actor) =
         Actor::spawn(engine.clone(), pdf_analyzer_id.clone(), PdfAnalyzer::default(), SpawnOptions::default()).await?;
 
-    let pdf_analyzer_handle = tokio::spawn(async move {
+    let _pdf_analyzer_handle = tokio::spawn(async move {
         if let Err(e) = pdf_analyzer_actor.start(&mut pdf_analyzer_ctx).await {
             error!("PDF analyzer actor error: {}", e);
         }
@@ -55,8 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     info!("Analyzed PDF content:\n{}", pdf_content);
-
-    pdf_analyzer_handle.abort();
 
     // Export the database for debugging
     dbg_export_db!(engine);

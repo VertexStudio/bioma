@@ -23,7 +23,7 @@ impl Actor for MainActor {
         info!("{} Starting conversation with LLM", ctx.id());
 
         // Start the chat actor
-        let ask_handle = tokio::spawn(async move {
+        let _ask_handle = tokio::spawn(async move {
             if let Err(e) = ask_actor.start(&mut ask_ctx).await {
                 error!("LLM actor error: {}", e);
             }
@@ -58,8 +58,6 @@ impl Actor for MainActor {
                 error!("{} No response received from LLM", ctx.id());
             }
         }
-
-        ask_handle.abort();
 
         info!("{} Conversation ended", ctx.id());
         Ok(())
