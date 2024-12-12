@@ -96,7 +96,9 @@ async fn get_next_variation(
     ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
 ) -> TestVariation {
     // If the current enpoint is the first in the list AND it is the time to execute it, change the variation, otherwise, return current variation
-    if ordering_state.endpoint_order[0].eq(&endpoint_type) && should_execute(&endpoint_type, ordering_state).await {
+    if ordering_state.endpoint_order.is_empty()
+        || (ordering_state.endpoint_order[0].eq(&endpoint_type) && should_execute(&endpoint_type, ordering_state).await)
+    {
         // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
         variation_state.set_new_random_file_name().await;
 
@@ -147,6 +149,10 @@ async fn should_execute(
     endpoint_type: &TestType,
     ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
 ) -> bool {
+    if ordering_state.endpoint_order.is_empty() {
+        return true;
+    }
+
     info!(
         "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
         ordering_state.current_index, ordering_state.endpoint_order[ordering_state.current_index], endpoint_type
@@ -186,9 +192,15 @@ async fn make_request<T: serde::Serialize>(
     let mut goose = user.request(goose_request).await?;
 
     // Update ordering_state after request is complete
-    let old_index = ordering_state.current_index;
-    ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
-    info!("Order Update - Index: {} -> {}, Completed: {:?}", old_index, ordering_state.current_index, endpoint_type);
+    if !ordering_state.endpoint_order.is_empty() {
+        let old_index = ordering_state.current_index;
+        ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
+
+        info!(
+            "Order Update - Index: {} -> {}, Completed: {:?}",
+            old_index, ordering_state.current_index, endpoint_type
+        );
+    }
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
@@ -320,9 +332,11 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     // Update state after request is complete
 
-    let old_index = ordering_state.current_index;
-    ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
-    info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, ordering_state.current_index);
+    if !ordering_state.endpoint_order.is_empty() {
+        let old_index = ordering_state.current_index;
+        ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
+        info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, ordering_state.current_index);
+    }
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
