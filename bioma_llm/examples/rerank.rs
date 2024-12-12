@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn and start the rerank actor
     let (mut rerank_ctx, mut rerank_actor) =
         Actor::spawn(engine.clone(), rerank_id.clone(), Rerank::default(), SpawnOptions::default()).await?;
-    let rerank_handle = tokio::spawn(async move {
+    let _rerank_handle = tokio::spawn(async move {
         if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
             error!("Rerank actor error: {}", e);
         }
@@ -87,8 +87,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for ranked_text in sorted_texts.texts {
         println!("{:>2}: {:>6.2} {}", ranked_text.index, ranked_text.score, &texts[ranked_text.index]);
     }
-
-    rerank_handle.abort();
 
     // Export the database for debugging
     dbg_export_db!(engine);
