@@ -1619,24 +1619,23 @@ mod tests {
             info!("{} Says hi!", ctx.id());
             let pong_id = self.pong_id.clone();
             let mut attempts = 0;
+
             loop {
                 info!("{} Ping", ctx.id());
                 attempts += 1;
-                let mut pong_stream = ctx.send::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
 
-                // Collect response from stream
-                if let Some(pong) = pong_stream.next().await {
-                    let pong = pong?;
-                    info!("{} Pong {}", ctx.id(), pong.times);
-                    if pong.times == 0 {
-                        break;
-                    }
+                let pong = ctx.send_and_wait_reply::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
+                info!("{} Pong {}", ctx.id(), pong.times);
+
+                if pong.times == 0 {
+                    break;
                 }
 
                 if attempts >= self.max_attempts {
                     return Err(PingActorError::PingFailed(attempts));
                 }
             }
+
             info!("{} Says bye!", ctx.id());
             Ok(())
         }
@@ -1670,11 +1669,12 @@ mod tests {
     impl Message<Ping> for PongActor {
         type Response = Pong;
 
-        async fn handle(&mut self, _ctx: &mut ActorContext<Self>, _message: &Ping) -> Result<(), Self::Error> {
+        async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &Ping) -> Result<(), Self::Error> {
             if self.times == 0 {
                 Err(PongActorError::PongLimitReached)
             } else {
                 self.times -= 1;
+                ctx.reply(Pong { times: self.times }).await?;
                 Ok(())
             }
         }
