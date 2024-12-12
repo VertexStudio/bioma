@@ -95,21 +95,16 @@ async fn get_next_variation(
     variations: usize,
     ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
 ) -> TestVariation {
-    // Lock guard on tracking variables
-
-    dbg!(&ordering_state.endpoint_order[0], &endpoint_type, ordering_state.endpoint_order[0].eq(&endpoint_type));
-
+    // If the current enpoint is the first in the list AND it is the time to execute it, change the variation, otherwise, return current variation
     if ordering_state.endpoint_order[0].eq(&endpoint_type) && should_execute(&endpoint_type, ordering_state).await {
         // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
         variation_state.set_new_random_file_name().await;
 
-        // This ensures that the index is always within 0 and (variations - 1)
+        // This ensures that the index is always within 0 and (variations - 1), ensuring
         variation_state.index = (variation_state.index + 1) % variations;
 
-        println!("Changed variation to: {}", variation_state.index);
         variation_state.clone()
     } else {
-        println!("Same variation: {}", variation_state.index);
         variation_state.clone()
     }
 }
@@ -147,7 +142,11 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     GooseAttack::initialize_with_config(config)
 }
 
-async fn should_execute(endpoint_type: &TestType, ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>) -> bool {
+/// Check if the endpoint_type should execute, according to the ordering state
+async fn should_execute(
+    endpoint_type: &TestType,
+    ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
+) -> bool {
     info!(
         "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
         ordering_state.current_index, ordering_state.endpoint_order[ordering_state.current_index], endpoint_type
@@ -155,7 +154,7 @@ async fn should_execute(endpoint_type: &TestType, ordering_state: &mut tokio::sy
     endpoint_type == &ordering_state.endpoint_order[ordering_state.current_index]
 }
 
-// Modify make_request to use global state
+/// Modify make_request to use global state
 async fn make_request<T: serde::Serialize>(
     user: &mut GooseUser,
     method: GooseMethod,
@@ -165,9 +164,6 @@ async fn make_request<T: serde::Serialize>(
     payload: Option<T>,
     ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
 ) -> TransactionResult {
-    // Check ordering using global state but don't update yet
-    // let mut state = ORDERING_STATE.lock().await;
-
     let should_execute = should_execute(&endpoint_type, ordering_state).await;
 
     if !should_execute {
