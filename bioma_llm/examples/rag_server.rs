@@ -645,26 +645,14 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
     let rank_texts = RankTexts { query: body.query.clone(), texts: body.texts.clone() };
 
     match user_actor
-        .send::<Rerank, RankTexts>(
+        .send_and_wait_reply::<Rerank, RankTexts>(
             rank_texts,
             &data.rerank,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
         .await
     {
-        Ok(mut stream) => {
-            if let Some(result) = stream.next().await {
-                match result {
-                    Ok(ranked_texts) => HttpResponse::Ok().json(ranked_texts),
-                    Err(e) => {
-                        error!("Rerank error in stream: {}", e);
-                        HttpResponse::InternalServerError().body(e.to_string())
-                    }
-                }
-            } else {
-                HttpResponse::InternalServerError().body("No response received from rerank actor")
-            }
-        }
+        Ok(ranked_texts) => HttpResponse::Ok().json(ranked_texts),
         Err(e) => {
             error!("Rerank error: {}", e);
             HttpResponse::InternalServerError().body(e.to_string())
