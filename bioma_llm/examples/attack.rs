@@ -276,14 +276,12 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     let variation = get_next_variation(TestType::Upload, &mut variation_state, variations, &mut ordering_state).await;
 
-    let mut state = ORDERING_STATE.lock().await;
-
     let should_execute = {
         info!(
             "Upload Order Check - Current Index: {}, Expected: {:?}, Actual: Upload",
-            state.current_index, state.endpoint_order[state.current_index]
+            ordering_state.current_index, ordering_state.endpoint_order[ordering_state.current_index]
         );
-        TestType::Upload == state.endpoint_order[state.current_index]
+        TestType::Upload == ordering_state.endpoint_order[ordering_state.current_index]
     };
 
     if !should_execute {
@@ -332,9 +330,9 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     // Update state after request is complete
 
-    let old_index = state.current_index;
-    state.current_index = (state.current_index + 1) % state.endpoint_order.len();
-    info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, state.current_index);
+    let old_index = ordering_state.current_index;
+    ordering_state.current_index = (ordering_state.current_index + 1) % ordering_state.endpoint_order.len();
+    info!("Upload Order Update - Index: {} -> {}, Completed: Upload", old_index, ordering_state.current_index);
 
     if let Ok(response) = goose.response {
         if !response.status().is_success() {
