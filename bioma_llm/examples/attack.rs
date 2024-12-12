@@ -95,14 +95,16 @@ async fn get_next_variation(
     variations: usize,
     ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>,
 ) -> TestVariation {
-    // If the current enpoint is the first in the list AND it is the time to execute it, change the variation, otherwise, return current variation
+    // If the array is empty (no --order flag), always get a new variation, if is not empty, will check for the following:
+    // If the current endpoint is the first in the list AND it is the time to execute it, change the variation,
+    // otherwise, return current variation
     if ordering_state.endpoint_order.is_empty()
         || (ordering_state.endpoint_order[0].eq(&endpoint_type) && should_execute(&endpoint_type, ordering_state).await)
     {
         // Get the current variation for the endpoint type or create a new one if it does not exist and set a new random file name for the variation
         variation_state.set_new_random_file_name().await;
 
-        // This ensures that the index is always within 0 and (variations - 1), ensuring
+        // This ensures that the index is always within 0 and (variations - 1), ensuring the exact variations
         variation_state.index = (variation_state.index + 1) % variations;
 
         variation_state.clone()
