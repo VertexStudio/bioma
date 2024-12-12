@@ -33,7 +33,7 @@ async fn test_engine_db_write() -> Result<(), SystemActorError> {
         msg: Value::Null,
     };
 
-    let record: Option<Record> = db.create("test_engine_db_write").content(msg).await?;
+    let record: Option<Record> = db.lock().await.create("test_engine_db_write").content(msg).await?;
 
     assert_eq!(record.unwrap().id, RecordId::from_table_key("test_engine_db_write", "0000001"));
 

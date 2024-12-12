@@ -709,7 +709,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
         async move {
             // Check if the actor already exists
             let actor_record: Option<ActorRecord> =
-                engine.db().select(&id.record_id()).await.map_err(SystemActorError::from)?;
+                engine.db().lock().await.select(&id.record_id()).await.map_err(SystemActorError::from)?;
 
             if let Some(actor_record) = actor_record {
                 // Actor exists, apply options
@@ -717,7 +717,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     SpawnExistsOptions::Reset => {
                         // Reset the actor by deleting its record
                         let _: Option<ActorRecord> =
-                            engine.db().delete(&id.record_id()).await.map_err(SystemActorError::from)?;
+                            engine.db().lock().await.delete(&id.record_id()).await.map_err(SystemActorError::from)?;
                         // We'll create a new record below
                     }
                     SpawnExistsOptions::Error => {
@@ -741,8 +741,14 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
 
             // Create or update actor record in the database
             let content = ActorRecord { id: id.record_id(), tag: id.tag.clone(), state: actor_state };
-            let _record: Option<Record> =
-                engine.db().create(DB_TABLE_ACTOR).content(content).await.map_err(SystemActorError::from)?;
+            let _record: Option<Record> = engine
+                .db()
+                .lock()
+                .await
+                .create(DB_TABLE_ACTOR)
+                .content(content)
+                .await
+                .map_err(SystemActorError::from)?;
 
             // Create and return the actor context
             let ctx = ActorContext::new(engine.clone(), id.clone());
@@ -796,8 +802,15 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             // Update actor record in the database
             let content = ActorRecord { id: record_id.clone(), tag: ctx.id().tag.clone(), state: actor_state };
 
-            let _record: Option<Record> =
-                ctx.engine().db().update(&record_id).content(content).await.map_err(SystemActorError::from)?;
+            let _record: Option<Record> = ctx
+                .engine()
+                .db()
+                .lock()
+                .await
+                .update(&record_id)
+                .content(content)
+                .await
+                .map_err(SystemActorError::from)?;
 
             Ok(())
         }
@@ -844,7 +857,7 @@ impl<T: Actor> ActorContext<T> {
 
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
         let query = include_str!("../sql/unreplied_messages.surql");
-        let mut res = self.engine().db().query(query).bind(("rx", self.id.record_id())).await?;
+        let mut res = self.engine().db().lock().await.query(query).bind(("rx", self.id.record_id())).await?;
         let existing_messages: Vec<FrameMessage> = res.take(0)?;
         trace!("unreplied_messages: {:?}", existing_messages);
         Ok(existing_messages)
@@ -864,7 +877,7 @@ impl<T: Actor> ActorContext<T> {
     pub async fn health(&self) -> bool {
         // Check if the actor is still in the database
         let record: Result<Option<ActorRecord>, SystemActorError> =
-            self.engine().db().select(&self.id.record_id()).await.map_err(SystemActorError::from);
+            self.engine().db().lock().await.select(&self.id.record_id()).await.map_err(SystemActorError::from);
         if let Ok(Some(_)) = record {
             true
         } else {
@@ -875,7 +888,7 @@ impl<T: Actor> ActorContext<T> {
     /// Kill the actor
     pub async fn kill(&self) -> Result<(), SystemActorError> {
         let _: Option<ActorRecord> =
-            self.engine().db().delete(&self.id.record_id()).await.map_err(SystemActorError::from)?;
+            self.engine().db().lock().await.delete(&self.id.record_id()).await.map_err(SystemActorError::from)?;
         Ok(())
     }
 
@@ -899,7 +912,7 @@ impl<T: Actor> ActorContext<T> {
     pub async fn recv(&self) -> Result<MessageStream, SystemActorError> {
         let query = format!("LIVE SELECT * FROM {} WHERE rx = {}", DB_TABLE_MESSAGE, self.id().record_id());
         debug!("[{}] msg-live {}", &self.id().record_id(), &query);
-        let mut res = self.engine().db().query(&query).await?;
+        let mut res = self.engine().db().lock().await.query(&query).await?;
         let live_query = res.stream::<Notification<FrameMessage>>(0)?;
         let self_id = self.id().clone();
         let live_query = live_query
@@ -992,6 +1005,8 @@ impl<T: Actor> ActorContext<T> {
                 // Insert reply chunk into database
                 // This query likely creates a new reply record and links it to original message
                 let result = db
+                    .lock()
+                    .await
                     .query(reply_query)
                     .bind(("reply_id", reply_id))
                     .bind(("reply", reply))
@@ -1026,6 +1041,8 @@ impl<T: Actor> ActorContext<T> {
             // Insert final reply into database
             // Uses same query template but marks this as final reply
             if let Err(e) = db
+                .lock()
+                .await
                 .query(reply_query)
                 .bind(("reply_id", reply_id))
                 .bind(("reply", reply))
@@ -1080,7 +1097,7 @@ impl<T: Actor> ActorContext<T> {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(0)).await;
             let msg_id: Result<Option<Record>, surrealdb::Error> =
-                db.create(DB_TABLE_MESSAGE).content(task_request).await;
+                db.lock().await.create(DB_TABLE_MESSAGE).content(task_request).await;
             if let Ok(Some(msg_id)) = msg_id {
                 let id = msg_id.id.clone();
                 if task_request_id != id {
@@ -1487,7 +1504,7 @@ impl<T: Actor> ActorContext<T> {
             format!("LIVE SELECT id.{{id, chunk}}, * FROM {} WHERE id.id = '{}'", DB_TABLE_REPLY, reply_id.key());
         debug!("[{}] reply-live {}", self.id().record_id(), query);
 
-        let mut res = self.engine().db().query(&query).await?;
+        let mut res = self.engine().db().lock().await.query(&query).await?;
         let notification_stream = res.stream::<Notification<FrameReply>>(0)?;
         let self_id = self.id().clone();
 
