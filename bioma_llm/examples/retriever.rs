@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut indexer_ctx, mut indexer_actor) =
         Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
 
-    let indexer_handle = tokio::spawn(async move {
+    let _indexer_handle = tokio::spawn(async move {
         if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
             error!("Indexer actor error: {}", e);
         }
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut retriever_ctx, mut retriever_actor) =
         Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
 
-    let retriever_handle = tokio::spawn(async move {
+    let _retriever_handle = tokio::spawn(async move {
         if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
             error!("Retriever actor error: {}", e);
         }
@@ -112,9 +112,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Save context to file for debugging
     let context_content = context.to_markdown();
     tokio::fs::write(output_dir.join("debug").join("retriever_context.md"), context_content).await?;
-
-    indexer_handle.abort();
-    retriever_handle.abort();
 
     // Export the database for debugging
     dbg_export_db!(engine);
