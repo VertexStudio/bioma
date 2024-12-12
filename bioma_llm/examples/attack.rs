@@ -147,12 +147,12 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     GooseAttack::initialize_with_config(config)
 }
 
-async fn should_execute(endpoint_type: &TestType, state: &mut tokio::sync::MutexGuard<'_, OrderingState>) -> bool {
+async fn should_execute(endpoint_type: &TestType, ordering_state: &mut tokio::sync::MutexGuard<'_, OrderingState>) -> bool {
     info!(
         "Order Check - Current Index: {}, Expected: {:?}, Actual: {:?}",
-        state.current_index, state.endpoint_order[state.current_index], endpoint_type
+        ordering_state.current_index, ordering_state.endpoint_order[ordering_state.current_index], endpoint_type
     );
-    endpoint_type == &state.endpoint_order[state.current_index]
+    endpoint_type == &ordering_state.endpoint_order[ordering_state.current_index]
 }
 
 // Modify make_request to use global state
@@ -276,13 +276,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 
     let variation = get_next_variation(TestType::Upload, &mut variation_state, variations, &mut ordering_state).await;
 
-    let should_execute = {
-        info!(
-            "Upload Order Check - Current Index: {}, Expected: {:?}, Actual: Upload",
-            ordering_state.current_index, ordering_state.endpoint_order[ordering_state.current_index]
-        );
-        TestType::Upload == ordering_state.endpoint_order[ordering_state.current_index]
-    };
+    let should_execute = should_execute(&TestType::Upload, &mut ordering_state).await;
 
     if !should_execute {
         info!("Skipping Upload - out of order");
