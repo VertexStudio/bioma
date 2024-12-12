@@ -76,67 +76,86 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     // Initialize the actor system
-    let engine_options = EngineOptions::builder().endpoint("ws://localhost:9123".into()).build();
-    let engine = Engine::connect(engine_options).await?;
+    let engine = Engine::test().await?;
 
-    // Create echo ID
-    let echo_id = ActorId::of::<Echo>("/echo");
+    // Setup the main actor
+    let (mut main_actor_ctx, mut main_actor) =
+        Actor::spawn(engine.clone(), ActorId::of::<MainActor>("/main"), MainActor, SpawnOptions::default()).await?;
 
-    // Create relay ID
-    let relay_id = ActorId::of::<Relay>("/relay");
+    // Start the main actor with a timeout
+    let main_timeout = std::time::Duration::from_secs(10);
+    let _result = tokio::time::timeout(main_timeout, main_actor.start(&mut main_actor_ctx))
+        .await
+        .map_err(|_| SystemActorError::TaskTimeout(main_timeout))?;
 
-    // Spawn the echo actor
-    let (mut echo_ctx, mut echo_actor) = Actor::spawn(
-        engine.clone(),
-        echo_id.clone(),
-        Echo { max_echoes: 3 },
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await?;
+    // Export the database for debugging
+    dbg_export_db!(engine);
 
-    // Spawn the relay actor
-    let (relay_ctx, _) = Actor::spawn(
-        engine.clone(),
-        relay_id.clone(),
-        Relay,
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await?;
+    Ok(())
+}
 
-    // Spawn the echo actor in a separate task
-    let echo_handle = tokio::spawn(async move {
-        if let Err(e) = echo_actor.start(&mut echo_ctx).await {
-            error!("Echo actor error: {}", e);
-        }
-    });
+#[derive(Debug, Serialize, Deserialize)]
+struct MainActor;
 
-    // Send test messages through the relay
-    let test_messages = vec!["Hello, Echo!", "How are you?", "Goodbye!"];
+impl Actor for MainActor {
+    type Error = SystemActorError;
 
-    for message in test_messages {
-        let echo_text = EchoText { text: message.to_string() };
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
 
-        // Send message through relay and wait for single reply
-        match relay_ctx.send_and_wait_reply::<Echo, EchoText>(echo_text, &echo_id, SendOptions::default()).await {
-            Ok(echoed) => {
-                info!("Received echo: {:?}", echoed);
-                // Break if no more echoes left
-                if echoed.echoes_left == 0 {
+        // Create actor IDs
+        let echo_id = ActorId::of::<Echo>("/echo");
+        let relay_id = ActorId::of::<Relay>("/relay");
+
+        // Spawn the echo actor
+        let (mut echo_ctx, mut echo_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            echo_id.clone(),
+            Echo { max_echoes: 3 },
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
+
+        // Spawn the relay actor
+        let (relay_ctx, _) =
+            Actor::spawn(ctx.engine().clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+        // Start the echo actor
+        let echo_handle = tokio::spawn(async move {
+            if let Err(e) = echo_actor.start(&mut echo_ctx).await {
+                error!("Echo actor error: {}", e);
+            }
+        });
+
+        // Send test messages through the relay
+        let test_messages = vec!["Hello, Echo!", "How are you?", "Goodbye!"];
+
+        for message in test_messages {
+            let echo_text = EchoText { text: message.to_string() };
+
+            // Send message through relay and wait for single reply
+            match relay_ctx.send_and_wait_reply::<Echo, EchoText>(echo_text, &echo_id, SendOptions::default()).await {
+                Ok(echoed) => {
+                    info!("Received echo: {:?}", echoed);
+                    // Break if no more echoes left
+                    if echoed.echoes_left == 0 {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!("Error sending message: {}", e);
                     break;
                 }
             }
-            Err(e) => {
-                error!("Error sending message: {}", e);
-                break;
-            }
+
+            // Add a small delay between messages
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
-        // Add a small delay between messages
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Abort the echo actor task
+        echo_handle.abort();
+
+        info!("{} Finished", ctx.id());
+        Ok(())
     }
-
-    // Wait for echo actor to finish
-    echo_handle.abort();
-
-    Ok(())
 }
