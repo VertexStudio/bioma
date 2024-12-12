@@ -270,11 +270,9 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
 
     get_next_variation(TestType::Chat, &mut variation_state, variations, &mut ordering_state).await;
 
-    let payload = ChatMessages {
-        messages: vec![ChatMessage::user("Hello, how are you?".to_string())],
-        restart: false,
-        persist: false,
-    };
+    let payload = json!({
+        "messages": [ChatMessage::user("Hello, how are you?".to_string())],
+    });
 
     make_request(user, GooseMethod::Post, "/api/chat", "Chat", TestType::Chat, Some(payload), &mut ordering_state).await
 }
@@ -415,7 +413,9 @@ pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
 
     get_next_variation(TestType::Ask, &mut variation_state, variations, &mut ordering_state).await;
 
-    let payload = json!({ "query": "What is ubuntu, surrealdb and rust? Please divide the answer in sections." });
+    let payload = json!({
+        "messages": [ChatMessage::user("What is ubuntu, surrealdb and rust? Please divide the answer in sections.".to_string())],
+    });
 
     make_request(user, GooseMethod::Post, "/ask", "RAG Ask", TestType::Ask, Some(payload), &mut ordering_state).await
 }

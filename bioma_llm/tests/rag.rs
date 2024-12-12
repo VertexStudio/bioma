@@ -167,7 +167,7 @@ pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
 }
 
 pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult {
-    let payload = DeleteSource { sources: vec!["uploads/test.txt".to_string()] };
+    let payload = DeleteSource { source: "uploads/test.txt".to_string() };
 
     let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
