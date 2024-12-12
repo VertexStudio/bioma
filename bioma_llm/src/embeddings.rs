@@ -186,6 +186,8 @@ impl Message<TopK> for Embeddings {
         let query_sql = include_str!("../sql/similarities.surql").replace("{top_k}", &message.k.to_string());
 
         let mut results = db
+            .lock()
+            .await
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("threshold", message.threshold))
@@ -232,6 +234,8 @@ impl Message<StoreEmbeddings> for Embeddings {
             };
 
             let mut results = db
+                .lock()
+                .await
                 .query(emb_query)
                 .bind(("embedding", embedding))
                 .bind(("metadata", metadata))
@@ -420,10 +424,12 @@ impl Embeddings {
 
                 // Execute the schema definition
                 let db = ctx.engine().db();
-                db.query(&schema_def).await.map_err(SystemActorError::from)?;
+                db.lock().await.query(&schema_def).await.map_err(SystemActorError::from)?;
 
                 // Store text model info in database if not already present
                 let model: Result<Option<Record>, _> = db
+                    .lock()
+                    .await
                     .create(("model", self.model.to_string()))
                     .content(text_model_info)
                     .await
@@ -434,6 +440,8 @@ impl Embeddings {
 
                 // Store image model info in database if not already present
                 let model: Result<Option<Record>, _> = db
+                    .lock()
+                    .await
                     .create(("model", self.image_model.to_string()))
                     .content(image_model_info)
                     .await
