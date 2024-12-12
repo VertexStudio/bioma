@@ -116,11 +116,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Abort all embeddings actors
-    for handle in embeddings_handles {
-        handle.abort();
-    }
-
     // Export the database for debugging
     dbg_export_db!(engine);
 

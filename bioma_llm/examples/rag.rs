@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut indexer_ctx, mut indexer_actor) =
         Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
 
-    let indexer_handle = tokio::spawn(async move {
+    let _indexer_handle = tokio::spawn(async move {
         if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
             error!("Indexer actor error: {}", e);
         }
@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut retriever_ctx, mut retriever_actor) =
         Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
 
-    let retriever_handle = tokio::spawn(async move {
+    let _retriever_handle = tokio::spawn(async move {
         if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
             error!("Retriever actor error: {}", e);
         }
@@ -45,15 +45,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create chat conversation
     let mut conversation = vec![];
 
-    let chat = Chat::builder().model("llama3.2".into()).messages_number_limit(10).history(conversation.clone()).build();
+    let ask = Ask::builder().model("llama3.2".into()).messages_number_limit(10).history(conversation.clone()).build();
 
-    let chat_id = ActorId::of::<Chat>("/chat");
-    let (mut chat_ctx, mut chat_actor) =
-        Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await?;
+    let ask_id = ActorId::of::<Ask>("/ask");
+    let (mut ask_ctx, mut ask_actor) =
+        Actor::spawn(engine.clone(), ask_id.clone(), ask, SpawnOptions::default()).await?;
 
-    let chat_handle = tokio::spawn(async move {
-        if let Err(e) = chat_actor.start(&mut chat_ctx).await {
-            error!("Chat actor error: {}", e);
+    let _ask_handle = tokio::spawn(async move {
+        if let Err(e) = ask_actor.start(&mut ask_ctx).await {
+            error!("Ask actor error: {}", e);
         }
     });
 
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .build();
     let _indexer = relay_ctx
-        .send::<Indexer, IndexGlobs>(
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
             index_globs,
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
@@ -119,28 +119,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     conversation.push(user_query);
 
     // Send the context to the chat actor
-    info!("Sending context to chat actor");
-    let chat_response = relay_ctx
-        .send_and_wait_reply::<Chat, ChatMessages>(
-            ChatMessages { messages: conversation.clone(), restart: false, persist: false },
-            &chat_id,
+    info!("Sending context to ask actor");
+    let ask_response = relay_ctx
+        .send_and_wait_reply::<Ask, AskMessages>(
+            AskMessages { messages: conversation.clone(), restart: false, persist: false },
+            &ask_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )
         .await?;
-    info!("Chat {} responded", &chat_response.model);
+    info!("Ask {} responded", &ask_response.model);
 
     // Save chat to file for debugging
-    let mut chat_content = String::new();
+    let mut ask_content = String::new();
     for message in &conversation {
-        chat_content.push_str(&format!("{:?}: {}\n\n", message.role, message.content));
+        ask_content.push_str(&format!("{:?}: {}\n\n", message.role, message.content));
     }
-    let response = chat_response.message.unwrap();
-    chat_content.push_str(&format!("{:?}: {}\n\n", &response.role, &response.content));
-    tokio::fs::write(output_dir.join("debug").join("rag_chat.md"), chat_content).await?;
-
-    indexer_handle.abort();
-    retriever_handle.abort();
-    chat_handle.abort();
+    let response = ask_response.message.unwrap();
+    ask_content.push_str(&format!("{:?}: {}\n\n", &response.role, &response.content));
+    tokio::fs::write(output_dir.join("debug").join("rag_ask.md"), ask_content).await?;
 
     // Export the database for debugging
     dbg_export_db!(engine);
