@@ -82,7 +82,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create echo ID
     let echo_id = ActorId::of::<Echo>("/echo");
 
-    // Wait for the echo actor to finish
+    // Create relay ID
+    let relay_id = ActorId::of::<Relay>("/relay");
+
+    // Spawn the echo actor
     let (mut echo_ctx, mut echo_actor) = Actor::spawn(
         engine.clone(),
         echo_id.clone(),
@@ -90,7 +93,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
-    echo_actor.start(&mut echo_ctx).await?;
+
+    // Spawn the relay actor
+    let (relay_ctx, _) = Actor::spawn(
+        engine.clone(),
+        relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    // Spawn the echo actor in a separate task
+    let echo_handle = tokio::spawn(async move {
+        if let Err(e) = echo_actor.start(&mut echo_ctx).await {
+            error!("Echo actor error: {}", e);
+        }
+    });
+
+    // Send test messages through the relay
+    let test_messages = vec!["Hello, Echo!", "How are you?", "Goodbye!"];
+
+    for message in test_messages {
+        let echo_text = EchoText { text: message.to_string() };
+
+        // Send message through relay and wait for single reply
+        match relay_ctx.send_and_wait_reply::<Echo, EchoText>(echo_text, &echo_id, SendOptions::default()).await {
+            Ok(echoed) => {
+                info!("Received echo: {:?}", echoed);
+                // Break if no more echoes left
+                if echoed.echoes_left == 0 {
+                    break;
+                }
+            }
+            Err(e) => {
+                error!("Error sending message: {}", e);
+                break;
+            }
+        }
+
+        // Add a small delay between messages
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    // Wait for echo actor to finish
+    echo_handle.abort();
 
     Ok(())
 }
