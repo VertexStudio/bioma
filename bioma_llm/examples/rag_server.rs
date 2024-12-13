@@ -410,14 +410,16 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     .await
                 {
                     Ok(mut stream) => {
+                        let mut is_first_message = true;
                         while let Some(response) = stream.next().await {
                             match response {
                                 Ok(chunk) => {
-                                    // Include full conversation context only in the final message
+                                    // Include context only in the first message
                                     let response = ChatResponse {
                                         response: chunk.clone(),
-                                        context: if chunk.done { conversation.clone() } else { vec![] },
+                                        context: if is_first_message { conversation.clone() } else { vec![] },
                                     };
+                                    is_first_message = false;
 
                                     if tx.send(Ok::<_, String>(web::Json(response))).await.is_err() {
                                         break;
