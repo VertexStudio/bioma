@@ -494,6 +494,7 @@ impl FromStr for WeightedEndpoint {
     }
 }
 
+/// Cli tool to run stress test to the RAG server.
 /// To see all the available endpoints for --endpoints, please visit the README at bioma_llm crate.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
