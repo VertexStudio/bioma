@@ -959,6 +959,7 @@ dependencies = [
  "lazy_static",
  "mdka",
  "ollama-rs",
+ "once_cell",
  "ort",
  "rand",
  "reqwest 0.12.9",
