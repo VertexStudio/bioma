@@ -359,8 +359,13 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let chat_request =
-                    ChatMessages { messages: conversation.clone(), restart: false, persist: true, stream: true };
+                let chat_request = ChatMessages {
+                    messages: conversation.clone(),
+                    restart: false,
+                    persist: true,
+                    stream: true,
+                    format: None,
+                };
 
                 match user_actor
                     .send::<Chat, ChatMessages>(
@@ -518,7 +523,13 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             info!("Sending context to chat actor");
             let ask_response = user_actor
                 .send_and_wait_reply::<Chat, ChatMessages>(
-                    ChatMessages { messages: conversation.clone(), restart: false, persist: false, stream: false },
+                    ChatMessages {
+                        messages: conversation.clone(),
+                        restart: false,
+                        persist: false,
+                        stream: false,
+                        format: None,
+                    },
                     &data.chat,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                 )

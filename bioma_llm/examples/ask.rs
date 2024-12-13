@@ -45,7 +45,13 @@ impl Actor for MainActor {
             let chat_message = ChatMessage::user(starter.to_string());
             let response: ChatMessageResponse = ctx
                 .send_and_wait_reply::<Chat, ChatMessages>(
-                    ChatMessages { messages: vec![chat_message], restart: false, persist: false, stream: false },
+                    ChatMessages {
+                        messages: vec![chat_message],
+                        restart: false,
+                        persist: false,
+                        stream: false,
+                        format: None,
+                    },
                     &ask_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )
