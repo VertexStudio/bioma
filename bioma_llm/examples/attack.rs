@@ -494,10 +494,11 @@ impl FromStr for WeightedEndpoint {
     }
 }
 
+/// To see all the available endpoints for --endpoints, please visit the README at bioma_llm crate.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Endpoints to run with optional weights (endpoint:weight,endpoint:weight)
+    /// Endpoints to run with optional weights (endpoint:weight,endpoint:weight).
     #[arg(value_delimiter = ',', short, long, default_value = "all")]
     endpoints: Vec<WeightedEndpoint>,
 
