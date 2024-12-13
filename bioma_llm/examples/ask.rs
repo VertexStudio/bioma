@@ -9,12 +9,12 @@ struct MainActor {
 }
 
 impl Actor for MainActor {
-    type Error = AskError;
+    type Error = ChatError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
-        let ask_id = ActorId::of::<Ask>("/llm");
+        let ask_id = ActorId::of::<Chat>("/llm");
 
-        let ask = Ask::builder().model("llama3.2".into()).build();
+        let ask = Chat::builder().model("llama3.2".into()).build();
 
         // Spawn the chat actor
         let (mut ask_ctx, mut ask_actor) =
@@ -44,8 +44,8 @@ impl Actor for MainActor {
             info!("{} Sending message: {}", ctx.id(), starter);
             let chat_message = ChatMessage::user(starter.to_string());
             let response: ChatMessageResponse = ctx
-                .send_and_wait_reply::<Ask, AskMessages>(
-                    AskMessages { messages: vec![chat_message], restart: false, persist: false },
+                .send_and_wait_reply::<Chat, ChatMessages>(
+                    ChatMessages { messages: vec![chat_message], restart: false, persist: false, stream: false },
                     &ask_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )

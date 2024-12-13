@@ -36,7 +36,6 @@ struct AppState {
     embeddings: ActorId,
     rerank: ActorId,
     chat: ActorId,
-    ask: ActorId,
 }
 
 impl AppState {
@@ -360,7 +359,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: true };
+                let chat_request =
+                    ChatMessages { messages: conversation.clone(), restart: false, persist: true, stream: true };
 
                 match user_actor
                     .send::<Chat, ChatMessages>(
@@ -517,9 +517,9 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
             info!("Sending context to chat actor");
             let ask_response = user_actor
-                .send_and_wait_reply::<Ask, AskMessages>(
-                    AskMessages { messages: conversation.clone(), restart: false, persist: false },
-                    &data.ask,
+                .send_and_wait_reply::<Chat, ChatMessages>(
+                    ChatMessages { messages: conversation.clone(), restart: false, persist: false, stream: false },
+                    &data.chat,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                 )
                 .await;
@@ -755,22 +755,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(chat_handle);
 
-    let ask_id = ActorId::of::<Ask>("/rag/ask");
-    let (mut ask_ctx, mut ask_actor) = Actor::spawn(
-        engine.clone(),
-        ask_id.clone(),
-        Ask::default(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await?;
-
-    let ask_handle = tokio::spawn(async move {
-        if let Err(e) = ask_actor.start(&mut ask_ctx).await {
-            error!("Ask actor error: {}", e);
-        }
-    });
-    actor_handles.push(ask_handle);
-
     // Create app state
     let data = web::Data::new(AppState {
         engine: engine.clone(),
@@ -779,7 +763,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         embeddings: embeddings_id,
         rerank: rerank_id,
         chat: chat_id,
-        ask: ask_id,
     });
 
     // Create and run server
