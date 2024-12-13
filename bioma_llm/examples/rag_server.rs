@@ -636,38 +636,82 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    if body.model != "nomic-embed-text" {
-        return HttpResponse::BadRequest().body("Invalid model");
+    // Validate model
+    match body.model.as_str() {
+        "nomic-embed-text" | "nomic-embed-vision" => (),
+        _ => return HttpResponse::BadRequest().body("Invalid model"),
     }
 
-    // Check if input is a string or a list of strings
-    let texts = match body.input.as_str() {
-        Some(s) => vec![s.to_string()],
-        None => body.input.as_array().unwrap().iter().map(|s| s.to_string()).collect(),
+    // Process input based on model type
+    let embedding_content = match body.model.as_str() {
+        "nomic-embed-text" => {
+            // Handle text embeddings
+            let texts = match body.input.as_str() {
+                Some(s) => vec![s.to_string()],
+                None => match body.input.as_array() {
+                    Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+                    None => return HttpResponse::BadRequest().body("Input must be string or array of strings"),
+                },
+            };
+            EmbeddingContent::Text(texts)
+        }
+        "nomic-embed-vision" => {
+            // Handle base64 image embeddings
+            let base64_images = match body.input.as_str() {
+                Some(s) => vec![s.to_string()],
+                None => match body.input.as_array() {
+                    Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+                    None => return HttpResponse::BadRequest().body("Input must be string or array of strings"),
+                },
+            };
+
+            // Validate base64 images
+            let images = base64_images.into_iter().map(|base64| ImageData::Base64(base64)).collect();
+
+            EmbeddingContent::Image(images)
+        }
+        _ => unreachable!(),
     };
 
-    let max_text_len = texts.iter().map(|text| text.len()).max().unwrap_or(0);
-    info!("Received embed query with {} texts (max. {} chars)", texts.len(), max_text_len);
-
-    const CHUNK_SIZE: usize = 10;
+    // Process embeddings - different handling for text vs images
     let mut all_embeddings = Vec::new();
 
-    // Process texts in chunks
-    for chunk in texts.chunks(CHUNK_SIZE) {
-        match user_actor
-            .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-                GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
-                &data.embeddings,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-            )
-            .await
-        {
-            Ok(chunk_response) => {
-                all_embeddings.extend(chunk_response.embeddings);
+    match &embedding_content {
+        EmbeddingContent::Text(texts) => {
+            // Process text in chunks
+            const CHUNK_SIZE: usize = 10;
+            for chunk in texts.chunks(CHUNK_SIZE) {
+                match user_actor
+                    .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
+                        GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
+                        &data.embeddings,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+                    )
+                    .await
+                {
+                    Ok(chunk_response) => all_embeddings.extend(chunk_response.embeddings),
+                    Err(e) => {
+                        error!("Error processing text chunk: {:?}", e);
+                        return HttpResponse::InternalServerError().body(e.to_string());
+                    }
+                }
             }
-            Err(e) => {
-                error!("Error processing chunk: {:?}", e);
-                return HttpResponse::InternalServerError().body(e.to_string());
+        }
+        EmbeddingContent::Image(_) => {
+            // Process all images in a single request
+            match user_actor
+                .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
+                    GenerateEmbeddings { content: embedding_content },
+                    &data.embeddings,
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                )
+                .await
+            {
+                Ok(response) => all_embeddings.extend(response.embeddings),
+                Err(e) => {
+                    error!("Error processing images: {:?}", e);
+                    return HttpResponse::InternalServerError().body(e.to_string());
+                }
             }
         }
     }
