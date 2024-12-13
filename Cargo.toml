@@ -46,5 +46,6 @@ glob = "0.3"
 walkdir = "2.4"
 zip = "2.2"
 futures-util = "0.3"
+tempfile = "3.14.0"
 
 bioma_derive = { path = "../bioma_derive" }
