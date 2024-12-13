@@ -1,51 +1,105 @@
-# Bioma LLM  
+# Bioma LLM - Stress Testing Guide
 
-## Running stress tests  
+This guide details how to use the `bioma_llm` stress testing tool to evaluate the performance of your RAG server under various load conditions.
 
-This test is intented to test the performance of the endpoints in the rag server under stress conditions. With one command you can decide which endpoints you want to test.  
+## Overview
+
+The stress testing tool simulates multiple users interacting with different endpoints of your RAG server. It allows you to:
+
+- Define which endpoints to test
+- Set the number of concurrent users
+- Control test duration
+- Specify endpoint execution order
+- Introduce variations in test data
+
+## Usage
+
+Basic command structure:
 
 ```bash
-cargo run -p bioma_llm --example attack -- --endpoints <endpoints_list> --order
-```  
+cargo run -p bioma_llm --example attack -- [OPTIONS]
+```
 
-```endpoints_list``` is a string with the endpoints you want to test separated by commas. The ```--order``` flag is optional and if you use it the endpoints will be tested in the order you passed them. For example:  
+### Options
+
+| Option               | Required | Description                                                                       | Example                                   | Default                 |
+| -------------------- | -------- | --------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------- |
+| `--endpoints`        | No       | Comma-separated list of endpoints to test with optional weights (endpoint:weight) | `--endpoints health:1,index:3,upload,ask` | `all`                   |
+| `--server`           | No       | RAG server URL                                                                    | `--server http://localhost:5766`          | `http://localhost:5766` |
+| `--users`            | No       | Number of concurrent users                                                        | `--users 20`                              | `10`                    |
+| `--time`             | No       | Test duration in seconds                                                          | `--time 70`                               | `60`                    |
+| `--log`              | No       | Request logs file path                                                            | `--log .output/requests.log`              | `.output/requests.log`  |
+| `--report`           | No       | HTML report file path                                                             | `--report .output/report.html`            | `.output/report.html`   |
+| `--metrics-interval` | No       | Metrics reporting interval (seconds)                                              | `--metrics-interval 4`                    | `0`                     |
+| `--order`            | No       | Execute endpoints in listed order                                                 | `--order`                                 | Random order            |
+| `--variations`       | No       | Number of test file variations                                                    | `--variations 16`                         | `5`                     |
+
+### Available Endpoints
+
+- `health`
+- `hello`
+- `index`
+- `chat`
+- `upload`
+- `delete`
+- `embed`
+- `ask`
+- `retrieve`
+- `rerank`
+- `all` (tests all endpoints)
+
+## Example Scenarios
+
+### Basic Test (All Endpoints)
+
+```bash
+cargo run -p bioma_llm --example attack
+```
+
+Tests all endpoints with 10 users for 60 seconds.
+
+### Ordered Test with Specific Endpoints
 
 ```bash
 cargo run -p bioma_llm --example attack -- --endpoints health,hello,upload --order
 ```
 
-will test, for every iteration, the health, hello and upload endpoints in this order.
+Tests specified endpoints in sequence.
 
-This is a more complete example:
+### Weighted Test
 
 ```bash
-cargo run -p bioma_llm --example attack -- --endpoints health,hello,upload,index,ask --users 20 --time 70 --order --variations 16
+cargo run -p bioma_llm --example attack -- --endpoints index:3,ask:1
 ```
 
-To see all the arguments you can use, and the corresponding descriptions, please see the table below:
+Tests index endpoint 3x more frequently than ask endpoint.
 
-| Argument           | Required | Description                                                              | Example                                   | Default               |
-|--------------------|----------|--------------------------------------------------------------------------|-------------------------------------------|-----------------------|
-| `endpoints`        | `False`    | Endpoints to run with optional weights (endpoint:weight,endpoint:weight) | `--endpoints health:1,index:3,upload,ask` | all                   |
-| `server`           | `False`    | RAG Server URL                                                           | `--server http://localhost:5766`          | http://localhost:5766 |
-| `users`            | `False`    | Number of users in goose                                                 | `--users 15`                              | 10                    |
-| `time`             | `False`    | Run time in seconds                                                      | `--time 5`                                | 60                    |
-| `log`              | `False`    | Request log file path                                                    | `--log /tmp/requests.log`                 | .output/requests.log  |
-| `report`           | `False`    | Report file path                                                         | `--report /tmp/report.html`               | .output/report.html   |
-| `metrics-interval` | `False`    | Metrics reporting interval in seconds                                    | `--metrics-interval 4`                    | 15                    |
-| `--order`          | `False`    | Run scenarios in sequential order                                        | `--order`                                 | -                     |
-| `variations`       | `False`    | Number of variations for the test files                                  | `--variations 10`                         | 1                     |
+### Extended Test with High Load
 
-Available endpoints:
+```bash
+cargo run -p bioma_llm --example attack -- --endpoints all --users 50 --time 120 --variations 50
+```
 
-- health
-- hello
-- index
-- chat
-- upload
-- deletesource
-- embed
-- ask
-- retrieve
-- rerank
-- all
+Simulates 50 users across all endpoints for 2 minutes using 50 different test files.
+
+## Test File Variations
+
+The `--variations` option introduces variability in test data for file-handling endpoints.
+
+Example:
+
+```bash
+cargo run -p bioma_llm --example attack -- --endpoints upload,index --variations 3
+```
+
+## Interpreting Results
+
+The stress testing results can be analyzed through two main outputs:
+
+1. HTML Report (`report.html`).
+
+2. Request Logs (`requests.log`).
+
+## Notes
+
+- Ensure RAG server is running at specified URL before testing
