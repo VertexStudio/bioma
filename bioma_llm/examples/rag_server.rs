@@ -340,7 +340,40 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         Ok(context) => {
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
-            let context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+            let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+
+            // Add image handling here
+            if let Some(ctx) = context
+                .context
+                .iter()
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+            {
+                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+                    match &metadata {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
+                            Ok(image_data) => {
+                                match tokio::task::spawn_blocking(move || {
+                                    base64::engine::general_purpose::STANDARD.encode(image_data)
+                                })
+                                .await
+                                {
+                                    Ok(base64_data) => {
+                                        context_message.images =
+                                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                    }
+                                    Err(e) => {
+                                        error!("Error encoding image: {:?}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error reading image file: {:?}", e);
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            }
 
             // Build the conversation by inserting the context message before the last user message
             let conversation = {
