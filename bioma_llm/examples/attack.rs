@@ -499,7 +499,7 @@ impl FromStr for WeightedEndpoint {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Endpoints to run with optional weights (endpoint:weight,endpoint:weight).
+    /// Endpoints to run with optional weights (endpoint:weight,endpoint:weight,endpoint).
     #[arg(value_delimiter = ',', short, long, default_value = "all")]
     endpoints: Vec<WeightedEndpoint>,
 
