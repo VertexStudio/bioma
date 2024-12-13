@@ -4,10 +4,13 @@ use ollama_rs::{
     generation::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse},
         options::GenerationOptions,
+        parameters::FormatType,
     },
     Ollama,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::borrow::Cow;
 use tracing::{error, info};
 use url::Url;
@@ -59,11 +62,31 @@ impl Default for Chat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Schema(Value);
+
+impl Schema {
+    pub fn new<T: JsonSchema>() -> Self {
+        let schema = schemars::schema_for!(T);
+        let format_json = Self::clean_schema(serde_json::to_value(&schema).unwrap());
+        Self(format_json)
+    }
+
+    fn clean_schema(mut schema_value: Value) -> Value {
+        if let Some(obj) = schema_value.as_object_mut() {
+            obj.remove("$schema");
+            obj.remove("title");
+        }
+        schema_value
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessages {
     pub messages: Vec<ChatMessage>,
     pub restart: bool,
     pub persist: bool,
     pub stream: bool,
+    pub format: Option<Schema>,
 }
 
 impl Message<ChatMessages> for Chat {
@@ -84,8 +107,15 @@ impl Message<ChatMessages> for Chat {
 
         // Prepare chat request
         let mut chat_message_request = ChatMessageRequest::new(self.model.to_string(), self.history.clone());
+
+        // Add generation options
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
+        }
+
+        // Add format
+        if let Some(format) = &request.format {
+            chat_message_request = chat_message_request.format(FormatType::Json(format.0.clone()));
         }
 
         if request.stream {

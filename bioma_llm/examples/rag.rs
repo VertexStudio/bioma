@@ -122,7 +122,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Sending context to ask actor");
     let ask_response = relay_ctx
         .send_and_wait_reply::<Chat, ChatMessages>(
-            ChatMessages { messages: conversation.clone(), restart: false, persist: false, stream: false },
+            ChatMessages {
+                messages: conversation.clone(),
+                restart: false,
+                persist: false,
+                stream: false,
+                format: None,
+            },
             &ask_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )
