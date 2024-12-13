@@ -71,13 +71,13 @@ impl TestType {
         vec![
             TestType::Health,
             TestType::Hello,
-            TestType::Index,
-            TestType::Chat,
             TestType::Upload,
+            TestType::Index,
+            TestType::Retrieve,
+            TestType::Ask,
+            TestType::Chat,
             TestType::Delete,
             TestType::Embed,
-            TestType::Ask,
-            TestType::Retrieve,
             TestType::Rerank,
         ]
     }
