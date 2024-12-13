@@ -396,8 +396,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             tokio::spawn(async move {
                 let chat_request = ChatMessages {
                     messages: conversation.clone(),
-                    restart: false,
-                    persist: true,
+                    restart: true,
+                    persist: false,
                     stream: true,
                     format: body.format.clone(),
                 };
@@ -564,7 +564,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 .send_and_wait_reply::<Chat, ChatMessages>(
                     ChatMessages {
                         messages: conversation.clone(),
-                        restart: false,
+                        restart: true,
                         persist: false,
                         stream: false,
                         format: body.format.clone(),
