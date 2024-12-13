@@ -338,6 +338,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     match context {
         Ok(context) => {
+            info!("Context fetched: {:#?}", context);
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
             let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
