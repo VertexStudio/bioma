@@ -483,7 +483,7 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
         .await
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct WeightedEndpoint {
     endpoint: TestType,
     weight: usize,
@@ -553,9 +553,17 @@ struct Args {
     variations: usize,
 }
 
+fn contains_endpoint(endpoints: &[WeightedEndpoint], target: TestType) -> bool {
+    endpoints.iter().any(|e| e.endpoint == target)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), GooseError> {
     let args = Args::parse();
+
+    if contains_endpoint(&args.endpoints, TestType::All) && args.endpoints.len() > 1 {
+        panic!("\"all\" endpoint should be used alone");
+    }
 
     // Set the variations count globally
     {
@@ -570,7 +578,8 @@ async fn main() -> Result<(), GooseError> {
 
     if args.order {
         // Initialize the global ordering state with the endpoint order
-        if args.endpoints[0].endpoint == TestType::All {
+
+        if args.endpoints.len() == 1 && args.endpoints[0].endpoint == TestType::All {
             ORDERING_STATE.lock().await.endpoint_order = TestType::all_order();
         } else {
             let endpoint_order: Vec<TestType> = args.endpoints.iter().map(|we| we.endpoint.clone()).collect();
