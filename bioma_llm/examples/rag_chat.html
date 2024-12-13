@@ -166,47 +166,27 @@
         function createContextSection(context) {
             if (!context?.length) return '';
 
+            let regularMessages = '';
             let systemMessage = '';
-            let contextMessages = '';
+            let lastUserMessage = '';
 
+            // First find the last user message
+            const lastUserIndex = [...context].reverse().findIndex(msg => msg.role === 'user');
+            const lastMessageIndex = lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+
+            // Process regular messages (non-system and not the last user message)
             context.forEach((msg, index) => {
-                console.log("Processing context message:", msg);
-                const roleClass = msg.role + '-message';
-
-                // Get images ready if they exist
-                const images = msg.images || [];
-                let imageIndex = 0;
-
-                if (msg.role === 'system') {
-                    // Split content by lines to insert images at the right position
-                    let contentLines = msg.content ? msg.content.split('\n') : [];
-                    let processedContent = '';
-                    
-                    contentLines.forEach(line => {
-                        const trimmedLine = line.trim();
-                        processedContent += md.render(trimmedLine);
-                        
-                        // If we find an [IMAGE:xxx] marker and we have an image, insert it
-                        if (trimmedLine.startsWith('[IMAGE:') && imageIndex < images.length) {
-                            const imageUrl = processBase64Image(images[imageIndex]);
-                            processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-                            imageIndex++;
-                        }
-                    });
-
-                    systemMessage += `
-                        <div class="message ${roleClass}">
-                            <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
-                            <div class="chunk">${processedContent}</div>
-                        </div>
-                    `;
-                } else {
+                if (msg.role !== 'system' && index !== lastMessageIndex) {
+                    const roleClass = msg.role + '-message';
                     let content = msg.content || '';
                     let source = '';
                     let uri = '';
                     let processedContent = '';
 
-                    // Parse content and insert images at the right positions
+                    // Process images and content
+                    const images = msg.images || [];
+                    let imageIndex = 0;
+
                     const lines = content.split('\n');
                     lines.forEach(line => {
                         const trimmedLine = line.trim();
@@ -225,8 +205,7 @@
                         }
                     });
 
-                    contextMessages += `
-                        ${index > 0 ? '<div class="source-separator"></div>' : ''}
+                    regularMessages += `
                         <div class="message ${roleClass}">
                             ${source ? `<div class="source">Source: ${source}</div>` : ''}
                             ${uri ? `<div class="uri">URI: ${uri}</div>` : ''}
@@ -238,12 +217,56 @@
                 }
             });
 
+            // Process system messages
+            context.forEach(msg => {
+                if (msg.role === 'system') {
+                    const roleClass = msg.role + '-message';
+                    const images = msg.images || [];
+                    let imageIndex = 0;
+                    let processedContent = '';
+
+                    const contentLines = msg.content ? msg.content.split('\n') : [];
+                    contentLines.forEach(line => {
+                        const trimmedLine = line.trim();
+                        processedContent += md.render(trimmedLine);
+
+                        if (trimmedLine.startsWith('[IMAGE:') && imageIndex < images.length) {
+                            const imageUrl = processBase64Image(images[imageIndex]);
+                            processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+                            imageIndex++;
+                        }
+                    });
+
+                    systemMessage += `
+                        <div class="message ${roleClass}">
+                            <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
+                            <div class="chunk">${processedContent}</div>
+                        </div>
+                    `;
+                }
+            });
+
+            // Process last user message if it exists
+            if (lastMessageIndex !== -1) {
+                const lastMsg = context[lastMessageIndex];
+                const roleClass = lastMsg.role + '-message';
+                lastUserMessage = `
+                    <div class="message ${roleClass}">
+                        <strong>${lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)}:</strong>
+                        <div class="chunk">${md.render(lastMsg.content || '')}</div>
+                    </div>
+                `;
+            }
+
             const contextHtml = `
                 <div class="context-container">
                     <div class="context-toggle" onclick="toggleContext(this)">Show Context ▼</div>
                     <div class="context-content">
+                        ${regularMessages}
+                        ${regularMessages && systemMessage ? '<div class="source-separator"></div>' : ''}
                         ${systemMessage}
-                        ${contextMessages}
+                        ${(regularMessages || systemMessage) && lastUserMessage ? '<div class="source-separator"></div>' : ''}
+                        ${lastUserMessage}
                     </div>
                 </div>
             `;
