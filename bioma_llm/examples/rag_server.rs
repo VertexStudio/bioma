@@ -793,7 +793,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::default(),
+        Chat::builder().model("llama3.2-vision".into()).build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
