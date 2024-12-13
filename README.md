@@ -163,6 +163,7 @@ curl -X POST http://localhost:5766/ask \
 ### Generate embeddings:
 
 ```bash
+# Text embeddings example
 curl -X POST http://localhost:5766/api/embed \
     -H "Content-Type: application/json" \
     -d '{
@@ -170,6 +171,17 @@ curl -X POST http://localhost:5766/api/embed \
         "input": [
             "Why is the sky blue?",
             "Why is the grass green?"
+        ]
+    }'
+
+# Image embeddings example (base64 encoded images)
+curl -X POST http://localhost:5766/api/embed \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "nomic-embed-vision",
+        "input": [
+            "<base64_encoded_image_1>",
+            "<base64_encoded_image_2>"
         ]
     }'
 ```

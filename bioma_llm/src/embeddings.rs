@@ -64,6 +64,59 @@ pub enum ImageData {
     Base64(String),
 }
 
+impl ImageData {
+    fn parse_base64_image(base64_str: &str) -> Result<(Vec<u8>, Option<String>), EmbeddingsError> {
+        // Handle both raw base64 and data URLs
+        let (base64_data, format) = if let Some(idx) = base64_str.find("data:image/") {
+            // Parse data URL format
+            let format_end = base64_str[idx + 11..]
+                .find(';')
+                .map(|i| idx + 11 + i)
+                .ok_or_else(|| EmbeddingsError::ImageFormat("Invalid data URL format".into()))?;
+
+            let format = base64_str[idx + 11..format_end].to_string();
+
+            let base64_start = base64_str[format_end..]
+                .find("base64,")
+                .map(|i| format_end + i + 7)
+                .ok_or_else(|| EmbeddingsError::ImageFormat("Missing base64 marker".into()))?;
+
+            (&base64_str[base64_start..], Some(format))
+        } else {
+            (base64_str, None)
+        };
+
+        // Decode base64
+        let image_data =
+            base64::engine::general_purpose::STANDARD.decode(base64_data).map_err(EmbeddingsError::Base64Decode)?;
+
+        Ok((image_data, format))
+    }
+
+    fn determine_image_extension(data: &[u8], format_hint: Option<String>) -> Result<&'static str, EmbeddingsError> {
+        // First try the format hint if provided
+        if let Some(format) = format_hint {
+            match format.to_lowercase().as_str() {
+                "jpeg" | "jpg" => return Ok(".jpg"),
+                "png" => return Ok(".png"),
+                "webp" => return Ok(".webp"),
+                _ => {} // Fall through to signature detection
+            }
+        }
+
+        // Check file signature
+        if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            Ok(".jpg")
+        } else if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+            Ok(".png")
+        } else if data.starts_with(&[0x52, 0x49, 0x46, 0x46]) && data[8..12] == [0x57, 0x45, 0x42, 0x50] {
+            Ok(".webp")
+        } else {
+            Err(EmbeddingsError::ImageFormat("Unsupported image format".into()))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EmbeddingContent {
     Text(Vec<String>),
@@ -77,17 +130,14 @@ impl EmbeddingContent {
             .map(|image_data| match image_data {
                 ImageData::Path(path) => Ok(PathBuf::from(path)),
                 ImageData::Base64(base64_str) => {
-                    // Remove data URL prefix if present
-                    let base64_data =
-                        if let Some(idx) = base64_str.find("base64,") { &base64_str[idx + 7..] } else { base64_str };
+                    // Parse and validate base64 data
+                    let (image_data, format_hint) = ImageData::parse_base64_image(base64_str)?;
 
-                    // Decode base64
-                    let image_data = base64::engine::general_purpose::STANDARD
-                        .decode(base64_data)
-                        .map_err(EmbeddingsError::Base64Decode)?;
+                    // Determine file extension
+                    let extension = ImageData::determine_image_extension(&image_data, format_hint)?;
 
-                    // Create temporary file
-                    let mut temp_file = TempBuilder::new().prefix("embedding_").suffix(".jpg").tempfile()?;
+                    // Create temporary file with correct extension
+                    let mut temp_file = TempBuilder::new().prefix("embedding_").suffix(extension).tempfile()?;
 
                     // Write image data
                     temp_file.write_all(&image_data)?;
