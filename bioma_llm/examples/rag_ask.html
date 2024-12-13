@@ -148,34 +148,118 @@
             return '<pre><code>' + md.utils.escapeHtml(code) + '</code></pre>';
         };
 
-        // Creates a collapsible section to display the context/sources used for the AI's response
-        function createContextSection(context) {
-            // Return empty string if no context is provided or if it's invalid
-            if (!context || !Array.isArray(context) || context.length === 0) {
-                return '';
+        function processBase64Image(base64String) {
+            base64String = base64String.trim();
+            
+            if (base64String.startsWith('data:image')) {
+                return base64String;
             }
+            
+            try {
+                atob(base64String);
+                return `data:image/jpeg;base64,${base64String}`;
+            } catch (e) {
+                console.error('Invalid base64 string:', e);
+                return null;
+            }
+        }
 
-            // Transform each context message into HTML elements
-            const contextMessages = context.map(msg => {
-                // Create CSS class based on the message role (e.g., 'user-message', 'assistant-message')
-                const roleClass = msg.role + '-message';
-                // Convert markdown content to HTML, handle empty content gracefully
-                const content = msg.content ? md.render(msg.content) : '';
-                // Return a message div with role label and formatted content
-                return `
-                    <div class="message ${roleClass}">
-                        <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
-                        ${content}
+        function createContextSection(context) {
+            if (!context?.length) return '';
+
+            let regularMessages = '';
+            let systemMessage = '';
+            let lastUserMessage = '';
+
+            const lastUserIndex = [...context].reverse().findIndex(msg => msg.role === 'user');
+            const lastMessageIndex = lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+
+            // Process regular messages
+            context.forEach((msg, index) => {
+                if (msg.role !== 'system' && index !== lastMessageIndex) {
+                    const roleClass = msg.role + '-message';
+                    let content = msg.content || '';
+                    let source = '';
+                    let uri = '';
+                    let processedContent = '';
+                    const images = msg.images || [];
+                    let imageIndex = 0;
+
+                    content.split('\n').forEach(line => {
+                        const trimmedLine = line.trim();
+                        if (trimmedLine.startsWith('[URI:')) {
+                            uri = trimmedLine.slice(5, -1);
+                        } else if (trimmedLine.startsWith('Source:')) {
+                            source = trimmedLine.slice(7).trim();
+                        } else if (trimmedLine.startsWith('[IMAGE:')) {
+                            if (imageIndex < images.length) {
+                                const imageUrl = processBase64Image(images[imageIndex]);
+                                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+                                imageIndex++;
+                            }
+                        } else if (trimmedLine) {
+                            processedContent += md.render(trimmedLine);
+                        }
+                    });
+
+                    regularMessages += `
+                        <div class="message ${roleClass}">
+                            ${source ? `<div class="source">Source: ${source}</div>` : ''}
+                            ${uri ? `<div class="uri">URI: ${uri}</div>` : ''}
+                            <div class="chunk">${processedContent}</div>
+                        </div>
+                    `;
+                }
+            });
+
+            // Process system messages
+            context.forEach(msg => {
+                if (msg.role === 'system') {
+                    const roleClass = msg.role + '-message';
+                    const images = msg.images || [];
+                    let imageIndex = 0;
+                    let processedContent = '';
+
+                    (msg.content || '').split('\n').forEach(line => {
+                        const trimmedLine = line.trim();
+                        processedContent += md.render(trimmedLine);
+
+                        if (trimmedLine.startsWith('[IMAGE:') && imageIndex < images.length) {
+                            const imageUrl = processBase64Image(images[imageIndex]);
+                            processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+                            imageIndex++;
+                        }
+                    });
+
+                    systemMessage += `
+                        <div class="message ${roleClass}">
+                            <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
+                            <div class="chunk">${processedContent}</div>
+                        </div>
+                    `;
+                }
+            });
+
+            // Process last user message
+            if (lastMessageIndex !== -1) {
+                const lastMsg = context[lastMessageIndex];
+                lastUserMessage = `
+                    <div class="message ${lastMsg.role}-message">
+                        <strong>${lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)}:</strong>
+                        <div class="chunk">${md.render(lastMsg.content || '')}</div>
                     </div>
                 `;
-            }).join('');
+            }
 
-            // Create a collapsible container with toggle button and content
             return `
                 <div class="context-container">
                     <div class="context-toggle" onclick="toggleContext(this)">Show Context ▼</div>
                     <div class="context-content">
-                        ${contextMessages}
+                        ${regularMessages}
+                        ${regularMessages && systemMessage ? '<div class="source-separator"></div>' : ''}
+                        ${systemMessage}
+                        ${(regularMessages || systemMessage) && lastUserMessage ? '<div class="source-separator"></div>' : ''}
+                        ${lastUserMessage}
                     </div>
                 </div>
             `;

@@ -36,7 +36,6 @@ struct AppState {
     embeddings: ActorId,
     rerank: ActorId,
     chat: ActorId,
-    ask: ActorId,
 }
 
 impl AppState {
@@ -279,6 +278,7 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
 struct ChatQuery {
     messages: Vec<ChatMessage>,
     source: Option<String>,
+    format: Option<chat::Schema>,
 }
 
 #[derive(Serialize)]
@@ -338,9 +338,43 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
     match context {
         Ok(context) => {
+            info!("Context fetched: {:#?}", context);
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
-            let context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+            let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+
+            // Add image handling here
+            if let Some(ctx) = context
+                .context
+                .iter()
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+            {
+                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+                    match &metadata {
+                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
+                            Ok(image_data) => {
+                                match tokio::task::spawn_blocking(move || {
+                                    base64::engine::general_purpose::STANDARD.encode(image_data)
+                                })
+                                .await
+                                {
+                                    Ok(base64_data) => {
+                                        context_message.images =
+                                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                    }
+                                    Err(e) => {
+                                        error!("Error encoding image: {:?}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error reading image file: {:?}", e);
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            }
 
             // Build the conversation by inserting the context message before the last user message
             let conversation = {
@@ -360,7 +394,13 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let chat_request = ChatMessages { messages: conversation.clone(), restart: false, persist: true };
+                let chat_request = ChatMessages {
+                    messages: conversation.clone(),
+                    restart: false,
+                    persist: true,
+                    stream: true,
+                    format: body.format.clone(),
+                };
 
                 match user_actor
                     .send::<Chat, ChatMessages>(
@@ -371,14 +411,16 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     .await
                 {
                     Ok(mut stream) => {
+                        let mut is_first_message = true;
                         while let Some(response) = stream.next().await {
                             match response {
                                 Ok(chunk) => {
-                                    // Include full conversation context only in the final message
+                                    // Include context only in the first message
                                     let response = ChatResponse {
                                         response: chunk.clone(),
-                                        context: if chunk.done { conversation.clone() } else { vec![] },
+                                        context: if is_first_message { conversation.clone() } else { vec![] },
                                     };
+                                    is_first_message = false;
 
                                     if tx.send(Ok::<_, String>(web::Json(response))).await.is_err() {
                                         break;
@@ -428,12 +470,14 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 struct AskQuery {
     messages: Vec<ChatMessage>,
     source: Option<String>,
+    format: Option<chat::Schema>,
 }
 
 #[derive(Serialize)]
 struct AskResponse {
     #[serde(flatten)]
     response: ChatMessageResponse,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     context: Vec<ChatMessage>,
 }
 
@@ -517,9 +561,15 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
 
             info!("Sending context to chat actor");
             let ask_response = user_actor
-                .send_and_wait_reply::<Ask, AskMessages>(
-                    AskMessages { messages: conversation.clone(), restart: false, persist: false },
-                    &data.ask,
+                .send_and_wait_reply::<Chat, ChatMessages>(
+                    ChatMessages {
+                        messages: conversation.clone(),
+                        restart: false,
+                        persist: false,
+                        stream: false,
+                        format: body.format.clone(),
+                    },
+                    &data.chat,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
                 )
                 .await;
@@ -743,7 +793,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::default(),
+        Chat::builder().model("llama3.2-vision".into()).build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -755,22 +805,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(chat_handle);
 
-    let ask_id = ActorId::of::<Ask>("/rag/ask");
-    let (mut ask_ctx, mut ask_actor) = Actor::spawn(
-        engine.clone(),
-        ask_id.clone(),
-        Ask::default(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await?;
-
-    let ask_handle = tokio::spawn(async move {
-        if let Err(e) = ask_actor.start(&mut ask_ctx).await {
-            error!("Ask actor error: {}", e);
-        }
-    });
-    actor_handles.push(ask_handle);
-
     // Create app state
     let data = web::Data::new(AppState {
         engine: engine.clone(),
@@ -779,7 +813,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         embeddings: embeddings_id,
         rerank: rerank_id,
         chat: chat_id,
-        ask: ask_id,
     });
 
     // Create and run server

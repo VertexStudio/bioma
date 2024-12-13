@@ -4,10 +4,13 @@ use ollama_rs::{
     generation::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse},
         options::GenerationOptions,
+        parameters::FormatType,
     },
     Ollama,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::borrow::Cow;
 use tracing::{error, info};
 use url::Url;
@@ -59,10 +62,31 @@ impl Default for Chat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Schema(Value);
+
+impl Schema {
+    pub fn new<T: JsonSchema>() -> Self {
+        let schema = schemars::schema_for!(T);
+        let format_json = Self::clean_schema(serde_json::to_value(&schema).unwrap());
+        Self(format_json)
+    }
+
+    fn clean_schema(mut schema_value: Value) -> Value {
+        if let Some(obj) = schema_value.as_object_mut() {
+            obj.remove("$schema");
+            obj.remove("title");
+        }
+        schema_value
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessages {
     pub messages: Vec<ChatMessage>,
     pub restart: bool,
     pub persist: bool,
+    pub stream: bool,
+    pub format: Option<Schema>,
 }
 
 impl Message<ChatMessages> for Chat {
@@ -83,49 +107,79 @@ impl Message<ChatMessages> for Chat {
 
         // Prepare chat request
         let mut chat_message_request = ChatMessageRequest::new(self.model.to_string(), self.history.clone());
+
+        // Add generation options
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
         }
 
-        // Get streaming response from Ollama
-        let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
-        let mut accumulated_content = String::new();
+        // Add format
+        if let Some(format) = &request.format {
+            chat_message_request = chat_message_request.format(FormatType::Json(format.0.clone()));
+        }
 
-        // Stream responses back to caller
-        while let Some(response) = stream.next().await {
-            match response {
-                Ok(chunk) => {
-                    // Send chunk through actor's reply mechanism
-                    ctx.reply(chunk.clone()).await?;
+        if request.stream {
+            // Get streaming response from Ollama
+            let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
+            let mut accumulated_content = String::new();
 
-                    // Accumulate message content
-                    if let Some(message) = &chunk.message {
-                        accumulated_content.push_str(&message.content);
-                    }
+            // Stream responses back to caller
+            while let Some(response) = stream.next().await {
+                match response {
+                    Ok(chunk) => {
+                        // Send chunk through actor's reply mechanism
+                        ctx.reply(chunk.clone()).await?;
 
-                    // If this is the final message, add the complete message to history
-                    if chunk.done {
-                        if !accumulated_content.is_empty() {
-                            self.history.push(ChatMessage::assistant(accumulated_content.clone()));
+                        // Accumulate message content
+                        if let Some(message) = &chunk.message {
+                            accumulated_content.push_str(&message.content);
                         }
 
-                        // Persist if requested
-                        if request.persist {
-                            self.history = self
-                                .history
-                                .iter()
-                                .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
-                                .cloned()
-                                .collect();
-                            self.save(ctx).await?;
+                        // If this is the final message, add the complete message to history
+                        if chunk.done {
+                            if !accumulated_content.is_empty() {
+                                self.history.push(ChatMessage::assistant(accumulated_content.clone()));
+                            }
+
+                            // Persist if requested
+                            if request.persist {
+                                self.history = self
+                                    .history
+                                    .iter()
+                                    .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
+                                    .cloned()
+                                    .collect();
+                                self.save(ctx).await?;
+                            }
                         }
                     }
-                }
-                Err(_) => {
-                    error!("Error in chat stream");
-                    break;
+                    Err(_) => {
+                        error!("Error in chat stream");
+                        break;
+                    }
                 }
             }
+        } else {
+            // Send the messages to the ollama client
+            let result = self.ollama.send_chat_messages(chat_message_request).await?;
+
+            // Add the assistant's message to the history
+            if let Some(message) = &result.message {
+                self.history.push(ChatMessage::assistant(message.content.clone()));
+            }
+
+            if request.persist {
+                // Filter out system messages before saving
+                self.history = self
+                    .history
+                    .iter()
+                    .filter(|msg| msg.role != ollama_rs::generation::chat::MessageRole::System)
+                    .cloned()
+                    .collect();
+                self.save(ctx).await?;
+            }
+
+            ctx.reply(result).await?;
         }
 
         Ok(())
