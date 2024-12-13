@@ -152,14 +152,6 @@ curl -X POST http://localhost:5766/retrieve \
     }'
 ```
 
-### Ask a question:
-
-```bash
-curl -X POST http://localhost:5766/ask \
-    -H "Content-Type: application/json" \
-    -d '{"query": "What is Bioma?"}'
-```
-
 ### Generate embeddings:
 
 ```bash
@@ -195,13 +187,14 @@ curl -X POST http://localhost:5766/rerank \
 curl -X POST http://localhost:5766/api/chat \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "llama3.2",
         "messages": [
             {
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
-        ]
+        ],
+        "source": ".*",
+        "format": null
     }'
 ```
 
@@ -210,7 +203,29 @@ curl -X POST http://localhost:5766/api/chat \
 ```bash
 curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
-    -d '{"messages": [{"role": "user", "content": "Why is the sky blue?"}]}'
+    -d '{
+        "messages": [
+            {
+                "role": "user",
+                "content": "Should I learn Rust?"
+            }
+        ],
+        "source": ".*",
+        "format": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "boolean",
+                    "description": "Yes or no answer"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation for the answer"
+                }
+            },
+            "required": ["answer", "reason"]
+        }
+    }'
 ```
 
 ### Delete indexed sources:
