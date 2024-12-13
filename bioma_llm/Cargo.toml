@@ -24,6 +24,7 @@ bon = { workspace = true }
 lazy_static = "1.5.0"
 walkdir = { workspace = true }
 zip = { workspace = true }
+tempfile = { workspace = true }
 
 ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "b20a99857da206288210cf53c0e1de44b59894db", features = [
     "function-calling",
@@ -80,4 +81,3 @@ actix-multipart = "0.7.2"
 anyhow = "1.0"
 tokio-stream = "0.1"
 futures-util = "0.3"
-tempfile = "3.6.0"

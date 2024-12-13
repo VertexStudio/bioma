@@ -1,4 +1,5 @@
 // use crate::ORT_EXIT_MUTEX;
+use base64::Engine as _;
 use bioma_actor::prelude::*;
 use bon::Builder;
 use derive_more::{Deref, Display};
@@ -6,8 +7,11 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use surrealdb::value::RecordId;
+use tempfile::Builder as TempBuilder;
 use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -42,14 +46,61 @@ pub enum EmbeddingsError {
     SendTextEmbeddings(#[from] mpsc::error::SendError<EmbeddingRequest>),
     #[error("Error receiving text embeddings: {0}")]
     RecvEmbeddings(#[from] oneshot::error::RecvError),
+    #[error("Base64 decode error: {0}")]
+    Base64Decode(#[from] base64::DecodeError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Image format error: {0}")]
+    ImageFormat(String),
+    #[error("Persist error: {0}")]
+    Persist(#[from] tempfile::PersistError),
 }
 
 impl ActorError for EmbeddingsError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ImageData {
+    Path(String),
+    Base64(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EmbeddingContent {
     Text(Vec<String>),
-    Image(Vec<String>),
+    Image(Vec<ImageData>),
+}
+
+impl EmbeddingContent {
+    fn process_image_data(images: &[ImageData]) -> Result<Vec<PathBuf>, EmbeddingsError> {
+        images
+            .iter()
+            .map(|image_data| match image_data {
+                ImageData::Path(path) => Ok(PathBuf::from(path)),
+                ImageData::Base64(base64_str) => {
+                    // Remove data URL prefix if present
+                    let base64_data =
+                        if let Some(idx) = base64_str.find("base64,") { &base64_str[idx + 7..] } else { base64_str };
+
+                    // Decode base64
+                    let image_data = base64::engine::general_purpose::STANDARD
+                        .decode(base64_data)
+                        .map_err(EmbeddingsError::Base64Decode)?;
+
+                    // Create temporary file
+                    let mut temp_file = TempBuilder::new().prefix("embedding_").suffix(".jpg").tempfile()?;
+
+                    // Write image data
+                    temp_file.write_all(&image_data)?;
+
+                    // Get path and persist the file
+                    let (file, path) = temp_file.keep()?;
+                    std::mem::forget(file);
+
+                    Ok(path)
+                }
+            })
+            .collect()
+    }
 }
 
 pub struct EmbeddingRequest {
@@ -89,7 +140,7 @@ pub struct StoredEmbeddings {
 pub enum Query {
     Embedding(Vec<f32>),
     Text(String),
-    Image(String),
+    Image(ImageData),
 }
 
 /// Get the top k similar embeddings to a query
@@ -170,13 +221,16 @@ impl Message<TopK> for Embeddings {
                     .await?;
                 rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
-            Query::Image(path) => {
+            Query::Image(image_data) => {
                 let Some(embedding_tx) = self.embedding_tx.as_ref() else {
                     return Err(EmbeddingsError::TextEmbeddingNotInitialized);
                 };
                 let (tx, rx) = oneshot::channel();
                 embedding_tx
-                    .send(EmbeddingRequest { response_tx: tx, content: EmbeddingContent::Image(vec![path.clone()]) })
+                    .send(EmbeddingRequest {
+                        response_tx: tx,
+                        content: EmbeddingContent::Image(vec![image_data.clone()]),
+                    })
                     .await?;
                 rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
             }
@@ -514,20 +568,26 @@ impl Embeddings {
                                         }
                                     }
                                 }
-                                EmbeddingContent::Image(paths) => {
-                                    let image_count = paths.len();
-                                    match image_embedding.embed(paths, None) {
-                                        Ok(embeddings) => {
-                                            info!(
-                                                "Generated {} image embeddings in {:?}",
-                                                image_count,
-                                                start.elapsed()
-                                            );
-                                            let _ = request.response_tx.send(Ok(embeddings));
-                                        }
+                                EmbeddingContent::Image(images) => {
+                                    let image_count = images.len();
+                                    match EmbeddingContent::process_image_data(&images) {
+                                        Ok(paths) => match image_embedding.embed(paths, None) {
+                                            Ok(embeddings) => {
+                                                info!(
+                                                    "Generated {} image embeddings in {:?}",
+                                                    image_count,
+                                                    start.elapsed()
+                                                );
+                                                let _ = request.response_tx.send(Ok(embeddings));
+                                            }
+                                            Err(err) => {
+                                                error!("Failed to generate image embeddings: {}", err);
+                                                let _ = request.response_tx.send(Err(err));
+                                            }
+                                        },
                                         Err(err) => {
-                                            error!("Failed to generate image embeddings: {}", err);
-                                            let _ = request.response_tx.send(Err(err));
+                                            error!("Failed to process image data: {}", err);
+                                            let _ = request.response_tx.send(Err(err.into()));
                                         }
                                     }
                                 }
