@@ -46,7 +46,7 @@ cargo run -p bioma_llm --example attack -- [OPTIONS]
 - `ask`
 - `retrieve`
 - `rerank`
-- `all` (tests all endpoints)
+- `all` (tests all endpoints and should be used alone)
 
 ## Example Scenarios
 
