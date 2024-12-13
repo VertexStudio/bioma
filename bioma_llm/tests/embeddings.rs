@@ -634,7 +634,9 @@ async fn test_image_embeddings_generate() -> Result<(), TestError> {
     let image_paths = vec!["../assets/images/rust-pet.png".to_string()];
     let generated = relay_ctx
         .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { content: EmbeddingContent::Image(image_paths.clone()) },
+            GenerateEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -683,7 +685,10 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: Some(metadata) },
+            StoreEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+                metadata: Some(metadata),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -706,7 +711,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     // Search using the same image
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
+        query: embeddings::Query::Image(ImageData::Path("../assets/images/elephant.jpg".to_string())),
         threshold: 0.5,
         k: 1,
         source: None,
@@ -759,7 +764,10 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
     let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
     let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings { content: EmbeddingContent::Image(image_paths), metadata: None },
+            StoreEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+                metadata: None,
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -826,7 +834,9 @@ async fn test_embeddings_multiple_images_batch() -> Result<(), TestError> {
 
     let generated = relay_ctx
         .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { content: EmbeddingContent::Image(image_paths) },
+            GenerateEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -871,7 +881,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     let stored_image = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
+                content: EmbeddingContent::Image(vec![ImageData::Path("../assets/images/elephant.jpg".to_string())]),
                 metadata: Some(vec![serde_json::json!({"type": "image"})]),
             },
             &embeddings_id,
