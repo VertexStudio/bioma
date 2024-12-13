@@ -532,7 +532,7 @@ struct Args {
     order: bool,
 
     /// Number of variations for the test files
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 5)]
     variations: usize,
 }
 
