@@ -58,7 +58,7 @@ enum TestType {
     Index,
     Chat,
     Upload,
-    DeleteSource,
+    Delete,
     Embed,
     Ask,
     Retrieve,
@@ -77,7 +77,7 @@ impl FromStr for TestType {
             "index" => Ok(TestType::Index),
             "chat" => Ok(TestType::Chat),
             "upload" => Ok(TestType::Upload),
-            "deletesource" => Ok(TestType::DeleteSource),
+            "delete" => Ok(TestType::Delete),
             "embed" => Ok(TestType::Embed),
             "ask" => Ok(TestType::Ask),
             "retrieve" => Ok(TestType::Retrieve),
@@ -361,8 +361,7 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
     let variations = *VARIATIONS_COUNT.lock().await;
     let mut ordering_state = ORDERING_STATE.lock().await;
 
-    let variation =
-        get_next_variation(TestType::DeleteSource, &mut variation_state, variations, &mut ordering_state).await;
+    let variation = get_next_variation(TestType::Delete, &mut variation_state, variations, &mut ordering_state).await;
 
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = DeleteSource { source: file_name };
@@ -372,7 +371,7 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
         GooseMethod::Post,
         "/delete_source",
         "Delete Source",
-        TestType::DeleteSource,
+        TestType::Delete,
         Some(payload),
         &mut ordering_state,
     )
@@ -586,7 +585,7 @@ async fn main() -> Result<(), GooseError> {
                     .set_sequence(sequence)
                     .set_weight(weighted.weight)?,
             ),
-            TestType::DeleteSource => scenario.register_transaction(
+            TestType::Delete => scenario.register_transaction(
                 transaction!(load_test_delete_source)
                     .set_name("Delete Source")
                     .set_sequence(sequence)
