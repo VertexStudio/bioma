@@ -278,6 +278,7 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
 struct ChatQuery {
     messages: Vec<ChatMessage>,
     source: Option<String>,
+    format: Option<chat::Schema>,
 }
 
 #[derive(Serialize)]
@@ -364,7 +365,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     restart: false,
                     persist: true,
                     stream: true,
-                    format: None,
+                    format: body.format.clone(),
                 };
 
                 match user_actor
@@ -433,12 +434,14 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 struct AskQuery {
     messages: Vec<ChatMessage>,
     source: Option<String>,
+    format: Option<chat::Schema>,
 }
 
 #[derive(Serialize)]
 struct AskResponse {
     #[serde(flatten)]
     response: ChatMessageResponse,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     context: Vec<ChatMessage>,
 }
 
@@ -528,7 +531,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                         restart: false,
                         persist: false,
                         stream: false,
-                        format: None,
+                        format: body.format.clone(),
                     },
                     &data.chat,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
