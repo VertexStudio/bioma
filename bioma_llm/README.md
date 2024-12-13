@@ -22,11 +22,19 @@ This is a more complete example:
 cargo run -p bioma_llm --example attack -- --endpoints health,hello,upload,index,ask --users 20 --time 70 --order --variations 16
 ```
 
-To see all the arguments you can use, and the corresponding descriptions, please run:
+To see all the arguments you can use, and the corresponding descriptions, please see the table below:
 
-```bash
-cargo run -p bioma_llm --example attack -- --help
-```
+| Argument           | Required | Description                                                              | Example                                   | Default               |
+|--------------------|----------|--------------------------------------------------------------------------|-------------------------------------------|-----------------------|
+| `endpoints`        | `False`    | Endpoints to run with optional weights (endpoint:weight,endpoint:weight) | `--endpoints health:1,index:3,upload,ask` | all                   |
+| `server`           | `False`    | RAG Server URL                                                           | `--server http://localhost:5766`          | http://localhost:5766 |
+| `users`            | `False`    | Number of users in goose                                                 | `--users 15`                              | 10                    |
+| `time`             | `False`    | Run time in seconds                                                      | `--time 5`                                | 60                    |
+| `log`              | `False`    | Request log file path                                                    | `--log /tmp/requests.log`                 | .output/requests.log  |
+| `report`           | `False`    | Report file path                                                         | `--report /tmp/report.html`               | .output/report.html   |
+| `metrics-interval` | `False`    | Metrics reporting interval in seconds                                    | `--metrics-interval 4`                    | 15                    |
+| `--order`          | `False`    | Run scenarios in sequential order                                        | `--order`                                 | -                     |
+| `variations`       | `False`    | Number of variations for the test files                                  | `--variations 10`                         | 1                     |
 
 Available endpoints:
 
