@@ -142,6 +142,7 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     config.run_time = args.time.to_string();
     config.request_log = args.log.clone();
     config.report_file = args.report.clone();
+    config.running_metrics = Some(args.metrics_interval);
 
     GooseAttack::initialize_with_config(config)
 }
@@ -522,7 +523,7 @@ struct Args {
     report: String,
 
     /// Metrics reporting interval in seconds
-    #[arg(short, long, default_value_t = 15)]
+    #[arg(short, long, default_value_t = 0)]
     metrics_interval: usize,
 
     /// Run scenarios in sequential order
