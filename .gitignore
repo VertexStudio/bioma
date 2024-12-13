@@ -9,4 +9,6 @@ history.txt
 # Not platform agnostic yet, so ignore it
 uv.lock
 .python-version
+
+*.log
 pyproject.toml
