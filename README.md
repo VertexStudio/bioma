@@ -207,11 +207,24 @@ curl -X POST http://localhost:5766/ask \
         "messages": [
             {
                 "role": "user",
-                "content": "Why is the sky blue?"
+                "content": "Should I learn Rust?"
             }
         ],
         "source": ".*",
-        "format": null
+        "format": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "boolean",
+                    "description": "Yes or no answer"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation for the answer"
+                }
+            },
+            "required": ["answer", "reason"]
+        }
     }'
 ```
 
