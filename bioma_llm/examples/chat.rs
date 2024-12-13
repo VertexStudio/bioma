@@ -48,7 +48,13 @@ impl Actor for MainActor {
             // Get streaming response
             let mut response_stream = ctx
                 .send::<Chat, ChatMessages>(
-                    ChatMessages { messages: vec![chat_message], restart: false, persist: false },
+                    ChatMessages {
+                        messages: vec![chat_message],
+                        restart: false,
+                        persist: false,
+                        stream: true,
+                        format: None,
+                    },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                 )

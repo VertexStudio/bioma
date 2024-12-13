@@ -117,35 +117,15 @@
             margin-bottom: 5px;
             color: #555;
         }
-
-        .context-content .source-separator {
-            border-top: 1px solid #ccc;
-            margin: 10px 0;
+        .source-separator {
+            border-top: 1px solid #ddd;
+            margin-top: 10px;
+            padding-top: 10px;
         }
-
-        .context-content .uri {
-            font-style: italic;
-            color: #666;
-            font-size: 0.85em;
-            margin: 5px 0;
-        }
-
-        .context-content .chunk {
-            margin-top: 5px;
-            padding: 8px;
-            border-radius: 4px;
-        }
-
-        .context-content .source {
-            color: #666;
-            font-size: 0.85em;
-            margin: 5px 0;
-        }
-
-        .context-content .chunk-number {
-            color: #666;
-            font-size: 0.85em;
-            margin: 5px 0;
+        .source,
+        .uri,
+        .chunk {
+            margin-bottom: 5px;
         }
     </style>
 </head>
@@ -164,6 +144,10 @@
 
         mermaid.initialize({ startOnLoad: true });
 
+        // Global variables for streaming state
+        let partialLine = '';
+        let contextSet = false;
+
         // Custom renderer for code fence blocks in markdown
         md.renderer.rules.fence = function (tokens, idx, options, env, self) {
             const token = tokens[idx];
@@ -180,51 +164,115 @@
 
         // Creates a collapsible section to display the context/sources used for the AI's response
         function createContextSection(context) {
-            // Return empty string if no context is provided or if it's invalid
-            if (!context || !Array.isArray(context) || context.length === 0) {
-                return '';
-            }
+            if (!context?.length) return '';
 
-            const contextMessages = context.map((msg, index) => {
-                const roleClass = msg.role + '-message';
-                
-                // Parse the content string to extract Source, URI, and Chunk
-                let source = '', uri = '', chunk = '', content = '';
-                if (msg.content) {
-                    const lines = msg.content.split('\n');
+            let regularMessages = '';
+            let systemMessage = '';
+            let lastUserMessage = '';
+
+            // First find the last user message
+            const lastUserIndex = [...context].reverse().findIndex(msg => msg.role === 'user');
+            const lastMessageIndex = lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+
+            // Process regular messages (non-system and not the last user message)
+            context.forEach((msg, index) => {
+                if (msg.role !== 'system' && index !== lastMessageIndex) {
+                    const roleClass = msg.role + '-message';
+                    let content = msg.content || '';
+                    let source = '';
+                    let uri = '';
+                    let processedContent = '';
+
+                    // Process images and content
+                    const images = msg.images || [];
+                    let imageIndex = 0;
+
+                    const lines = content.split('\n');
                     lines.forEach(line => {
-                        if (line.startsWith('Source:')) source = line.replace('Source:', '').trim();
-                        else if (line.startsWith('URI:')) uri = line.replace('URI:', '').trim();
-                        else if (line.startsWith('Chunk:')) chunk = line.replace('Chunk:', '').trim();
-                        else content += line + '\n';
+                        const trimmedLine = line.trim();
+                        if (trimmedLine.startsWith('[URI:')) {
+                            uri = trimmedLine.slice(5, -1);
+                        } else if (trimmedLine.startsWith('Source:')) {
+                            source = trimmedLine.slice(7).trim();
+                        } else if (trimmedLine.startsWith('[IMAGE:')) {
+                            if (imageIndex < images.length) {
+                                const imageUrl = processBase64Image(images[imageIndex]);
+                                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+                                imageIndex++;
+                            }
+                        } else if (trimmedLine) {
+                            processedContent += md.render(trimmedLine);
+                        }
                     });
-                }
 
-                const separator = index > 0 ? '<div class="source-separator"></div>' : '';
-                
-                return `
-                    ${separator}
-                    <div class="message ${roleClass}">
-                        <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
-                        ${source ? `<div class="source">Source: ${source}</div>` : ''}
-                        ${uri ? `<div class="uri">URI: ${uri}</div>` : ''}
-                        ${chunk ? `<div class="chunk-number">Chunk: ${chunk}</div>` : ''}
-                        <div class="chunk">
-                            ${content ? md.render(content) : ''}
+                    regularMessages += `
+                        <div class="message ${roleClass}">
+                            ${source ? `<div class="source">Source: ${source}</div>` : ''}
+                            ${uri ? `<div class="uri">URI: ${uri}</div>` : ''}
+                            <div class="chunk">
+                                ${processedContent}
+                            </div>
                         </div>
+                    `;
+                }
+            });
+
+            // Process system messages
+            context.forEach(msg => {
+                if (msg.role === 'system') {
+                    const roleClass = msg.role + '-message';
+                    const images = msg.images || [];
+                    let imageIndex = 0;
+                    let processedContent = '';
+
+                    const contentLines = msg.content ? msg.content.split('\n') : [];
+                    contentLines.forEach(line => {
+                        const trimmedLine = line.trim();
+                        processedContent += md.render(trimmedLine);
+
+                        if (trimmedLine.startsWith('[IMAGE:') && imageIndex < images.length) {
+                            const imageUrl = processBase64Image(images[imageIndex]);
+                            processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+                            imageIndex++;
+                        }
+                    });
+
+                    systemMessage += `
+                        <div class="message ${roleClass}">
+                            <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)}:</strong>
+                            <div class="chunk">${processedContent}</div>
+                        </div>
+                    `;
+                }
+            });
+
+            // Process last user message if it exists
+            if (lastMessageIndex !== -1) {
+                const lastMsg = context[lastMessageIndex];
+                const roleClass = lastMsg.role + '-message';
+                lastUserMessage = `
+                    <div class="message ${roleClass}">
+                        <strong>${lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)}:</strong>
+                        <div class="chunk">${md.render(lastMsg.content || '')}</div>
                     </div>
                 `;
-            }).join('');
+            }
 
-            // Create a collapsible container with toggle button and content
-            return `
+            const contextHtml = `
                 <div class="context-container">
                     <div class="context-toggle" onclick="toggleContext(this)">Show Context ▼</div>
                     <div class="context-content">
-                        ${contextMessages}
+                        ${regularMessages}
+                        ${regularMessages && systemMessage ? '<div class="source-separator"></div>' : ''}
+                        ${systemMessage}
+                        ${(regularMessages || systemMessage) && lastUserMessage ? '<div class="source-separator"></div>' : ''}
+                        ${lastUserMessage}
                     </div>
                 </div>
             `;
+
+            console.log("Final context HTML:", contextHtml);
+            return contextHtml;
         }
 
         function appendMessage(sender, content, context = null) {
@@ -331,48 +379,17 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let accumulatedContent = '';
+                
+                // Reset streaming state
+                partialLine = '';
+                contextSet = false;
 
                 while (true) {
                     const {value, done} = await reader.read();
                     if (done) break;
 
                     const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                
-                                // Handle streaming content
-                                if (data.message?.content) {
-                                    accumulatedContent += data.message.content;
-                                    contentDiv.innerHTML = md.render(accumulatedContent);
-                                }
-
-                                // Handle context when streaming is done
-                                if (data.done && data.context?.length > 0) {
-                                    const contextSection = createContextSection(data.context);
-                                    const contextDiv = document.createElement('div');
-                                    contextDiv.innerHTML = contextSection;
-                                    messageDiv.appendChild(contextDiv);
-                                }
-
-                                // Add the message to history only when done
-                                if (data.done) {
-                                    messageHistory.push({
-                                        role: 'assistant',
-                                        content: accumulatedContent
-                                    });
-                                }
-                            } catch (e) {
-                                console.error('Error parsing SSE data:', e);
-                            }
-                        }
-                    }
-                    
-                    // Scroll to bottom as content streams in
-                    window.scrollTo(0, document.body.scrollHeight);
+                    accumulatedContent = processStreamChunk(chunk, messageDiv, contentDiv, accumulatedContent);
                 }
 
                 // Re-initialize mermaid diagrams after complete response
@@ -382,6 +399,83 @@
                 console.error('Error:', error);
                 appendMessage('system', 'An error occurred while fetching the response.');
             }
+        }
+
+        function processStreamChunk(chunk, messageDiv, contentDiv, accumulatedContent) {
+            const textToProcess = partialLine + chunk;
+            const lines = textToProcess.split('\n');
+
+            // Save last potentially incomplete line for next chunk
+            partialLine = lines[lines.length - 1];
+
+            // Process complete lines
+            for (let i = 0; i < lines.length - 1; i++) {
+                const line = lines[i];
+                if (line.startsWith('data: ')) {
+                    try {
+                        const jsonStr = line.slice(6);
+                        if (!jsonStr.trim()) continue;
+
+                        const data = JSON.parse(jsonStr);
+
+                        // Handle system message
+                        if (data.message?.role === 'system') {
+                            const systemMessageDiv = document.createElement('div');
+                            systemMessageDiv.className = 'message system-message';
+                            systemMessageDiv.innerHTML = `<strong>System:</strong> ${md.render(data.message.content)}`;
+                            messageDiv.insertBefore(systemMessageDiv, contentDiv);
+                        }
+
+                        // Handle context with images
+                        if (!contextSet && data.context?.length > 0) {
+                            const contextSection = createContextSection(data.context);
+                            // Remove any existing context first
+                            const existingContext = messageDiv.querySelector('.context-container');
+                            if (existingContext) {
+                                existingContext.remove();
+                            }
+                            const contextDiv = document.createElement('div');
+                            contextDiv.innerHTML = contextSection;
+                            messageDiv.appendChild(contextDiv);
+                            contextSet = true;
+                        }
+
+                        // Handle message content and images
+                        if (data.message?.content || data.message?.images) {
+                            if (data.message.content) {
+                                accumulatedContent = (accumulatedContent || '') + data.message.content;
+                            }
+
+                            // Handle images if present
+                            if (data.message.images && data.message.images.length > 0) {
+                                data.message.images.forEach(imageBase64 => {
+                                    const imgElement = document.createElement('img');
+                                    imgElement.src = processBase64Image(imageBase64);
+                                    imgElement.style.maxWidth = '100%';
+                                    contentDiv.appendChild(imgElement);
+                                });
+                            }
+
+                            // Render the markdown content
+                            contentDiv.innerHTML = md.render(accumulatedContent || '');
+                        }
+
+                        if (data.done) {
+                            messageHistory.push({
+                                role: 'assistant',
+                                content: accumulatedContent,
+                                images: data.message?.images
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('Incomplete or invalid JSON in line:', line);
+                        continue;
+                    }
+                }
+            }
+
+            window.scrollTo(0, document.body.scrollHeight);
+            return accumulatedContent;
         }
 
         // Dynamically adjusts the height of the textarea based on its content
@@ -407,6 +501,27 @@
                 resizeTextarea();
             }
         });
+
+        function processBase64Image(base64String) {
+            // Remove any whitespace or newlines
+            base64String = base64String.trim();
+            
+            // Check if it's already a complete data URL
+            if (base64String.startsWith('data:image')) {
+                return base64String;
+            }
+            
+            // Check if it's a partial base64 string
+            try {
+                // Try to decode the base64 string
+                atob(base64String);
+                // If successful, create a complete data URL
+                return `data:image/jpeg;base64,${base64String}`;
+            } catch (e) {
+                console.error('Invalid base64 string:', e);
+                return null;
+            }
+        }
     </script>
 </body>
 </html>

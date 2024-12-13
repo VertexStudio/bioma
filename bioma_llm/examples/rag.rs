@@ -45,9 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create chat conversation
     let mut conversation = vec![];
 
-    let ask = Ask::builder().model("llama3.2".into()).messages_number_limit(10).history(conversation.clone()).build();
+    let ask = Chat::builder().model("llama3.2".into()).messages_number_limit(10).history(conversation.clone()).build();
 
-    let ask_id = ActorId::of::<Ask>("/ask");
+    let ask_id = ActorId::of::<Chat>("/ask");
     let (mut ask_ctx, mut ask_actor) =
         Actor::spawn(engine.clone(), ask_id.clone(), ask, SpawnOptions::default()).await?;
 
@@ -121,8 +121,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the context to the chat actor
     info!("Sending context to ask actor");
     let ask_response = relay_ctx
-        .send_and_wait_reply::<Ask, AskMessages>(
-            AskMessages { messages: conversation.clone(), restart: false, persist: false },
+        .send_and_wait_reply::<Chat, ChatMessages>(
+            ChatMessages {
+                messages: conversation.clone(),
+                restart: false,
+                persist: false,
+                stream: false,
+                format: None,
+            },
             &ask_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )

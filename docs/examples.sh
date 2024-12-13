@@ -85,6 +85,41 @@ curl -X POST http://localhost:5766/api/chat \
         ]
     }'
 
+# Structured ask with schema (compatible with Ollama)
+curl -X POST http://localhost:5766/ask \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "llama3.2",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Tell me about Puerto Rico."
+            }
+        ],
+        "format": {
+            "type": "object",
+            "properties": {
+            "name": {
+                "type": "string"
+            },
+            "capital": {
+                "type": "string"
+            },
+            "languages": {
+                "type": "array",
+                "items": {
+                "type": "string"
+                }
+            }
+            },
+            "required": [
+            "name",
+            "capital", 
+            "languages"
+            ]
+        }
+    }'
+
 # Ollama Endpoints (running on port 11434)
 # ----------------
 # Generate a response
