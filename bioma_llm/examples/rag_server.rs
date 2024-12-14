@@ -439,22 +439,18 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 }
             });
 
-            // Stream responses as Server-Sent Events (SSE)
-            HttpResponse::Ok().content_type("text/event-stream").streaming::<_, Box<dyn StdError>>(
+            // Stream responses as NDJSON
+            HttpResponse::Ok().content_type("application/x-ndjson").streaming::<_, Box<dyn StdError>>(
                 tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
                     Ok(response) => {
-                        let mut data = String::with_capacity(256);
-                        data.push_str("data: ");
-                        data.push_str(&serde_json::to_string(&response).unwrap_or_default());
-                        data.push_str("\n\n");
-                        Ok(web::Bytes::from(data))
+                        let json = serde_json::to_string(&response).unwrap_or_default();
+                        Ok(web::Bytes::from(format!("{}\n", json)))
                     }
                     Err(e) => {
-                        let mut error = String::with_capacity(e.len() + 8);
-                        error.push_str("error: ");
-                        error.push_str(&e);
-                        error.push_str("\n\n");
-                        Ok(web::Bytes::from(error))
+                        let error_json = serde_json::json!({
+                            "error": e.to_string()
+                        });
+                        Ok(web::Bytes::from(format!("{}\n", error_json)))
                     }
                 }),
             )

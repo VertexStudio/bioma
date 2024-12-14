@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,9 +12,11 @@
         body {
             font-family: Arial, sans-serif;
             max-width: 800px;
-            margin: 0 auto;  /* Center the content */
+            /* Center the content */
+            margin: 0 auto;
             padding: 20px;
-            padding-bottom: 80px;  /* Extra padding for fixed input container */
+            /* Extra padding for fixed input container */
+            padding-bottom: 80px;
         }
 
         /* Chat messages container - vertical flex layout */
@@ -29,13 +32,16 @@
             position: fixed;
             bottom: 0;
             left: 50%;
-            transform: translateX(-50%);  /* Center the container */
+            transform: translateX(-50%);
+            /* Center the container */
             padding: 20px;
             background-color: white;
-            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);  /* Subtle shadow above */
+            /* Subtle shadow above */
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
             width: 100%;
             box-sizing: border-box;
-            border-radius: 10px 10px 0 0;  /* Rounded top corners */
+            /* Rounded top corners */
+            border-radius: 10px 10px 0 0;
         }
 
         /* Textarea input styling with auto-resize capability */
@@ -61,18 +67,23 @@
 
         /* Message variants for different roles */
         .user-message {
-            background-color: #d1e8ff;  /* Light blue */
-            align-self: flex-end;  /* Align to right */
+            /* Light blue */
+            background-color: #d1e8ff;
+            /* Align to right */
+            align-self: flex-end;
             margin-left: auto;
         }
 
         .assistant-message {
-            background-color: #dbdbdb;  /* Light gray */
-            align-self: flex-start;  /* Align to left */
+            /* Light gray */
+            background-color: #dbdbdb;
+            /* Align to left */
+            align-self: flex-start;
         }
 
         .system-message {
-            background-color: #ffeeee;  /* Light red */
+            /* Light red */
+            background-color: #ffeeee;
             align-self: flex-start;
         }
 
@@ -117,11 +128,13 @@
             margin-bottom: 5px;
             color: #555;
         }
+
         .source-separator {
             border-top: 1px solid #ddd;
             margin-top: 10px;
             padding-top: 10px;
         }
+
         .source,
         .uri,
         .chunk {
@@ -297,10 +310,10 @@
             // - User messages: escape HTML first to prevent XSS attacks
             // - Other messages: render markdown directly (trusted content)
             const mainContent = md.render(sender === 'User' ? md.utils.escapeHtml(content) : content);
-            
+
             // For assistant messages only, add collapsible context/sources section
             const contextSection = role === 'assistant' ? createContextSection(context) : '';
-            
+
             // Combine main message and context into the message div
             messageDiv.innerHTML = mainContent + contextSection;
 
@@ -314,17 +327,17 @@
 
         // Define a global function that toggles the visibility of context sections
         // This needs to be on the window object since it's called from inline HTML onclick handlers
-        window.toggleContext = function(toggleElement) {
+        window.toggleContext = function (toggleElement) {
             // Get the content div that follows the toggle button
             const contextContent = toggleElement.nextElementSibling;
-            
+
             // Check if content is currently hidden
             // Content is hidden if display is 'none' or if no display style is set
             const isHidden = contextContent.style.display === 'none' || !contextContent.style.display;
-            
+
             // Toggle visibility by setting display to either 'block' or 'none'
             contextContent.style.display = isHidden ? 'block' : 'none';
-            
+
             // Update the toggle button text and arrow direction (▲/▼)
             // to indicate current state
             toggleElement.textContent = isHidden ? 'Hide Context ▲' : 'Show Context ▼';
@@ -344,7 +357,9 @@
                         role: "user",
                         content: queryText
                     }
-                ]
+                ],
+                model: "llama3.2",
+                stream: true
             };
 
             // Display user's message in the chat UI
@@ -379,17 +394,31 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let accumulatedContent = '';
-                
+                let partialJsonLine = ''; // Buffer for incomplete JSON lines
+
                 // Reset streaming state
-                partialLine = '';
                 contextSet = false;
 
                 while (true) {
-                    const {value, done} = await reader.read();
+                    const { value, done } = await reader.read();
                     if (done) break;
 
                     const chunk = decoder.decode(value);
-                    accumulatedContent = processStreamChunk(chunk, messageDiv, contentDiv, accumulatedContent);
+                    partialJsonLine += chunk;
+
+                    // Process complete JSON lines
+                    while (partialJsonLine.includes('}\n')) {
+                        const endIndex = partialJsonLine.indexOf('}\n') + 1;
+                        const completeJsonLine = partialJsonLine.substring(0, endIndex);
+                        partialJsonLine = partialJsonLine.substring(endIndex);
+
+                        accumulatedContent = processJsonLine(completeJsonLine, messageDiv, contentDiv, accumulatedContent);
+                    }
+                }
+
+                // Handle any remaining partial JSON line at the end
+                if (partialJsonLine.trim()) {
+                    accumulatedContent = processJsonLine(partialJsonLine, messageDiv, contentDiv, accumulatedContent);
                 }
 
                 // Re-initialize mermaid diagrams after complete response
@@ -401,77 +430,59 @@
             }
         }
 
-        function processStreamChunk(chunk, messageDiv, contentDiv, accumulatedContent) {
-            const textToProcess = partialLine + chunk;
-            const lines = textToProcess.split('\n');
 
-            // Save last potentially incomplete line for next chunk
-            partialLine = lines[lines.length - 1];
+        function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
 
-            // Process complete lines
-            for (let i = 0; i < lines.length - 1; i++) {
-                const line = lines[i];
-                if (line.startsWith('data: ')) {
-                    try {
-                        const jsonStr = line.slice(6);
-                        if (!jsonStr.trim()) continue;
+            const data = JSON.parse(json_line);
 
-                        const data = JSON.parse(jsonStr);
+            // Handle system message
+            if (data.message?.role === 'system') {
+                const systemMessageDiv = document.createElement('div');
+                systemMessageDiv.className = 'message system-message';
+                systemMessageDiv.innerHTML = `<strong>System:</strong> ${md.render(data.message.content)}`;
+                messageDiv.insertBefore(systemMessageDiv, contentDiv);
+            }
 
-                        // Handle system message
-                        if (data.message?.role === 'system') {
-                            const systemMessageDiv = document.createElement('div');
-                            systemMessageDiv.className = 'message system-message';
-                            systemMessageDiv.innerHTML = `<strong>System:</strong> ${md.render(data.message.content)}`;
-                            messageDiv.insertBefore(systemMessageDiv, contentDiv);
-                        }
-
-                        // Handle context with images
-                        if (!contextSet && data.context?.length > 0) {
-                            const contextSection = createContextSection(data.context);
-                            // Remove any existing context first
-                            const existingContext = messageDiv.querySelector('.context-container');
-                            if (existingContext) {
-                                existingContext.remove();
-                            }
-                            const contextDiv = document.createElement('div');
-                            contextDiv.innerHTML = contextSection;
-                            messageDiv.appendChild(contextDiv);
-                            contextSet = true;
-                        }
-
-                        // Handle message content and images
-                        if (data.message?.content || data.message?.images) {
-                            if (data.message.content) {
-                                accumulatedContent = (accumulatedContent || '') + data.message.content;
-                            }
-
-                            // Handle images if present
-                            if (data.message.images && data.message.images.length > 0) {
-                                data.message.images.forEach(imageBase64 => {
-                                    const imgElement = document.createElement('img');
-                                    imgElement.src = processBase64Image(imageBase64);
-                                    imgElement.style.maxWidth = '100%';
-                                    contentDiv.appendChild(imgElement);
-                                });
-                            }
-
-                            // Render the markdown content
-                            contentDiv.innerHTML = md.render(accumulatedContent || '');
-                        }
-
-                        if (data.done) {
-                            messageHistory.push({
-                                role: 'assistant',
-                                content: accumulatedContent,
-                                images: data.message?.images
-                            });
-                        }
-                    } catch (e) {
-                        console.warn('Incomplete or invalid JSON in line:', line);
-                        continue;
-                    }
+            // Handle context with images
+            if (!contextSet && data.context?.length > 0) {
+                const contextSection = createContextSection(data.context);
+                // Remove any existing context first
+                const existingContext = messageDiv.querySelector('.context-container');
+                if (existingContext) {
+                    existingContext.remove();
                 }
+                const contextDiv = document.createElement('div');
+                contextDiv.innerHTML = contextSection;
+                messageDiv.appendChild(contextDiv);
+                contextSet = true;
+            }
+
+            // Handle message content and images
+            if (data.message?.content || data.message?.images) {
+                if (data.message.content) {
+                    accumulatedContent = (accumulatedContent || '') + data.message.content;
+                }
+
+                // Handle images if present
+                if (data.message.images && data.message.images.length > 0) {
+                    data.message.images.forEach(imageBase64 => {
+                        const imgElement = document.createElement('img');
+                        imgElement.src = processBase64Image(imageBase64);
+                        imgElement.style.maxWidth = '100%';
+                        contentDiv.appendChild(imgElement);
+                    });
+                }
+
+                // Render the markdown content
+                contentDiv.innerHTML = md.render(accumulatedContent || '');
+            }
+
+            if (data.done) {
+                messageHistory.push({
+                    role: 'assistant',
+                    content: accumulatedContent,
+                    images: data.message?.images
+                });
             }
 
             window.scrollTo(0, document.body.scrollHeight);
@@ -495,7 +506,7 @@
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();  // Prevent default newline
                 sendQuery();
-            } 
+            }
             // Enter with Shift: Allow multiline input
             else if (e.key === 'Enter' && e.shiftKey) {
                 resizeTextarea();
@@ -505,12 +516,12 @@
         function processBase64Image(base64String) {
             // Remove any whitespace or newlines
             base64String = base64String.trim();
-            
+
             // Check if it's already a complete data URL
             if (base64String.startsWith('data:image')) {
                 return base64String;
             }
-            
+
             // Check if it's a partial base64 string
             try {
                 // Try to decode the base64 string
@@ -524,4 +535,5 @@
         }
     </script>
 </body>
+
 </html>
