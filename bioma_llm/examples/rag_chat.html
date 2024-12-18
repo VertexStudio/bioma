@@ -284,7 +284,7 @@
                 </div>
             `;
 
-            console.log("Final context HTML:", contextHtml);
+            console.debug("Final context HTML:", contextHtml);
             return contextHtml;
         }
 
@@ -394,7 +394,7 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let accumulatedContent = '';
-                let partialJsonLine = ''; // Buffer for incomplete JSON lines
+                let buffer = ''; // Buffer for incomplete JSON lines
 
                 // Reset streaming state
                 contextSet = false;
@@ -404,21 +404,30 @@
                     if (done) break;
 
                     const chunk = decoder.decode(value);
-                    partialJsonLine += chunk;
+                    buffer += chunk;
 
-                    // Process complete JSON lines
-                    while (partialJsonLine.includes('}\n')) {
-                        const endIndex = partialJsonLine.indexOf('}\n') + 1;
-                        const completeJsonLine = partialJsonLine.substring(0, endIndex);
-                        partialJsonLine = partialJsonLine.substring(endIndex);
+                    // Process complete lines, keeping any partial line in buffer
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';  // Keep last potentially incomplete line
 
-                        accumulatedContent = processJsonLine(completeJsonLine, messageDiv, contentDiv, accumulatedContent);
+                    // Process each complete line
+                    for (const line of lines) {
+                        if (!line.trim()) continue;  // Skip empty lines
+                        try {
+                            accumulatedContent = processJsonLine(line, messageDiv, contentDiv, accumulatedContent);
+                        } catch (e) {
+                            console.error('Error processing JSON line:', e);
+                        }
                     }
                 }
 
-                // Handle any remaining partial JSON line at the end
-                if (partialJsonLine.trim()) {
-                    accumulatedContent = processJsonLine(partialJsonLine, messageDiv, contentDiv, accumulatedContent);
+                // Handle any remaining complete JSON at the end
+                if (buffer.trim()) {
+                    try {
+                        accumulatedContent = processJsonLine(buffer, messageDiv, contentDiv, accumulatedContent);
+                    } catch (e) {
+                        console.error('Error processing final JSON:', e);
+                    }
                 }
 
                 // Re-initialize mermaid diagrams after complete response
