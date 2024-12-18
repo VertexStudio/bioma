@@ -1,3 +1,4 @@
+use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::embeddings::{ImageModel, Model};
 use bioma_llm::prelude::*;
@@ -10,6 +11,8 @@ enum TestError {
     System(#[from] SystemActorError),
     #[error("Embeddings error: {0}")]
     Embeddings(#[from] EmbeddingsError),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 const CLIPVIT32_EMBEDDING_LENGTH: usize = 512;
@@ -634,7 +637,9 @@ async fn test_image_embeddings_generate() -> Result<(), TestError> {
     let image_paths = vec!["../assets/images/rust-pet.png".to_string()];
     let generated = relay_ctx
         .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { content: EmbeddingContent::Image(image_paths.clone()) },
+            GenerateEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -683,7 +688,10 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: Some(metadata) },
+            StoreEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+                metadata: Some(metadata),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -706,7 +714,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     // Search using the same image
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Image("../assets/images/elephant.jpg".to_string()),
+        query: embeddings::Query::Image(ImageData::Path("../assets/images/elephant.jpg".to_string())),
         threshold: 0.5,
         k: 1,
         source: None,
@@ -759,7 +767,10 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
     let image_paths = vec!["../assets/images/elephant.jpg".to_string()];
     let stored = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings { content: EmbeddingContent::Image(image_paths), metadata: None },
+            StoreEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+                metadata: None,
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -826,7 +837,9 @@ async fn test_embeddings_multiple_images_batch() -> Result<(), TestError> {
 
     let generated = relay_ctx
         .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { content: EmbeddingContent::Image(image_paths) },
+            GenerateEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -871,7 +884,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     let stored_image = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
             StoreEmbeddings {
-                content: EmbeddingContent::Image(vec!["../assets/images/elephant.jpg".to_string()]),
+                content: EmbeddingContent::Image(vec![ImageData::Path("../assets/images/elephant.jpg".to_string())]),
                 metadata: Some(vec![serde_json::json!({"type": "image"})]),
             },
             &embeddings_id,
@@ -1071,6 +1084,105 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         found_sources.iter().all(|&found| found),
         "Expected results from all documents when no source filter is applied"
     );
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_base64_image_embeddings() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+    let table_prefix = embeddings_actor.table_prefix();
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Read image file and convert to base64
+    let image_data = std::fs::read("../assets/images/elephant.jpg").map_err(TestError::from)?;
+    let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_data);
+
+    // Test both raw base64 and data URL formats
+    let test_cases = vec![base64_image.clone(), format!("data:image/jpeg;base64,{}", base64_image)];
+
+    for (i, base64_str) in test_cases.iter().enumerate() {
+        // Store base64 image embeddings
+        let stored = relay_ctx
+            .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+                StoreEmbeddings {
+                    content: EmbeddingContent::Image(vec![ImageData::Base64(base64_str.clone())]),
+                    metadata: Some(vec![serde_json::json!({
+                        "description": "Base64 elephant image",
+                        "format": if i == 0 { "raw" } else { "data_url" }
+                    })]),
+                },
+                &embeddings_id,
+                SendOptions::default(),
+            )
+            .await?;
+
+        // Create source record
+        let source_query = include_str!("../sql/source.surql");
+        engine
+            .db()
+            .lock()
+            .await
+            .query(source_query)
+            .bind(("source", format!("base64_test_{}.test", i)))
+            .bind(("uri", format!("base64_uri_{}.test", i)))
+            .bind(("emb_ids", stored.ids))
+            .bind(("prefix", table_prefix.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
+
+        // Search using the same base64 image
+        let top_k = embeddings::TopK {
+            query: embeddings::Query::Image(ImageData::Base64(base64_str.clone())),
+            threshold: 0.5,
+            k: 1,
+            source: None,
+        };
+
+        let similarities = relay_ctx
+            .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+            .await?;
+
+        // Verify results
+        assert_eq!(similarities.len(), 1);
+        assert!(similarities[0].similarity > 0.99, "Expected very high similarity for exact match");
+        assert_eq!(similarities[0].metadata.as_ref().unwrap()["description"], "Base64 elephant image");
+    }
+
+    // Cross-modal search using text
+    let top_k = embeddings::TopK {
+        query: embeddings::Query::Text("an elephant".to_string()),
+        threshold: 0.2,
+        k: 2,
+        source: None,
+    };
+
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
+
+    // Verify cross-modal search results
+    assert_eq!(similarities.len(), 2); // Should find both stored versions
+    assert!(similarities.iter().all(|s| s.metadata.as_ref().unwrap()["description"] == "Base64 elephant image"));
 
     // Terminate the actor
     embeddings_handle.abort();
