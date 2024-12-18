@@ -93,6 +93,7 @@ pub enum CodeLanguage {
 pub enum TextType {
     Pdf,
     Markdown,
+    MCFile,
     Code(CodeLanguage),
     Text,
 }
@@ -221,6 +222,7 @@ impl Indexer {
                 let (text_type, content) = match text_type {
                     TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
                     TextType::Pdf => (TextType::Markdown, content),
+                    TextType::MCFile => (TextType::Markdown, content),
                     _ => (text_type, content),
                 };
 
@@ -395,6 +397,12 @@ impl Message<IndexGlobs> for Indexer {
                                     continue;
                                 }
                             }
+                        }
+                        // Special handling for MC files
+                        else if ext == "docx" || ext == "pptx" || ext == "xlsx" {
+                            let content = String::from("Testing MC file");
+
+                            Content::Text { content, text_type: TextType::MCFile, chunk_config }
                         } else {
                             // Handle all other text-based files
                             let text_type = match ext {
