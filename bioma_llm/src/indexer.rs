@@ -43,7 +43,7 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
-    #[error("PdfAnalyzer actor not initialized")]
+    #[error("Markitdown actor not initialized")]
     MarkitdownActorNotInitialized,
     #[error("SurrealDB error: {0}")]
     SurrealDB(#[from] surrealdb::Error),
