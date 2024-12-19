@@ -1,6 +1,5 @@
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::path::PathBuf;
 use tracing::{error, info};
 use url::Url;
@@ -43,17 +42,23 @@ impl Default for MarkitDown {
 
 impl MarkitDown {
     async fn post_markitdown(&self, req: &AnalyzeMCFile) -> Result<String, MarkitDownError> {
-        dbg!(serde_json::to_string(&req).unwrap());
-        let form_result = reqwest::Client::new()
-            .post(self.markitdown_url.clone())
-            .header("Content-Type", "application/json")
-            .json(&req)
-            .send()
-            .await?
-            .json::<MarkitDownServerResponse>()
-            .await?;
+        let form_result = reqwest::multipart::Form::new().file("file", &req.file_path).await;
 
-        Ok(form_result.text_content)
+        match form_result {
+            Ok(form) => {
+                let response = reqwest::Client::new().post(self.markitdown_url.clone()).multipart(form).send().await;
+
+                match response {
+                    Ok(resp) => {
+                        let json_response = serde_json::from_str::<MarkitDownServerResponse>(&resp.text().await?)?;
+
+                        Ok(json_response.text_content)
+                    }
+                    Err(error) => Err(MarkitDownError::ErrorPostFile(error)),
+                }
+            }
+            Err(error) => Err(MarkitDownError::ErrorFile(error)),
+        }
     }
 }
 
