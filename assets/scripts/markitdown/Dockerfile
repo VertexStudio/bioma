@@ -1,0 +1,17 @@
+# Use an official Python runtime as a parent image
+FROM python:3.13-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the current directory contents into the container
+COPY . /app
+
+# Install any necessary dependencies
+RUN pip install flask markitdown
+
+# Expose the port your Flask app runs on
+EXPOSE 5000
+
+# Run the Flask app
+CMD ["python", "markitdown_script.py"]
