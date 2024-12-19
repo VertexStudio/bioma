@@ -44,7 +44,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Store image embeddings
     let embeddings_ids = relay_ctx
         .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-            StoreEmbeddings { content: EmbeddingContent::Image(image_paths.clone()), metadata: None },
+            StoreEmbeddings {
+                content: EmbeddingContent::Image(image_paths.iter().map(|p| ImageData::Path(p.clone())).collect()),
+                metadata: None,
+            },
             &embeddings_id,
             SendOptions::default(),
         )
@@ -56,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Search for similar images using an image query
     let top_k = embeddings::TopK {
-        query: embeddings::Query::Image("assets/images/rust-pet.png".to_string()),
+        query: embeddings::Query::Image(ImageData::Path("assets/images/rust-pet.png".to_string())),
         threshold: 0.5,
         k: 3,
         source: None,
@@ -76,7 +79,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate embeddings without storing them
     let generated = relay_ctx
         .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-            GenerateEmbeddings { content: EmbeddingContent::Image(vec!["assets/images/rust-pet.png".to_string()]) },
+            GenerateEmbeddings {
+                content: EmbeddingContent::Image(vec![ImageData::Path("assets/images/rust-pet.png".to_string())]),
+            },
             &embeddings_id,
             SendOptions::default(),
         )
