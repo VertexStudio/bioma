@@ -7,8 +7,10 @@ markitdown = MarkItDown()
 @app.route('/convert', methods=['POST'])
 def convert():
     try:
-        print("Received request", request)
-        file_path = request.form['file_path']
+        print("Received request", request.json)
+        data = request.json  # Parse JSON data
+        print("Received JSON data:", data)
+        file_path = data.get('file_path') 
         print("Got file", file_path)
         result = markitdown.convert(file_path)
         print("Converted file", result)
