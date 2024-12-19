@@ -1,5 +1,5 @@
 use crate::{
-    embeddings::{Embeddings, EmbeddingsError, StoreEmbeddings},
+    embeddings::{Embeddings, EmbeddingsError, ImageData, StoreEmbeddings},
     markitdown::{AnalyzeMCFile, MarkitDown, MarkitDownError},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
@@ -201,7 +201,7 @@ impl Indexer {
                 let result = ctx
                     .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                         StoreEmbeddings {
-                            content: EmbeddingContent::Image(vec![path_clone]),
+                            content: EmbeddingContent::Image(vec![ImageData::Path(path_clone)]),
                             metadata: metadata.map(|m| vec![m]),
                         },
                         embeddings_id,
