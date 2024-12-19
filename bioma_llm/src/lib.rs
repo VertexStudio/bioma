@@ -1,6 +1,7 @@
 pub mod chat;
 pub mod embeddings;
 pub mod indexer;
+pub mod markitdown;
 pub mod pdf_analyzer;
 pub mod rerank;
 pub mod retriever;
