@@ -8,10 +8,10 @@ WORKDIR /app
 COPY . /app
 
 # Install any necessary dependencies
-RUN pip install flask markitdown
+RUN pip install flask markitdown gunicorn
 
 # Expose the port your Flask app runs on
 EXPOSE 5000
 
 # Run the Flask app
-CMD ["python", "markitdown_script.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "markitdown_script:app"]
