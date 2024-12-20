@@ -1,6 +1,6 @@
 services:
   ollama:
-    image: ollama/ollama
+    image: ollama/ollama:0.5.4
     container_name: bioma-ollama
     deploy:
       resources:
@@ -35,7 +35,7 @@ services:
       - bioma-surreal_data:/data
     command: chown -R 1000:1000 /data
 
-  markitdown_service:
+  markitdown:
     build:
       context: assets/scripts/markitdown
       dockerfile: Dockerfile
