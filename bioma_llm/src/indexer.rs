@@ -1,5 +1,6 @@
 use crate::{
     embeddings::{Embeddings, EmbeddingsError, ImageData, StoreEmbeddings},
+    markitdown::{AnalyzeMCFile, MarkitDown, MarkitDownError},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
 };
 use bioma_actor::prelude::*;
@@ -26,6 +27,8 @@ pub enum IndexerError {
     Embeddings(#[from] EmbeddingsError),
     #[error("PdfAnalyzer error: {0}")]
     PdfAnalyzer(#[from] PdfAnalyzerError),
+    #[error("Markitdown error: {0}")]
+    Markitdown(#[from] MarkitDownError),
     #[error("Glob error: {0}")]
     Glob(#[from] glob::GlobError),
     #[error("Pattern error: {0}")]
@@ -40,6 +43,8 @@ pub enum IndexerError {
     EmbeddingsActorNotInitialized,
     #[error("PdfAnalyzer actor not initialized")]
     PdfAnalyzerActorNotInitialized,
+    #[error("Markitdown actor not initialized")]
+    MarkitdownActorNotInitialized,
     #[error("SurrealDB error: {0}")]
     SurrealDB(#[from] surrealdb::Error),
     #[error("Other error: {0}")]
@@ -93,6 +98,7 @@ pub enum CodeLanguage {
 pub enum TextType {
     Pdf,
     Markdown,
+    MCFile,
     Code(CodeLanguage),
     Text,
 }
@@ -221,6 +227,7 @@ impl Indexer {
                 let (text_type, content) = match text_type {
                     TextType::Code(CodeLanguage::Html) => (TextType::Markdown, mdka::from_html(&content)),
                     TextType::Pdf => (TextType::Markdown, content),
+                    TextType::MCFile => (TextType::Markdown, content),
                     _ => (text_type, content),
                 };
 
@@ -302,6 +309,9 @@ impl Message<IndexGlobs> for Indexer {
         };
         let Some(pdf_analyzer_id) = &self.pdf_analyzer_id else {
             return Err(IndexerError::PdfAnalyzerActorNotInitialized);
+        };
+        let Some(markitdown_id) = &self.markitdown_id else {
+            return Err(IndexerError::MarkitdownActorNotInitialized);
         };
 
         let total_index_globs_time = std::time::Instant::now();
@@ -392,6 +402,23 @@ impl Message<IndexGlobs> for Indexer {
                                 Ok(content) => Content::Text { content, text_type: TextType::Pdf, chunk_config },
                                 Err(e) => {
                                     error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                                    continue;
+                                }
+                            }
+                        }
+                        // Special handling for MC files
+                        else if ext == "docx" || ext == "pptx" || ext == "xlsx" {
+                            match ctx
+                                .send_and_wait_reply::<MarkitDown, AnalyzeMCFile>(
+                                    AnalyzeMCFile { file_path: pathbuf.clone() },
+                                    markitdown_id,
+                                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                )
+                                .await
+                            {
+                                Ok(content) => Content::Text { content, text_type: TextType::MCFile, chunk_config },
+                                Err(e) => {
+                                    error!("Failed to convert MC file to md: {}. Error: {}", pathbuf.display(), e);
                                     continue;
                                 }
                             }
@@ -502,12 +529,16 @@ impl Message<DeleteSource> for Indexer {
 pub struct Indexer {
     pub embeddings: Embeddings,
     pub pdf_analyzer: PdfAnalyzer,
+    pub markitdown: MarkitDown,
     embeddings_id: Option<ActorId>,
     pdf_analyzer_id: Option<ActorId>,
+    markitdown_id: Option<ActorId>,
     #[serde(skip)]
     pdf_analyzer_handle: Option<tokio::task::JoinHandle<()>>,
     #[serde(skip)]
     embeddings_handle: Option<tokio::task::JoinHandle<()>>,
+    #[serde(skip)]
+    markitdown_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for Indexer {
@@ -515,10 +546,13 @@ impl Default for Indexer {
         Self {
             embeddings: Embeddings::default(),
             pdf_analyzer: PdfAnalyzer::default(),
+            markitdown: MarkitDown::default(),
             embeddings_id: None,
             pdf_analyzer_id: None,
+            markitdown_id: None,
             pdf_analyzer_handle: None,
             embeddings_handle: None,
+            markitdown_handle: None,
         }
     }
 }
@@ -594,8 +628,27 @@ impl Indexer {
             }
         });
 
+        // Generate child id for markitdown
+        let markitdown_id = ActorId::of::<MarkitDown>(format!("{}/markitdown", self_id.name()));
+        self.markitdown_id = Some(markitdown_id.clone());
+
+        let (mut markitdown_ctx, mut markitdown_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            markitdown_id.clone(),
+            self.markitdown.clone(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
+
+        let markitdown_handle = tokio::spawn(async move {
+            if let Err(e) = markitdown_actor.start(&mut markitdown_ctx).await {
+                error!("MarkitDown actor error: {}", e);
+            }
+        });
+
         self.pdf_analyzer_handle = Some(pdf_analyzer_handle);
         self.embeddings_handle = Some(embeddings_handle);
+        self.markitdown_handle = Some(markitdown_handle);
 
         info!("Indexer ready");
 
