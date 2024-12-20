@@ -30,7 +30,7 @@ impl ActorError for MarkitDownError {}
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize, Clone)]
 pub struct MarkitDown {
-    #[builder(default = Url::parse("http://localhost:5000/convert").unwrap())]
+    #[builder(default = Url::parse("http://localhost:5001/convert").unwrap())]
     pub markitdown_url: Url,
 }
 
@@ -46,6 +46,7 @@ impl MarkitDown {
 
         match form_result {
             Ok(form) => {
+                dbg!(&self.markitdown_url.clone());
                 let response = reqwest::Client::new().post(self.markitdown_url.clone()).multipart(form).send().await;
 
                 match response {
