@@ -1,5 +1,7 @@
 use crate::prelude::*;
+use actor::ActorRecord;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -54,5 +56,17 @@ fn is_workspace_root(dir: &Path) -> bool {
         content.contains("[workspace]")
     } else {
         false
+    }
+}
+
+/// Marge to Value Objects
+pub fn merge_serde_json_value(a: &mut Value, b: &Value) {
+    match (a, b) {
+        (Value::Object(a), Value::Object(b)) => {
+            for (k, v) in b {
+                merge_serde_json_value(a.entry(k.clone()).or_insert(Value::Null), v);
+            }
+        }
+        (a, b) => *a = b.clone(),
     }
 }
