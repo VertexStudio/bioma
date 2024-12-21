@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use actor::ActorRecord;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
