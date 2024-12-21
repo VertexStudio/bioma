@@ -1,4 +1,5 @@
 use crate::engine::{Engine, Record};
+use crate::util::merge_serde_json_value;
 use futures::{future, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -671,6 +672,7 @@ pub enum SpawnExistsOptions {
 ///     .spawn(engine, id, SpawnOptions::default())
 ///     .await?;
 /// ```
+
 pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + Sync {
     /// The error type returned by this actor's operations.
     type Error: ActorError;
@@ -711,7 +713,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             let actor_record: Option<ActorRecord> =
                 engine.db().lock().await.select(&id.record_id()).await.map_err(SystemActorError::from)?;
 
-            if let Some(actor_record) = actor_record {
+            if let Some(mut actor_record) = actor_record {
                 // Actor exists, apply options
                 match options.exists {
                     SpawnExistsOptions::Reset => {
@@ -726,7 +728,25 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     SpawnExistsOptions::Restore => {
                         // Restore the actor by loading its state from the database
                         let actor_state = actor_record.state;
-                        let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
+
+                        // Get the actor "template"
+                        let empty_actor_state = serde_json::to_value(&actor).map_err(SystemActorError::from)?;
+
+                        // Merge the restored state into the template
+                        merge_serde_json_value(&mut empty_actor_state.clone(), &actor_state);
+                        actor_record.state = empty_actor_state;
+
+                        // Update actor record
+                        let _record: Option<Record> = engine
+                            .db()
+                            .lock()
+                            .await
+                            .update(id.record_id())
+                            .content(actor_record.clone())
+                            .await
+                            .map_err(SystemActorError::from)?;
+
+                        let actor: Self = serde_json::from_value(actor_record.state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
                         let ctx = ActorContext::new(engine.clone(), id.clone());
                         return Ok((ctx, actor));
