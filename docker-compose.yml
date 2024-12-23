@@ -2,6 +2,9 @@ services:
   ollama:
     image: ollama/ollama:0.5.4
     container_name: bioma-ollama
+    environment:
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_HOST=0.0.0.0
     deploy:
       resources:
         reservations:
