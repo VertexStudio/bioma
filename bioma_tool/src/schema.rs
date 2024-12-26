@@ -111,12 +111,8 @@ pub struct ClientCapabilitiesRoots {
 pub struct ClientCapabilities {
     #[doc = " Experimental, non-standard capabilities that the client supports."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub experimental: Option<
-        ::std::collections::BTreeMap<
-            String,
-            ::std::collections::BTreeMap<String, serde_json::Value>,
-        >,
-    >,
+    pub experimental:
+        Option<::std::collections::BTreeMap<String, ::std::collections::BTreeMap<String, serde_json::Value>>>,
     #[doc = " Present if the client supports listing roots."]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roots: Option<ClientCapabilitiesRoots>,
@@ -1116,12 +1112,8 @@ pub struct ServerCapabilitiesPromptsResourcesTools {
 pub struct ServerCapabilities {
     #[doc = " Experimental, non-standard capabilities that the server supports."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub experimental: Option<
-        ::std::collections::BTreeMap<
-            String,
-            ::std::collections::BTreeMap<String, serde_json::Value>,
-        >,
-    >,
+    pub experimental:
+        Option<::std::collections::BTreeMap<String, ::std::collections::BTreeMap<String, serde_json::Value>>>,
     #[doc = " Present if the server supports sending log messages to the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logging: Option<::std::collections::BTreeMap<String, serde_json::Value>>,
@@ -1205,12 +1197,8 @@ pub struct TextResourceContents {
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct ToolInputSchema {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<
-        ::std::collections::BTreeMap<
-            String,
-            ::std::collections::BTreeMap<String, serde_json::Value>,
-        >,
-    >,
+    pub properties:
+        Option<::std::collections::BTreeMap<String, ::std::collections::BTreeMap<String, serde_json::Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<Vec<String>>,
     #[serde(rename = "type")]

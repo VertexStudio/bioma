@@ -9,7 +9,8 @@ pub mod retriever;
 pub mod prelude {
     pub use crate::chat::{self, Chat, ChatError, ChatMessages};
     pub use crate::embeddings::{
-        self, EmbeddingContent, Embeddings, EmbeddingsError, GenerateEmbeddings, GeneratedEmbeddings, StoreEmbeddings, ImageData
+        self, EmbeddingContent, Embeddings, EmbeddingsError, GenerateEmbeddings, GeneratedEmbeddings, ImageData,
+        StoreEmbeddings,
     };
     pub use crate::indexer::{self, DeleteSource, DeletedSource, IndexGlobs, Indexer, IndexerError};
     pub use crate::rerank::{self, RankTexts, RankedText, RankedTexts, Rerank, RerankError};

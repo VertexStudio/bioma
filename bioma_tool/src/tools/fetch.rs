@@ -55,10 +55,7 @@ pub struct Fetch {
 impl Default for Fetch {
     fn default() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            client: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_default(),
             user_agent: "Bioma/1.0 (+https://github.com/BiomaAI/bioma)".to_string(),
         }
     }
@@ -66,17 +63,12 @@ impl Default for Fetch {
 
 impl ToolDef for Fetch {
     const NAME: &'static str = "fetch";
-    const DESCRIPTION: &'static str =
-        "Fetches a URL from the internet and extracts its contents as markdown";
+    const DESCRIPTION: &'static str = "Fetches a URL from the internet and extracts its contents as markdown";
     type Properties = FetchProperties;
 
     fn def() -> Tool {
         let input_schema = serde_json::from_str::<ToolInputSchema>(FETCH_SCHEMA).unwrap();
-        Tool {
-            name: Self::NAME.to_string(),
-            description: Some(Self::DESCRIPTION.to_string()),
-            input_schema,
-        }
+        Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
     async fn call(&self, properties: Self::Properties) -> Result<CallToolResult, ToolError> {
@@ -144,12 +136,7 @@ impl Fetch {
             .join("/robots.txt")
             .map_err(|e| ToolError::Custom(format!("Failed to construct robots.txt URL: {}", e)))?;
 
-        let response = self
-            .client
-            .get(robots_url)
-            .header("User-Agent", &self.user_agent)
-            .send()
-            .await;
+        let response = self.client.get(robots_url).header("User-Agent", &self.user_agent).send().await;
 
         match response {
             Ok(resp) => {
@@ -157,17 +144,11 @@ impl Fetch {
                     return Ok(()); // No robots.txt, assume allowed
                 }
 
-                let robots_content = resp
-                    .text()
-                    .await
-                    .map_err(|e| ToolError::Custom(format!("Failed to read robots.txt: {}", e)))?;
+                let robots_content =
+                    resp.text().await.map_err(|e| ToolError::Custom(format!("Failed to read robots.txt: {}", e)))?;
 
                 let mut matcher = DefaultMatcher::default();
-                if !matcher.one_agent_allowed_by_robots(
-                    &robots_content,
-                    &self.user_agent,
-                    url.as_str(),
-                ) {
+                if !matcher.one_agent_allowed_by_robots(&robots_content, &self.user_agent, url.as_str()) {
                     return Err(ToolError::Custom("Access denied by robots.txt".to_string()));
                 }
                 Ok(())
@@ -177,11 +158,7 @@ impl Fetch {
     }
 
     async fn fetch_url(&self, url: &Url) -> Result<reqwest::Response, reqwest::Error> {
-        self.client
-            .get(url.as_str())
-            .header("User-Agent", &self.user_agent)
-            .send()
-            .await
+        self.client.get(url.as_str()).header("User-Agent", &self.user_agent).send().await
     }
 
     async fn process_content(
@@ -190,17 +167,11 @@ impl Fetch {
         response: reqwest::Response,
         properties: &FetchProperties,
     ) -> Result<String, ToolError> {
-        let content_type = response
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_string();
+        let content_type =
+            response.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
 
-        let html = response
-            .text()
-            .await
-            .map_err(|e| ToolError::Custom(format!("Failed to get response text: {}", e)))?;
+        let html =
+            response.text().await.map_err(|e| ToolError::Custom(format!("Failed to get response text: {}", e)))?;
 
         let is_html = html.trim().starts_with("<html") || content_type.contains("text/html");
 
@@ -214,12 +185,7 @@ impl Fetch {
             let readable = readability::extract(&mut cursor, url, ExtractOptions::default());
             let readable = match readable {
                 Ok(readable) => readable,
-                Err(e) => {
-                    return Err(ToolError::Custom(format!(
-                        "Failed to extract content: {}",
-                        e
-                    )))
-                }
+                Err(e) => return Err(ToolError::Custom(format!("Failed to extract content: {}", e))),
             };
 
             // Convert to markdown
@@ -228,11 +194,7 @@ impl Fetch {
 
         // Apply start_index and max_length
         let start = properties.start_index.unwrap_or(0);
-        let content = if start < content.len() {
-            content[start..].to_string()
-        } else {
-            String::new()
-        };
+        let content = if start < content.len() { content[start..].to_string() } else { String::new() };
 
         let content = if let Some(max_length) = properties.max_length {
             content.chars().take(max_length).collect()
@@ -275,12 +237,8 @@ mod tests {
         let tool = Fetch::default();
 
         // Test allowed URL
-        let props = FetchProperties {
-            url: format!("{}/test", server.url()),
-            max_length: None,
-            start_index: None,
-            raw: None,
-        };
+        let props =
+            FetchProperties { url: format!("{}/test", server.url()), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(false));
@@ -323,12 +281,7 @@ mod tests {
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(false));
-        assert!(result.content[0]
-            .get("text")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .contains("<html><body>"));
+        assert!(result.content[0].get("text").unwrap().as_str().unwrap().contains("<html><body>"));
 
         html_mock.remove_async().await;
     }
@@ -356,10 +309,7 @@ mod tests {
         };
 
         let result = tool.call(props).await.unwrap();
-        assert_eq!(
-            result.content[0].get("text").unwrap().as_str().unwrap(),
-            "12345"
-        );
+        assert_eq!(result.content[0].get("text").unwrap().as_str().unwrap(), "12345");
 
         // Test start_index
         let props = FetchProperties {
@@ -370,10 +320,7 @@ mod tests {
         };
 
         let result = tool.call(props).await.unwrap();
-        assert_eq!(
-            result.content[0].get("text").unwrap().as_str().unwrap(),
-            "67890"
-        );
+        assert_eq!(result.content[0].get("text").unwrap().as_str().unwrap(), "67890");
 
         html_mock.remove_async().await;
     }
@@ -383,11 +330,7 @@ mod tests {
         let mut server = mockito::Server::new_async().await;
 
         // Test 404 response
-        let not_found_mock = server
-            .mock("GET", "/not-found")
-            .with_status(404)
-            .create_async()
-            .await;
+        let not_found_mock = server.mock("GET", "/not-found").with_status(404).create_async().await;
 
         let tool = Fetch::default();
         let props = FetchProperties {
@@ -401,12 +344,7 @@ mod tests {
         assert_eq!(result.is_error, Some(true));
 
         // Test invalid URL
-        let props = FetchProperties {
-            url: "not-a-url".to_string(),
-            max_length: None,
-            start_index: None,
-            raw: None,
-        };
+        let props = FetchProperties { url: "not-a-url".to_string(), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(true));

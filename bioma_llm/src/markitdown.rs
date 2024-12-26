@@ -46,7 +46,8 @@ impl MarkitDown {
 
         match form_result {
             Ok(form) => {
-                let markitdown_url = self.markitdown_url.clone().join("/convert").expect("Failed to join markitdown URL");
+                let markitdown_url =
+                    self.markitdown_url.clone().join("/convert").expect("Failed to join markitdown URL");
                 let response = reqwest::Client::new().post(markitdown_url).multipart(form).send().await;
 
                 match response {

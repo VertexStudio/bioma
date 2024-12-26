@@ -10,9 +10,8 @@ pub mod tools;
 pub mod transport;
 
 use schema::{
-    CallToolRequestParams, CancelledNotificationParams, Implementation, InitializeRequestParams,
-    InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult, Prompt, Resource,
-    ServerCapabilities,
+    CallToolRequestParams, CancelledNotificationParams, Implementation, InitializeRequestParams, InitializeResult,
+    ListPromptsResult, ListResourcesResult, ListToolsResult, Prompt, Resource, ServerCapabilities,
 };
 
 #[derive(Default, Clone)]
@@ -27,9 +26,7 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
 }
 
-pub async fn start_server<T: ModelContextProtocolServer>(
-    mut transport: TransportType,
-) -> Result<()> {
+pub async fn start_server<T: ModelContextProtocolServer>(mut transport: TransportType) -> Result<()> {
     let server = T::new();
     let mut io_handler = MetaIoHandler::default();
 
@@ -39,50 +36,38 @@ pub async fn start_server<T: ModelContextProtocolServer>(
     let server_prompts = server.clone();
     let server_call = server.clone();
 
-    io_handler.add_method_with_meta(
-        "initialize",
-        move |params: Params, _meta: ServerMetadata| {
-            let server = server.clone();
-            debug!("Handling initialize request");
+    io_handler.add_method_with_meta("initialize", move |params: Params, _meta: ServerMetadata| {
+        let server = server.clone();
+        debug!("Handling initialize request");
 
-            async move {
-                let init_params: InitializeRequestParams = params.parse().map_err(|e| {
-                    error!("Failed to parse initialize parameters: {}", e);
-                    jsonrpc_core::Error::invalid_params(e.to_string())
-                })?;
+        async move {
+            let init_params: InitializeRequestParams = params.parse().map_err(|e| {
+                error!("Failed to parse initialize parameters: {}", e);
+                jsonrpc_core::Error::invalid_params(e.to_string())
+            })?;
 
-                let result = InitializeResult {
-                    capabilities: server.get_capabilities(),
-                    protocol_version: init_params.protocol_version,
-                    server_info: Implementation {
-                        name: "rust-mcp-server".to_string(),
-                        version: "0.1.0".to_string(),
-                    },
-                    instructions: Some("Basic MCP server with tool support".to_string()),
-                    meta: None,
-                };
+            let result = InitializeResult {
+                capabilities: server.get_capabilities(),
+                protocol_version: init_params.protocol_version,
+                server_info: Implementation { name: "bioma-mcp-server".to_string(), version: "0.1.0".to_string() },
+                instructions: Some("Bioma MCP server".to_string()),
+                meta: None,
+            };
 
-                info!("Successfully handled initialize request");
-                Ok(serde_json::to_value(result).map_err(|e| {
-                    error!("Failed to serialize initialize result: {}", e);
-                    jsonrpc_core::Error::invalid_params(e.to_string())
-                })?)
-            }
-        },
-    );
+            info!("Successfully handled initialize request");
+            Ok(serde_json::to_value(result).map_err(|e| {
+                error!("Failed to serialize initialize result: {}", e);
+                jsonrpc_core::Error::invalid_params(e.to_string())
+            })?)
+        }
+    });
 
-    io_handler.add_notification_with_meta(
-        "notifications/initialized",
-        |_params, _meta: ServerMetadata| {
-            info!("Received initialized notification");
-        },
-    );
+    io_handler.add_notification_with_meta("notifications/initialized", |_params, _meta: ServerMetadata| {
+        info!("Received initialized notification");
+    });
 
-    io_handler.add_notification_with_meta(
-        "cancelled",
-        move |params: Params, _meta: ServerMetadata| match params
-            .parse::<CancelledNotificationParams>()
-        {
+    io_handler.add_notification_with_meta("cancelled", move |params: Params, _meta: ServerMetadata| {
+        match params.parse::<CancelledNotificationParams>() {
             Ok(cancel_params) => {
                 info!(
                     "Received cancellation for request {}: {}",
@@ -93,19 +78,16 @@ pub async fn start_server<T: ModelContextProtocolServer>(
             Err(e) => {
                 error!("Failed to parse cancellation params: {}", e);
             }
-        },
-    );
+        }
+    });
 
     io_handler.add_method("resources/list", move |_params| {
         let server = server_resources.clone();
         debug!("Handling resources/list request");
 
         async move {
-            let response = ListResourcesResult {
-                next_cursor: None,
-                resources: server.get_resources().clone(),
-                meta: None,
-            };
+            let response =
+                ListResourcesResult { next_cursor: None, resources: server.get_resources().clone(), meta: None };
 
             info!("Successfully handled resources/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
@@ -117,11 +99,7 @@ pub async fn start_server<T: ModelContextProtocolServer>(
         debug!("Handling prompts/list request");
 
         async move {
-            let response = ListPromptsResult {
-                next_cursor: None,
-                prompts: server.get_prompts().clone(),
-                meta: None,
-            };
+            let response = ListPromptsResult { next_cursor: None, prompts: server.get_prompts().clone(), meta: None };
 
             info!("Successfully handled prompts/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
@@ -132,18 +110,10 @@ pub async fn start_server<T: ModelContextProtocolServer>(
         let server = server_tools.clone();
         debug!("Handling tools/list request");
 
-        let tools = server
-            .get_tools()
-            .iter()
-            .map(|tool| tool.def())
-            .collect::<Vec<_>>();
+        let tools = server.get_tools().iter().map(|tool| tool.def()).collect::<Vec<_>>();
 
         async move {
-            let response = ListToolsResult {
-                next_cursor: None,
-                tools: tools,
-                meta: None,
-            };
+            let response = ListToolsResult { next_cursor: None, tools: tools, meta: None };
 
             info!("Successfully handled tools/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
@@ -197,17 +167,14 @@ pub async fn start_server<T: ModelContextProtocolServer>(
 
     // Handle incoming messages
     while let Some(request) = rx.recv().await {
-        let response = io_handler
-            .handle_request(&request, ServerMetadata::default())
-            .await
-            .unwrap_or_else(|| {
-                if !request.contains(r#""method":"notifications/"#) && 
-                   !request.contains(r#""method":"cancelled"#) {
-                    error!("Error handling request");
-                    return r#"{"jsonrpc": "2.0", "error": {"code": -32603, "message": "Internal error"}, "id": null}"#.to_string();
-                }
-                String::new()
-            });
+        let response = io_handler.handle_request(&request, ServerMetadata::default()).await.unwrap_or_else(|| {
+            if !request.contains(r#""method":"notifications/"#) && !request.contains(r#""method":"cancelled"#) {
+                error!("Error handling request");
+                return r#"{"jsonrpc": "2.0", "error": {"code": -32603, "message": "Internal error"}, "id": null}"#
+                    .to_string();
+            }
+            String::new()
+        });
 
         if !response.is_empty() {
             if let Err(e) = transport.send_response(response).await {
