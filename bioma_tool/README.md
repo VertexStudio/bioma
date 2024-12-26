@@ -1,6 +1,6 @@
 # Bioma Tool
 
-A Rust implementation of the Model Context Protocol (MCP) server.
+A Rust implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
 
 ## What is Model Context Protocol?
 
@@ -32,12 +32,17 @@ The implementation includes several built-in tools:
 
 To start a basic MCP server:
 
-Configure the claude_config.json file
+Configure the claude_config.json file. In macOS, it is located in the following path:
+```
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+Add the following to the file:
 ```
 {
     "mcpServers": {
         "bioma-tool": {
-            "command": "/Users/rozgo/BiomaAI/bioma/target/debug/bioma-tool",
+            "command": "/Users/rozgo/BiomaAI/bioma/target/debug/examples/mcp_server",
             "args": [
                 "--log-file",
                 "/Users/rozgo/BiomaAI/bioma/.output/mcp_server.log",

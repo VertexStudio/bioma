@@ -100,8 +100,7 @@ impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
                 None => Value::Null,
             };
 
-            let properties: T::Properties =
-                serde_json::from_value(value).map_err(ToolError::ArgumentParse)?;
+            let properties: T::Properties = serde_json::from_value(value).map_err(ToolError::ArgumentParse)?;
 
             self.call(properties).await
         })

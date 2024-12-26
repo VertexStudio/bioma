@@ -69,16 +69,9 @@ impl ModelContextProtocolServer for McpServer {
 
     fn get_capabilities(&self) -> ServerCapabilities {
         ServerCapabilities {
-            tools: Some(ServerCapabilitiesPromptsResourcesTools {
-                list_changed: Some(false),
-            }),
-            resources: Some(ServerCapabilitiesPromptsResources {
-                list_changed: Some(false),
-                subscribe: Some(false),
-            }),
-            prompts: Some(ServerCapabilitiesPrompts {
-                list_changed: Some(false),
-            }),
+            tools: Some(ServerCapabilitiesPromptsResourcesTools { list_changed: Some(false) }),
+            resources: Some(ServerCapabilitiesPromptsResources { list_changed: Some(false), subscribe: Some(false) }),
+            prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
             ..Default::default()
         }
     }

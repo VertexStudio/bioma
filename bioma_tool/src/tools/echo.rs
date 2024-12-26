@@ -30,11 +30,7 @@ impl ToolDef for Echo {
 
     fn def() -> Tool {
         let input_schema = serde_json::from_str::<ToolInputSchema>(ECHO_SCHEMA).unwrap();
-        Tool {
-            name: Self::NAME.to_string(),
-            description: Some(Self::DESCRIPTION.to_string()),
-            input_schema,
-        }
+        Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
     async fn call(&self, properties: Self::Properties) -> Result<CallToolResult, ToolError> {
@@ -59,9 +55,7 @@ mod tests {
     #[tokio::test]
     async fn test_echo_tool() {
         let tool = Echo;
-        let props = EchoProperties {
-            message: "hello".to_string(),
-        };
+        let props = EchoProperties { message: "hello".to_string() };
 
         let result = ToolDef::call(&tool, props).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "hello");

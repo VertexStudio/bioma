@@ -51,9 +51,7 @@ pub struct MemoryProperties {
     #[schemars(with = "String")]
     action: MemoryAction,
 
-    #[schemars(
-        description = "The key to store/retrieve/delete the memory under (not required for list/clear)"
-    )]
+    #[schemars(description = "The key to store/retrieve/delete the memory under (not required for list/clear)")]
     key: Option<String>,
 
     #[schemars(description = "The JSON value to store (only required for store action)")]
@@ -71,11 +69,7 @@ impl ToolDef for Memory {
 
     fn def() -> Tool {
         let input_schema = serde_json::from_str::<ToolInputSchema>(MEMORY_SCHEMA).unwrap();
-        Tool {
-            name: Self::NAME.to_string(),
-            description: Some(Self::DESCRIPTION.to_string()),
-            input_schema,
-        }
+        Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
     async fn call(&self, properties: Self::Properties) -> Result<CallToolResult, ToolError> {
@@ -104,8 +98,7 @@ impl ToolDef for Memory {
                     None => return Ok(Self::error("Key is required for retrieve action")),
                 };
                 match store.get(&key) {
-                    Some(value) => serde_json::to_string_pretty(value)
-                        .map_err(|e| ToolError::ResultSerialize(e))?,
+                    Some(value) => serde_json::to_string_pretty(value).map_err(|e| ToolError::ResultSerialize(e))?,
                     None => format!("No memory found for key: {}", key),
                 }
             }
@@ -172,11 +165,7 @@ mod tests {
 
     async fn clear_memory() {
         let tool = Memory;
-        let clear_props = MemoryProperties {
-            action: MemoryAction::Clear,
-            key: None,
-            value: None,
-        };
+        let clear_props = MemoryProperties { action: MemoryAction::Clear, key: None, value: None };
         tool.call(clear_props).await.unwrap();
     }
 
@@ -193,43 +182,24 @@ mod tests {
             value: Some(json!({"test": "value"})),
         };
         let result = tool.call(store_props).await.unwrap();
-        assert!(result.content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Successfully stored"));
+        assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully stored"));
 
         // Test retrieving
-        let retrieve_props = MemoryProperties {
-            action: MemoryAction::Retrieve,
-            key: Some("test_key".to_string()),
-            value: None,
-        };
+        let retrieve_props =
+            MemoryProperties { action: MemoryAction::Retrieve, key: Some("test_key".to_string()), value: None };
         let result = tool.call(retrieve_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test"));
 
         // Test listing
-        let list_props = MemoryProperties {
-            action: MemoryAction::List,
-            key: None,
-            value: None,
-        };
+        let list_props = MemoryProperties { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
-        assert!(result.content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("test_key"));
+        assert!(result.content[0]["text"].as_str().unwrap().contains("test_key"));
 
         // Test deleting
-        let delete_props = MemoryProperties {
-            action: MemoryAction::Delete,
-            key: Some("test_key".to_string()),
-            value: None,
-        };
+        let delete_props =
+            MemoryProperties { action: MemoryAction::Delete, key: Some("test_key".to_string()), value: None };
         let result = tool.call(delete_props).await.unwrap();
-        assert!(result.content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Successfully deleted"));
+        assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully deleted"));
 
         // Test clearing
         let store_props = MemoryProperties {
@@ -239,23 +209,12 @@ mod tests {
         };
         tool.call(store_props).await.unwrap();
 
-        let clear_props = MemoryProperties {
-            action: MemoryAction::Clear,
-            key: None,
-            value: None,
-        };
+        let clear_props = MemoryProperties { action: MemoryAction::Clear, key: None, value: None };
         let result = tool.call(clear_props).await.unwrap();
-        assert!(result.content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Successfully cleared"));
+        assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully cleared"));
 
         // Verify memory is empty after clear
-        let list_props = MemoryProperties {
-            action: MemoryAction::List,
-            key: None,
-            value: None,
-        };
+        let list_props = MemoryProperties { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "[]");
     }
@@ -273,19 +232,12 @@ mod tests {
         let properties = input_schema.properties.expect("Should have properties");
 
         // Check action property
-        let action_prop = properties
-            .get("action")
-            .expect("Should have action property");
-        assert_eq!(
-            action_prop.get("type").and_then(|v| v.as_str()),
-            Some("string")
-        );
+        let action_prop = properties.get("action").expect("Should have action property");
+        assert_eq!(action_prop.get("type").and_then(|v| v.as_str()), Some("string"));
 
         // Check enum values exist for action
-        let enum_values = action_prop
-            .get("enum")
-            .and_then(|v| v.as_array())
-            .expect("Should have enum values for action");
+        let enum_values =
+            action_prop.get("enum").and_then(|v| v.as_array()).expect("Should have enum values for action");
 
         // Verify all action types are present
         assert!(enum_values.contains(&json!("store")));
@@ -296,17 +248,11 @@ mod tests {
 
         // Check key and value properties exist
         assert!(properties.contains_key("key"), "Should have key property");
-        assert!(
-            properties.contains_key("value"),
-            "Should have value property"
-        );
+        assert!(properties.contains_key("value"), "Should have value property");
 
         // Check required fields
         let required = input_schema.required.expect("Should have required fields");
-        assert!(
-            required.contains(&"action".to_string()),
-            "Action should be required"
-        );
+        assert!(required.contains(&"action".to_string()), "Action should be required");
         assert_eq!(required.len(), 1, "Only action should be required");
     }
 
