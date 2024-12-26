@@ -19,7 +19,6 @@ bon = { workspace = true }
 object_store = { workspace = true, features = ["serde"] }
 url = { workspace = true, features = ["serde"] }
 
-bioma_derive = { path = "../bioma_derive" }
 bioma_actor = { path = "../bioma_actor" }
 
 [dev-dependencies]
