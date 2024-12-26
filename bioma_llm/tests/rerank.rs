@@ -64,7 +64,7 @@ async fn test_rerank_basic() -> Result<(), TestError> {
     // Rerank the texts
     let ranked_texts = relay_ctx
         .send_and_wait_reply::<Rerank, RankTexts>(
-            RankTexts { query: query.to_string(), texts: texts.clone() },
+            RankTexts::builder().query(query.to_string()).texts(texts.clone()).build(),
             &rerank_id,
             SendOptions::default(),
         )
@@ -160,7 +160,7 @@ async fn test_rerank_pool() -> Result<(), TestError> {
     for (i, chunk) in chunks.iter().enumerate() {
         let rerank_id = &rerank_actors[i];
         let future = relay_ctx.send_and_wait_reply::<Rerank, RankTexts>(
-            RankTexts { query: "General knowledge".to_string(), texts: chunk.clone() },
+            RankTexts::builder().query("General knowledge".to_string()).texts(chunk.clone()).build(),
             rerank_id,
             SendOptions::default(),
         );

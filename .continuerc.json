@@ -1,0 +1,51 @@
+{
+    "models": [
+        {
+            "model": "AUTODETECT",
+            "title": "Autodetect",
+            "provider": "ollama"
+        },
+        {
+            "title": "Qwen2.5 Coder",
+            "provider": "ollama",
+            "model": "qwen2.5-coder:32b-instruct-q5_K_M",
+            "contextLength": 128000,
+            "apiBase": "http://127.0.0.1:11434"
+        }
+    ],
+    "tabAutocompleteModel": {
+        "title": "Qwen2.5 Coder",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:32b-instruct-q5_K_M",
+        "apiBase": "http://127.0.0.1:11434"
+    },
+    "embeddingsProvider": {
+        "provider": "ollama",
+        "model": "nomic-embed-text",
+        "apiBase": "http://127.0.0.1:5766"
+    },
+    "reranker": {
+        "name": "huggingface-tei",
+        "params": {
+            "apiBase": "http://127.0.0.1:5766",
+            "truncate": true
+        },
+        "truncation_direction": "Right"
+    },
+    "experimental": {
+        "modelContextProtocolServers": [
+            {
+                "transport": {
+                    "type": "stdio",
+                    "command": "/Users/rozgo/BiomaAI/bioma/target/debug/examples/mcp_server",
+                    "args": [
+                        "--log-file",
+                        "/Users/rozgo/BiomaAI/bioma/.output/mcp_server.log",
+                        "--transport",
+                        "stdio"
+                    ]
+                }
+            }
+        ]
+    }
+}

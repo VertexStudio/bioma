@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send the texts to the rerank actor
     let ranked_texts = relay_ctx
         .send_and_wait_reply::<Rerank, RankTexts>(
-            RankTexts { query: query.to_string(), texts: texts.clone() },
+            RankTexts::builder().query(query.to_string()).texts(texts.clone()).build(),
             &rerank_id,
             SendOptions::default(),
         )

@@ -470,14 +470,14 @@ pub async fn load_test_rerank(user: &mut GooseUser) -> TransactionResult {
 
     get_next_variation(TestType::Rerank, &mut variation_state, variations, &mut ordering_state).await;
 
-    let payload = RankTexts {
-        query: "Explain About ubuntu, surrealdb and Rust?".to_string(),
-        texts: vec![
+    let payload = RankTexts::builder()
+        .query("Explain About ubuntu, surrealdb and Rust?".to_string())
+        .texts(vec![
             "The weather is sunny today".to_string(),
             "It's raining outside".to_string(),
             "The temperature is 25 degrees".to_string(),
-        ],
-    };
+        ])
+        .build();
 
     make_request(user, GooseMethod::Post, "/rerank", "RAG Rerank", TestType::Rerank, Some(payload), &mut ordering_state)
         .await

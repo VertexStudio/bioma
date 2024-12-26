@@ -88,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, query) in queries.iter().enumerate() {
         let rerank_id = &rerank_actors[i % num_rerank_actors];
         let future = relay_ctx.send_and_wait_reply::<Rerank, RankTexts>(
-            RankTexts { query: query.to_string(), texts: texts.iter().map(|s| s.to_string()).collect() },
+            RankTexts::builder().query(query.to_string()).texts(texts.iter().map(|s| s.to_string()).collect()).build(),
             rerank_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
         );
