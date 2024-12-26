@@ -26,10 +26,18 @@ walkdir = { workspace = true }
 zip = { workspace = true }
 tempfile = { workspace = true }
 
-ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "b20a99857da206288210cf53c0e1de44b59894db", features = [
+# ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "a1f2bb5c5161d4879b089104e8753990c832ba9c", features = [
+#     "function-calling",
+#     "stream",
+# ] }
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "0cadf08b2abee4fa38a2b57549212fe04d152cf5", features = [
     "function-calling",
     "stream",
 ] }
+# ollama-rs = { path = "../../ollama-rs", features = [
+#     "function-calling",
+#     "stream",
+# ] }
 hf-hub = "0.3.2"
 fastembed = "4.3"
 

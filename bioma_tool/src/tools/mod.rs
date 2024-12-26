@@ -49,7 +49,15 @@ pub trait ToolCallHandler: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<CallToolResult, ToolError>> + Send + 'a>>;
 
     /// Returns the tool's definition/schema
-    fn def(&self) -> schema::Tool;
+    fn def(&self) -> schema::Tool {
+        // Need to do this because Ollama doesn't support $refs (references in the schema)
+        // So we have to explicitly turn them off
+        // let mut settings = SchemaSettings::draft07();
+        // settings.inline_subschemas = true;
+        // let generator = settings.into_generator();
+        // let schema = generator.into_root_schema_for::<Self::Properties>();
+        panic!("Not implemented");
+    }
 }
 
 /// Trait for defining a concrete tool implementation

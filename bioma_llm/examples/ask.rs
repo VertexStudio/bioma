@@ -47,6 +47,9 @@ impl Actor for MainActor {
         info!("{} Asking: {}", ctx.id(), question);
 
         let chat_message = ChatMessage::user(question.to_string());
+        let format = chat::Schema::new::<RustPrinciples>();
+        info!("{} Format: {}", ctx.id(), format.schema_json());
+
         let response: ChatMessageResponse = ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
                 ChatMessages {
@@ -54,7 +57,7 @@ impl Actor for MainActor {
                     restart: false,
                     persist: false,
                     stream: false,
-                    format: Some(chat::Schema::new::<RustPrinciples>()),
+                    format: Some(format),
                 },
                 &ask_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
@@ -62,18 +65,30 @@ impl Actor for MainActor {
             .await?;
 
         if let Some(assistant_message) = response.message {
-            // Attempt to parse the response as JSON, pretty print if successful,
-            // otherwise print the raw response string.
-            match serde_json::from_str::<serde_json::Value>(&assistant_message.content) {
-                Ok(json_value) => {
+            // First try to parse as RustPrinciples
+            match serde_json::from_str::<RustPrinciples>(&assistant_message.content) {
+                Ok(principles) => {
                     info!(
-                        "{} Structured response:\n{}",
+                        "{} Parsed RustPrinciples successfully:\n{}",
                         ctx.id(),
-                        serde_json::to_string_pretty(&json_value).unwrap_or_else(|_| assistant_message.content.clone())
+                        serde_json::to_string_pretty(&principles).unwrap()
                     );
                 }
-                Err(_) => {
-                    info!("{} Unstructured response: {}", ctx.id(), assistant_message.content);
+                Err(e) => {
+                    error!("{} Failed to parse response as RustPrinciples: {}", ctx.id(), e);
+                    // Fall back to previous behavior of trying to pretty print as generic JSON
+                    match serde_json::from_str::<serde_json::Value>(&assistant_message.content) {
+                        Ok(json_value) => {
+                            info!(
+                                "{} Structured response:\n{}",
+                                ctx.id(),
+                                serde_json::to_string_pretty(&json_value).unwrap_or_else(|_| assistant_message.content.clone())
+                            );
+                        }
+                        Err(_) => {
+                            info!("{} Unstructured response: {}", ctx.id(), assistant_message.content);
+                        }
+                    }
                 }
             }
         } else {

@@ -4,13 +4,13 @@ use ollama_rs::{
     generation::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse},
         options::GenerationOptions,
-        parameters::FormatType,
+        parameters::{FormatType, JsonStructure},
     },
     Ollama,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+// use serde_json::Value;
 use std::borrow::Cow;
 use tracing::{error, info};
 use url::Url;
@@ -62,21 +62,23 @@ impl Default for Chat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Schema(Value);
+pub struct Schema {
+    #[serde(flatten)]
+    schema: schemars::schema::RootSchema,
+}
 
 impl Schema {
     pub fn new<T: JsonSchema>() -> Self {
-        let schema = schemars::schema_for!(T);
-        let format_json = Self::clean_schema(serde_json::to_value(&schema).unwrap());
-        Self(format_json)
+        // Configure schema settings to inline subschemas (required for Ollama)
+        let mut settings = schemars::gen::SchemaSettings::draft07();
+        settings.inline_subschemas = true;
+        let generator = settings.into_generator();
+        let schema = generator.into_root_schema_for::<T>();
+        Self { schema }
     }
 
-    fn clean_schema(mut schema_value: Value) -> Value {
-        if let Some(obj) = schema_value.as_object_mut() {
-            obj.remove("$schema");
-            obj.remove("title");
-        }
-        schema_value
+    pub fn schema_json(&self) -> String {
+        serde_json::to_string(&self.schema).unwrap()
     }
 }
 
@@ -115,7 +117,8 @@ impl Message<ChatMessages> for Chat {
 
         // Add format
         if let Some(format) = &request.format {
-            chat_message_request = chat_message_request.format(FormatType::Json(format.0.clone()));
+            chat_message_request = chat_message_request
+                .format(FormatType::StructuredJson(JsonStructure::from_schema(format.schema.clone())));
         }
 
         if request.stream {
