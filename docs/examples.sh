@@ -97,26 +97,30 @@ curl -X POST http://localhost:5766/ask \
             }
         ],
         "format": {
+            "title": "PuertoRicoInfo",
             "type": "object",
+            "required": [
+                "name",
+                "capital",
+                "languages"
+            ],
             "properties": {
-            "name": {
-                "type": "string"
-            },
-            "capital": {
-                "type": "string"
-            },
-            "languages": {
-                "type": "array",
-                "items": {
-                "type": "string"
+                "name": {
+                    "description": "Name of the territory",
+                    "type": "string"
+                },
+                "capital": {
+                    "description": "Capital city",
+                    "type": "string"
+                },
+                "languages": {
+                    "description": "Official languages spoken",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
-            },
-            "required": [
-            "name",
-            "capital", 
-            "languages"
-            ]
         }
     }'
 
