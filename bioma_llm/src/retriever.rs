@@ -1,6 +1,6 @@
 use crate::embeddings::{self, Embeddings, EmbeddingsError};
 use crate::indexer::{ContentSource, Metadata};
-use crate::rerank::{RankTexts, Rerank, RerankError};
+use crate::rerank::{RankTexts, Rerank, RerankError, TruncationDirection};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
@@ -161,7 +161,14 @@ impl Message<RetrieveContext> for Retriever {
                 let mut ranked_contexts = if !text_similarities.is_empty() {
                     let texts: Vec<String> = text_similarities.iter().filter_map(|(s, _)| s.text.clone()).collect();
 
-                    let rerank_req = RankTexts { query: text.clone(), texts };
+                    let rerank_req = RankTexts {
+                        query: text.clone(),
+                        texts,
+                        raw_scores: true,
+                        return_text: false,
+                        truncate: true,
+                        truncation_direction: TruncationDirection::Right,
+                    };
                     let ranked_texts = ctx
                         .send_and_wait_reply::<Rerank, RankTexts>(
                             rerank_req,

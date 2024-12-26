@@ -1,5 +1,6 @@
 // use crate::ORT_EXIT_MUTEX;
 use bioma_actor::prelude::*;
+use bon::Builder;
 use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -26,16 +27,76 @@ pub enum RerankError {
 
 impl ActorError for RerankError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RankTexts {
+    /// The query text to compare against the corpus of texts
+    ///
+    /// # Example
+    /// ```
+    /// let query = "What is Deep Learning?";
+    /// ```
     pub query: String,
+
+    /// Whether to return raw similarity scores (true) or normalized probabilities (false)
+    ///
+    /// When false, scores are normalized using softmax to produce probabilities that sum to 1.0
+    #[serde(default = "default_raw_scores")]
+    #[builder(default = default_raw_scores())]
+    pub raw_scores: bool,
+
+    /// Whether to include the original text in the response
+    ///
+    /// When true, the response will include the full text for each result.
+    /// When false, only indices and scores are returned.
+    #[serde(default = "default_return_text")]
+    #[builder(default = default_return_text())]
+    pub return_text: bool,
+
+    /// The corpus of texts to rank by similarity to the query
     pub texts: Vec<String>,
+
+    /// Whether to truncate texts that exceed the model's maximum length
+    #[serde(default = "default_truncate")]
+    #[builder(default = default_truncate())]
+    pub truncate: bool,
+
+    /// The direction to truncate texts from when truncation is enabled
+    ///
+    /// Can be either "left" or "right". Defaults to truncating from the right.
+    #[serde(default = "default_truncation_direction")]
+    #[builder(default = default_truncation_direction())]
+    pub truncation_direction: TruncationDirection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+// #[serde(rename_all = "lowercase")]
+pub enum TruncationDirection {
+    Left,
+    Right,
+}
+
+fn default_raw_scores() -> bool {
+    false
+}
+
+fn default_return_text() -> bool {
+    false
+}
+
+fn default_truncate() -> bool {
+    false
+}
+
+fn default_truncation_direction() -> TruncationDirection {
+    TruncationDirection::Right
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankedText {
     pub index: usize,
     pub score: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,9 +119,7 @@ impl Message<RankTexts> for Rerank {
         };
 
         let (tx, rx) = oneshot::channel();
-        rerank_tx
-            .send(RerankRequest { sender: tx, query: rank_texts.query.clone(), texts: rank_texts.texts.clone() })
-            .await?;
+        rerank_tx.send(RerankRequest { sender: tx, message: rank_texts.clone() }).await?;
 
         ctx.reply(rx.await??).await?;
         Ok(())
@@ -69,8 +128,7 @@ impl Message<RankTexts> for Rerank {
 
 pub struct RerankRequest {
     sender: oneshot::Sender<Result<RankedTexts, fastembed::Error>>,
-    query: String,
-    texts: Vec<String>,
+    message: RankTexts,
 }
 
 lazy_static! {
@@ -197,24 +255,45 @@ impl Rerank {
 
                     while let Some(request) = rerank_rx.blocking_recv() {
                         let start = std::time::Instant::now();
-                        let texts = request.texts.iter().map(|text| text).collect::<Vec<&String>>();
-                        match reranker.rerank(&request.query, texts, false, None) {
+                        let texts = request.message.texts.iter().map(|text| text).collect::<Vec<&String>>();
+                        match reranker.rerank(&request.message.query, texts, false, None) {
                             Ok(results) => {
                                 // compute average text length
-                                let avg_text_len = request.texts.iter().map(|text| text.len() as f32).sum::<f32>()
-                                    / request.texts.len() as f32;
+                                let avg_text_len =
+                                    request.message.texts.iter().map(|text| text.len() as f32).sum::<f32>()
+                                        / request.message.texts.len() as f32;
                                 info!(
                                     "Ranked {} texts (avg. {:.1} chars) in {:?}",
-                                    request.texts.len(),
+                                    request.message.texts.len(),
                                     avg_text_len,
                                     start.elapsed()
                                 );
-                                let ranked_texts = RankedTexts {
+
+                                let mut ranked_texts = RankedTexts {
                                     texts: results
                                         .into_iter()
-                                        .map(|result| RankedText { index: result.index, score: result.score })
+                                        .map(|result| RankedText {
+                                            index: result.index,
+                                            score: result.score,
+                                            text: match request.message.return_text {
+                                                true => Some(request.message.texts[result.index].clone()),
+                                                false => None,
+                                            },
+                                        })
                                         .collect(),
                                 };
+
+                                if !request.message.raw_scores {
+                                    // Apply softmax normalization to scores
+                                    let max_score =
+                                        ranked_texts.texts.iter().map(|t| t.score).fold(f32::NEG_INFINITY, f32::max);
+                                    let sum: f32 = ranked_texts.texts.iter().map(|t| (t.score - max_score).exp()).sum();
+
+                                    for text in &mut ranked_texts.texts {
+                                        text.score = ((text.score - max_score).exp()) / sum;
+                                    }
+                                }
+
                                 let _ = request.sender.send(Ok(ranked_texts));
                             }
                             Err(err) => {

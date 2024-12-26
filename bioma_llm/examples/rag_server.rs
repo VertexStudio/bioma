@@ -10,7 +10,7 @@ use indexer::Metadata;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error as StdError;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 /// Example of a RAG server using the Bioma Actor framework
 ///
@@ -681,7 +681,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
                     .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                         GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
                         &data.embeddings,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
                     )
                     .await
                 {
@@ -717,13 +717,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
     HttpResponse::Ok().json(generated_embeddings)
 }
 
-#[derive(Deserialize)]
-struct RerankQuery {
-    query: String,
-    texts: Vec<String>,
-}
-
-async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> HttpResponse {
+async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -731,18 +725,22 @@ async fn rerank(body: web::Json<RerankQuery>, data: web::Data<AppState>) -> Http
 
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
+    debug!("Rerank query: {}", body.query);
 
-    let rank_texts = RankTexts { query: body.query.clone(), texts: body.texts.clone() };
+    let rank_texts = body.clone();
 
     match user_actor
         .send_and_wait_reply::<Rerank, RankTexts>(
             rank_texts,
             &data.rerank,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
         )
         .await
     {
-        Ok(ranked_texts) => HttpResponse::Ok().json(ranked_texts),
+        Ok(ranked_texts) => {
+            debug!("Reranked texts: {:#?}", ranked_texts);
+            HttpResponse::Ok().json(ranked_texts)
+        }
         Err(e) => {
             error!("Rerank error: {}", e);
             HttpResponse::InternalServerError().body(e.to_string())

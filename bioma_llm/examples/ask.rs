@@ -82,7 +82,8 @@ impl Actor for MainActor {
                             info!(
                                 "{} Structured response:\n{}",
                                 ctx.id(),
-                                serde_json::to_string_pretty(&json_value).unwrap_or_else(|_| assistant_message.content.clone())
+                                serde_json::to_string_pretty(&json_value)
+                                    .unwrap_or_else(|_| assistant_message.content.clone())
                             );
                         }
                         Err(_) => {
