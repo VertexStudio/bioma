@@ -1,17 +1,21 @@
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
+use prompts::PromptGetHandler;
 use tokio::sync::mpsc;
 use tools::ToolCallHandler;
 use tracing::{debug, error, info};
 use transport::{Transport, TransportType};
 
+pub mod prompts;
 pub mod schema;
 pub mod tools;
+
 pub mod transport;
 
 use schema::{
-    CallToolRequestParams, CancelledNotificationParams, Implementation, InitializeRequestParams, InitializeResult,
-    ListPromptsResult, ListResourcesResult, ListToolsResult, Prompt, Resource, ServerCapabilities,
+    CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
+    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult, Resource,
+    ServerCapabilities,
 };
 
 #[derive(Default, Clone)]
@@ -22,7 +26,7 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn new() -> Self;
     fn get_capabilities(&self) -> ServerCapabilities;
     fn get_resources(&self) -> &Vec<Resource>;
-    fn get_prompts(&self) -> &Vec<Prompt>;
+    fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>>;
     fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
 }
 
@@ -35,6 +39,7 @@ pub async fn start_server<T: ModelContextProtocolServer>(mut transport: Transpor
     let server_resources = server.clone();
     let server_prompts = server.clone();
     let server_call = server.clone();
+    let server_get_prompt = server.clone();
 
     io_handler.add_method_with_meta("initialize", move |params: Params, _meta: ServerMetadata| {
         let server = server.clone();
@@ -98,11 +103,48 @@ pub async fn start_server<T: ModelContextProtocolServer>(mut transport: Transpor
         let server = server_prompts.clone();
         debug!("Handling prompts/list request");
 
+        let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
+
         async move {
-            let response = ListPromptsResult { next_cursor: None, prompts: server.get_prompts().clone(), meta: None };
+            let response = ListPromptsResult { next_cursor: None, prompts: prompts, meta: None };
 
             info!("Successfully handled prompts/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
+        }
+    });
+
+    io_handler.add_method("prompts/get", move |params: Params| {
+        let server = server_get_prompt.clone();
+        debug!("Handling prompts/get request");
+
+        async move {
+            let params: GetPromptRequestParams = params.parse().map_err(|e| {
+                error!("Failed to parse prompt get parameters: {}", e);
+                jsonrpc_core::Error::invalid_params(e.to_string())
+            })?;
+
+            // Find the requested prompt
+            let prompts = server.get_prompts();
+            let prompt = prompts.iter().find(|p| p.def().name == params.name);
+
+            match prompt {
+                Some(prompt) => {
+                    let result = prompt.get_boxed(params.arguments).await.map_err(|e| {
+                        error!("Prompt execution failed: {}", e);
+                        jsonrpc_core::Error::internal_error()
+                    })?;
+
+                    info!("Successfully handled prompts/get request for: {}", params.name);
+                    Ok(serde_json::to_value(result).map_err(|e| {
+                        error!("Failed to serialize prompt result: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?)
+                }
+                None => {
+                    error!("Unknown prompt requested: {}", params.name);
+                    Err(jsonrpc_core::Error::method_not_found())
+                }
+            }
         }
     });
 
