@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use bioma_tool::{
+    prompts::{self, PromptGetHandler},
     schema::{
-        Prompt, PromptArgument, Resource, ServerCapabilities, ServerCapabilitiesPrompts,
-        ServerCapabilitiesPromptsResources, ServerCapabilitiesPromptsResourcesTools,
+        Resource, ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
+        ServerCapabilitiesPromptsResourcesTools,
     },
     tools::{self, ToolCallHandler},
     transport::{StdioTransport, TransportType, WebSocketTransport},
@@ -33,7 +34,7 @@ struct Args {
 struct McpServer {
     tools: Vec<Box<dyn ToolCallHandler>>,
     resources: Vec<Resource>,
-    prompts: Vec<Prompt>,
+    prompts: Vec<Box<dyn PromptGetHandler>>,
 }
 
 impl ModelContextProtocolServer for McpServer {
@@ -46,16 +47,6 @@ impl ModelContextProtocolServer for McpServer {
             annotations: None,
         };
 
-        let example_prompt = Prompt {
-            name: "greet".to_string(),
-            description: Some("A friendly greeting prompt".to_string()),
-            arguments: Some(vec![PromptArgument {
-                name: "name".to_string(),
-                description: Some("Name of the person to greet".to_string()),
-                required: Some(true),
-            }]),
-        };
-
         Self {
             tools: vec![
                 Box::new(tools::echo::Echo),
@@ -63,24 +54,26 @@ impl ModelContextProtocolServer for McpServer {
                 Box::new(tools::fetch::Fetch::default()),
             ],
             resources: vec![example_resource],
-            prompts: vec![example_prompt],
+            prompts: vec![Box::new(prompts::greet::Greet)],
         }
     }
 
     fn get_capabilities(&self) -> ServerCapabilities {
-        ServerCapabilities {
+        let caps = ServerCapabilities {
             tools: Some(ServerCapabilitiesPromptsResourcesTools { list_changed: Some(false) }),
             resources: Some(ServerCapabilitiesPromptsResources { list_changed: Some(false), subscribe: Some(false) }),
             prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
             ..Default::default()
-        }
+        };
+
+        caps
     }
 
     fn get_resources(&self) -> &Vec<Resource> {
         &self.resources
     }
 
-    fn get_prompts(&self) -> &Vec<Prompt> {
+    fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>> {
         &self.prompts
     }
 

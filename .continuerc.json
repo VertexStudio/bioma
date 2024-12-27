@@ -1,11 +1,6 @@
 {
     "models": [
         {
-            "model": "AUTODETECT",
-            "title": "Autodetect",
-            "provider": "ollama"
-        },
-        {
             "title": "Qwen2.5 Coder",
             "provider": "ollama",
             "model": "qwen2.5-coder:32b-instruct-q5_K_M",
@@ -37,7 +32,7 @@
             {
                 "transport": {
                     "type": "stdio",
-                    "command": "/Users/rozgo/BiomaAI/bioma/target/debug/examples/mcp_server",
+                    "command": "/Users/rozgo/BiomaAI/bioma/target/release/examples/mcp_server",
                     "args": [
                         "--log-file",
                         "/Users/rozgo/BiomaAI/bioma/.output/mcp_server.log",
