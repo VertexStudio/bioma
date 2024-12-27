@@ -1,7 +1,7 @@
 {
     "models": [
         {
-            "title": "Qwen2.5 Coder",
+            "title": "Bioma - Qwen2.5 Coder",
             "provider": "ollama",
             "model": "qwen2.5-coder:32b-instruct-q5_K_M",
             "contextLength": 128000,
@@ -38,6 +38,23 @@
                         "/Users/rozgo/BiomaAI/bioma/.output/mcp_server.log",
                         "--transport",
                         "stdio"
+                    ]
+                }
+            },
+            {
+                "transport": {
+                    "type": "stdio",
+                    "command": "docker",
+                    "args": [
+                        "run",
+                        "-i",
+                        "--rm",
+                        "--mount",
+                        "type=bind,src=/Users/rozgo/VertexNAS,dst=/projects/VertexNAS",
+                        "--mount",
+                        "type=bind,src=/Users/rozgo/BiomaAI,dst=/projects/BiomaAI",
+                        "mcp/filesystem",
+                        "/projects"
                     ]
                 }
             }

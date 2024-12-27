@@ -5,9 +5,9 @@ use bioma_tool::{
         Resource, ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
+    server::ModelContextProtocolServer,
     tools::{self, ToolCallHandler},
     transport::{StdioTransport, TransportType, WebSocketTransport},
-    ModelContextProtocolServer,
 };
 use clap::Parser;
 use std::path::PathBuf;
@@ -124,5 +124,5 @@ async fn main() -> Result<()> {
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 
-    bioma_tool::start_server::<McpServer>(transport).await
+    bioma_tool::server::start::<McpServer>(transport).await
 }
