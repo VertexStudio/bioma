@@ -1,8 +1,9 @@
 use crate::prompts::PromptGetHandler;
+use crate::resources::ResourceReadHandler;
 use crate::schema::{
     CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult, Resource,
-    ServerCapabilities,
+    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult,
+    ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::{Transport, TransportType};
@@ -18,7 +19,7 @@ impl Metadata for ServerMetadata {}
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn new() -> Self;
     fn get_capabilities(&self) -> ServerCapabilities;
-    fn get_resources(&self) -> &Vec<Resource>;
+    fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>>;
     fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>>;
     fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
 }
@@ -33,6 +34,7 @@ pub async fn start<T: ModelContextProtocolServer>(mut transport: TransportType) 
     let server_prompts = server.clone();
     let server_call = server.clone();
     let server_get_prompt = server.clone();
+    let server_read_resource = server.clone();
 
     io_handler.add_method_with_meta("initialize", move |params: Params, _meta: ServerMetadata| {
         let server = server.clone();
@@ -83,12 +85,44 @@ pub async fn start<T: ModelContextProtocolServer>(mut transport: TransportType) 
         let server = server_resources.clone();
         debug!("Handling resources/list request");
 
+        let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
+
         async move {
-            let response =
-                ListResourcesResult { next_cursor: None, resources: server.get_resources().clone(), meta: None };
+            let response = ListResourcesResult { next_cursor: None, resources: resources, meta: None };
 
             info!("Successfully handled resources/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
+        }
+    });
+
+    io_handler.add_method("resources/read", move |params: Params| {
+        let server = server_read_resource.clone();
+        debug!("Handling resources/read request");
+
+        async move {
+            let params: ReadResourceRequestParams = params.parse().map_err(|e| {
+                error!("Failed to parse resource read parameters: {}", e);
+                jsonrpc_core::Error::invalid_params(e.to_string())
+            })?;
+
+            let resources = server.get_resources();
+            let resource = resources.iter().find(|resource| resource.def().uri == params.uri);
+
+            match resource {
+                Some(resource) => {
+                    let result = resource.read_boxed(params.uri.clone()).await.map_err(|e| {
+                        error!("Resource read failed: {}", e);
+                        jsonrpc_core::Error::internal_error()
+                    })?;
+
+                    info!("Successfully handled resources/read request for: {}", params.uri);
+                    Ok(serde_json::to_value(result).unwrap_or_default())
+                }
+                None => {
+                    error!("Unknown resource requested: {}", params.uri);
+                    Err(jsonrpc_core::Error::method_not_found())
+                }
+            }
         }
     });
 

@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use bioma_tool::{
     prompts::{self, PromptGetHandler},
+    resources::{self, ResourceReadHandler},
     schema::{
-        Resource, ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
+        ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
     server::ModelContextProtocolServer,
@@ -33,27 +34,19 @@ struct Args {
 
 struct McpServer {
     tools: Vec<Box<dyn ToolCallHandler>>,
-    resources: Vec<Resource>,
+    resources: Vec<Box<dyn ResourceReadHandler>>,
     prompts: Vec<Box<dyn PromptGetHandler>>,
 }
 
 impl ModelContextProtocolServer for McpServer {
     fn new() -> Self {
-        let example_resource = Resource {
-            name: "example.txt".to_string(),
-            uri: "file:///example.txt".to_string(),
-            description: Some("An example text file".to_string()),
-            mime_type: Some("text/plain".to_string()),
-            annotations: None,
-        };
-
         Self {
             tools: vec![
                 Box::new(tools::echo::Echo),
                 Box::new(tools::memory::Memory),
                 Box::new(tools::fetch::Fetch::default()),
             ],
-            resources: vec![example_resource],
+            resources: vec![Box::new(resources::readme::Readme)],
             prompts: vec![Box::new(prompts::greet::Greet)],
         }
     }
@@ -69,7 +62,7 @@ impl ModelContextProtocolServer for McpServer {
         caps
     }
 
-    fn get_resources(&self) -> &Vec<Resource> {
+    fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>> {
         &self.resources
     }
 

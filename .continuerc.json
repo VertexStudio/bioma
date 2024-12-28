@@ -35,7 +35,7 @@
                     "command": "/Users/rozgo/BiomaAI/bioma/target/release/examples/mcp_server",
                     "args": [
                         "--log-file",
-                        "/Users/rozgo/BiomaAI/bioma/.output/mcp_server.log",
+                        "/Users/rozgo/BiomaAI/bioma/.output/mcp_server-vscode.log",
                         "--transport",
                         "stdio"
                     ]
