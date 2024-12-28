@@ -20,8 +20,8 @@ pub const MEMORY_SCHEMA: &str = r#"{
             "type": "string"
         },
         "value": {
-            "description": "The JSON value to store (only required for store action)",
-            "type": ["object", "null"]
+            "description": "Any JSON value to store (only required for store action). Can be an object, array, string, number, boolean, or null",
+            "type": ["object", "array", "string", "number", "boolean", "null"]
         }
     },
     "required": ["action"]
@@ -43,7 +43,7 @@ pub enum MemoryAction {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct MemoryProperties {
+pub struct MemoryArgs {
     #[schemars(required = true)]
     #[schemars(
         description = "The action to perform: 'store' to save a value, 'retrieve' to get a value, 'list' to see all keys, 'delete' to remove a key, or 'clear' to remove all keys"
@@ -65,27 +65,27 @@ pub struct Memory;
 impl ToolDef for Memory {
     const NAME: &'static str = "memory";
     const DESCRIPTION: &'static str = "Store and retrieve JSON memories using string keys";
-    type Properties = MemoryProperties;
+    type Args = MemoryArgs;
 
     fn def() -> Tool {
         let input_schema = serde_json::from_str::<ToolInputSchema>(MEMORY_SCHEMA).unwrap();
         Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
-    async fn call(&self, properties: Self::Properties) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         let store_result = MEMORY_STORE.lock();
         let mut store = match store_result {
             Ok(store) => store,
             Err(e) => return Ok(Self::error(e.to_string())),
         };
 
-        let result = match properties.action {
+        let result = match args.action {
             MemoryAction::Store => {
-                let key = match properties.key {
+                let key = match args.key {
                     Some(k) => k,
                     None => return Ok(Self::error("Key is required for store action")),
                 };
-                let value = match properties.value {
+                let value = match args.value {
                     Some(v) => v,
                     None => return Ok(Self::error("Value is required for store action")),
                 };
@@ -93,7 +93,7 @@ impl ToolDef for Memory {
                 format!("Successfully stored memory with key: {}", key)
             }
             MemoryAction::Retrieve => {
-                let key = match properties.key {
+                let key = match args.key {
                     Some(k) => k,
                     None => return Ok(Self::error("Key is required for retrieve action")),
                 };
@@ -110,7 +110,7 @@ impl ToolDef for Memory {
                 }
             }
             MemoryAction::Delete => {
-                let key = match properties.key {
+                let key = match args.key {
                     Some(k) => k,
                     None => return Ok(Self::error("Key is required for delete action")),
                 };
@@ -165,7 +165,7 @@ mod tests {
 
     async fn clear_memory() {
         let tool = Memory;
-        let clear_props = MemoryProperties { action: MemoryAction::Clear, key: None, value: None };
+        let clear_props = MemoryArgs { action: MemoryAction::Clear, key: None, value: None };
         tool.call(clear_props).await.unwrap();
     }
 
@@ -176,7 +176,7 @@ mod tests {
         let tool = Memory;
 
         // Test storing
-        let store_props = MemoryProperties {
+        let store_props = MemoryArgs {
             action: MemoryAction::Store,
             key: Some("test_key".to_string()),
             value: Some(json!({"test": "value"})),
@@ -186,35 +186,34 @@ mod tests {
 
         // Test retrieving
         let retrieve_props =
-            MemoryProperties { action: MemoryAction::Retrieve, key: Some("test_key".to_string()), value: None };
+            MemoryArgs { action: MemoryAction::Retrieve, key: Some("test_key".to_string()), value: None };
         let result = tool.call(retrieve_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test"));
 
         // Test listing
-        let list_props = MemoryProperties { action: MemoryAction::List, key: None, value: None };
+        let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test_key"));
 
         // Test deleting
-        let delete_props =
-            MemoryProperties { action: MemoryAction::Delete, key: Some("test_key".to_string()), value: None };
+        let delete_props = MemoryArgs { action: MemoryAction::Delete, key: Some("test_key".to_string()), value: None };
         let result = tool.call(delete_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully deleted"));
 
         // Test clearing
-        let store_props = MemoryProperties {
+        let store_props = MemoryArgs {
             action: MemoryAction::Store,
             key: Some("test_key2".to_string()),
             value: Some(json!({"test": "value"})),
         };
         tool.call(store_props).await.unwrap();
 
-        let clear_props = MemoryProperties { action: MemoryAction::Clear, key: None, value: None };
+        let clear_props = MemoryArgs { action: MemoryAction::Clear, key: None, value: None };
         let result = tool.call(clear_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully cleared"));
 
         // Verify memory is empty after clear
-        let list_props = MemoryProperties { action: MemoryAction::List, key: None, value: None };
+        let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "[]");
     }
@@ -260,5 +259,36 @@ mod tests {
     fn test_auto_generated_schema() {
         let tool = Memory.def();
         println!("Tool: {:?}", tool);
+    }
+
+    #[tokio::test]
+    async fn test_memory_value_types() {
+        clear_memory().await;
+        let tool = Memory;
+
+        // Test all JSON value types
+        let test_cases = vec![
+            ("object_key", json!({"test": "value"})),
+            ("array_key", json!([1, 2, 3])),
+            ("string_key", json!("test string")),
+            ("number_key", json!(42)),
+            ("boolean_key", json!(true)),
+            ("null_key", json!(null)),
+        ];
+
+        // Store and retrieve each type
+        for (key, value) in test_cases {
+            // Store value
+            let store_props =
+                MemoryArgs { action: MemoryAction::Store, key: Some(key.to_string()), value: Some(value.clone()) };
+            let result = tool.call(store_props).await.unwrap();
+            assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully stored"));
+
+            // Retrieve and verify value
+            let retrieve_props = MemoryArgs { action: MemoryAction::Retrieve, key: Some(key.to_string()), value: None };
+            let result = tool.call(retrieve_props).await.unwrap();
+            let retrieved_value: Value = serde_json::from_str(result.content[0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(retrieved_value, value);
+        }
     }
 }

@@ -15,7 +15,7 @@ pub const ECHO_SCHEMA: &str = r#"{
 }"#;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct EchoProperties {
+pub struct EchoArgs {
     #[schemars(description = "The message to echo", required = true)]
     message: String,
 }
@@ -26,14 +26,14 @@ pub struct Echo;
 impl ToolDef for Echo {
     const NAME: &'static str = "echo";
     const DESCRIPTION: &'static str = "Echoes back the input message";
-    type Properties = EchoProperties;
+    type Args = EchoArgs;
 
     fn def() -> Tool {
         let input_schema = serde_json::from_str::<ToolInputSchema>(ECHO_SCHEMA).unwrap();
         Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
-    async fn call(&self, properties: Self::Properties) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, properties: Self::Args) -> Result<CallToolResult, ToolError> {
         Ok(CallToolResult {
             content: vec![serde_json::to_value(TextContent {
                 type_: "text".to_string(),
@@ -55,7 +55,7 @@ mod tests {
     #[tokio::test]
     async fn test_echo_tool() {
         let tool = Echo;
-        let props = EchoProperties { message: "hello".to_string() };
+        let props = EchoArgs { message: "hello".to_string() };
 
         let result = ToolDef::call(&tool, props).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "hello");

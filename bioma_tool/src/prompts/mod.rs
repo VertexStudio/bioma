@@ -51,16 +51,16 @@ pub trait PromptDef: Serialize {
     /// A description of what the prompt does
     const DESCRIPTION: &'static str;
 
-    /// The type representing the prompt's input properties
-    type Properties: Serialize + JsonSchema + serde::de::DeserializeOwned;
+    /// The type representing the prompt's input arguments
+    type Args: Serialize + JsonSchema + serde::de::DeserializeOwned;
 
     /// Generates the prompt's schema definition
     fn def() -> schema::Prompt;
 
-    /// Executes the prompt with strongly-typed properties
+    /// Executes the prompt with strongly-typed arguments
     fn get<'a>(
         &'a self,
-        properties: Self::Properties,
+        properties: Self::Args,
     ) -> impl Future<Output = Result<GetPromptResult, PromptError>> + Send + 'a;
 }
 
@@ -75,9 +75,7 @@ impl<T: PromptDef + Send + Sync> PromptGetHandler for T {
                 Some(map) => serde_json::to_value(map).map_err(PromptError::ArgumentParse)?,
                 None => Value::Null,
             };
-
-            let properties: T::Properties = serde_json::from_value(value).map_err(PromptError::ArgumentParse)?;
-
+            let properties: T::Args = serde_json::from_value(value).map_err(PromptError::ArgumentParse)?;
             self.get(properties).await
         })
     }

@@ -34,7 +34,7 @@ const FETCH_SCHEMA: &str = r#"{
 }"#;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct FetchProperties {
+pub struct FetchArgs {
     #[schemars(description = "URL to fetch", required = true)]
     url: String,
     #[schemars(description = "Maximum number of characters to return")]
@@ -64,16 +64,16 @@ impl Default for Fetch {
 impl ToolDef for Fetch {
     const NAME: &'static str = "fetch";
     const DESCRIPTION: &'static str = "Fetches a URL from the internet and extracts its contents as markdown";
-    type Properties = FetchProperties;
+    type Args = FetchArgs;
 
     fn def() -> Tool {
         let input_schema = serde_json::from_str::<ToolInputSchema>(FETCH_SCHEMA).unwrap();
         Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
-    async fn call(&self, properties: Self::Properties) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         // Validate URL
-        let url = Url::parse(&properties.url);
+        let url = Url::parse(&args.url);
         let url = match url {
             Ok(url) => url,
             Err(e) => return Ok(Self::error(format!("Invalid URL: {}", e))),
@@ -91,7 +91,7 @@ impl ToolDef for Fetch {
         };
 
         // Process content
-        let content = self.process_content(&url, response, &properties).await;
+        let content = self.process_content(&url, response, &args).await;
         let content = match content {
             Ok(content) => content,
             Err(e) => return Ok(Self::error(format!("Failed to process content: {}", e))),
@@ -165,7 +165,7 @@ impl Fetch {
         &self,
         url: &Url,
         response: reqwest::Response,
-        properties: &FetchProperties,
+        args: &FetchArgs,
     ) -> Result<String, ToolError> {
         let content_type =
             response.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
@@ -175,7 +175,7 @@ impl Fetch {
 
         let is_html = html.trim().starts_with("<html") || content_type.contains("text/html");
 
-        let content = if properties.raw.unwrap_or(false) || !is_html {
+        let content = if args.raw.unwrap_or(false) || !is_html {
             html
         } else {
             // Convert the HTML string into a cursor that implements Read
@@ -193,10 +193,10 @@ impl Fetch {
         };
 
         // Apply start_index and max_length
-        let start = properties.start_index.unwrap_or(0);
+        let start = args.start_index.unwrap_or(0);
         let content = if start < content.len() { content[start..].to_string() } else { String::new() };
 
-        let content = if let Some(max_length) = properties.max_length {
+        let content = if let Some(max_length) = args.max_length {
             content.chars().take(max_length).collect()
         } else {
             content.chars().take(5000).collect()
@@ -237,19 +237,14 @@ mod tests {
         let tool = Fetch::default();
 
         // Test allowed URL
-        let props =
-            FetchProperties { url: format!("{}/test", server.url()), max_length: None, start_index: None, raw: None };
+        let props = FetchArgs { url: format!("{}/test", server.url()), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(false));
 
         // Test disallowed URL
-        let props = FetchProperties {
-            url: format!("{}/private/test", server.url()),
-            max_length: None,
-            start_index: None,
-            raw: None,
-        };
+        let props =
+            FetchArgs { url: format!("{}/private/test", server.url()), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(true));
@@ -272,12 +267,8 @@ mod tests {
             .await;
 
         let tool = Fetch::default();
-        let props = FetchProperties {
-            url: format!("{}/raw", server.url()),
-            max_length: None,
-            start_index: None,
-            raw: Some(true),
-        };
+        let props =
+            FetchArgs { url: format!("{}/raw", server.url()), max_length: None, start_index: None, raw: Some(true) };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(false));
@@ -301,7 +292,7 @@ mod tests {
         let tool = Fetch::default();
 
         // Test max_length
-        let props = FetchProperties {
+        let props = FetchArgs {
             url: format!("{}/limited", server.url()),
             max_length: Some(5),
             start_index: None,
@@ -312,7 +303,7 @@ mod tests {
         assert_eq!(result.content[0].get("text").unwrap().as_str().unwrap(), "12345");
 
         // Test start_index
-        let props = FetchProperties {
+        let props = FetchArgs {
             url: format!("{}/limited", server.url()),
             max_length: None,
             start_index: Some(5),
@@ -333,18 +324,14 @@ mod tests {
         let not_found_mock = server.mock("GET", "/not-found").with_status(404).create_async().await;
 
         let tool = Fetch::default();
-        let props = FetchProperties {
-            url: format!("{}/not-found", server.url()),
-            max_length: None,
-            start_index: None,
-            raw: None,
-        };
+        let props =
+            FetchArgs { url: format!("{}/not-found", server.url()), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(true));
 
         // Test invalid URL
-        let props = FetchProperties { url: "not-a-url".to_string(), max_length: None, start_index: None, raw: None };
+        let props = FetchArgs { url: "not-a-url".to_string(), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(true));
