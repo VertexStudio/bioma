@@ -1,10 +1,6 @@
 use crate::resources::{ResourceDef, ResourceError};
-use crate::schema::{ReadResourceResult, Resource, TextContent};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ReadmeProperties {}
+use crate::schema::{ReadResourceResult, Resource};
+use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Readme;
@@ -13,8 +9,6 @@ impl ResourceDef for Readme {
     const NAME: &'static str = "readme";
     const DESCRIPTION: &'static str = "Returns the Bioma README.md content";
     const URI: &'static str = "file:///bioma/README.md";
-
-    type Properties = ReadmeProperties;
 
     fn def() -> Resource {
         Resource {
@@ -28,14 +22,12 @@ impl ResourceDef for Readme {
 
     async fn read(&self, _uri: String) -> Result<ReadResourceResult, ResourceError> {
         let readme_content = include_str!("../../../README.md");
-
         Ok(ReadResourceResult {
-            contents: vec![serde_json::to_value(TextContent {
-                text: readme_content.to_string(),
-                type_: "text".to_string(),
-                annotations: None,
-            })
-            .map_err(ResourceError::ResultSerialize)?],
+            contents: vec![serde_json::json!({
+                "uri": Self::URI.to_string(),
+                "mimeType": "text/markdown",
+                "text": readme_content,
+            })],
             meta: None,
         })
     }
@@ -49,8 +41,9 @@ mod tests {
     async fn test_readme() {
         let readme = Readme;
         let result = readme.read("".to_string()).await.unwrap();
-        let text_content: TextContent = serde_json::from_value(result.contents[0].clone()).unwrap();
-        assert!(text_content.text.contains("# Bioma"));
+        let content = &result.contents[0];
+        let text = content["text"].as_str().expect("text field should be a string");
+        assert!(text.contains("# Bioma"));
     }
 
     #[test]

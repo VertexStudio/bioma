@@ -42,10 +42,10 @@ Add the following to the file:
 {
     "mcpServers": {
         "bioma-tool": {
-            "command": "/Users/rozgo/BiomaAI/bioma/target/debug/examples/mcp_server",
+            "command": "/Users/rozgo/BiomaAI/bioma/target/release/examples/mcp_server",
             "args": [
                 "--log-file",
-                "/Users/rozgo/BiomaAI/bioma/.output/mcp_server.log",
+                "/Users/rozgo/BiomaAI/bioma/.output/mcp_server-claude.log",
                 "--transport",
                 "stdio"
             ]
@@ -53,6 +53,12 @@ Add the following to the file:
     }
 }
 ```
+
+Test servers using [mcp-cli](https://github.com/wong2/mcp-cli):
+```
+npx @wong2/mcp-cli
+```
+
 
 Generate the schema.es from MCP schema.json
 ```

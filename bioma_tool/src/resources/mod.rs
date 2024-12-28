@@ -1,5 +1,4 @@
 use crate::schema::{self, ReadResourceResult};
-use schemars::JsonSchema;
 use serde::Serialize;
 use std::future::Future;
 use std::pin::Pin;
@@ -52,13 +51,10 @@ pub trait ResourceDef: Serialize {
     /// The URI of the resource
     const URI: &'static str;
 
-    /// The type representing the resource's input properties
-    type Properties: Serialize + JsonSchema + serde::de::DeserializeOwned;
-
     /// Generates the resource's schema definition
     fn def() -> schema::Resource;
 
-    /// Reads the resource with strongly-typed properties
+    /// Reads the resource with strongly-typed arguments
     fn read<'a>(&'a self, uri: String) -> impl Future<Output = Result<ReadResourceResult, ResourceError>> + Send + 'a;
 }
 

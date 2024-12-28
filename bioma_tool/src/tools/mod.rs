@@ -55,7 +55,7 @@ pub trait ToolCallHandler: Send + Sync {
         // let mut settings = SchemaSettings::draft07();
         // settings.inline_subschemas = true;
         // let generator = settings.into_generator();
-        // let schema = generator.into_root_schema_for::<Self::Properties>();
+        // let schema = generator.into_root_schema_for::<Self::Args>();
         panic!("Not implemented");
     }
 }
@@ -71,26 +71,23 @@ pub trait ToolDef: Serialize {
     /// A description of what the tool does
     const DESCRIPTION: &'static str;
 
-    /// The type representing the tool's input properties
-    type Properties: Serialize + JsonSchema + serde::de::DeserializeOwned;
+    /// The type representing the tool's input arguments
+    type Args: Serialize + JsonSchema + serde::de::DeserializeOwned;
 
     /// Generates the tool's schema definition
     ///
     /// This method creates a complete tool schema including name, description,
-    /// and input parameter definitions derived from the Properties type.
+    /// and input parameter definitions derived from the Args type.
     fn def() -> schema::Tool;
 
-    /// Executes the tool with strongly-typed properties
+    /// Executes the tool with strongly-typed arguments
     ///
     /// # Arguments
-    /// * `properties` - The typed input properties for the tool
+    /// * `args` - The typed input arguments for the tool
     ///
     /// # Returns
     /// A future that resolves to either a tool result or an error
-    fn call<'a>(
-        &'a self,
-        properties: Self::Properties,
-    ) -> impl Future<Output = Result<CallToolResult, ToolError>> + Send + 'a;
+    fn call<'a>(&'a self, args: Self::Args) -> impl Future<Output = Result<CallToolResult, ToolError>> + Send + 'a;
 }
 
 /// Implementation of `ToolCallHandler` for any type implementing `ToolDef`
@@ -107,10 +104,8 @@ impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
                 Some(map) => serde_json::to_value(map).map_err(ToolError::ArgumentParse)?,
                 None => Value::Null,
             };
-
-            let properties: T::Properties = serde_json::from_value(value).map_err(ToolError::ArgumentParse)?;
-
-            self.call(properties).await
+            let args: T::Args = serde_json::from_value(value).map_err(ToolError::ArgumentParse)?;
+            self.call(args).await
         })
     }
 

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct GreetProperties {
+pub struct GreetArgs {
     #[schemars(description = "Name of the person to greet")]
     name: String,
 }
@@ -15,7 +15,7 @@ pub struct Greet;
 impl PromptDef for Greet {
     const NAME: &'static str = "greet";
     const DESCRIPTION: &'static str = "A friendly greeting prompt";
-    type Properties = GreetProperties;
+    type Args = GreetArgs;
 
     fn def() -> crate::schema::Prompt {
         crate::schema::Prompt {
@@ -29,7 +29,7 @@ impl PromptDef for Greet {
         }
     }
 
-    async fn get(&self, properties: Self::Properties) -> Result<GetPromptResult, PromptError> {
+    async fn get(&self, args: Self::Args) -> Result<GetPromptResult, PromptError> {
         Ok(GetPromptResult {
             messages: vec![
                 PromptMessage {
@@ -44,7 +44,7 @@ impl PromptDef for Greet {
                 PromptMessage {
                     role: Role::User,
                     content: serde_json::to_value(TextContent {
-                        text: properties.name.clone(),
+                        text: args.name.clone(),
                         type_: "text".to_string(),
                         annotations: None,
                     })
@@ -64,7 +64,7 @@ mod tests {
     #[tokio::test]
     async fn test_greet() {
         let greet = Greet;
-        let props = GreetProperties { name: "Alice".to_string() };
+        let props = GreetArgs { name: "Alice".to_string() };
 
         let result = greet.get(props).await.unwrap();
         let text_content: TextContent = serde_json::from_value(result.messages[0].content.clone()).unwrap();
