@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for message in &conversation {
         ask_content.push_str(&format!("{:?}: {}\n\n", message.role, message.content));
     }
-    let response = ask_response.message.unwrap();
+    let response = ask_response.message;
     ask_content.push_str(&format!("{:?}: {}\n\n", &response.role, &response.content));
     tokio::fs::write(output_dir.join("debug").join("rag_ask.md"), ask_content).await?;
 

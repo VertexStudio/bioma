@@ -65,10 +65,8 @@ impl Actor for MainActor {
             while let Some(chunk) = response_stream.next().await {
                 match chunk {
                     Ok(response) => {
-                        if let Some(message) = &response.message {
-                            print!("{}", message.content);
-                            full_response.push_str(&message.content);
-                        }
+                        print!("{}", response.message.content);
+                        full_response.push_str(&response.message.content);
 
                         // Break if this is the final message
                         if response.done {

@@ -64,36 +64,33 @@ impl Actor for MainActor {
             )
             .await?;
 
-        if let Some(assistant_message) = response.message {
-            // First try to parse as RustPrinciples
-            match serde_json::from_str::<RustPrinciples>(&assistant_message.content) {
-                Ok(principles) => {
-                    info!(
-                        "{} Parsed RustPrinciples successfully:\n{}",
-                        ctx.id(),
-                        serde_json::to_string_pretty(&principles).unwrap()
-                    );
-                }
-                Err(e) => {
-                    error!("{} Failed to parse response as RustPrinciples: {}", ctx.id(), e);
-                    // Fall back to previous behavior of trying to pretty print as generic JSON
-                    match serde_json::from_str::<serde_json::Value>(&assistant_message.content) {
-                        Ok(json_value) => {
-                            info!(
-                                "{} Structured response:\n{}",
-                                ctx.id(),
-                                serde_json::to_string_pretty(&json_value)
-                                    .unwrap_or_else(|_| assistant_message.content.clone())
-                            );
-                        }
-                        Err(_) => {
-                            info!("{} Unstructured response: {}", ctx.id(), assistant_message.content);
-                        }
+        // First try to parse as RustPrinciples
+        let assistant_message = response.message;
+        match serde_json::from_str::<RustPrinciples>(&assistant_message.content) {
+            Ok(principles) => {
+                info!(
+                    "{} Parsed RustPrinciples successfully:\n{}",
+                    ctx.id(),
+                    serde_json::to_string_pretty(&principles).unwrap()
+                );
+            }
+            Err(e) => {
+                error!("{} Failed to parse response as RustPrinciples: {}", ctx.id(), e);
+                // Fall back to previous behavior of trying to pretty print as generic JSON
+                match serde_json::from_str::<serde_json::Value>(&assistant_message.content) {
+                    Ok(json_value) => {
+                        info!(
+                            "{} Structured response:\n{}",
+                            ctx.id(),
+                            serde_json::to_string_pretty(&json_value)
+                                .unwrap_or_else(|_| assistant_message.content.clone())
+                        );
+                    }
+                    Err(_) => {
+                        info!("{} Unstructured response: {}", ctx.id(), assistant_message.content);
                     }
                 }
             }
-        } else {
-            error!("{} No response received from LLM", ctx.id());
         }
 
         info!("{} Request completed", ctx.id());
