@@ -24,10 +24,30 @@ const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
 pub enum ChatError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
-    #[error("Ollama error: {0}")]
-    Ollama(#[from] OllamaError),
+    #[error("Tool call error: {0}")]
+    ToolCall(String),
+    #[error("JSON error: {0}")]
+    JsonError(serde_json::Error),
+    #[error("Reqwest error: {0}")]
+    ReqwestError(reqwest::Error),
+    #[error("Ollama internal error: {0}")]
+    OllamaInternal(String),
+    #[error("Ollama other error: {0}")]
+    OllamaOther(String),
     #[error("Ollama not initialized")]
     OllamaNotInitialized,
+}
+
+impl From<OllamaError> for ChatError {
+    fn from(err: OllamaError) -> Self {
+        match err {
+            OllamaError::ToolCallError(e) => ChatError::ToolCall(e.to_string()),
+            OllamaError::JsonError(e) => ChatError::JsonError(e),
+            OllamaError::ReqwestError(e) => ChatError::ReqwestError(e),
+            OllamaError::InternalError(e) => ChatError::OllamaInternal(e.message),
+            OllamaError::Other(e) => ChatError::OllamaOther(e),
+        }
+    }
 }
 
 impl ActorError for ChatError {}
@@ -134,9 +154,7 @@ impl Message<ChatMessages> for Chat {
                         ctx.reply(chunk.clone()).await?;
 
                         // Accumulate message content
-                        if let Some(message) = &chunk.message {
-                            accumulated_content.push_str(&message.content);
-                        }
+                        accumulated_content.push_str(&chunk.message.content);
 
                         // If this is the final message, add the complete message to history
                         if chunk.done {
@@ -167,9 +185,7 @@ impl Message<ChatMessages> for Chat {
             let result = self.ollama.send_chat_messages(chat_message_request).await?;
 
             // Add the assistant's message to the history
-            if let Some(message) = &result.message {
-                self.history.push(ChatMessage::assistant(message.content.clone()));
-            }
+            self.history.push(ChatMessage::assistant(result.message.content.clone()));
 
             if request.persist {
                 // Filter out system messages before saving

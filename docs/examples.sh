@@ -130,19 +130,35 @@ curl -X POST http://localhost:5766/ask \
 curl -X POST http://localhost:11434/api/generate \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "llama3.2",
+        "model": "qwen2.5-coder:32b-instruct-q5_K_M",
         "prompt": "Why is the sky blue?"
     }'
 
 # Chat completion
-curl -X POST http://localhost:11434/api/chat \
+curl -X POST http://127.0.0.1:11434/api/generate \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "llama3.2",
+        "model": "qwen2.5-coder:32b-instruct-q5_K_M",
         "messages": [
             {
                 "role": "user",
                 "content": "Why is the sky blue?"
+            }
+        ]
+    }'
+
+curl http://127.0.0.1:11434/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "qwen2.5-coder:32b-instruct-q5_K_M",
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are Mistral.rs, an AI assistant."
+            },
+            {
+                "role": "user",
+                "content": "Say hello."
             }
         ]
     }'

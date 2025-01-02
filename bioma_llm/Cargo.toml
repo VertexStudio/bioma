@@ -30,12 +30,10 @@ tempfile = { workspace = true }
 #     "function-calling",
 #     "stream",
 # ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "0cadf08b2abee4fa38a2b57549212fe04d152cf5", features = [
-    "function-calling",
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "e28ab5aab3c56ffc7849fa263e5dfc773a99bbe3", features = [
     "stream",
 ] }
 # ollama-rs = { path = "../../ollama-rs", features = [
-#     "function-calling",
 #     "stream",
 # ] }
 hf-hub = "0.3.2"
