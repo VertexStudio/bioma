@@ -949,7 +949,6 @@ dependencies = [
  "futures",
  "futures-util",
  "glob",
- "goose",
  "hf-hub",
  "humantime",
  "humantime-serde",
@@ -957,7 +956,6 @@ dependencies = [
  "lazy_static",
  "mdka",
  "ollama-rs",
- "once_cell",
  "ort",
  "rand",
  "reqwest",
@@ -2496,6 +2494,24 @@ dependencies = [
  "tokio-tungstenite 0.21.0",
  "tungstenite 0.21.0",
  "url",
+]
+
+[[package]]
+name = "goose_attack"
+version = "0.1.0"
+dependencies = [
+ "bioma_actor",
+ "bioma_behavior",
+ "bioma_llm",
+ "bioma_tool",
+ "clap",
+ "goose",
+ "once_cell",
+ "rand",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
