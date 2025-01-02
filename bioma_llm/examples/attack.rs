@@ -158,7 +158,7 @@ fn initialize_goose(args: &Args) -> Result<GooseAttack, GooseError> {
     config.users = Some(args.users);
     config.run_time = args.time.to_string();
     config.request_log = args.log.clone();
-    config.report_file = args.report.clone();
+    config.report_file = vec![args.report.clone()];
     config.running_metrics = Some(args.metrics_interval);
 
     GooseAttack::initialize_with_config(config)
