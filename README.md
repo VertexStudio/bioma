@@ -196,14 +196,13 @@ curl -X POST http://localhost:5766/rerank \
 curl -X POST http://localhost:5766/api/chat \
     -H "Content-Type: application/json" \
     -d '{
+        "model": "llama3.2",
         "messages": [
             {
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
-        ],
-        "source": ".*",
-        "format": null
+        ]
     }'
 ```
 
@@ -213,26 +212,38 @@ curl -X POST http://localhost:5766/api/chat \
 curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
     -d '{
+        "model": "llama3.2",
         "messages": [
             {
                 "role": "user",
-                "content": "Should I learn Rust?"
+                "content": "Tell me about Puerto Rico."
             }
         ],
-        "source": ".*",
         "format": {
+            "title": "PuertoRicoInfo",
             "type": "object",
+            "required": [
+                "name",
+                "capital",
+                "languages"
+            ],
             "properties": {
-                "answer": {
-                    "type": "boolean",
-                    "description": "Yes or no answer"
+                "name": {
+                    "description": "Name of the territory",
+                    "type": "string"
                 },
-                "reason": {
-                    "type": "string",
-                    "description": "Brief explanation for the answer"
+                "capital": {
+                    "description": "Capital city",
+                    "type": "string"
+                },
+                "languages": {
+                    "description": "Official languages spoken",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
-            },
-            "required": ["answer", "reason"]
+            }
         }
     }'
 ```
