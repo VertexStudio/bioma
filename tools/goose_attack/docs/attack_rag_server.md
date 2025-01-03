@@ -16,10 +16,6 @@ The stress testing tool simulates multiple users interacting with different endp
 
 RAG server must be running before starting the stress test. Please refer to the main [README](../../../README.md) file.
 
-```bash
-cargo run -p goose_attack --bin attack_rag_server -- [OPTIONS]
-```
-
 ## Usage
 
 Basic command structure:
