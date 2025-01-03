@@ -1,4 +1,4 @@
-# Bioma LLM - Stress Testing Guide
+# Rag Server - Stress Testing Guide
 
 This guide details how to use the `bioma_llm` stress testing tool to evaluate the performance of your RAG server under various load conditions.
 
@@ -12,12 +12,16 @@ The stress testing tool simulates multiple users interacting with different endp
 - Specify endpoint execution order
 - Introduce variations in test data
 
+## Prerequisites
+
+RAG server must be running before starting the stress test. Please refer to the main [README](../../rag_server/README.md) file.
+
 ## Usage
 
 Basic command structure:
 
 ```bash
-cargo run -p goose_attack --example bioma_llm -- [OPTIONS]
+cargo run -p goose_attack --bin attack_rag_server -- [OPTIONS]
 ```
 
 ### Options
@@ -53,7 +57,7 @@ cargo run -p goose_attack --example bioma_llm -- [OPTIONS]
 ### Basic Test (All Endpoints)
 
 ```bash
-cargo run -p goose_attack --example bioma_llm
+cargo run -p goose_attack --bin attack_rag_server
 ```
 
 Tests all endpoints with 10 users for 60 seconds.
@@ -61,7 +65,7 @@ Tests all endpoints with 10 users for 60 seconds.
 ### Ordered Test with Specific Endpoints
 
 ```bash
-cargo run -p goose_attack --example bioma_llm -- --endpoints health,hello,upload --order
+cargo run -p goose_attack --bin attack_rag_server -- --endpoints health,hello,upload --order
 ```
 
 Tests specified endpoints in sequence.
@@ -69,7 +73,7 @@ Tests specified endpoints in sequence.
 ### Weighted Test
 
 ```bash
-cargo run -p goose_attack --example bioma_llm -- --endpoints index:3,ask:1
+cargo run -p goose_attack --bin attack_rag_server -- --endpoints index:3,ask:1
 ```
 
 Tests index endpoint 3x more frequently than ask endpoint.
@@ -77,7 +81,7 @@ Tests index endpoint 3x more frequently than ask endpoint.
 ### Extended Test with High Load
 
 ```bash
-cargo run -p goose_attack --example bioma_llm -- --endpoints all --users 50 --time 120 --variations 50
+cargo run -p goose_attack --bin attack_rag_server -- --endpoints all --users 50 --time 120 --variations 50
 ```
 
 Simulates 50 users across all endpoints for 2 minutes using 50 different test files.
@@ -89,7 +93,7 @@ The `--variations` option introduces variability in test data for file-handling 
 Example:
 
 ```bash
-cargo run -p goose_attack --example bioma_llm -- --endpoints upload,index --variations 3
+cargo run -p goose_attack --bin attack_rag_server -- --endpoints upload,index --variations 3
 ```
 
 ## Interpreting Results
