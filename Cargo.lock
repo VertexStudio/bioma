@@ -4753,6 +4753,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "rag_server"
+version = "0.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-multipart",
+ "actix-web",
+ "anyhow",
+ "base64 0.22.1",
+ "bioma_actor",
+ "bioma_llm",
+ "clap",
+ "futures-util",
+ "glob",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "rand"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
