@@ -4,4 +4,4 @@ The porpuse of this crate is to test the performance of the different parts of b
 
 ## Specific guides  
 
-- [Bioma LLM](docs/llm.md)  
+- [Bioma LLM](docs/bioma_llm.md)  
