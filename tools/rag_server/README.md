@@ -10,6 +10,10 @@ A REST API server for Retrieval-Augmented Generation (RAG) built with Bioma.
 - Text reranking
 - File upload support (single files and zip archives)
 
+## RAG server example
+
+[Agentic RAG Server](docs/rag_server.md)
+
 ## Quick Start
 
 1. Start SurrealDB:
@@ -23,10 +27,6 @@ surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass roo
 ```bash
 cargo run --release -p rag_server
 ```
-
-## RAG server example
-
-[Agentic RAG Server](docs/rag_server.md)
 
 ## Endpoints
 
