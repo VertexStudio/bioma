@@ -1,4 +1,4 @@
-# Bioma LLM - Stress Testing Guide
+# Rag Server - Stress Testing Guide
 
 This guide details how to use the `bioma_llm` stress testing tool to evaluate the performance of your RAG server under various load conditions.
 
