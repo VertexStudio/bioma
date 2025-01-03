@@ -11,10 +11,10 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tracing::{debug, error};
 
-pub trait Transport {
-    fn start(&mut self, request_tx: mpsc::Sender<String>) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
-    fn send_response(&mut self, response: String) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
-}
+use super::Transport;
+
+type WsStream = WebSocketStream<tokio::net::TcpStream>;
+type WsWriter = futures::stream::SplitSink<WsStream, Message>;
 
 #[derive(Clone)]
 pub struct StdioTransport {
@@ -44,13 +44,13 @@ impl Transport for StdioTransport {
         })
     }
 
-    fn send_response(&mut self, response: String) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+    fn send_message(&mut self, message: String) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         let stdout = self.stdout.clone();
         Box::pin(async move {
-            if !response.is_empty() {
-                debug!("Sending [stdio]: {}", response);
+            if !message.is_empty() {
+                debug!("Sending [stdio]: {}", message);
                 let mut stdout = stdout.lock().await;
-                stdout.write_all(response.as_bytes()).await.context("Failed to write response")?;
+                stdout.write_all(message.as_bytes()).await.context("Failed to write message")?;
                 stdout.write_all(b"\n").await.context("Failed to write newline")?;
                 stdout.flush().await.context("Failed to flush stdout")?;
             }
@@ -58,9 +58,6 @@ impl Transport for StdioTransport {
         })
     }
 }
-
-type WsStream = WebSocketStream<tokio::net::TcpStream>;
-type WsWriter = futures::stream::SplitSink<WsStream, Message>;
 
 #[derive(Clone)]
 pub struct WebSocketTransport {
@@ -117,38 +114,16 @@ impl Transport for WebSocketTransport {
         })
     }
 
-    fn send_response(&mut self, response: String) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+    fn send_message(&mut self, message: String) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         let writer = self.writer.clone();
         Box::pin(async move {
-            if !response.is_empty() {
+            if !message.is_empty() {
                 if let Some(writer) = &mut *writer.lock().await {
-                    debug!("Sending [websocket]: {}", response);
-                    writer.send(Message::Text(response.into())).await.context("Failed to send WebSocket message")?;
+                    debug!("Sending [websocket]: {}", message);
+                    writer.send(Message::Text(message.into())).await.context("Failed to send WebSocket message")?;
                 }
             }
             Ok(())
         })
     }
-}
-
-#[derive(Clone)]
-pub enum TransportType {
-    Stdio(StdioTransport),
-    WebSocket(WebSocketTransport),
-}
-
-impl Transport for TransportType {
-    fn start(&mut self, request_tx: mpsc::Sender<String>) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        match self {
-            TransportType::Stdio(t) => t.start(request_tx),
-            TransportType::WebSocket(t) => t.start(request_tx),
-        }
-    }
-
-    fn send_response(&mut self, response: String) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        match self {
-            TransportType::Stdio(t) => t.send_response(response),
-            TransportType::WebSocket(t) => t.send_response(response),
-        }
-    }
-}
+} 
