@@ -3,7 +3,7 @@ use bioma_tool::{
     client::Client,
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
     transport::{
-        client::{McpServer, StdioTransport},
+        stdio::{McpServer, StdioTransport},
         TransportType,
     },
 };
@@ -50,13 +50,11 @@ async fn main() -> Result<()> {
             args.server_log_file.clone(),
         ],
     };
-    let transport = StdioTransport::new();
-    transport.start_process(&server).await?;
+    let transport = StdioTransport::new_client(&server)?;
 
     // Create transport and client
     let transport = match args.transport.as_str() {
-        "stdio" => TransportType::ClientStdio(transport),
-        "websocket" => return Err(anyhow::anyhow!("WebSocket transport not yet implemented for client")),
+        "stdio" => TransportType::Stdio(transport),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
     let mut client = Client::new(transport).await?;

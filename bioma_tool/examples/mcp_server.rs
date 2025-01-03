@@ -8,7 +8,7 @@ use bioma_tool::{
     },
     server::ModelContextProtocolServer,
     tools::{self, ToolCallHandler},
-    transport::{server::StdioTransport, TransportType, server::WebSocketTransport},
+    transport::{stdio::StdioTransport, TransportType},
 };
 use clap::Parser;
 use std::path::PathBuf;
@@ -112,8 +112,7 @@ async fn main() -> Result<()> {
     setup_logging(args.log_file)?;
 
     let transport = match args.transport.as_str() {
-        "stdio" => TransportType::ServerStdio(StdioTransport::new()),
-        "websocket" => TransportType::ServerWebSocket(WebSocketTransport::new(args.ws_addr)),
+        "stdio" => TransportType::Stdio(StdioTransport::new_server()),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 
