@@ -1,6 +1,6 @@
 # Stress Testing Guide  
 
-The porpuse of this crate is to test the performance of the different parts of bioma under stress conditions.  
+The purpose of this crate is to conduct performance stress tests on the different modules of Bioma.
 
 ## Specific guides  
 
