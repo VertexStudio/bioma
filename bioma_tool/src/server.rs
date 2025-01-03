@@ -246,7 +246,7 @@ pub async fn start<T: ModelContextProtocolServer>(mut transport: TransportType) 
         });
 
         if !response.is_empty() {
-            if let Err(e) = transport.send_response(response).await {
+            if let Err(e) = transport.send_message(response).await {
                 error!("Failed to send response: {}", e);
                 return Err(e).context("Failed to send response");
             }
