@@ -14,7 +14,7 @@ The stress testing tool simulates multiple users interacting with different endp
 
 ## Prerequisites
 
-RAG server must be running before starting the stress test. Please refer to the main [README](../../../README.md) file.
+RAG server must be running before starting the stress test. Please refer to the main [README](../../rag_server/README.md) file.
 
 ## Usage
 
