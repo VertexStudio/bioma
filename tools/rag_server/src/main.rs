@@ -299,11 +299,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     // This helps find relevant context across all parts of the user's conversation.
     let query = {
         // Extract only the user messages, ignoring system/assistant messages
-        let user_messages: Vec<_> = body
-            .messages
-            .iter()
-            .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
-            .collect();
+        let user_messages: Vec<_> = body.messages.iter().filter(|message| message.role == MessageRole::User).collect();
 
         // Pre-allocate string capacity to avoid reallocations
         // Size = sum of all message lengths + newlines between messages
@@ -359,8 +355,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                                 .await
                                 {
                                     Ok(base64_data) => {
-                                        context_message.images =
-                                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
                                     }
                                     Err(e) => {
                                         error!("Error encoding image: {:?}", e);
@@ -486,7 +481,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     let query = body
         .messages
         .iter()
-        .filter(|message| message.role == ollama_rs::generation::chat::MessageRole::User)
+        .filter(|message| message.role == MessageRole::User)
         .map(|message| message.content.clone())
         .collect::<Vec<String>>()
         .join("\n");
@@ -531,8 +526,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                                 .await
                                 {
                                     Ok(base64_data) => {
-                                        context_message.images =
-                                            Some(vec![ollama_rs::generation::images::Image::from_base64(&base64_data)]);
+                                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
                                     }
                                     Err(e) => {
                                         error!("Error encoding image: {:?}", e);
