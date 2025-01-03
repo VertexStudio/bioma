@@ -101,7 +101,7 @@ impl Client {
 
         // Send request
         let request_str = serde_json::to_string(&request)?;
-        self.transport.send_message(request_str).await?;
+        self.transport.send(request_str).await?;
 
         // Parse response as proper JSON-RPC response
         if let Some(response) = self.response_rx.recv().await {
