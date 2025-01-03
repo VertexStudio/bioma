@@ -17,7 +17,7 @@ The stress testing tool simulates multiple users interacting with different endp
 Basic command structure:
 
 ```bash
-cargo run -p bioma_llm --example attack -- [OPTIONS]
+cargo run --package goose_attack --example llm -- [OPTIONS]
 ```
 
 ### Options
@@ -53,7 +53,7 @@ cargo run -p bioma_llm --example attack -- [OPTIONS]
 ### Basic Test (All Endpoints)
 
 ```bash
-cargo run -p bioma_llm --example attack
+cargo run --package goose_attack --example llm
 ```
 
 Tests all endpoints with 10 users for 60 seconds.
@@ -61,7 +61,7 @@ Tests all endpoints with 10 users for 60 seconds.
 ### Ordered Test with Specific Endpoints
 
 ```bash
-cargo run -p bioma_llm --example attack -- --endpoints health,hello,upload --order
+cargo run --package goose_attack --example llm -- --endpoints health,hello,upload --order
 ```
 
 Tests specified endpoints in sequence.
@@ -69,7 +69,7 @@ Tests specified endpoints in sequence.
 ### Weighted Test
 
 ```bash
-cargo run -p bioma_llm --example attack -- --endpoints index:3,ask:1
+cargo run --package goose_attack --example llm -- --endpoints index:3,ask:1
 ```
 
 Tests index endpoint 3x more frequently than ask endpoint.
@@ -77,7 +77,7 @@ Tests index endpoint 3x more frequently than ask endpoint.
 ### Extended Test with High Load
 
 ```bash
-cargo run -p bioma_llm --example attack -- --endpoints all --users 50 --time 120 --variations 50
+cargo run --package goose_attack --example llm -- --endpoints all --users 50 --time 120 --variations 50
 ```
 
 Simulates 50 users across all endpoints for 2 minutes using 50 different test files.
@@ -89,7 +89,7 @@ The `--variations` option introduces variability in test data for file-handling 
 Example:
 
 ```bash
-cargo run -p bioma_llm --example attack -- --endpoints upload,index --variations 3
+cargo run --package goose_attack --example llm -- --endpoints upload,index --variations 3
 ```
 
 ## Interpreting Results
