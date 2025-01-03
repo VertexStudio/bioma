@@ -25,6 +25,12 @@ lazy_static = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }
 tempfile = { workspace = true }
+actix-web = { workspace = true }
+actix-cors = { workspace = true }
+actix-multipart = { workspace = true }
+futures-util = { workspace = true }
+tokio-stream = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "a1f2bb5c5161d4879b089104e8753990c832ba9c", features = [
 #     "function-calling",
@@ -85,3 +91,7 @@ strum = { workspace = true }
 tokio-stream = { workspace = true }
 futures-util = { workspace = true }
 tempfile = { workspace = true }
+
+[[bin]]
+name = "rag_server"
+path = "src/bin/rag_server.rs"
