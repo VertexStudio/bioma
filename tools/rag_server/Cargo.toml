@@ -21,3 +21,9 @@ zip = { workspace = true }
 
 bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+glob = { workspace = true }
+reqwest = { workspace = true }
