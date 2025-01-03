@@ -102,12 +102,12 @@ python assets/scripts/rerank_server.py
 
 ## RAG server example
 
-[Agentic RAG Server](bioma_llm/examples/rag_server.md)
+[Agentic RAG Server](tools/rag_server/docs/rag_server.md)
 
 ### Launch the server:
 
 ```bash
-cargo run --release -p bioma_llm --example rag_server
+cargo run --release -p rag_server
 ```
 
 ### Reset the engine:
