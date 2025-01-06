@@ -20,6 +20,8 @@ readability-rs = { workspace = true }
 url = { workspace = true }
 robotstxt = { workspace = true }
 schemars = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 mockito = { workspace = true }

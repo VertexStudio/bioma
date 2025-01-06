@@ -3,6 +3,7 @@ use bioma_tool::{
     client::{Client, ServerConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
     transport::{stdio::StdioTransport, TransportType},
+    utils::ping::PingConfig,
 };
 use clap::Parser;
 use tracing::info;
@@ -54,7 +55,8 @@ async fn main() -> Result<()> {
         "stdio" => TransportType::Stdio(transport),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
-    let mut client = Client::new(transport).await?;
+    let mut client =
+        Client::new(transport, Some(PingConfig { interval_ms: 100, timeout_ms: 50, failure_threshold: 2 })).await?;
 
     // Initialize the client
     info!("Initializing client...");

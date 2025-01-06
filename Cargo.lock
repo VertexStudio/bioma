@@ -989,12 +989,14 @@ name = "bioma_tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "futures",
  "html2md",
  "jsonrpc-core",
  "lazy_static",
  "mockito",
+ "rand",
  "readability-rs",
  "reqwest",
  "robotstxt",
