@@ -292,7 +292,7 @@ pub async fn load_test_chat(user: &mut GooseUser) -> TransactionResult {
         "messages": [ChatMessage::user("Hello, how are you?".to_string())],
     });
 
-    make_request(user, GooseMethod::Post, "/api/chat", "Chat", TestType::Chat, Some(payload), &mut ordering_state).await
+    make_request(user, GooseMethod::Post, "/chat", "Chat", TestType::Chat, Some(payload), &mut ordering_state).await
 }
 
 pub async fn load_test_upload(user: &mut GooseUser) -> TransactionResult {
@@ -414,7 +414,7 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
     make_request(
         user,
         GooseMethod::Post,
-        "/api/embed",
+        "/embed",
         "Embed Text",
         TestType::Embed,
         Some(payload),
