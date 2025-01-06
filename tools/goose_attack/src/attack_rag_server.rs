@@ -411,16 +411,8 @@ pub async fn load_test_embed(user: &mut GooseUser) -> TransactionResult {
         "input": String::from_utf8_lossy(&file_bytes).to_string(),
     });
 
-    make_request(
-        user,
-        GooseMethod::Post,
-        "/embed",
-        "Embed Text",
-        TestType::Embed,
-        Some(payload),
-        &mut ordering_state,
-    )
-    .await
+    make_request(user, GooseMethod::Post, "/embed", "Embed Text", TestType::Embed, Some(payload), &mut ordering_state)
+        .await
 }
 
 pub async fn load_test_ask(user: &mut GooseUser) -> TransactionResult {
