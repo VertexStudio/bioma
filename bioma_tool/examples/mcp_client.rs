@@ -1,11 +1,8 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::Client,
+    client::{Client, ServerConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
-    transport::{
-        stdio::{McpServer, StdioTransport},
-        TransportType,
-    },
+    transport::{stdio::StdioTransport, TransportType},
 };
 use clap::Parser;
 use tracing::info;
@@ -41,7 +38,7 @@ async fn main() -> Result<()> {
 
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
-    let server = McpServer {
+    let server = ServerConfig {
         command: args.server_path,
         args: vec![
             "--transport".to_string(),

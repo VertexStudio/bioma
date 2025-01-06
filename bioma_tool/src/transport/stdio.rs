@@ -1,3 +1,5 @@
+use super::Transport;
+use crate::client::ServerConfig;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::{
@@ -6,13 +8,6 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tracing::{debug, error};
-
-use super::Transport;
-
-pub struct McpServer {
-    pub command: String,
-    pub args: Vec<String>,
-}
 
 enum StdioMode {
     Server(Arc<Mutex<tokio::io::Stdout>>),
@@ -34,7 +29,7 @@ impl StdioTransport {
         Self { mode: Arc::new(StdioMode::Server(Arc::new(Mutex::new(tokio::io::stdout())))) }
     }
 
-    pub fn new_client(server: &McpServer) -> Result<Self> {
+    pub fn new_client(server: &ServerConfig) -> Result<Self> {
         let mut child = Command::new(&server.command)
             .args(&server.args)
             .stdin(std::process::Stdio::piped())

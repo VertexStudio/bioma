@@ -13,6 +13,11 @@ use crate::schema::{
 };
 use crate::transport::TransportType;
 
+pub struct ServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
 pub struct Client {
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
