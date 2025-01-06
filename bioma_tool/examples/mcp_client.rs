@@ -1,8 +1,7 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::{Client, ServerConfig},
+    client::{ModelContextProtocolClient, ServerConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
-    transport::{stdio::StdioTransport, TransportType},
 };
 use clap::Parser;
 use tracing::info;
@@ -39,6 +38,7 @@ async fn main() -> Result<()> {
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
     let server = ServerConfig {
+        transport: args.transport.clone(),
         command: args.server_path,
         args: vec![
             "--transport".to_string(),
@@ -47,14 +47,9 @@ async fn main() -> Result<()> {
             args.server_log_file.clone(),
         ],
     };
-    let transport = StdioTransport::new_client(&server)?;
 
-    // Create transport and client
-    let transport = match args.transport.as_str() {
-        "stdio" => TransportType::Stdio(transport),
-        _ => return Err(anyhow::anyhow!("Invalid transport type")),
-    };
-    let mut client = Client::new(transport).await?;
+    // Create client
+    let mut client = ModelContextProtocolClient::new(server).await?;
 
     // Initialize the client
     info!("Initializing client...");
