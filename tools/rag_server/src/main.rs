@@ -866,10 +866,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(self::ask))
-            .route("/api/chat", web::post().to(self::chat))
+            .route("/chat", web::post().to(self::chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
-            .route("/api/embed", web::post().to(embed))
+            .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
     })
     .bind("0.0.0.0:5766")?

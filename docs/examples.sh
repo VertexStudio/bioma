@@ -50,7 +50,7 @@ curl -X POST http://localhost:5766/ask \
 # Embedding Operations
 # ----------------
 # Generate embeddings
-curl -X POST http://localhost:5766/api/embed \
+curl -X POST http://localhost:5766/embed \
     -H "Content-Type: application/json" \
     -d '{
         "model": "nomic-embed-text",
@@ -73,7 +73,7 @@ curl -X POST http://localhost:5766/rerank \
     }'
 
 # Chat completion (compatible with Ollama)
-curl -X POST http://localhost:5766/api/chat \
+curl -X POST http://localhost:5766/chat \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",

@@ -82,7 +82,7 @@ curl -X POST http://localhost:5766/retrieve \
 
 ```bash
 # Text embeddings example
-curl -X POST http://localhost:5766/api/embed \
+curl -X POST http://localhost:5766/embed \
     -H "Content-Type: application/json" \
     -d '{
         "model": "nomic-embed-text",
@@ -93,7 +93,7 @@ curl -X POST http://localhost:5766/api/embed \
     }'
 
 # Image embeddings example (base64 encoded images)
-curl -X POST http://localhost:5766/api/embed \
+curl -X POST http://localhost:5766/embed \
     -H "Content-Type: application/json" \
     -d '{
         "model": "nomic-embed-vision",
@@ -119,7 +119,7 @@ curl -X POST http://localhost:5766/rerank \
 ### Chat completion:
 
 ```bash
-curl -X POST http://localhost:5766/api/chat \
+curl -X POST http://localhost:5766/chat \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",
