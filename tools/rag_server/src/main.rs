@@ -4,6 +4,8 @@ use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responde
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use clap::Parser;
+use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
@@ -12,11 +14,12 @@ use serde_json::json;
 use std::error::Error as StdError;
 use tracing::{debug, error, info};
 
-/// Example of a RAG server using the Bioma Actor framework
+mod config;
+mod tool;
+
+/// RAG server using the Bioma Actor framework
 ///
 /// CURL (examples)[docs/examples.sh]
-
-const CHAT_DEFAULT_PROMPT: &str = "You are, Bioma, a helpful assistant. Your creator is Vertex Studio, a games and simulation company. Format your response in markdown. Use the following context to answer the user's query: \n\n";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct UserActor {}
@@ -30,6 +33,7 @@ impl Actor for UserActor {
 }
 
 struct AppState {
+    config: Config,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -337,7 +341,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             info!("Context fetched: {:#?}", context);
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
-            let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+            let mut context_message = ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
 
             // Add image handling here
             if let Some(ctx) = context
@@ -508,7 +512,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            let mut context_message = ChatMessage::system(format!("{}{}", CHAT_DEFAULT_PROMPT, context_content));
+            let mut context_message = ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
 
             // Handle image context if present
             if let Some(ctx) = context
@@ -749,8 +753,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
+    let args = Args::parse();
+    let config = args.load_config()?;
+
     // Initialize engine
-    let engine = Engine::connect(EngineOptions::builder().endpoint("ws://localhost:9123".into()).build()).await?;
+    let engine = Engine::connect(EngineOptions::builder().endpoint(config.engine_endpoint.clone()).build()).await?;
 
     // Spawn main actors and their relays
     let mut actor_handles = Vec::new();
@@ -825,7 +832,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::builder().model("llama3.2-vision".into()).build(),
+        Chat::builder().model(config.chat_model.clone()).build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -839,6 +846,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create app state
     let data = web::Data::new(AppState {
+        config,
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,

@@ -25,17 +25,8 @@ lazy_static = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }
 tempfile = { workspace = true }
+ollama-rs = { workspace = true }
 
-# ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "a1f2bb5c5161d4879b089104e8753990c832ba9c", features = [
-#     "function-calling",
-#     "stream",
-# ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "e28ab5aab3c56ffc7849fa263e5dfc773a99bbe3", features = [
-    "stream",
-] }
-# ollama-rs = { path = "../../ollama-rs", features = [
-#     "stream",
-# ] }
 hf-hub = "0.3.2"
 fastembed = "4.3"
 

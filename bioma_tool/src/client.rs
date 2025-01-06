@@ -1,33 +1,46 @@
-use crate::transport::Transport;
-use anyhow::Result;
-use jsonrpc_core::Params;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, error};
-
 use crate::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, GetPromptRequestParams, GetPromptResult, Implementation,
     InitializeRequestParams, InitializeResult, ListPromptsRequestParams, ListPromptsResult, ListResourcesRequestParams,
     ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult,
     ServerCapabilities,
 };
-use crate::transport::TransportType;
+use crate::transport::{stdio::StdioTransport, Transport, TransportType};
+use anyhow::Result;
+use jsonrpc_core::Params;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
+use tracing::{debug, error};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
+    #[serde(default = "default_transport")]
+    pub transport: String,
     pub command: String,
     pub args: Vec<String>,
 }
 
-pub struct Client {
+fn default_transport() -> String {
+    "stdio".to_string()
+}
+
+pub struct ModelContextProtocolClient {
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
     response_rx: mpsc::Receiver<String>,
 }
 
-impl Client {
-    pub async fn new(transport: TransportType) -> Result<Self> {
+impl ModelContextProtocolClient {
+    pub async fn new(server: ServerConfig) -> Result<Self> {
         let (tx, rx) = mpsc::channel::<String>(1);
+
+        let transport = StdioTransport::new_client(&server)?;
+
+        let transport = match server.transport.as_str() {
+            "stdio" => TransportType::Stdio(transport),
+            _ => return Err(anyhow::anyhow!("Invalid transport type")),
+        };
 
         // Start transport once during initialization
         let mut transport_clone = transport.clone();

@@ -18,9 +18,13 @@ serde_json = { workspace = true }
 ulid = { workspace = true }
 uuid = { workspace = true }
 zip = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+ollama-rs = { workspace = true }
 
 bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
+bioma_tool = { path = "../../bioma_tool" }
 
 [dev-dependencies]
 anyhow = { workspace = true }

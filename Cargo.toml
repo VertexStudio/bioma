@@ -87,3 +87,15 @@ once_cell = "1.20"
 lazy_static = "1.5"
 base64 = "0.22"
 rand = "0.8"
+
+# LLM
+# ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "a1f2bb5c5161d4879b089104e8753990c832ba9c", features = [
+#     "function-calling",
+#     "stream",
+# ] }
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "e28ab5aab3c56ffc7849fa263e5dfc773a99bbe3", features = [
+    "stream",
+] }
+# ollama-rs = { path = "../../ollama-rs", features = [
+#     "stream",
+# ] }
