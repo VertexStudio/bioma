@@ -81,6 +81,15 @@ pub async fn start<T: ModelContextProtocolServer>(mut transport: TransportType) 
         }
     });
 
+    io_handler.add_method("ping", move |_params| {
+        debug!("Handling ping request");
+
+        async move {
+            info!("Successfully handled ping request");
+            Ok(serde_json::json!({}))
+        }
+    });
+
     io_handler.add_method("resources/list", move |_params| {
         let server = server_resources.clone();
         debug!("Handling resources/list request");
