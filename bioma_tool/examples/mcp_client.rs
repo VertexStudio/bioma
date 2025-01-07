@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
     let server = ServerConfig {
+        name: "bioma-tool".to_string(),
         transport: args.transport.clone(),
         command: args.server_path,
         args: vec![

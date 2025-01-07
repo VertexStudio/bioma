@@ -4066,7 +4066,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.2.2"
-source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=e28ab5aab3c56ffc7849fa263e5dfc773a99bbe3#e28ab5aab3c56ffc7849fa263e5dfc773a99bbe3"
+source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=75548313bed6a14dc046ae514d74b309215b8cd8#75548313bed6a14dc046ae514d74b309215b8cd8"
 dependencies = [
  "async-stream",
  "log",
@@ -4769,6 +4769,7 @@ dependencies = [
  "glob",
  "ollama-rs",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",

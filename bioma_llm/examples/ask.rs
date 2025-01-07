@@ -58,6 +58,7 @@ impl Actor for MainActor {
                     persist: false,
                     stream: false,
                     format: Some(format),
+                    tools: None,
                 },
                 &ask_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),

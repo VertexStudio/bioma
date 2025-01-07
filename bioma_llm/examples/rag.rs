@@ -128,6 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 persist: false,
                 stream: false,
                 format: None,
+                tools: None,
             },
             &ask_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),

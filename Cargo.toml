@@ -42,9 +42,16 @@ derive_more = "0.99"
 
 # Logging and Debugging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "time",
+] }
 tracing-appender = "0.2"
-test-log = { version = "0.2", default-features = false, features = ["trace", "color"] }
+test-log = { version = "0.2", default-features = false, features = [
+    "trace",
+    "color",
+] }
 console-subscriber = "0.4"
 color-backtrace = "0.6"
 
@@ -87,15 +94,16 @@ once_cell = "1.20"
 lazy_static = "1.5"
 base64 = "0.22"
 rand = "0.8"
+indexmap = "2.7"
 
 # LLM
 # ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "a1f2bb5c5161d4879b089104e8753990c832ba9c", features = [
 #     "function-calling",
 #     "stream",
 # ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "e28ab5aab3c56ffc7849fa263e5dfc773a99bbe3", features = [
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "75548313bed6a14dc046ae514d74b309215b8cd8", features = [
     "stream",
 ] }
-# ollama-rs = { path = "../../ollama-rs", features = [
+# ollama-rs = { path = "../ollama-rs", features = [
 #     "stream",
 # ] }

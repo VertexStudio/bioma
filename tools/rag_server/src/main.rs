@@ -9,9 +9,11 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
+use ollama_rs::generation::tools::ToolCall;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::error::Error as StdError;
+use tool::Tools;
 use tracing::{debug, error, info};
 
 mod config;
@@ -34,6 +36,7 @@ impl Actor for UserActor {
 
 struct AppState {
     config: Config,
+    tools: Tools,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -293,6 +296,14 @@ struct ChatResponse {
     context: Vec<ChatMessage>,
 }
 
+#[derive(Serialize)]
+struct ToolResponse {
+    server: String,
+    tool: String,
+    call: ToolCall,
+    response: Value,
+}
+
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -337,8 +348,11 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         .await;
 
     match context {
-        Ok(context) => {
+        Ok(mut context) => {
+            // Reverse to keep more relevant context near user query
+            context.reverse();
             info!("Context fetched: {:#?}", context);
+
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
             let mut context_message = ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
@@ -376,16 +390,51 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             }
 
             // Build the conversation by inserting the context message before the last user message
-            let conversation = {
+            let mut conversation = {
                 let mut conv = Vec::with_capacity(body.messages.len() + 1);
                 if !body.messages.is_empty() {
                     conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
-                    conv.push(context_message);
+                    conv.push(context_message.clone());
                     conv.push(body.messages[body.messages.len() - 1].clone());
                 } else {
-                    conv.push(context_message);
+                    conv.push(context_message.clone());
                 }
                 conv
+            };
+
+            // Generate tool calls if tools are available
+            let tools = data.tools.get_tools();
+            let tool_response = if !tools.is_empty() {
+                let conversation = {
+                    let mut conv = Vec::with_capacity(body.messages.len() + 1);
+                    if !body.messages.is_empty() {
+                        conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
+                        conv.push(body.messages[body.messages.len() - 1].clone());
+                    } else {
+                        conv.push(context_message.clone());
+                    }
+                    conv
+                };
+
+                let tool_request = ChatMessages {
+                    messages: conversation.clone(),
+                    restart: true,
+                    persist: false,
+                    stream: false,
+                    format: body.format.clone(),
+                    tools: Some(tools),
+                };
+                let tool_response = user_actor
+                    .send_and_wait_reply::<Chat, ChatMessages>(
+                        tool_request,
+                        &data.chat,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    )
+                    .await;
+                info!("Tool response: {:#?}", tool_response);
+                Some(tool_response)
+            } else {
+                None
             };
 
             // Set up streaming channel with sufficient buffer for chat responses
@@ -393,12 +442,55 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
+                // If tool calls are generated, call tools and add them to the conversation
+                if let Some(Ok(tool_response)) = tool_response {
+                    for tool_call in &tool_response.message.tool_calls {
+                        let tool = data.tools.get_tool(&tool_call.function.name);
+                        if let Some((_tool_info, tool_client)) = tool {
+                            // Execute the tool call and get raw result
+                            let execution_result = tool_client.call(tool_call).await;
+
+                            // Convert the execution result to a JSON value
+                            let result_json = match execution_result {
+                                Ok(execution_output) => {
+                                    serde_json::to_value(execution_output.content).unwrap_or_default()
+                                }
+                                Err(e) => serde_json::json!({
+                                    "error": format!("Error calling tool: {:?}", e)
+                                }),
+                            };
+
+                            // Create the structured tool response
+                            let formatted_tool_response = ToolResponse {
+                                server: tool_client.server.name.clone(),
+                                tool: tool_call.function.name.clone(),
+                                call: tool_call.clone(),
+                                response: result_json,
+                            };
+
+                            // Convert to chat message and create response object
+                            let tool_result_message =
+                                ChatMessage::tool(serde_json::to_string(&formatted_tool_response).unwrap_or_default());
+                            let mut streaming_response = tool_response.clone();
+                            streaming_response.message = tool_result_message.clone();
+                            let chat_stream_response = ChatResponse { response: streaming_response, context: vec![] };
+
+                            // Send the response through the channel
+                            if tx.send(Ok(web::Json(chat_stream_response))).await.is_err() {
+                                break;
+                            }
+                            conversation.push(tool_result_message);
+                        }
+                    }
+                }
+
                 let chat_request = ChatMessages {
                     messages: conversation.clone(),
                     restart: true,
                     persist: false,
                     stream: true,
                     format: body.format.clone(),
+                    tools: None,
                 };
 
                 match user_actor
@@ -562,6 +654,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                         persist: false,
                         stream: false,
                         format: body.format.clone(),
+                        tools: None,
                     },
                     &data.chat,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
@@ -844,9 +937,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(chat_handle);
 
+    // Tools setup
+    let mut tools = Tools::new();
+    for server in &config.tool_servers {
+        tools.add_server(server.clone()).await?;
+    }
+
     // Create app state
     let data = web::Data::new(AppState {
         config,
+        tools,
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,

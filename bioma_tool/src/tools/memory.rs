@@ -20,8 +20,8 @@ pub const MEMORY_SCHEMA: &str = r#"{
             "type": "string"
         },
         "value": {
-            "description": "Any JSON value to store (only required for store action). Can be an object, array, string, number, boolean, or null",
-            "type": ["object", "array", "string", "number", "boolean", "null"]
+            "description": "The JSON object to store (only required for store action)",
+            "type": "object"
         }
     },
     "required": ["action"]
@@ -54,7 +54,7 @@ pub struct MemoryArgs {
     #[schemars(description = "The key to store/retrieve/delete the memory under (not required for list/clear)")]
     key: Option<String>,
 
-    #[schemars(description = "The JSON value to store (only required for store action)")]
+    #[schemars(description = "The JSON object to store (only required for store action)")]
     #[schemars(with = "Value")]
     value: Option<Value>,
 }
