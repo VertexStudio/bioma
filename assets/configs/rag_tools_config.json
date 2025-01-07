@@ -1,0 +1,19 @@
+{
+    "engine_endpoint": "ws://0.0.0.0:9123",
+    "rag_endpoint": "http://0.0.0.0:5766",
+    "chat_model": "qwen2.5-coder:32b-instruct-q5_K_M",
+    "chat_prompt": "You are, Bioma, a helpful assistant. Your creator is Vertex Studio, a games and simulation company. Format your response in markdown. Use the following context to answer the user's query:\n\n",
+    "tool_servers": [
+        {
+            "name": "bioma-tool",
+            "transport": "stdio",
+            "command": "target/release/examples/mcp_server",
+            "args": [
+                "--transport",
+                "stdio",
+                "--log-file",
+                ".output/mcp_server-bioma.log"
+            ]
+        }
+    ]
+}

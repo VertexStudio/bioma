@@ -87,6 +87,13 @@
             align-self: flex-start;
         }
 
+        .tool-message {
+            /* Light purple/lavender */
+            background-color: #e6e6fa;
+            align-self: flex-start;
+            font-family: monospace;
+        }
+
         /* Context section styling */
         .context-toggle {
             font-size: 0.8em;
@@ -139,6 +146,36 @@
         .uri,
         .chunk {
             margin-bottom: 5px;
+        }
+
+        /* Tool message specific styling */
+        .tool-message {
+            /* Light purple/lavender */
+            background-color: #e6e6fa;
+            align-self: flex-start;
+            font-family: monospace;
+        }
+
+        .tool-header {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .tool-function {
+            margin-bottom: 8px;
+        }
+
+        .tool-details pre {
+            background-color: rgba(255, 255, 255, 0.5);
+            padding: 8px;
+            border-radius: 4px;
+            margin: 4px 0 12px 0;
+            overflow-x: auto;
+        }
+
+        .tool-details code {
+            font-size: 0.9em;
         }
     </style>
 </head>
@@ -292,7 +329,8 @@
             // Determine the message role based on sender type
             // Can be 'user', 'system', or 'assistant' (default)
             const role = sender.toLowerCase() === 'user' ? 'user' :
-                sender.toLowerCase() === 'system' ? 'system' : 'assistant';
+                sender.toLowerCase() === 'system' ? 'system' :
+                    sender.toLowerCase() === 'tool' ? 'tool' : 'assistant';
 
             // Add the new message to the chat history array
             // This history is used when making new API requests
@@ -441,15 +479,37 @@
 
 
         function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
-
             const data = JSON.parse(json_line);
 
-            // Handle system message
-            if (data.message?.role === 'system') {
-                const systemMessageDiv = document.createElement('div');
-                systemMessageDiv.className = 'message system-message';
-                systemMessageDiv.innerHTML = `<strong>System:</strong> ${md.render(data.message.content)}`;
-                messageDiv.insertBefore(systemMessageDiv, contentDiv);
+            // Handle system and tool messages
+            if (data.message?.role === 'system' || data.message?.role === 'tool') {
+                // Create new message div for system or tool messages
+                const specialMessageDiv = document.createElement('div');
+                specialMessageDiv.className = `message ${data.message.role}-message`;
+
+                // Special formatting for tool messages
+                if (data.message.role === 'tool') {
+                    const toolData = JSON.parse(data.message.content);
+                    const formattedContent = `
+                        <div class="tool-header">
+                            <strong>🔧 Tool Call:</strong> ${toolData.tool} (${toolData.server})
+                        </div>
+                        <div class="tool-function">
+                            <strong>Function:</strong> ${toolData.call.function.name}
+                        </div>
+                        <div class="tool-details">
+                            <strong>Arguments:</strong>
+                            <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                            <strong>Response:</strong>
+                            <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                        </div>
+                    `;
+                    specialMessageDiv.innerHTML = formattedContent;
+                } else {
+                    specialMessageDiv.innerHTML = md.render(data.message.content);
+                }
+
+                chatContainer.insertBefore(specialMessageDiv, messageDiv);
             }
 
             // Handle context with images
@@ -468,22 +528,25 @@
 
             // Handle message content and images
             if (data.message?.content || data.message?.images) {
-                if (data.message.content) {
-                    accumulatedContent = (accumulatedContent || '') + data.message.content;
-                }
+                // Only process content if it's not a system or tool message
+                if (data.message.role !== 'system' && data.message.role !== 'tool') {
+                    if (data.message.content) {
+                        accumulatedContent = (accumulatedContent || '') + data.message.content;
+                    }
 
-                // Handle images if present
-                if (data.message.images && data.message.images.length > 0) {
-                    data.message.images.forEach(imageBase64 => {
-                        const imgElement = document.createElement('img');
-                        imgElement.src = processBase64Image(imageBase64);
-                        imgElement.style.maxWidth = '100%';
-                        contentDiv.appendChild(imgElement);
-                    });
-                }
+                    // Handle images if present
+                    if (data.message.images && data.message.images.length > 0) {
+                        data.message.images.forEach(imageBase64 => {
+                            const imgElement = document.createElement('img');
+                            imgElement.src = processBase64Image(imageBase64);
+                            imgElement.style.maxWidth = '100%';
+                            contentDiv.appendChild(imgElement);
+                        });
+                    }
 
-                // Render the markdown content
-                contentDiv.innerHTML = md.render(accumulatedContent || '');
+                    // Render the markdown content
+                    contentDiv.innerHTML = md.render(accumulatedContent || '');
+                }
             }
 
             if (data.done) {

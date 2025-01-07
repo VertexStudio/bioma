@@ -14,6 +14,7 @@ use tracing::{debug, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
+    pub name: String,
     #[serde(default = "default_transport")]
     pub transport: String,
     pub command: String,

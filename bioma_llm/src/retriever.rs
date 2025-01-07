@@ -79,6 +79,10 @@ pub struct RetrievedContext {
 }
 
 impl RetrievedContext {
+    pub fn reverse(&mut self) {
+        self.context.reverse();
+    }
+
     pub fn to_markdown(&self) -> String {
         let mut context_content = String::new();
 

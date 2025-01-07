@@ -5,6 +5,7 @@ use ollama_rs::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse},
         options::GenerationOptions,
         parameters::{FormatType, JsonStructure},
+        tools::ToolInfo,
     },
     Ollama,
 };
@@ -109,12 +110,16 @@ pub struct ChatMessages {
     pub persist: bool,
     pub stream: bool,
     pub format: Option<Schema>,
+    pub tools: Option<Vec<ToolInfo>>,
 }
 
 impl Message<ChatMessages> for Chat {
     type Response = ChatMessageResponse;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, request: &ChatMessages) -> Result<(), ChatError> {
+        // Get stream flag, may be changed by tools
+        let mut stream = request.stream;
+
         if request.restart {
             self.history.clear();
         }
@@ -130,6 +135,12 @@ impl Message<ChatMessages> for Chat {
         // Prepare chat request
         let mut chat_message_request = ChatMessageRequest::new(self.model.to_string(), self.history.clone());
 
+        // Add tools
+        if let Some(tools) = &request.tools {
+            chat_message_request.tools = tools.clone();
+            stream = false;
+        }
+
         // Add generation options
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
@@ -141,7 +152,7 @@ impl Message<ChatMessages> for Chat {
                 .format(FormatType::StructuredJson(JsonStructure::from_schema(format.schema.clone())));
         }
 
-        if request.stream {
+        if stream {
             // Get streaming response from Ollama
             let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
             let mut accumulated_content = String::new();
@@ -184,8 +195,10 @@ impl Message<ChatMessages> for Chat {
             // Send the messages to the ollama client
             let result = self.ollama.send_chat_messages(chat_message_request).await?;
 
-            // Add the assistant's message to the history
-            self.history.push(ChatMessage::assistant(result.message.content.clone()));
+            // Add the response message to the history only if its an assistant message
+            if result.message.role == ollama_rs::generation::chat::MessageRole::Assistant {
+                self.history.push(result.message.clone());
+            }
 
             if request.persist {
                 // Filter out system messages before saving

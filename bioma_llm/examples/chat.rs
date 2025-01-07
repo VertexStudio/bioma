@@ -54,6 +54,7 @@ impl Actor for MainActor {
                         persist: false,
                         stream: true,
                         format: None,
+                        tools: None,
                     },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
