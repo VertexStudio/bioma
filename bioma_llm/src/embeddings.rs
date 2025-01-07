@@ -1,4 +1,4 @@
-// use crate::ORT_EXIT_MUTEX;
+use crate::indexer::ContentSource;
 use base64::Engine as _;
 use bioma_actor::prelude::*;
 use bon::Builder;
@@ -16,8 +16,6 @@ use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-
-use crate::indexer::ContentSource;
 
 lazy_static! {
     static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =

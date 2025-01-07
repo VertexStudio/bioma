@@ -15,24 +15,15 @@ use serde_json::{json, Value};
 use std::error::Error as StdError;
 use tool::Tools;
 use tracing::{debug, error, info};
+use user::UserActor;
 
 mod config;
 mod tool;
+mod user;
 
 /// RAG server using the Bioma Actor framework
 ///
 /// CURL (examples)[docs/examples.sh]
-
-#[derive(Debug, Serialize, Deserialize)]
-struct UserActor {}
-
-impl Actor for UserActor {
-    type Error = SystemActorError;
-
-    async fn start(&mut self, _ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 
 struct AppState {
     config: Config,
@@ -448,7 +439,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                         let tool = data.tools.get_tool(&tool_call.function.name);
                         if let Some((_tool_info, tool_client)) = tool {
                             // Execute the tool call and get raw result
-                            let execution_result = tool_client.call(tool_call).await;
+                            let execution_result = tool_client.call(&user_actor, tool_call).await;
 
                             // Convert the execution result to a JSON value
                             let result_json = match execution_result {
@@ -938,9 +929,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     actor_handles.push(chat_handle);
 
     // Tools setup
+    let tools_user = UserActor::new(&engine, "/rag/tool/".into()).await?;
     let mut tools = Tools::new();
-    for server in &config.tool_servers {
-        tools.add_server(server.clone()).await?;
+    for tool in &config.tools {
+        tools.add_tool(&engine, &tools_user, tool.clone(), "/rag".into()).await?;
     }
 
     // Create app state

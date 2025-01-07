@@ -1,7 +1,8 @@
+use crate::user::UserActor;
 use anyhow::Result;
-use bioma_tool::client::ServerConfig;
-use bioma_tool::schema::{CallToolRequestParams, CallToolResult, ToolInputSchema};
-use bioma_tool::ModelContextProtocolClient;
+use bioma_actor::prelude::*;
+use bioma_tool::client::{CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ServerConfig};
+use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use schemars::{
     schema::{InstanceType, Metadata, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec},
@@ -9,18 +10,19 @@ use schemars::{
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::info;
+use std::time::Duration;
+use tokio::task::JoinHandle;
+use tracing::{error, info};
 
 pub struct ToolClient {
     pub server: ServerConfig,
-    pub client: Arc<Mutex<ModelContextProtocolClient>>,
+    pub client_id: ActorId,
+    pub _client_handle: Option<JoinHandle<()>>,
     pub tools: Vec<ToolInfo>,
 }
 
 impl ToolClient {
-    pub async fn call(&self, tool_call: &ToolCall) -> Result<CallToolResult> {
+    pub async fn call(&self, user: &ActorContext<UserActor>, tool_call: &ToolCall) -> Result<CallToolResult> {
         let args: BTreeMap<String, Value> = tool_call
             .function
             .arguments
@@ -28,7 +30,14 @@ impl ToolClient {
             .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default();
         let request = CallToolRequestParams { name: tool_call.function.name.clone(), arguments: Some(args) };
-        self.client.lock().await.call_tool(request).await
+        let response = user
+            .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
+                CallTool(request),
+                &self.client_id,
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+            )
+            .await?;
+        Ok(response)
     }
 }
 
@@ -41,20 +50,49 @@ impl Tools {
         Self { clients: vec![] }
     }
 
-    pub async fn add_server(&mut self, server: ServerConfig) -> Result<()> {
-        let mut client = ModelContextProtocolClient::new(server.clone()).await?;
-        let list_tools = client.list_tools(None).await?;
+    pub async fn add_tool(
+        &mut self,
+        engine: &Engine,
+        user: &ActorContext<UserActor>,
+        config: ClientConfig,
+        prefix: String,
+    ) -> Result<()> {
+        let server = config.server;
+        let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
+
+        let client_handle = if config.host {
+            let (mut client_ctx, mut client_actor) = Actor::spawn(
+                engine.clone(),
+                client_id.clone(),
+                ModelContextProtocolClientActor::new(server.clone()),
+                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+            )
+            .await?;
+
+            Some(tokio::spawn(async move {
+                if let Err(e) = client_actor.start(&mut client_ctx).await {
+                    error!("Embeddings actor error: {}", e);
+                }
+            }))
+        } else {
+            None
+        };
+
+        let list_tools: ListToolsResult = user
+            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+                ListTools(None),
+                &client_id,
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+            )
+            .await?;
         info!("Loaded {} tools from {}", list_tools.tools.len(), server.name);
         for tool in &list_tools.tools {
             info!("├─ Tool: {}", tool.name);
         }
         let tools: Vec<ToolInfo> = list_tools.tools.into_iter().map(parse_tool_info).collect();
-        // Save tools info to file for debugging
-        // let tools_json = serde_json::to_string_pretty(&tools)?;
-        // let debug_path = format!("debug_tools_{}.json", server.name.replace(" ", "_"));
-        // std::fs::write(&debug_path, tools_json)?;
-        // info!("Saved tools debug info to {}", debug_path);
-        self.clients.push(ToolClient { server, client: Arc::new(Mutex::new(client)), tools });
+
+        self.clients.push(ToolClient { server, client_id, _client_handle: client_handle, tools });
+
         Ok(())
     }
 
@@ -74,7 +112,7 @@ impl Tools {
     }
 }
 
-fn parse_tool_info(tool: bioma_tool::schema::Tool) -> ToolInfo {
+fn parse_tool_info(tool: schema::Tool) -> ToolInfo {
     let root_schema = convert_to_root_schema(tool.input_schema.clone()).unwrap();
     ToolInfo::from_schema(tool.name.clone().into(), tool.description.clone().unwrap_or_default().into(), root_schema)
 }
