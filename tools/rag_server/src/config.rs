@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bioma_tool::client::ServerConfig;
+use bioma_tool::client::ClientConfig;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -16,7 +16,7 @@ pub struct Config {
     pub chat_model: Cow<'static, str>,
     #[serde(default = "default_chat_prompt")]
     pub chat_prompt: Cow<'static, str>,
-    pub tool_servers: Vec<ServerConfig>,
+    pub tools: Vec<ClientConfig>,
 }
 
 fn default_engine_endpoint() -> Cow<'static, str> {
@@ -47,7 +47,7 @@ impl Default for Config {
             rag_endpoint: default_rag_endpoint(),
             chat_model: default_chat_model(),
             chat_prompt: default_chat_prompt(),
-            tool_servers: vec![],
+            tools: vec![],
         }
     }
 }
@@ -74,10 +74,10 @@ impl Args {
         info!("├─ Engine Endpoint: {}", config.engine_endpoint);
         info!("├─ Chat Model: {}", config.chat_model);
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
-        info!("├─ Tool Servers: {} configured", config.tool_servers.len());
-        for (i, server) in config.tool_servers.iter().enumerate() {
-            let prefix = if i == config.tool_servers.len() - 1 { "└──" } else { "├──" };
-            info!("{}  {}", prefix, server.name);
+        info!("├─ Tool Servers: {} configured", config.tools.len());
+        for (i, tool) in config.tools.iter().enumerate() {
+            let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };
+            info!("{}  {}", prefix, tool.server.name);
         }
         Ok(config)
     }

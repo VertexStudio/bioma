@@ -76,7 +76,7 @@ curl -X POST http://localhost:5766/rerank \
 curl -X POST http://localhost:5766/chat \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "llama3.2",
+        "model": "qwen2.5-coder:32b-instruct-q5_K_M",
         "messages": [
             {
                 "role": "user",

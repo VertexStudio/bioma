@@ -989,6 +989,7 @@ name = "bioma_tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bioma_actor",
  "clap",
  "futures",
  "html2md",

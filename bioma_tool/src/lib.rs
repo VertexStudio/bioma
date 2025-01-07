@@ -6,5 +6,4 @@ pub mod server;
 pub mod tools;
 pub mod transport;
 
-pub use client::ModelContextProtocolClient;
 pub use server::ModelContextProtocolServer;
