@@ -3,6 +3,7 @@ use bioma_actor::prelude::*;
 use bon::Builder;
 use derive_more::{Deref, Display};
 use lazy_static::lazy_static;
+use paperclip::actix::Apiv2Schema;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex;
@@ -27,7 +28,7 @@ pub enum RerankError {
 
 impl ActorError for RerankError {}
 
-#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(Builder, Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
 pub struct RankTexts {
     /// The query text to compare against the corpus of texts
     ///
@@ -68,7 +69,7 @@ pub struct RankTexts {
     pub truncation_direction: TruncationDirection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
 // #[serde(rename_all = "lowercase")]
 pub enum TruncationDirection {
     Left,

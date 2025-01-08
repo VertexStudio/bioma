@@ -1,6 +1,6 @@
 use actix_cors::Cors;
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
-use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{middleware::Logger, App, HttpResponse, HttpServer, Responder};
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
@@ -10,6 +10,7 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
+use paperclip::actix::{api_v2_operation, web, Apiv2Schema, OpenApiExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -55,14 +56,17 @@ impl AppState {
     }
 }
 
+#[api_v2_operation]
 async fn health() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
+#[api_v2_operation]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().json("Hello world!")
 }
 
+#[api_v2_operation]
 async fn reset(data: web::Data<AppState>) -> HttpResponse {
     info!("Resetting the engine");
     let engine = data.engine.clone();
@@ -99,6 +103,7 @@ struct Uploaded {
     size: usize,
 }
 
+// #[api_v2_operation]
 async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
@@ -225,6 +230,7 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     }
 }
 
+#[api_v2_operation]
 async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -242,6 +248,7 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
     }
 }
 
+#[api_v2_operation]
 async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -559,6 +566,7 @@ struct AskResponse {
     context: Vec<ChatMessage>,
 }
 
+// #[api_v2_operation]
 async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -670,6 +678,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     }
 }
 
+#[api_v2_operation]
 async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -702,12 +711,13 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Apiv2Schema)]
 struct EmbeddingsQuery {
     model: String,
     input: serde_json::Value,
 }
 
+#[api_v2_operation]
 async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -799,6 +809,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
     HttpResponse::Ok().json(generated_embeddings)
 }
 
+#[api_v2_operation]
 async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -952,6 +963,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
+            .wrap_api()
             .wrap(Logger::default())
             .wrap(cors)
             .app_data(data.clone())
@@ -965,12 +977,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
-            .route("/ask", web::post().to(self::ask))
-            .route("/chat", web::post().to(self::chat))
-            .route("/upload", web::post().to(upload))
+            // .route("/ask", web::post().to(self::ask))
+            // .route("/chat", web::post().to(self::chat))
+            // .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            .with_json_spec_at("/api/spec/v2")
+            .build()
     })
     .bind("0.0.0.0:5766")?
     .run();

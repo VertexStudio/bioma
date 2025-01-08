@@ -5,6 +5,7 @@ use crate::{
 };
 use bioma_actor::prelude::*;
 use derive_more::Display;
+use paperclip::actix::Apiv2Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use surrealdb::RecordId;
@@ -53,12 +54,28 @@ pub enum IndexerError {
 
 impl ActorError for IndexerError {}
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
+pub struct ChunkCapacity {
+    start: usize,
+    end: usize,
+}
+
+impl ChunkCapacity {
+    pub fn new(start: usize, end: usize) -> ChunkCapacity {
+        ChunkCapacity { start, end }
+    }
+
+    pub fn to_range(&self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
+}
+
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
 pub struct IndexGlobs {
     pub globs: Vec<String>,
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
-    pub chunk_capacity: std::ops::Range<usize>,
+    pub chunk_capacity: ChunkCapacity,
     #[builder(default = default_chunk_overlap())]
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
@@ -67,8 +84,8 @@ pub struct IndexGlobs {
     pub chunk_batch_size: usize,
 }
 
-fn default_chunk_capacity() -> std::ops::Range<usize> {
-    DEFAULT_CHUNK_CAPACITY
+fn default_chunk_capacity() -> ChunkCapacity {
+    ChunkCapacity { start: DEFAULT_CHUNK_CAPACITY.start, end: DEFAULT_CHUNK_CAPACITY.end }
 }
 
 fn default_chunk_overlap() -> usize {
@@ -137,7 +154,7 @@ pub struct ContentSource {
     pub uri: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
 pub struct DeleteSource {
     pub source: String,
 }
@@ -156,7 +173,7 @@ pub struct ImageDimensions {
 
 #[derive(Debug, Clone)]
 pub enum Content {
-    Text { content: String, text_type: TextType, chunk_config: (std::ops::Range<usize>, usize, usize) },
+    Text { content: String, text_type: TextType, chunk_config: (ChunkCapacity, usize, usize) },
     Image { path: String },
 }
 
@@ -234,13 +251,13 @@ impl Indexer {
                 let chunks = match &text_type {
                     TextType::Text => {
                         let splitter = TextSplitter::new(
-                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                            ChunkConfig::new(chunk_capacity.to_range()).with_trim(false).with_overlap(chunk_overlap)?,
                         );
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
                     TextType::Markdown => {
                         let splitter = MarkdownSplitter::new(
-                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                            ChunkConfig::new(chunk_capacity.to_range()).with_trim(false).with_overlap(chunk_overlap)?,
                         );
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
@@ -254,7 +271,7 @@ impl Indexer {
                         };
                         let splitter = CodeSplitter::new(
                             language,
-                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                            ChunkConfig::new(chunk_capacity.to_range()).with_trim(false).with_overlap(chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()

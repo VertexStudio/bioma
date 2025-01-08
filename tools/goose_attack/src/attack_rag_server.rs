@@ -5,6 +5,7 @@ use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
 use clap::{Parser, ValueEnum};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;
+use indexer::ChunkCapacity;
 use once_cell::sync::Lazy;
 use rand::Rng;
 use serde_json::json;
@@ -272,7 +273,7 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
     let payload = IndexGlobs {
         globs: vec![file_name],
-        chunk_capacity: DEFAULT_CHUNK_CAPACITY,
+        chunk_capacity: ChunkCapacity::new(DEFAULT_CHUNK_CAPACITY.start, DEFAULT_CHUNK_CAPACITY.end),
         chunk_overlap: DEFAULT_CHUNK_OVERLAP,
         chunk_batch_size: DEFAULT_CHUNK_BATCH_SIZE,
     };

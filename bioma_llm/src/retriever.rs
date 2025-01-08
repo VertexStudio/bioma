@@ -2,6 +2,7 @@ use crate::embeddings::{self, Embeddings, EmbeddingsError};
 use crate::indexer::{ContentSource, Metadata};
 use crate::rerank::{RankTexts, Rerank, RerankError, TruncationDirection};
 use bioma_actor::prelude::*;
+use paperclip::actix::Apiv2Schema;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
@@ -34,7 +35,7 @@ pub enum RetrieverError {
 
 impl ActorError for RetrieverError {}
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
 pub struct RetrieveContext {
     /// The query to search for
     #[serde(flatten)]
@@ -52,7 +53,7 @@ pub struct RetrieveContext {
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
 #[serde(tag = "type", content = "query")]
 pub enum RetrieveQuery {
     Text(String),
