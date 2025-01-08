@@ -3,61 +3,138 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Unified Services Dashboard</title>
+    <title>Dashboard</title>
     <style>
-      /* Base styles */
-      body {
+      * {
         margin: 0;
-        font-family: Arial, sans-serif;
-        background-color: #f0f0f0;
-      }
-
-      /* Navigation bar */
-      .nav-bar {
-        background-color: #333;
-        padding: 1rem;
-        display: flex;
-        gap: 1rem;
-        position: fixed;
-        top: 0;
-        width: 100%;
+        padding: 0;
         box-sizing: border-box;
-        z-index: 1000;
+        font-family: system-ui, -apple-system, sans-serif;
       }
 
-      .nav-button {
-        padding: 0.5rem 1rem;
-        border: none;
-        border-radius: 4px;
-        background-color: #555;
-        color: white;
-        cursor: pointer;
+      body {
+        background-color: rgb(249, 250, 251);
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 100vh;
+        width: 256px;
+        background-color: white;
+        border-right: 1px solid #e5e7eb;
+        padding: 1.5rem;
+      }
+
+      .sidebar h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 2rem;
+      }
+
+      .sidebar h2 {
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #6b7280;
+        margin-bottom: 1rem;
+      }
+
+      .nav-items {
         display: flex;
-        align-items: center;
+        flex-direction: column;
         gap: 0.5rem;
       }
 
-      .nav-button:hover {
-        background-color: #666;
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        color: #4b5563;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.2s;
       }
 
-      .nav-button.active {
-        background-color: #4caf50;
+      .nav-item:hover {
+        background-color: #f3f4f6;
       }
 
-      /* Content area */
-      .content {
-        margin-top: 4rem;
-        height: calc(100vh - 4rem);
+      .nav-item svg {
+        width: 20px;
+        height: 20px;
       }
 
-      .iframe-container {
+      .main-content {
+        margin-left: 256px;
+        padding: 2rem;
+      }
+
+      .main-content h1 {
+        font-size: 1.875rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 2rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+      }
+
+      .card {
+        background-color: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      }
+
+      .card h2 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 1rem;
+      }
+
+      .card-content {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        color: #4b5563;
+      }
+
+      .card-content svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      .nav-item.active {
+        background-color: #f3f4f6;
+        color: #2563eb;
+      }
+
+      .content-area {
+        position: fixed;
+        top: 0;
+        left: 256px;
+        right: 0;
+        bottom: 0;
+        background: white;
+      }
+
+      .interface-container {
         width: 100%;
         height: 100%;
         display: none;
       }
 
-      .iframe-container.active {
+      .interface-container.active {
         display: block;
       }
 
@@ -67,13 +144,6 @@
         border: none;
       }
 
-      /* Icons */
-      .icon {
-        width: 1rem;
-        height: 1rem;
-      }
-
-      /* Add these styles to your existing CSS */
       .iframe-error {
         display: flex;
         flex-direction: column;
@@ -85,62 +155,99 @@
         text-align: center;
       }
 
+      .iframe-error p {
+        color: #4b5563;
+        margin-bottom: 1rem;
+      }
+
       .iframe-error a {
-        margin-top: 1rem;
         padding: 0.5rem 1rem;
-        background-color: #4caf50;
+        background-color: #2563eb;
         color: white;
         text-decoration: none;
-        border-radius: 4px;
+        border-radius: 0.375rem;
+        transition: background-color 0.2s;
       }
 
       .iframe-error a:hover {
-        background-color: #45a049;
+        background-color: #1d4ed8;
       }
     </style>
   </head>
   <body>
-    <div class="nav-bar">
-      <button class="nav-button" data-target="surrealist">
-        <svg class="icon" viewBox="0 0 24 24">
-          <path
-            fill="currentColor"
-            d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-          />
-        </svg>
-        Surrealist
-      </button>
-      <button class="nav-button" data-target="chat">
-        <svg class="icon" viewBox="0 0 24 24">
-          <path
-            fill="currentColor"
-            d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-          />
-        </svg>
-        RAG Chat
-      </button>
-      <button class="nav-button" data-target="inspector">
-        <svg class="icon" viewBox="0 0 24 24">
-          <path
-            fill="currentColor"
-            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
-          />
-        </svg>
-        Inspector
-      </button>
-      <button class="nav-button" data-target="minio">
-        <svg class="icon" viewBox="0 0 24 24">
-          <path
-            fill="currentColor"
-            d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"
-          />
-        </svg>
-        MinIO
-      </button>
+    <div class="sidebar">
+      <h1>Dashboard</h1>
+      <h2>Services</h2>
+      <div class="nav-items">
+        <a class="nav-item" data-target="surrealist">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"
+            ></path>
+          </svg>
+          <span>Surrealist</span>
+        </a>
+        <a class="nav-item" data-target="chat">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+            ></path>
+          </svg>
+          <span>Chat</span>
+        </a>
+        <a class="nav-item" data-target="inspector">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4.879-4.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242z"
+            ></path>
+          </svg>
+          <span>Inspector</span>
+        </a>
+        <a class="nav-item" data-target="minio">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+            ></path>
+          </svg>
+          <span>Minio</span>
+        </a>
+      </div>
     </div>
 
-    <div class="content">
-      <div class="iframe-container" id="surrealist-container">
+    <div class="content-area">
+      <div class="interface-container" id="surrealist-container">
         <div class="iframe-error">
           <p>Unable to load Surrealist - External embedding not allowed</p>
           <a href="https://surrealist.app/explorer" target="_blank"
@@ -148,13 +255,13 @@
           >
         </div>
       </div>
-      <div class="iframe-container" id="chat-container">
+      <div class="interface-container" id="chat-container">
         <iframe src="../tools/rag_server/templates/rag_chat.html"></iframe>
       </div>
-      <div class="iframe-container" id="inspector-container">
+      <div class="interface-container" id="inspector-container">
         <iframe src="http://localhost:5173"></iframe>
       </div>
-      <div class="iframe-container" id="minio-container">
+      <div class="interface-container" id="minio-container">
         <div class="iframe-error">
           <p>Unable to load MinIO - External embedding not allowed</p>
           <a href="http://localhost:9001" target="_blank">Open in new tab</a>
@@ -163,29 +270,25 @@
     </div>
 
     <script>
-      // Handle tab switching
-      document.querySelectorAll(".nav-button").forEach((button) => {
-        button.addEventListener("click", () => {
-          // Update button states
-          document
-            .querySelectorAll(".nav-button")
-            .forEach((b) => b.classList.remove("active"));
-          button.classList.add("active");
+      document.querySelectorAll(".nav-item").forEach((item) => {
+        item.addEventListener("click", () => {
+          document.querySelectorAll(".nav-item").forEach((nav) => {
+            nav.classList.remove("active");
+          });
+          item.classList.add("active");
 
-          // Update iframe visibility
           document
-            .querySelectorAll(".iframe-container")
+            .querySelectorAll(".interface-container")
             .forEach((container) => {
               container.classList.remove("active");
             });
           document
-            .getElementById(`${button.dataset.target}-container`)
+            .getElementById(`${item.dataset.target}-container`)
             .classList.add("active");
         });
       });
 
-      // Activate first tab by default
-      document.querySelector(".nav-button").click();
+      document.querySelector(".nav-item").click();
     </script>
   </body>
 </html>
