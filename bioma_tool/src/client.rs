@@ -21,8 +21,6 @@ pub struct ServerConfig {
     pub transport: String,
     pub command: String,
     pub args: Vec<String>,
-    #[serde(default)]
-    pub ping: PingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +36,7 @@ impl Default for PingConfig {
 }
 
 fn default_ping_interval() -> u64 {
-    1
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,7 +58,10 @@ pub struct ModelContextProtocolClient {
 }
 
 impl ModelContextProtocolClient {
-    pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
+    pub async fn new(
+        server: ServerConfig,
+        ping_config: Option<PingConfig>,
+    ) -> Result<Self, ModelContextProtocolClientError> {
         println!("Server config: {:?}", server);
         let (tx, rx) = mpsc::channel::<String>(1);
 
@@ -97,9 +98,11 @@ impl ModelContextProtocolClient {
             response_rx: Arc::new(Mutex::new(rx)),
         };
 
-        // Start ping task with configurable interval
-        let client_arc = Arc::new(Mutex::new(client.clone()));
-        Self::start_ping_task(client_arc, server.ping.interval_secs).await;
+        // Start ping task with configurable interval if ping config is provided
+        if let Some(ping_config) = ping_config {
+            let client_arc = Arc::new(Mutex::new(client.clone()));
+            Self::start_ping_task(client_arc, ping_config.interval_secs).await;
+        }
 
         // Return the original client
         Ok(client)
@@ -258,13 +261,14 @@ impl ActorError for ModelContextProtocolClientError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
+    ping_config: Option<PingConfig>,
     #[serde(skip)]
     client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
 }
 
 impl ModelContextProtocolClientActor {
-    pub fn new(server: ServerConfig) -> Self {
-        ModelContextProtocolClientActor { server, client: None }
+    pub fn new(server: ServerConfig, ping_config: Option<PingConfig>) -> Self {
+        ModelContextProtocolClientActor { server, ping_config, client: None }
     }
 }
 
@@ -280,7 +284,7 @@ impl Actor for ModelContextProtocolClientActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
         info!("{} Started", ctx.id());
 
-        let client = ModelContextProtocolClient::new(self.server.clone()).await?;
+        let client = ModelContextProtocolClient::new(self.server.clone(), self.ping_config.clone()).await?;
         self.client = Some(Arc::new(Mutex::new(client)));
 
         let mut stream = ctx.recv().await?;
