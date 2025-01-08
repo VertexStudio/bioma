@@ -26,6 +26,7 @@ walkdir = { workspace = true }
 zip = { workspace = true }
 tempfile = { workspace = true }
 ollama-rs = { workspace = true }
+paperclip = { workspace = true }
 
 hf-hub = "0.3.2"
 fastembed = "4.3"

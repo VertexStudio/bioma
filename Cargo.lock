@@ -637,7 +637,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "strum",
+ "strum 0.26.3",
  "syn 2.0.94",
  "thiserror 1.0.69",
 ]
@@ -957,12 +957,13 @@ dependencies = [
  "mdka",
  "ollama-rs",
  "ort",
+ "paperclip",
  "rand",
  "reqwest",
  "schemars",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.26.3",
  "surrealdb",
  "tempfile",
  "test-log",
@@ -2489,8 +2490,8 @@ dependencies = [
  "serde",
  "serde_json",
  "simplelog",
- "strum",
- "strum_macros",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "tungstenite 0.21.0",
@@ -4190,6 +4191,79 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "paperclip"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2509afd8f138efe07cd367832289f5cc61d1eb1ec7f1eb75172abca6f7b9b66d"
+dependencies = [
+ "anyhow",
+ "itertools 0.10.5",
+ "once_cell",
+ "paperclip-actix",
+ "paperclip-core",
+ "paperclip-macros",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+ "url",
+]
+
+[[package]]
+name = "paperclip-actix"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4adf797da91baee514bc03b020fdd6673d2f8c1af8a859e50d6d803a4b3dddd2"
+dependencies = [
+ "actix-service",
+ "actix-web",
+ "futures",
+ "mime_guess",
+ "once_cell",
+ "paperclip-core",
+ "paperclip-macros",
+ "serde_json",
+]
+
+[[package]]
+name = "paperclip-core"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8db363c823fa71c00da73ff8cee3d6902e1ad66b770cc224a74dc7cf54de3aad"
+dependencies = [
+ "actix-web",
+ "mime",
+ "once_cell",
+ "paperclip-macros",
+ "pin-project-lite",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "paperclip-macros"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce6e25ce2c5362c8d48dc89e0f9ca076d507f7c1eabd04f0d593cdf5addff90c"
+dependencies = [
+ "heck 0.4.1",
+ "http 0.2.12",
+ "lazy_static",
+ "mime",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "strum 0.24.1",
+ "strum_macros 0.24.3",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4511,6 +4585,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "version_check",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4769,6 +4867,7 @@ dependencies = [
  "futures-util",
  "glob",
  "ollama-rs",
+ "paperclip",
  "reqwest",
  "schemars",
  "serde",
@@ -5595,6 +5694,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap 2.7.0",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5900,11 +6012,30 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
+
+[[package]]
+name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.26.4",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.24.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -6266,7 +6397,7 @@ dependencies = [
  "once_cell",
  "pulldown-cmark",
  "regex",
- "strum",
+ "strum 0.26.3",
  "thiserror 2.0.9",
  "tree-sitter",
  "unicode-segmentation",
@@ -6973,6 +7104,12 @@ name = "unicode_categories"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

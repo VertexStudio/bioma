@@ -20,6 +20,7 @@ uuid = { workspace = true }
 zip = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+paperclip = { workspace = true }
 ollama-rs = { workspace = true }
 schemars = { workspace = true }
 
