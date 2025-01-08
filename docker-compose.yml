@@ -73,9 +73,79 @@ services:
     networks:
       - bioma-network
 
+  minio:
+    image: quay.io/minio/minio
+    container_name: bioma-minio
+    ports:
+      - 9000:9000
+      - 9001:9001
+    networks:
+      - bioma-network
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_REGION_NAME: us-east-1
+      MINIO_CORS_ALLOW_ORIGIN: "*"
+      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "default-src * 'unsafe-inline' 'unsafe-eval'; frame-ancestors * 'self' file://* http://localhost:* http://127.0.0.1:* http://0.0.0.0:*"
+      MINIO_BROWSER_REFERRER_POLICY: "no-referrer-when-downgrade"
+    volumes:
+      - bioma-minio-data:/data
+    command: server /data --console-address ':9001'
+    healthcheck:
+      test: mc ready local
+      start_period: 1s
+      interval: 2s
+      timeout: 10s
+      retries: 10
+
+  mc:
+    image: minio/mc
+    container_name: bioma-mc
+    depends_on:
+      - minio
+    networks:
+      - bioma-network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5 &&
+      mc alias set myminio http://minio:9000 minioadmin minioadmin &&
+      mc mb -p myminio/bioma &&
+      echo '{
+        \"Version\": \"2012-10-17\",
+        \"Statement\": [
+          {
+            \"Effect\": \"Allow\",
+            \"Principal\": \"*\",
+            \"Action\": \"s3:GetObject\",
+            \"Resource\": \"arn:aws:s3:::bioma/*\"
+          },
+          {
+            \"Effect\": \"Allow\",
+            \"Principal\": {
+              \"AWS\": \"*\"
+            },
+            \"Action\": [
+              \"s3:GetBucketLocation\",
+              \"s3:ListBucket\",
+              \"s3:ListBucketMultipartUploads\",
+              \"s3:AbortMultipartUpload\", 
+              \"s3:DeleteObject\",
+              \"s3:ListMultipartUploadParts\",
+              \"s3:PutObject\"
+            ],
+            \"Resource\": [
+              \"arn:aws:s3:::bioma\",
+              \"arn:aws:s3:::bioma/*\"
+            ]
+          }
+        ]
+      }' > /tmp/policy.json &&
+      mc anonymous set-json /tmp/policy.json myminio/bioma"
+
 volumes:
   bioma-ollama_data:
   bioma-surreal_data:
+  bioma-minio-data:
 
 networks:
   bioma-network:
