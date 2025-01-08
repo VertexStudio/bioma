@@ -14,6 +14,10 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info};
 
+const DEFAULT_PING_INTERVAL_SECS: u64 = 1;
+const DEFAULT_PING_TIMEOUT_SECS: u64 = 5;
+const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub name: String,
@@ -27,16 +31,32 @@ pub struct ServerConfig {
 pub struct PingConfig {
     #[serde(default = "default_ping_interval")]
     pub interval_secs: u64,
+    #[serde(default = "default_ping_timeout")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_max_failures")]
+    pub max_failures: u32,
 }
 
 impl Default for PingConfig {
     fn default() -> Self {
-        Self { interval_secs: default_ping_interval() }
+        Self {
+            interval_secs: default_ping_interval(),
+            timeout_secs: default_ping_timeout(),
+            max_failures: default_max_failures(),
+        }
     }
 }
 
 fn default_ping_interval() -> u64 {
-    30
+    DEFAULT_PING_INTERVAL_SECS
+}
+
+fn default_ping_timeout() -> u64 {
+    DEFAULT_PING_TIMEOUT_SECS
+}
+
+fn default_max_failures() -> u32 {
+    MAX_CONSECUTIVE_FAILURES
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +75,7 @@ pub struct ModelContextProtocolClient {
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
     response_rx: Arc<Mutex<mpsc::Receiver<String>>>,
+    ping_failures: Arc<RwLock<u32>>,
 }
 
 impl ModelContextProtocolClient {
@@ -96,12 +117,13 @@ impl ModelContextProtocolClient {
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
             response_rx: Arc::new(Mutex::new(rx)),
+            ping_failures: Arc::new(RwLock::new(0)),
         };
 
         // Start ping task with configurable interval if ping config is provided
         if let Some(ping_config) = ping_config {
             let client_arc = Arc::new(Mutex::new(client.clone()));
-            Self::start_ping_task(client_arc, ping_config.interval_secs).await;
+            Self::start_ping_task(client_arc, ping_config).await;
         }
 
         // Return the original client
@@ -218,24 +240,58 @@ impl ModelContextProtocolClient {
 
     async fn ping(&mut self) -> Result<(), ModelContextProtocolClientError> {
         debug!("Sending ping request");
-        let response = self.request("ping".to_string(), serde_json::Value::Object(serde_json::Map::new())).await?;
 
-        // According to spec, we expect an empty response
-        if response != serde_json::Value::Object(serde_json::Map::new()) {
-            return Err(ModelContextProtocolClientError::Request("Invalid ping response".into()));
+        let ping_future = self.request("ping".to_string(), serde_json::Value::Object(serde_json::Map::new()));
+
+        match tokio::time::timeout(Duration::from_secs(DEFAULT_PING_TIMEOUT_SECS), ping_future).await {
+            Ok(result) => match result {
+                Ok(response) => {
+                    if response != serde_json::Value::Object(serde_json::Map::new()) {
+                        self.increment_ping_failures().await;
+                        return Err(ModelContextProtocolClientError::Request("Invalid ping response".into()));
+                    }
+                    // Reset failures on successful ping
+                    *self.ping_failures.write().await = 0;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.increment_ping_failures().await;
+                    Err(e)
+                }
+            },
+            Err(_) => {
+                self.increment_ping_failures().await;
+                Err(ModelContextProtocolClientError::Request("Ping timeout".into()))
+            }
         }
-        Ok(())
     }
 
-    async fn start_ping_task(client: Arc<Mutex<Self>>, interval_secs: u64) {
-        let mut interval = interval(Duration::from_secs(interval_secs));
+    async fn increment_ping_failures(&self) {
+        let mut failures = self.ping_failures.write().await;
+        *failures += 1;
+        error!("Ping failure count: {}", *failures);
+    }
+
+    async fn start_ping_task(client: Arc<Mutex<Self>>, config: PingConfig) {
+        let mut interval = interval(Duration::from_secs(config.interval_secs));
 
         tokio::spawn(async move {
             loop {
                 interval.tick().await;
                 let mut client = client.lock().await;
+
                 if let Err(e) = client.ping().await {
                     error!("Ping failed: {}", e);
+
+                    // Use the configured max_failures instead of constant
+                    let failures = *client.ping_failures.read().await;
+                    if failures >= config.max_failures {
+                        error!(
+                            "Maximum consecutive ping failures ({}) reached. Connection may be dead.",
+                            config.max_failures
+                        );
+                        *client.ping_failures.write().await = 0; // Reset counter
+                    }
                 }
             }
         });

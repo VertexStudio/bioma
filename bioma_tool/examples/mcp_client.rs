@@ -64,6 +64,8 @@ async fn main() -> Result<()> {
     let tools_result = client.list_tools(None).await?;
     info!("Available tools: {:?}", tools_result.tools);
 
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
     // List prompts
     info!("Listing prompts...");
     let prompts_result = client.list_prompts(None).await?;
