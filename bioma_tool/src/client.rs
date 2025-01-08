@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info};
 
-const DEFAULT_PING_INTERVAL_SECS: u64 = 1;
+const DEFAULT_PING_INTERVAL_SECS: u64 = 30;
 const DEFAULT_PING_TIMEOUT_SECS: u64 = 5;
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
