@@ -64,6 +64,15 @@ services:
               count: 1
               capabilities: [ gpu ]
 
+  surrealist:
+    image: surrealdb/surrealist:3.1.9
+    container_name: bioma-surrealist
+    ports:
+      - "80:80"
+      - "8080:8080"
+    networks:
+      - bioma-network
+
 volumes:
   bioma-ollama_data:
   bioma-surreal_data:
