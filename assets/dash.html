@@ -3,18 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dashboard</title>
+    <meta name="description" content="Development services dashboard" />
+    <title>Development Dashboard</title>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        font-family: system-ui, -apple-system, sans-serif;
+      :root {
+        --primary: #2563eb;
+        --primary-hover: #1d4ed8;
+        --text-primary: #1f2937;
+        --text-secondary: #4b5563;
+        --text-muted: #6b7280;
+        --bg-sidebar: #ffffff;
+        --bg-main: #f9fafb;
+        --border-color: #e5e7eb;
+        --transition-speed: 0.2s;
+        --sidebar-width: 256px;
+        --header-height: 64px;
+        --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+          "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+          "Noto Color Emoji";
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --primary: #3b82f6;
+          --primary-hover: #2563eb;
+          --text-primary: #f9fafb;
+          --text-secondary: #e5e7eb;
+          --text-muted: #9ca3af;
+          --bg-sidebar: #111827;
+          --bg-main: #030712;
+          --border-color: #374151;
+        }
       }
 
       body {
-        background-color: rgb(249, 250, 251);
+        background-color: var(--bg-main);
+        color: var(--text-primary);
         min-height: 100vh;
+        font-family: var(--font-family);
       }
 
       .sidebar {
@@ -23,22 +50,22 @@
         top: 0;
         height: 100vh;
         width: 256px;
-        background-color: white;
-        border-right: 1px solid #e5e7eb;
+        background-color: var(--bg-sidebar);
+        border-right: 1px solid var(--border-color);
         padding: 1.5rem;
       }
 
       .sidebar h1 {
         font-size: 1.5rem;
         font-weight: 600;
-        color: #1f2937;
+        color: var(--text-primary);
         margin-bottom: 2rem;
       }
 
       .sidebar h2 {
         font-size: 0.875rem;
         font-weight: 500;
-        color: #6b7280;
+        color: var(--text-muted);
         margin-bottom: 1rem;
       }
 
@@ -54,14 +81,15 @@
         gap: 0.75rem;
         padding: 0.5rem;
         border-radius: 0.5rem;
-        color: #4b5563;
+        color: var(--text-secondary);
         text-decoration: none;
         cursor: pointer;
         transition: background-color 0.2s;
       }
 
       .nav-item:hover {
-        background-color: #f3f4f6;
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
       }
 
       .nav-item svg {
@@ -115,8 +143,9 @@
       }
 
       .nav-item.active {
-        background-color: #f3f4f6;
-        color: #2563eb;
+        background-color: color-mix(in srgb, var(--primary) 15%, transparent);
+        color: var(--primary);
+        font-weight: 500;
       }
 
       .content-area {
@@ -214,7 +243,9 @@
   </head>
   <body>
     <div class="sidebar">
-      <h1>Dashboard</h1>
+      <div class="sidebar-header">
+        <h1>Bioma</h1>
+      </div>
       <h2>Services</h2>
       <div class="nav-items">
         <a class="nav-item" data-target="surrealist">
@@ -395,26 +426,79 @@
       </div>
     </div>
 
-    <script>
-      document.querySelectorAll(".nav-item").forEach((item) => {
-        item.addEventListener("click", () => {
-          document.querySelectorAll(".nav-item").forEach((nav) => {
-            nav.classList.remove("active");
-          });
-          item.classList.add("active");
+    <button
+      class="mobile-menu-toggle"
+      aria-label="Toggle mobile menu"
+      aria-expanded="false"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        width="24"
+        height="24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M4 6h16M4 12h16M4 18h16"
+        />
+      </svg>
+    </button>
 
-          document
-            .querySelectorAll(".interface-container")
-            .forEach((container) => {
-              container.classList.remove("active");
-            });
-          document
-            .getElementById(`${item.dataset.target}-container`)
-            .classList.add("active");
+    <script>
+      const navItems = document.querySelectorAll(".nav-item");
+      const containers = document.querySelectorAll(".interface-container");
+      const sidebar = document.querySelector(".sidebar");
+      const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
+
+      function setActiveNavItem(target) {
+        navItems.forEach((nav) => nav.classList.remove("active"));
+        containers.forEach((container) => container.classList.remove("active"));
+
+        const activeNav = Array.from(navItems).find(
+          (nav) => nav.dataset.target === target
+        );
+        const activeContainer = document.getElementById(`${target}-container`);
+
+        if (activeNav && activeContainer) {
+          activeNav.classList.add("active");
+          activeContainer.classList.add("active");
+        }
+      }
+
+      navItems.forEach((item) => {
+        item.addEventListener("click", () => {
+          setActiveNavItem(item.dataset.target);
         });
       });
 
-      document.querySelector(".nav-item").click();
+      setActiveNavItem(navItems[0].dataset.target);
+
+      const iframes = document.querySelectorAll("iframe");
+      iframes.forEach((iframe) => {
+        const container = iframe.closest(".interface-container");
+        const loading = container.querySelector(".loading");
+
+        if (loading) {
+          loading.classList.add("active");
+          iframe.addEventListener("load", () =>
+            loading.classList.remove("active")
+          );
+          iframe.addEventListener("error", () =>
+            loading.classList.remove("active")
+          );
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        if (window.innerWidth > 768) {
+          sidebar.classList.remove("active");
+          mobileMenuToggle.setAttribute("aria-expanded", "false");
+        }
+      });
     </script>
   </body>
 </html>
