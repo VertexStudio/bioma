@@ -64,7 +64,7 @@ impl Tools {
             let (mut client_ctx, mut client_actor) = Actor::spawn(
                 engine.clone(),
                 client_id.clone(),
-                ModelContextProtocolClientActor::new(server.clone()),
+                ModelContextProtocolClientActor::new(server.clone(), Some(PingConfig::default())),
                 SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
             )
             .await?;
