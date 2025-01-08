@@ -25,7 +25,7 @@ surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass roo
 2. Launch the server:
 
 ```bash
-cargo run --release -p rag_server
+cargo run --release -p rag_server$$
 ```
 
 ## Endpoints
