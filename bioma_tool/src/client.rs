@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::time::{interval, Duration};
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +21,24 @@ pub struct ServerConfig {
     pub transport: String,
     pub command: String,
     pub args: Vec<String>,
+    #[serde(default)]
+    pub ping: PingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingConfig {
+    #[serde(default = "default_ping_interval")]
+    pub interval_secs: u64,
+}
+
+impl Default for PingConfig {
+    fn default() -> Self {
+        Self { interval_secs: default_ping_interval() }
+    }
+}
+
+fn default_ping_interval() -> u64 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,15 +51,17 @@ fn default_transport() -> String {
     "stdio".to_string()
 }
 
+#[derive(Clone)]
 pub struct ModelContextProtocolClient {
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
-    response_rx: mpsc::Receiver<String>,
+    response_rx: Arc<Mutex<mpsc::Receiver<String>>>,
 }
 
 impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
+        println!("Server config: {:?}", server);
         let (tx, rx) = mpsc::channel::<String>(1);
 
         let transport = StdioTransport::new_client(&server);
@@ -68,12 +89,20 @@ impl ModelContextProtocolClient {
             }
         });
 
-        Ok(Self {
+        // Create client first
+        let client = Self {
             transport,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
-            response_rx: rx,
-        })
+            response_rx: Arc::new(Mutex::new(rx)),
+        };
+
+        // Start ping task with configurable interval
+        let client_arc = Arc::new(Mutex::new(client.clone()));
+        Self::start_ping_task(client_arc, server.ping.interval_secs).await;
+
+        // Return the original client
+        Ok(client)
     }
 
     pub async fn initialize(
@@ -167,7 +196,7 @@ impl ModelContextProtocolClient {
         }
 
         // Parse response as proper JSON-RPC response
-        if let Some(response) = self.response_rx.recv().await {
+        if let Some(response) = self.response_rx.lock().await.recv().await {
             let response: jsonrpc_core::Response = serde_json::from_str(&response)?;
             match response {
                 jsonrpc_core::Response::Single(output) => match output {
@@ -182,6 +211,31 @@ impl ModelContextProtocolClient {
         } else {
             Err(ModelContextProtocolClientError::Request("No response received".into()))
         }
+    }
+
+    async fn ping(&mut self) -> Result<(), ModelContextProtocolClientError> {
+        debug!("Sending ping request");
+        let response = self.request("ping".to_string(), serde_json::Value::Object(serde_json::Map::new())).await?;
+
+        // According to spec, we expect an empty response
+        if response != serde_json::Value::Object(serde_json::Map::new()) {
+            return Err(ModelContextProtocolClientError::Request("Invalid ping response".into()));
+        }
+        Ok(())
+    }
+
+    async fn start_ping_task(client: Arc<Mutex<Self>>, interval_secs: u64) {
+        let mut interval = interval(Duration::from_secs(interval_secs));
+
+        tokio::spawn(async move {
+            loop {
+                interval.tick().await;
+                let mut client = client.lock().await;
+                if let Err(e) = client.ping().await {
+                    error!("Ping failed: {}", e);
+                }
+            }
+        });
     }
 }
 

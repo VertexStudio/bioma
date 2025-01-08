@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::{ModelContextProtocolClient, ServerConfig},
+    client::{ModelContextProtocolClient, PingConfig, ServerConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
 };
 use clap::Parser;
@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
             "--log-file".to_string(),
             args.server_log_file.clone(),
         ],
+        ping: PingConfig::default(),
     };
 
     // Create client
@@ -79,6 +80,8 @@ async fn main() -> Result<()> {
     let resource_result =
         client.read_resource(ReadResourceRequestParams { uri: "file:///bioma/README.md".to_string() }).await?;
     info!("Resource content: {:?}", resource_result.contents);
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
     // Make an echo tool call
     info!("Making echo tool call...");
