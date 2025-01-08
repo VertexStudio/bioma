@@ -1,7 +1,9 @@
 use crate::user::UserActor;
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_tool::client::{CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ServerConfig};
+use bioma_tool::client::{
+    CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, PingConfig, ServerConfig,
+};
 use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use schemars::{
