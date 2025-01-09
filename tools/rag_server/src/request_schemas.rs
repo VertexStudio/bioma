@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use crate::AskQuery;
+use crate::{AskQuery, ChatQuery};
 
 // /index Endpoint Schemas
 
@@ -148,5 +148,30 @@ impl TryInto<AskQuery> for AskQueryRequest {
         };
 
         Ok(AskQuery { format, source: self.source, messages })
+    }
+}
+
+#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+pub struct ChatQueryRequest {
+    pub messages: Vec<ChatMessageRequestSchema>,
+    pub source: Option<String>,
+    pub format: Option<Value>,
+}
+
+impl TryInto<ChatQuery> for ChatQueryRequest {
+    type Error = String;
+
+    fn try_into(self) -> Result<ChatQuery, Self::Error> {
+        let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
+
+        let format: Option<chat::Schema> = match self.format {
+            Some(format) => match serde_json::from_value(format) {
+                Ok(format) => Some(format),
+                Err(_) => return Err("\"format\" field structure is not valid".to_string()),
+            },
+            None => None,
+        };
+
+        Ok(ChatQuery { format, source: self.source, messages })
     }
 }

@@ -10,7 +10,7 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::{ AskQueryRequest, IndexGlobsRequest, RetrieveContextRequest };
+use request_schemas::{ AskQueryRequest, ChatQueryRequest, IndexGlobsRequest, RetrieveContextRequest };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -318,10 +318,10 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 }
 
 #[derive(Deserialize)]
-struct ChatQuery {
-    messages: Vec<ChatMessage>,
-    source: Option<String>,
-    format: Option<chat::Schema>,
+pub struct ChatQuery {
+    pub messages: Vec<ChatMessage>,
+    pub source: Option<String>,
+    pub format: Option<chat::Schema>,
 }
 
 #[derive(Serialize)]
@@ -340,10 +340,27 @@ struct ToolResponse {
     response: Value,
 }
 
-async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/chat",
+    description = "Chat endpoint",
+    request_body = ChatQueryRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn chat(body: web::Json<ChatQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    let body: ChatQuery = match body.clone().try_into() {
+        Ok(query) => query,
+        Err(e) => {
+            error!("Error converting ChatQuery: {:?}", e);
+            return HttpResponse::BadRequest().body(e);
+        }
     };
 
     // Combine all user messages into a single query string for the retrieval system.
@@ -902,7 +919,7 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         index,
         retrieve,
         ask,
-        //chat,
+        chat,
         //upload,
         //delete_source,
         //embed,
