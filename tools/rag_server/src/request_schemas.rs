@@ -11,6 +11,7 @@ const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobsRequest {
     pub globs: Vec<String>,
+    #[schema(value_type = ChunkCapacity)]
     pub chunk_capacity: Option<ChunkCapacity>,
     pub chunk_overlap: Option<usize>,
     pub chunk_batch_size: Option<usize>,
