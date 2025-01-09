@@ -4,7 +4,6 @@ use bioma_llm::{
     chat,
     prelude::{ChatMessage, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
 };
-use ollama_rs::generation::images;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -18,10 +17,13 @@ const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
 #[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
 pub enum MessageRoleRequestSchema {
-    #[serde(rename = "role")]
+    #[serde(rename = "user")]
     User,
+    #[serde(rename = "assistant")]
     Assistant,
+    #[serde(rename = "system")]
     System,
+    #[serde(rename = "tool")]
     Tool,
 }
 
@@ -133,6 +135,8 @@ pub struct AskQueryRequest {
 impl Into<AskQuery> for AskQueryRequest {
     fn into(self) -> AskQuery {
         let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
+
+        // let format
 
         AskQuery { format: None, source: self.source, messages }
     }
