@@ -5,6 +5,7 @@ use bioma_llm::{
     prelude::{ChatMessage, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 
 use crate::AskQuery;
@@ -129,15 +130,23 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 pub struct AskQueryRequest {
     pub messages: Vec<ChatMessageRequestSchema>,
     pub source: Option<String>,
-    // pub format: Option<chat::Schema>,
+    pub format: Option<Value>,
 }
 
-impl Into<AskQuery> for AskQueryRequest {
-    fn into(self) -> AskQuery {
+impl TryInto<AskQuery> for AskQueryRequest {
+    type Error = String;
+
+    fn try_into(self) -> Result<AskQuery, Self::Error> {
         let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
 
-        // let format
+        let format: Option<chat::Schema> = match self.format {
+            Some(format) => match serde_json::from_value(format) {
+                Ok(format) => Some(format),
+                Err(_) => return Err("\"format\" field structure is not valid".to_string()),
+            },
+            None => None,
+        };
 
-        AskQuery { format: None, source: self.source, messages }
+        Ok(AskQuery { format, source: self.source, messages })
     }
 }

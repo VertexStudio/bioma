@@ -590,6 +590,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 }
 
 
+#[derive(Debug)]
 pub struct AskQuery {
     pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
@@ -619,7 +620,13 @@ async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> Htt
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: AskQuery = body.clone().into();
+    let body: AskQuery = match body.clone().try_into() {
+        Ok(query) => query,
+        Err(e) => {
+            error!("Error converting AskQueryRequest: {:?}", e);
+            return HttpResponse::BadRequest().body(e);
+        }
+    };
 
     let query = body
         .messages
