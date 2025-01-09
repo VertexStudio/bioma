@@ -1,4 +1,4 @@
-use bioma_llm::prelude::IndexGlobs;
+use bioma_llm::prelude::{IndexGlobs, RetrieveContext, RetrieveQuery};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -35,6 +35,46 @@ impl Into<IndexGlobs> for IndexGlobsRequest {
             .chunk_capacity(chunk_capacity)
             .chunk_overlap(self.chunk_overlap.unwrap_or(DEFAULT_CHUNK_OVERLAP))
             .chunk_batch_size(self.chunk_batch_size.unwrap_or(DEFAULT_CHUNK_BATCH_SIZE))
+            .build()
+    }
+}
+
+// /retrive Endpoint Schemas
+
+const DEFAULT_RETRIEVER_LIMIT: usize = 10;
+const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
+
+#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+
+pub enum RetrieveQueryRequest {
+    #[serde(rename = "query")]
+    Text(String),
+    // #[serde(rename = "query")]
+    Segundo(String),
+}
+
+#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+pub struct RetrieveContextRequest {
+    #[schema(value_type = RetrieveQueryRequest)]
+    #[serde(flatten)]
+    pub query: RetrieveQueryRequest,
+    pub limit: Option<usize>,
+    pub threshold: Option<f32>,
+    pub source: Option<String>,
+}
+
+impl Into<RetrieveContext> for RetrieveContextRequest {
+    fn into(self) -> RetrieveContext {
+        let query = match self.query {
+            RetrieveQueryRequest::Text(query) => RetrieveQuery::Text(query),
+            RetrieveQueryRequest::Segundo(query) => RetrieveQuery::Text(query),
+        };
+
+        RetrieveContext::builder()
+            .query(query)
+            .limit(self.limit.unwrap_or(DEFAULT_RETRIEVER_LIMIT))
+            .threshold(self.threshold.unwrap_or(DEFAULT_RETRIEVER_THRESHOLD))
+            .source(self.source.unwrap_or_default())
             .build()
     }
 }
