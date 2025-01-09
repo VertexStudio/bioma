@@ -10,16 +10,19 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
+use request_schemas::IndexGlobsRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
 use tool::Tools;
 use tracing::{debug, error, info};
 use user::UserActor;
+use utoipa::OpenApi;
 
 mod config;
 mod tool;
 mod user;
+mod request_schemas;
 
 /// RAG server using the Bioma Actor framework
 ///
@@ -55,6 +58,13 @@ impl AppState {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Server health check"),
+    )
+)]
 async fn health() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
@@ -225,13 +235,23 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     }
 }
 
-async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
+
+
+#[utoipa::path(
+    post,
+    path = "/index",
+    request_body = IndexGlobsRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn index(body: web::Json<IndexGlobsRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_globs = body.clone();
+    let index_globs: IndexGlobs = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response =
@@ -830,6 +850,25 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
     }
 }
 
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        health, 
+       // hello,
+        //reset,
+        index,
+        //retrieve,
+        //ask,
+        //chat,
+        //upload,
+        //delete_source,
+        //embed,
+        //rerank
+    )
+)]
+struct ApiDoc;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -935,6 +974,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tools.add_tool(&engine, &tools_user, tool.clone(), "/rag".into()).await?;
     }
 
+ 
+
     // Create app state
     let data = web::Data::new(AppState {
         config,
@@ -950,6 +991,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and run server
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
+
+        
 
         App::new()
             .wrap(Logger::default())
@@ -971,6 +1014,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            .route("/api-docs/openapi.json", web::get().to(move || async {
+                let openapi = ApiDoc::openapi();
+
+                HttpResponse::Ok().json(openapi.clone())
+            }))
     })
     .bind("0.0.0.0:5766")?
     .run();
