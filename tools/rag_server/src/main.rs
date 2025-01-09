@@ -10,7 +10,7 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::{ AskQueryRequest, ChatQueryRequest, DeleteSourceRequest, IndexGlobsRequest, RetrieveContextRequest };
+use request_schemas::{ AskQueryRequest, ChatQueryRequest, DeleteSourceRequest, EmbeddingsQueryRequest, IndexGlobsRequest, RetrieveContextRequest };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -845,13 +845,16 @@ async fn delete_source(body: web::Json<DeleteSourceRequest>, data: web::Data<App
     }
 }
 
-#[derive(Deserialize)]
-struct EmbeddingsQuery {
-    model: String,
-    input: serde_json::Value,
-}
-
-async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/embed",
+    description = "Embed endpoint",
+    request_body = EmbeddingsQueryRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),

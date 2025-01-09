@@ -186,3 +186,10 @@ impl Into<DeleteSource> for DeleteSourceRequest {
         DeleteSource { source: self.source }
     }
 }
+
+
+#[derive(ToSchema, Deserialize)]
+pub struct EmbeddingsQueryRequest {
+    pub model: String,
+    pub input: serde_json::Value,
+}
