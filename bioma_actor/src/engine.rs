@@ -39,29 +39,57 @@ pub struct Record {
 #[derive(Clone, Debug, Serialize, Deserialize, bon::Builder)]
 pub struct EngineOptions {
     /// Database endpoint
-    #[builder(default = "memory".into())]
+    #[builder(default = default_endpoint())]
+    #[serde(default = "default_endpoint")]
     pub endpoint: Cow<'static, str>,
     /// The namespace to use in the database.
-    #[builder(default = "dev".into())]
+    #[builder(default = default_namespace())]
+    #[serde(default = "default_namespace")]
     pub namespace: Cow<'static, str>,
     /// The name of the database to connect to.
-    #[builder(default = "bioma".into())]
+    #[builder(default = default_database())]
+    #[serde(default = "default_database")]
     pub database: Cow<'static, str>,
     /// The username for database authentication.
-    #[builder(default = "root".into())]
+    #[builder(default = default_username())]
+    #[serde(default = "default_username")]
     pub username: Cow<'static, str>,
     /// The password for database authentication.
-    #[builder(default = "root".into())]
+    #[builder(default = default_password())]
+    #[serde(default = "default_password")]
     pub password: Cow<'static, str>,
     /// Output directory for artifacts.
     #[builder(default = default_output_dir())]
+    #[serde(default = "default_output_dir")]
     pub output_dir: PathBuf,
     /// The local file system path for object store.
     #[builder(default = default_local_store_dir())]
+    #[serde(default = "default_local_store_dir")]
     pub local_store_dir: PathBuf,
     /// The HuggingFace cache directory.
     #[builder(default = default_hf_cache_dir())]
+    #[serde(default = "default_hf_cache_dir")]
     pub hf_cache_dir: PathBuf,
+}
+
+fn default_endpoint() -> Cow<'static, str> {
+    "memory".into()
+}
+
+fn default_namespace() -> Cow<'static, str> {
+    "dev".into()
+}
+
+fn default_database() -> Cow<'static, str> {
+    "bioma".into()
+}
+
+fn default_username() -> Cow<'static, str> {
+    "root".into()
+}
+
+fn default_password() -> Cow<'static, str> {
+    "root".into()
 }
 
 fn default_output_dir() -> PathBuf {
