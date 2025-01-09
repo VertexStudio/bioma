@@ -10,7 +10,7 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::{IndexGlobsRequest, RetrieveContextRequest};
+use request_schemas::{ AskQueryRequest, IndexGlobsRequest, RetrieveContextRequest };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -589,11 +589,11 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     }
 }
 
-#[derive(Deserialize)]
-struct AskQuery {
-    messages: Vec<ChatMessage>,
-    source: Option<String>,
-    format: Option<chat::Schema>,
+
+pub struct AskQuery {
+    pub messages: Vec<ChatMessage>,
+    pub source: Option<String>,
+    pub format: Option<chat::Schema>,
 }
 
 #[derive(Serialize)]
@@ -604,11 +604,22 @@ struct AskResponse {
     context: Vec<ChatMessage>,
 }
 
-async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/ask",
+    description = "Ask question",
+    request_body = AskQueryRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+
+    let body: AskQuery = body.clone().into();
 
     let query = body
         .messages
@@ -884,7 +895,7 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         reset,
         index,
         retrieve,
-        //ask,
+        ask,
         //chat,
         //upload,
         //delete_source,
