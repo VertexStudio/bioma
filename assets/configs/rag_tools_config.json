@@ -17,6 +17,25 @@
                     ".output/mcp_server-bioma.log"
                 ]
             }
+        },
+        {
+            "host": true,
+            "server": {
+                "name": "filesystem",
+                "transport": "stdio",
+                "command": "docker",
+                "args": [
+                    "run",
+                    "-i",
+                    "--rm",
+                    "--mount",
+                    "type=bind,src=/Users/rozgo/VertexNAS,dst=/projects/VertexNAS",
+                    "--mount",
+                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/projects/BiomaAI",
+                    "mcp/filesystem",
+                    "/projects"
+                ]
+            }
         }
     ]
 }
