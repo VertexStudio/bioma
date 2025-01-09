@@ -2,7 +2,8 @@ use bioma_llm::prelude::IndexGlobs;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-//
+// /index Endpoint Schemas
+
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobsRequest {
     pub globs: Vec<String>,
