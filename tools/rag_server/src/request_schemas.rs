@@ -1,7 +1,10 @@
+use std::vec;
+
 use bioma_llm::{
     chat,
     prelude::{ChatMessage, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
 };
+use ollama_rs::generation::images;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -32,6 +35,11 @@ pub struct ChatMessageRequestSchema {
 
 impl Into<ChatMessage> for ChatMessageRequestSchema {
     fn into(self) -> ChatMessage {
+        let images: Vec<Image> = match self.images {
+            Some(images) => images.into_iter().map(|image| Image::from_base64(image)).collect(),
+            None => vec![],
+        };
+
         let role = match self.role {
             MessageRoleRequestSchema::Assistant => bioma_llm::prelude::MessageRole::Assistant,
             MessageRoleRequestSchema::System => bioma_llm::prelude::MessageRole::System,
@@ -39,7 +47,7 @@ impl Into<ChatMessage> for ChatMessageRequestSchema {
             MessageRoleRequestSchema::Tool => bioma_llm::prelude::MessageRole::Tool,
         };
 
-        ChatMessage::new(role, self.content)
+        ChatMessage::new(role, self.content).with_images(images)
     }
 }
 
