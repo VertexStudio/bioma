@@ -636,6 +636,60 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 conversation.push(context_message.clone());
             }
 
+            // Generate tool calls if tools are available
+            let tools = data.tools.get_tools();
+            if !tools.is_empty() {
+                let tool_request = ChatMessages {
+                    messages: conversation.clone(),
+                    restart: true,
+                    persist: false,
+                    stream: false,
+                    format: body.format.clone(),
+                    tools: Some(tools),
+                };
+                
+                // Get tool calls from chat
+                if let Ok(tool_response) = user_actor
+                    .send_and_wait_reply::<Chat, ChatMessages>(
+                        tool_request,
+                        &data.chat,
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    )
+                    .await
+                {
+                    // Process each tool call
+                    for tool_call in &tool_response.message.tool_calls {
+                        if let Some((_tool_info, tool_client)) = data.tools.get_tool(&tool_call.function.name) {
+                            // Execute the tool call
+                            let execution_result = tool_client.call(&user_actor, tool_call).await;
+                            
+                            // Format the tool response
+                            let result_json = match execution_result {
+                                Ok(execution_output) => serde_json::to_value(execution_output.content).unwrap_or_default(),
+                                Err(e) => serde_json::json!({
+                                    "error": format!("Error calling tool: {:?}", e)
+                                }),
+                            };
+
+                            // Create structured tool response
+                            let formatted_tool_response = ToolResponse {
+                                server: tool_client.server.name.clone(),
+                                tool: tool_call.function.name.clone(),
+                                call: tool_call.clone(),
+                                response: result_json,
+                            };
+
+                            // Add tool result to conversation
+                            let tool_result_message = ChatMessage::tool(
+                                serde_json::to_string(&formatted_tool_response).unwrap_or_default()
+                            );
+                            conversation.push(tool_result_message);
+                        }
+                    }
+                }
+            }
+
+            // Continue with final chat request
             info!("Sending context to chat actor");
             let ask_response = user_actor
                 .send_and_wait_reply::<Chat, ChatMessages>(
@@ -645,7 +699,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                         persist: false,
                         stream: false,
                         format: body.format.clone(),
-                        tools: None,
+                        tools: None, // No tools for final response
                     },
                     &data.chat,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
