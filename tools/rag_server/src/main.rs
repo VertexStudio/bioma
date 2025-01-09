@@ -886,7 +886,6 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
     }
 }
 
-
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -1009,8 +1008,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for tool in &config.tools {
         tools.add_tool(&engine, &tools_user, tool.clone(), "/rag".into()).await?;
     }
-
- 
 
     // Create app state
     let data = web::Data::new(AppState {
