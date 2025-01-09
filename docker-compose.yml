@@ -86,11 +86,22 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
       MINIO_REGION_NAME: us-east-1
       MINIO_CORS_ALLOW_ORIGIN: "*"
-      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "default-src * 'unsafe-inline' 'unsafe-eval'; frame-ancestors * 'self' file://* http://localhost:* http://127.0.0.1:* http://0.0.0.0:*"
-      MINIO_BROWSER_REFERRER_POLICY: "no-referrer-when-downgrade"
+      MINIO_CORS_ALLOW_METHODS: "GET,PUT,POST,DELETE,OPTIONS"
+      MINIO_CORS_ALLOW_HEADERS: "*"
+      MINIO_CORS_EXPOSE_HEADERS: "ETag,X-Amz-Version-Id,X-Amz-Request-Id,X-Amz-Date,X-Amz-Security-Token"
+      MINIO_CORS_ALLOW_CREDENTIALS: "true"
+      MINIO_BROWSER: "on"
+      MINIO_BROWSER_REDIRECT: "off"
+      MINIO_BROWSER_REFERRER_POLICY: "no-referrer"
+      MINIO_BROWSER_HSTS_SECONDS: "0"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:9001"
+      MINIO_BROWSER_SESSION_DURATION: "24h"
+      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src * ws: wss:; frame-ancestors * file://* http://localhost:* https://localhost:*;"
+      MINIO_BROWSER_STRICT_TRANSPORT_SECURITY: "max-age=0"
+      MINIO_SERVER_URL: "http://localhost:9000"
     volumes:
       - bioma-minio-data:/data
-    command: server /data --console-address ':9001'
+    command: server /data --console-address ':9001' --address ':9000'
     healthcheck:
       test: mc ready local
       start_period: 1s
@@ -141,6 +152,18 @@ services:
         ]
       }' > /tmp/policy.json &&
       mc anonymous set-json /tmp/policy.json myminio/bioma"
+
+# TODO: Temporal fix for minio browser. Until minio fix the X Frame Options issue: https://github.com/minio/console/issues/3447
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "9002:80"
+    volumes:
+      - ./assets/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - minio
+    networks:
+      - bioma-network
 
 volumes:
   bioma-ollama_data:
