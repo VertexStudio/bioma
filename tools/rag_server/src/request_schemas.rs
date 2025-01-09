@@ -20,11 +20,10 @@ pub struct ChunkCapacity {
 
 impl Into<IndexGlobs> for IndexGlobsRequest {
     fn into(self) -> IndexGlobs {
-        IndexGlobs {
-            globs: self.globs,
-            chunk_capacity: self.chunk_capacity.start..self.chunk_capacity.end,
-            chunk_overlap: self.chunk_overlap,
-            chunk_batch_size: self.chunk_batch_size,
-        }
+        IndexGlobs::builder()
+            .globs(self.globs)
+            .chunk_capacity(self.chunk_capacity.start..self.chunk_capacity.end)
+            .chunk_overlap(self.chunk_overlap)
+            .build()
     }
 }
