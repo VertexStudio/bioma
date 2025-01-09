@@ -2,7 +2,7 @@ use std::vec;
 
 use bioma_llm::{
     chat,
-    prelude::{ChatMessage, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
+    prelude::{ChatMessage, DeleteSource, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -173,5 +173,16 @@ impl TryInto<ChatQuery> for ChatQueryRequest {
         };
 
         Ok(ChatQuery { format, source: self.source, messages })
+    }
+}
+
+#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+pub struct DeleteSourceRequest {
+    pub source: String,
+}
+
+impl Into<DeleteSource> for DeleteSourceRequest {
+    fn into(self) -> DeleteSource {
+        DeleteSource { source: self.source }
     }
 }

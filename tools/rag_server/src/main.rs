@@ -10,7 +10,7 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::{ AskQueryRequest, ChatQueryRequest, IndexGlobsRequest, RetrieveContextRequest };
+use request_schemas::{ AskQueryRequest, ChatQueryRequest, DeleteSourceRequest, IndexGlobsRequest, RetrieveContextRequest };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -804,13 +804,22 @@ async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> Htt
     }
 }
 
-async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/delete_source",
+    description = "Delete indexed sources",
+    request_body = DeleteSourceRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn delete_source(body: web::Json<DeleteSourceRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let delete_source = body.clone();
+    let delete_source = body.clone().into();
 
     info!("Sending delete message to indexer actor for sources: {:?}", body.source);
     let response = user_actor
@@ -975,7 +984,7 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         ask,
         chat,
         //upload,
-        //delete_source,
+        delete_source,
         //embed,
         //rerank
     )
