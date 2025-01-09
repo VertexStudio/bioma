@@ -988,7 +988,7 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         chat,
         //upload,
         delete_source,
-        //embed,
+        embed,
         //rerank
     )
 )]
