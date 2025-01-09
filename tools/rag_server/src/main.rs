@@ -10,7 +10,7 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::IndexGlobsRequest;
+use request_schemas::{IndexGlobsRequest, RetrieveContextRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -278,13 +278,22 @@ async fn index(body: web::Json<IndexGlobsRequest>, data: web::Data<AppState>) ->
     }
 }
 
-async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/retrive",
+    description = "Retrieve context in .md format",
+    request_body = RetrieveContextRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let retrieve_context = body.clone();
+    let retrieve_context: RetrieveContext = body.clone().into();
 
     info!("Sending message to retriever actor");
     let response = user_actor
@@ -874,7 +883,7 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         hello,
         reset,
         index,
-        //retrieve,
+        retrieve,
         //ask,
         //chat,
         //upload,
