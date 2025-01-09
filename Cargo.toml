@@ -83,6 +83,9 @@ actix-web = "4.9.0"
 actix-cors = "0.7.0"
 actix-multipart = "0.7.2"
 
+# Documentation
+utoipa = "5.3.1"
+
 # Testing
 goose = { git = "https://github.com/tag1consulting/goose.git", rev = "1a8280e1a2e2a1bbd01bccc7bdcd40f7c82db73c" }
 mockito = "1.6"

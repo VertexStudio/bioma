@@ -22,6 +22,7 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 ollama-rs = { workspace = true }
 schemars = { workspace = true }
+utoipa = { workspace = true }
 
 bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
