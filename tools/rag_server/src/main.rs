@@ -61,6 +61,7 @@ impl AppState {
 #[utoipa::path(
     get,
     path = "/health",
+    description = "Check server health",
     responses(
         (status = 200, description = "Server health check"),
     )
@@ -69,10 +70,26 @@ async fn health() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
+#[utoipa::path(
+    get,
+    path = "/hello",
+    description = "Hello, world! from the server",
+    responses(
+        (status = 200, description = "Server health check"),
+    )
+)]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().json("Hello world!")
 }
 
+#[utoipa::path(
+    get,
+    path = "/reset",
+    description = "Reset bioma engine",
+    responses(
+        (status = 200, description = "Server health check"),
+    )
+)]
 async fn reset(data: web::Data<AppState>) -> HttpResponse {
     info!("Resetting the engine");
     let engine = data.engine.clone();
@@ -235,11 +252,10 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     }
 }
 
-
-
 #[utoipa::path(
     post,
     path = "/index",
+    description = "This endpoint receives an array of path of files to index",
     request_body = IndexGlobsRequest,
     responses(
         (status = 200, description = "Ok"),
@@ -855,8 +871,8 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
 #[openapi(
     paths(
         health, 
-       // hello,
-        //reset,
+        hello,
+        reset,
         index,
         //retrieve,
         //ask,
@@ -991,8 +1007,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and run server
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
-
-        
 
         App::new()
             .wrap(Logger::default())
