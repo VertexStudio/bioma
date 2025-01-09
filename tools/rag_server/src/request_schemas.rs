@@ -1,12 +1,47 @@
-use bioma_llm::prelude::{IndexGlobs, RetrieveContext, RetrieveQuery};
+use bioma_llm::{
+    chat,
+    prelude::{ChatMessage, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+use crate::AskQuery;
 
 // /index Endpoint Schemas
 
 const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
+
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub enum MessageRoleRequestSchema {
+    #[serde(rename = "role")]
+    User,
+    Assistant,
+    System,
+    Tool,
+}
+
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub struct ChatMessageRequestSchema {
+    #[schema(value_type = MessageRoleRequestSchema)]
+    pub role: MessageRoleRequestSchema,
+    pub content: String,
+    pub images: Option<Vec<String>>,
+}
+
+impl Into<ChatMessage> for ChatMessageRequestSchema {
+    fn into(self) -> ChatMessage {
+        let role = match self.role {
+            MessageRoleRequestSchema::Assistant => bioma_llm::prelude::MessageRole::Assistant,
+            MessageRoleRequestSchema::System => bioma_llm::prelude::MessageRole::System,
+            MessageRoleRequestSchema::User => bioma_llm::prelude::MessageRole::User,
+            MessageRoleRequestSchema::Tool => bioma_llm::prelude::MessageRole::Tool,
+        };
+
+        ChatMessage::new(role, self.content)
+    }
+}
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobsRequest {
@@ -49,7 +84,6 @@ const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 pub enum RetrieveQueryRequest {
     #[serde(rename = "query")]
     Text(String),
-    // #[serde(rename = "query")]
     Segundo(String),
 }
 
@@ -76,5 +110,22 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
             .threshold(self.threshold.unwrap_or(DEFAULT_RETRIEVER_THRESHOLD))
             .source(self.source.unwrap_or_default())
             .build()
+    }
+}
+
+// ask
+
+#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+pub struct AskQueryRequest {
+    pub messages: Vec<ChatMessageRequestSchema>,
+    pub source: Option<String>,
+    // pub format: Option<chat::Schema>,
+}
+
+impl Into<AskQuery> for AskQueryRequest {
+    fn into(self) -> AskQuery {
+        let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
+
+        AskQuery { format: None, source: self.source, messages }
     }
 }
