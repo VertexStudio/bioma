@@ -138,7 +138,7 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
     }
 }
 
-// ask
+// /ask Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 #[schema(example = json!({
@@ -200,7 +200,18 @@ impl TryInto<AskQuery> for AskQueryRequestSchema {
     }
 }
 
+// /chat Endpoint Schemas
+
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+#[schema(example = json!({
+    "model": "llama3.2",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Why is the sky blue?"
+        }
+    ]
+}))]
 pub struct ChatQueryRequestSchema {
     pub messages: Vec<ChatMessageRequestSchema>,
     pub source: Option<String>,
@@ -225,6 +236,8 @@ impl TryInto<ChatQuery> for ChatQueryRequestSchema {
     }
 }
 
+// /delete_resource Endpoint Schemas
+
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct DeleteSourceRequestSchema {
     pub source: String,
@@ -235,6 +248,8 @@ impl Into<DeleteSource> for DeleteSourceRequestSchema {
         DeleteSource { source: self.source }
     }
 }
+
+// /embed Endpoint Schemas
 
 #[derive(ToSchema, Deserialize)]
 pub struct EmbeddingsQueryRequestSchema {
