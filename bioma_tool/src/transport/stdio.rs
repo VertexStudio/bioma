@@ -56,53 +56,45 @@ impl Transport for StdioTransport {
             StdioMode::Server(_stdout) => {
                 let stdin = tokio::io::stdin();
                 let mut lines = BufReader::new(stdin).lines();
-
                 while let Ok(Some(line)) = lines.next_line().await {
-                    debug!("Received [stdio]: {}", line);
+                    debug!("Server received [stdio]: {}", line);
                     if request_tx.send(line).await.is_err() {
                         error!("Failed to send request through channel");
                         break;
                     }
                 }
-
                 Ok(())
             }
             StdioMode::Client { stdout, .. } => {
                 let mut stdout = stdout.lock().await;
-                let mut reader = BufReader::new(&mut *stdout);
-                let mut line = String::new();
-
-                while reader.read_line(&mut line).await? > 0 {
-                    debug!("Received [stdio]: {}", line.trim());
-                    if request_tx.send(line.clone()).await.is_err() {
+                let mut lines = BufReader::new(&mut *stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("Client received [stdio]: {}", line);
+                    if request_tx.send(line).await.is_err() {
                         debug!("Request channel closed - stopping read loop");
                         break;
                     }
-                    line.clear();
                 }
-
                 Ok(())
             }
         }
     }
 
     async fn send(&mut self, message: String) -> Result<()> {
-        if !message.is_empty() {
-            match &*self.mode {
-                StdioMode::Server(stdout) => {
-                    let mut stdout = stdout.lock().await;
-                    debug!("Sending [stdio]: {}", message);
-                    stdout.write_all(message.as_bytes()).await.context("Failed to write message")?;
-                    stdout.write_all(b"\n").await.context("Failed to write newline")?;
-                    stdout.flush().await.context("Failed to flush stdout")?;
-                }
-                StdioMode::Client { stdin, .. } => {
-                    let mut stdin = stdin.lock().await;
-                    debug!("Sending [stdio]: {}", message);
-                    stdin.write_all(message.as_bytes()).await.context("Failed to write message")?;
-                    stdin.write_all(b"\n").await.context("Failed to write newline")?;
-                    stdin.flush().await.context("Failed to flush stdin")?;
-                }
+        match &*self.mode {
+            StdioMode::Server(stdout) => {
+                debug!("Server sending [stdio]: {}", message);
+                let mut stdout = stdout.lock().await;
+                stdout.write_all(message.as_bytes()).await.context("Failed to write message")?;
+                stdout.write_all(b"\n").await.context("Failed to write newline")?;
+                stdout.flush().await.context("Failed to flush stdout")?;
+            }
+            StdioMode::Client { stdin, .. } => {
+                debug!("Client sending [stdio]: {}", message);
+                let mut stdin = stdin.lock().await;
+                stdin.write_all(message.as_bytes()).await.context("Failed to write message")?;
+                stdin.write_all(b"\n").await.context("Failed to write newline")?;
+                stdin.flush().await.context("Failed to flush stdin")?;
             }
         }
         Ok(())
