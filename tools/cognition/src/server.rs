@@ -292,7 +292,7 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
 
 #[utoipa::path(
     post,
-    path = "/retrive",
+    path = "/retrieve",
     description = "Retrieve context in .md format",
     request_body = RetrieveContextRequest,
     responses(
