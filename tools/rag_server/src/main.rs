@@ -11,12 +11,7 @@ use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
 use request_schemas::{ 
-    AskQueryRequestSchema, 
-    ChatQueryRequestSchema, 
-    DeleteSourceRequestSchema, 
-    EmbeddingsQueryRequestSchema, 
-    IndexGlobsRequestSchema, 
-    RetrieveContextRequest 
+    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema, IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest 
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -954,18 +949,20 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
 
 #[utoipa::path(
     post,
-    path = "/embed",
-    description = "Embed endpoint",
-    request_body = EmbeddingsQueryRequestSchema,
+    path = "/rerank",
+    description = "Rerank endpoint",
+    request_body = RankTextsRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
+async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+
+    let body: RankTexts = body.clone().into();
 
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
