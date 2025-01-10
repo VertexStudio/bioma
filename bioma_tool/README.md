@@ -65,3 +65,24 @@ Generate the schema.es from MCP schema.json
 schemafy-cli src | rustfmt | tee src/schema.rs
 ```
 
+Examples:
+
+MCP client:
+```
+cargo run -p bioma_tool --example mcp_client -- target/debug/examples/mcp_server -- --log-file .output/mcp_server-bioma.log --transport stdio
+```
+
+MCP server:
+```
+cargo build -p bioma_tool --example mcp_server
+```
+
+Inspect example server:
+```
+npx @modelcontextprotocol/inspector ./target/debug/examples/mcp_server --log-file .output/mcp_server-inspector.log
+```
+
+Connecting to docker server:
+```
+./target/debug/examples/mcp_client -- docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
+```

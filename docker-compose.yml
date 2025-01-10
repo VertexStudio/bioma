@@ -5,6 +5,8 @@ services:
     environment:
       - OLLAMA_ORIGINS=*
       - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEPALIVE=-1
+      - OLLAMA_DEBUG=0
     deploy:
       resources:
         reservations:

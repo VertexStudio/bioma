@@ -13,21 +13,19 @@ use ollama_rs::generation::tools::ToolCall;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tool::Tools;
 use tracing::{debug, error, info};
 use user::UserActor;
 
-mod config;
-mod tool;
-mod user;
-
-/// RAG server using the Bioma Actor framework
-///
-/// CURL (examples)[docs/examples.sh]
+pub mod config;
+pub mod tool;
+pub mod user;
 
 struct AppState {
     config: Config,
-    tools: Tools,
+    tools: Arc<Mutex<Tools>>,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -394,37 +392,42 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             };
 
             // Generate tool calls if tools are available
-            let tools = data.tools.get_tools();
-            let tool_response = if !tools.is_empty() {
-                let conversation = {
-                    let mut conv = Vec::with_capacity(body.messages.len() + 1);
-                    if !body.messages.is_empty() {
-                        conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
-                        conv.push(body.messages[body.messages.len() - 1].clone());
-                    } else {
-                        conv.push(context_message.clone());
-                    }
-                    conv
-                };
+            let tools = data.tools.lock().await.list_tools(&user_actor).await;
+            let tool_response = if let Ok(tools) = tools {
+                if !tools.is_empty() {
+                    let conversation = {
+                        let mut conv = Vec::with_capacity(body.messages.len() + 1);
+                        if !body.messages.is_empty() {
+                            conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
+                            conv.push(body.messages[body.messages.len() - 1].clone());
+                        } else {
+                            conv.push(context_message.clone());
+                        }
+                        conv
+                    };
 
-                let tool_request = ChatMessages {
-                    messages: conversation.clone(),
-                    restart: true,
-                    persist: false,
-                    stream: false,
-                    format: body.format.clone(),
-                    tools: Some(tools),
-                };
-                let tool_response = user_actor
-                    .send_and_wait_reply::<Chat, ChatMessages>(
-                        tool_request,
-                        &data.chat,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
-                    )
-                    .await;
-                info!("Tool response: {:#?}", tool_response);
-                Some(tool_response)
+                    let tool_request = ChatMessages {
+                        messages: conversation.clone(),
+                        restart: true,
+                        persist: false,
+                        stream: false,
+                        format: body.format.clone(),
+                        tools: Some(tools),
+                    };
+                    let tool_response = user_actor
+                        .send_and_wait_reply::<Chat, ChatMessages>(
+                            tool_request,
+                            &data.chat,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                        )
+                        .await;
+                    info!("Tool response: {:#?}", tool_response);
+                    Some(tool_response)
+                } else {
+                    None
+                }
             } else {
+                error!("Error fetching tools: {:?}", tools);
                 None
             };
 
@@ -436,7 +439,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 // If tool calls are generated, call tools and add them to the conversation
                 if let Some(Ok(tool_response)) = tool_response {
                     for tool_call in &tool_response.message.tool_calls {
-                        let tool = data.tools.get_tool(&tool_call.function.name);
+                        let tools = data.tools.lock().await;
+                        let tool = tools.get_tool(&tool_call.function.name);
                         if let Some((_tool_info, tool_client)) = tool {
                             // Execute the tool call and get raw result
                             let execution_result = tool_client.call(&user_actor, tool_call).await;
@@ -841,7 +845,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = args.load_config()?;
 
     // Initialize engine
-    let engine = Engine::connect(EngineOptions::builder().endpoint(config.engine_endpoint.clone()).build()).await?;
+    let engine = Engine::connect(config.engine.clone()).await?;
 
     // Spawn main actors and their relays
     let mut actor_handles = Vec::new();
@@ -916,7 +920,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::builder().model(config.chat_model.clone()).build(),
+        Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -929,16 +933,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     actor_handles.push(chat_handle);
 
     // Tools setup
-    let tools_user = UserActor::new(&engine, "/rag/tool/".into()).await?;
     let mut tools = Tools::new();
     for tool in &config.tools {
-        tools.add_tool(&engine, &tools_user, tool.clone(), "/rag".into()).await?;
+        tools.add_tool(&engine, tool.clone(), "/rag".into()).await?;
     }
 
     // Create app state
     let data = web::Data::new(AppState {
-        config,
-        tools,
+        config: config.clone(),
+        tools: Arc::new(Mutex::new(tools)),
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,
@@ -948,6 +951,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Create and run server
+    let rag_endpoint_host = config.rag_endpoint.host_str().unwrap_or("0.0.0.0");
+    let rag_endpoint_port = config.rag_endpoint.port().unwrap_or(5766);
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
@@ -965,14 +970,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
-            .route("/ask", web::post().to(self::ask))
-            .route("/chat", web::post().to(self::chat))
+            .route("/ask", web::post().to(ask))
+            .route("/chat", web::post().to(chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            // Compatibility
+            .route("/api/chat", web::post().to(chat))
+            .route("/api/embed", web::post().to(embed))
     })
-    .bind("0.0.0.0:5766")?
+    .bind((rag_endpoint_host, rag_endpoint_port))?
     .run();
 
     // Run the server

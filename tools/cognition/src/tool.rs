@@ -12,9 +12,10 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub struct ToolClient {
+    pub hosting: bool,
     pub server: ServerConfig,
     pub client_id: ActorId,
     pub _client_handle: Option<JoinHandle<()>>,
@@ -39,6 +40,21 @@ impl ToolClient {
             .await?;
         Ok(response)
     }
+
+    pub async fn list_tools(&self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let list_tools: ListToolsResult = user
+            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+                ListTools(None),
+                &self.client_id,
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+            )
+            .await?;
+        info!("Listed {} tools from {}", list_tools.tools.len(), self.server.name);
+        for tool in &list_tools.tools {
+            info!("├─ Tool: {}", tool.name);
+        }
+        Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+    }
 }
 
 pub struct Tools {
@@ -50,17 +66,14 @@ impl Tools {
         Self { clients: vec![] }
     }
 
-    pub async fn add_tool(
-        &mut self,
-        engine: &Engine,
-        user: &ActorContext<UserActor>,
-        config: ClientConfig,
-        prefix: String,
-    ) -> Result<()> {
+    pub async fn add_tool(&mut self, engine: &Engine, config: ClientConfig, prefix: String) -> Result<()> {
+        let hosting = config.host;
         let server = config.server;
         let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
 
+        // If hosting, spawn client, which will spawn and host a ModelContextProtocol server
         let client_handle = if config.host {
+            debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
             let (mut client_ctx, mut client_actor) = Actor::spawn(
                 engine.clone(),
                 client_id.clone(),
@@ -69,29 +82,17 @@ impl Tools {
             )
             .await?;
 
+            let client_id_spawn = client_id.clone();
             Some(tokio::spawn(async move {
                 if let Err(e) = client_actor.start(&mut client_ctx).await {
-                    error!("Embeddings actor error: {}", e);
+                    error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
                 }
             }))
         } else {
             None
         };
 
-        let list_tools: ListToolsResult = user
-            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
-                ListTools(None),
-                &client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
-            )
-            .await?;
-        info!("Loaded {} tools from {}", list_tools.tools.len(), server.name);
-        for tool in &list_tools.tools {
-            info!("├─ Tool: {}", tool.name);
-        }
-        let tools: Vec<ToolInfo> = list_tools.tools.into_iter().map(parse_tool_info).collect();
-
-        self.clients.push(ToolClient { server, client_id, _client_handle: client_handle, tools });
+        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
 
         Ok(())
     }
@@ -107,8 +108,39 @@ impl Tools {
         None
     }
 
-    pub fn get_tools(&self) -> Vec<ToolInfo> {
-        self.clients.iter().flat_map(|c| c.tools.clone()).collect()
+    pub async fn list_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let mut all_tools = Vec::new();
+        for client in &mut self.clients {
+            // Only fetch if tools are empty (not cached)
+            if client.tools.is_empty() {
+                match client.list_tools(user).await {
+                    Ok(tools) => {
+                        client.tools = tools.clone();
+                        all_tools.extend(tools);
+                    }
+                    Err(e) => error!("Failed to fetch tools: {}", e),
+                }
+            } else {
+                // Use cached tools
+                all_tools.extend(client.tools.clone());
+            }
+        }
+        Ok(all_tools)
+    }
+
+    // Force refresh the cache if needed
+    pub async fn refresh_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let mut all_tools = Vec::new();
+        for client in &mut self.clients {
+            match client.list_tools(user).await {
+                Ok(tools) => {
+                    client.tools = tools.clone();
+                    all_tools.extend(tools);
+                }
+                Err(e) => error!("Failed to fetch tools: {}", e),
+            }
+        }
+        Ok(all_tools)
     }
 }
 

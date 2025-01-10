@@ -40,7 +40,7 @@
                     "--mount",
                     "type=bind,src=/Users/rozgo/BiomaAI,dst=/data/BiomaAI,ro",
                     "mcp/filesystem",
-                    "/data/BiomaAI"
+                    "/data"
                 ]
             }
         }
