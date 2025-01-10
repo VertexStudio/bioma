@@ -1,5 +1,5 @@
 use crate::user::UserActor;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use bioma_actor::prelude::*;
 use bioma_tool::client::{CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ServerConfig};
 use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
@@ -10,7 +10,9 @@ use schemars::{
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -20,9 +22,98 @@ pub struct ToolClient {
     pub client_id: ActorId,
     pub _client_handle: Option<JoinHandle<()>>,
     pub tools: Vec<ToolInfo>,
+    pub health_check_tx: mpsc::Sender<()>,
+    pub _health_check_handle: JoinHandle<()>,
 }
 
 impl ToolClient {
+    pub async fn new(
+        engine: &Engine,
+        config: ClientConfig,
+        prefix: String,
+        user: Arc<ActorContext<UserActor>>,
+        health_check_interval: Duration,
+    ) -> Result<Self> {
+        let hosting = config.host;
+        let server = config.server;
+        let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
+
+        let client_handle = if config.host {
+            debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
+            let (mut client_ctx, mut client_actor) = Actor::spawn(
+                engine.clone(),
+                client_id.clone(),
+                ModelContextProtocolClientActor::new(server.clone()),
+                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+            )
+            .await?;
+
+            let client_id_spawn = client_id.clone();
+            Some(tokio::spawn(async move {
+                if let Err(e) = client_actor.start(&mut client_ctx).await {
+                    error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
+                }
+            }))
+        } else {
+            None
+        };
+
+        let (health_check_tx, mut health_check_rx) = mpsc::channel(32);
+        let user = user.clone();
+        let client_id_clone = client_id.clone();
+
+        let health_check_handle = tokio::spawn(async move {
+            let healthy = Arc::new(RwLock::new(true));
+            loop {
+                tokio::select! {
+                    _ = health_check_rx.recv() => {
+                        debug!("Health check triggered for client {}", client_id_clone);
+                        let mut healthy_guard = healthy.write().await;
+                        *healthy_guard = false;
+                    },
+                    _ = tokio::time::sleep(health_check_interval) => {
+                        if !*healthy.read().await {
+                            debug!("Periodic health check for client {}", client_id_clone);
+                        } else {
+                            continue;
+                        }
+                    }
+                }
+
+                let health_check_result = user
+                    .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+                        ListTools(None),
+                        &client_id_clone,
+                        SendOptions::builder().timeout(Duration::from_secs(5)).build(),
+                    )
+                    .await;
+
+                match health_check_result {
+                    Ok(_) => {
+                        let mut healthy_guard = healthy.write().await;
+                        if !*healthy_guard {
+                            info!("Client {} is now healthy", client_id_clone);
+                            *healthy_guard = true;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Health check failed for client {}: {}", client_id_clone, e);
+                    }
+                }
+            }
+        });
+
+        Ok(Self {
+            hosting,
+            server,
+            client_id,
+            _client_handle: client_handle,
+            tools: vec![],
+            health_check_tx,
+            _health_check_handle: health_check_handle,
+        })
+    }
+
     pub async fn call(&self, user: &ActorContext<UserActor>, tool_call: &ToolCall) -> Result<CallToolResult> {
         let args: BTreeMap<String, Value> = tool_call
             .function
@@ -37,7 +128,18 @@ impl ToolClient {
                 &self.client_id,
                 SendOptions::builder().timeout(Duration::from_secs(30)).build(),
             )
-            .await?;
+            .await
+            .map_err(|e| anyhow!("Error sending CallTool message: {}", e))?;
+
+        if let Err(e) = &response {
+            if let SystemActorError::MessageTimeout(_, _) = e {
+                error!("Timeout calling tool {} on client {}: {}", tool_call.function.name, self.client_id, e);
+                if let Err(send_err) = self.health_check_tx.send(()).await {
+                    error!("Failed to send health check trigger: {}", send_err);
+                }
+            }
+        }
+
         Ok(response)
     }
 
@@ -59,42 +161,72 @@ impl ToolClient {
 
 pub struct Tools {
     pub clients: Vec<ToolClient>,
+    pub health_check_interval: Duration,
 }
 
 impl Tools {
     pub fn new() -> Self {
-        Self { clients: vec![] }
+        Self { clients: vec![], health_check_interval: Duration::from_secs(5) }
     }
 
-    pub async fn add_tool(&mut self, engine: &Engine, config: ClientConfig, prefix: String) -> Result<()> {
-        let hosting = config.host;
-        let server = config.server;
-        let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
-
-        // If hosting, spawn client, which will spawn and host a ModelContextProtocol server
-        let client_handle = if config.host {
-            debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
-            let (mut client_ctx, mut client_actor) = Actor::spawn(
-                engine.clone(),
-                client_id.clone(),
-                ModelContextProtocolClientActor::new(server.clone()),
-                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-            )
-            .await?;
-
-            let client_id_spawn = client_id.clone();
-            Some(tokio::spawn(async move {
-                if let Err(e) = client_actor.start(&mut client_ctx).await {
-                    error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
-                }
-            }))
-        } else {
-            None
-        };
-
-        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
-
+    pub async fn add_tool(
+        &mut self,
+        engine: &Engine,
+        config: ClientConfig,
+        prefix: String,
+        user: Arc<ActorContext<UserActor>>,
+    ) -> Result<()> {
+        let client = ToolClient::new(engine, config, prefix, user, self.health_check_interval).await?;
+        self.clients.push(client);
         Ok(())
+    }
+
+    pub async fn start_health_checks(&self, user: &ActorContext<UserActor>) {
+        for client in &self.clients {
+            let client_id = client.client_id.clone();
+            let healthy = client.healthy.clone();
+            let user = user.clone();
+            let interval = self.health_check_interval;
+            let mut health_check_rx = mpsc::channel(32).1;
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = health_check_rx.recv() => {
+                            debug!("Health check triggered for client {}", client_id);
+                        },
+                        _ = tokio::time::sleep(interval) => {
+                            if !*healthy.read().await {
+                                debug!("Periodic health check for client {}", client_id);
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+
+                    let health_check_result = user
+                        .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+                            ListTools(None),
+                            &client_id,
+                            SendOptions::builder().timeout(Duration::from_secs(5)).build(),
+                        )
+                        .await;
+
+                    match health_check_result {
+                        Ok(_) => {
+                            let mut healthy_guard = healthy.write().await;
+                            if !*healthy_guard {
+                                info!("Client {} is now healthy", client_id);
+                                *healthy_guard = true;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Health check failed for client {}: {}", client_id, e);
+                        }
+                    }
+                }
+            });
+        }
     }
 
     pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
