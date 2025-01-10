@@ -26,10 +26,6 @@ struct Args {
     /// Transport type (stdio or websocket)
     #[arg(long, default_value = "stdio")]
     transport: String,
-
-    /// WebSocket address (only used with websocket transport)
-    #[arg(long, default_value = "127.0.0.1:8080")]
-    ws_addr: String,
 }
 
 struct McpServer {
@@ -116,5 +112,5 @@ async fn main() -> Result<()> {
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 
-    bioma_tool::server::start::<McpServer>(transport).await
+    bioma_tool::server::start::<McpServer>("mcp_server", transport).await
 }
