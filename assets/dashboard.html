@@ -300,13 +300,45 @@
         width: 20px;
         height: 20px;
       }
+
+      .sidebar-toggle {
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        padding: 0.5rem;
+        border-radius: 0.375rem;
+        transition: all var(--transition-speed);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .sidebar-toggle svg {
+        width: 20px;
+        height: 20px;
+        transition: transform var(--transition-speed);
+      }
+
+      .sidebar.collapsed .sidebar-toggle svg {
+        transform: rotate(180deg);
+      }
+
+      .sidebar-toggle:hover {
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
+      }
     </style>
   </head>
   <body>
     <div class="sidebar">
       <div class="sidebar-header">
         <h1>Bioma</h1>
-        <button class="hide-bar-button" id="toggle-sidebar">
+        <button
+          class="sidebar-toggle"
+          id="toggle-sidebar"
+          aria-label="Toggle sidebar"
+        >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
