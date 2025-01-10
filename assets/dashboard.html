@@ -76,10 +76,12 @@
       }
 
       .nav-item {
-        display: flex;
+        display: grid;
+        grid-template-columns: 24px auto 48px;
         align-items: center;
         gap: 0.75rem;
         padding: 0.5rem;
+        padding-right: 2rem;
         border-radius: 0.5rem;
         color: var(--text-secondary);
         text-decoration: none;
@@ -87,14 +89,26 @@
         transition: background-color 0.2s;
       }
 
-      .nav-item:hover {
-        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
-        color: var(--primary);
-      }
-
       .nav-item svg {
         width: 20px;
         height: 20px;
+      }
+
+      .nav-item .external-link {
+        opacity: 0;
+        transition: opacity 0.2s;
+        color: currentColor;
+        justify-self: end;
+        margin-right: 8px;
+      }
+
+      .nav-item:hover .external-link {
+        opacity: 1;
+      }
+
+      .nav-item:hover {
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
       }
 
       .main-content {
@@ -248,7 +262,7 @@
       </div>
       <h2>Services</h2>
       <div class="nav-items">
-        <a class="nav-item" data-target="surrealist">
+        <div class="nav-item" data-target="surrealist">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -263,8 +277,25 @@
             ></path>
           </svg>
           <span>Surrealist</span>
-        </a>
-        <a class="nav-item" data-target="chat">
+          <a href="http://localhost:8080" target="_blank" class="external-link">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+        <div class="nav-item" data-target="chat">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -279,8 +310,29 @@
             ></path>
           </svg>
           <span>Chat</span>
-        </a>
-        <a class="nav-item" data-target="inspector">
+          <a
+            href="../tools/rag_server/templates/rag_chat.html"
+            target="_blank"
+            class="external-link"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+        <div class="nav-item" data-target="inspector">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -295,8 +347,25 @@
             ></path>
           </svg>
           <span>Inspector</span>
-        </a>
-        <a class="nav-item" data-target="minio">
+          <a href="http://localhost:5173" target="_blank" class="external-link">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+        <div class="nav-item" data-target="minio">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -311,109 +380,38 @@
             ></path>
           </svg>
           <span>Minio</span>
-        </a>
+          <a href="http://localhost:9001" target="_blank" class="external-link">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
       </div>
     </div>
 
     <div class="content-area">
       <div class="interface-container" id="surrealist-container">
-        <div class="toolbar">
-          <a
-            href="http://localhost:8080"
-            target="_blank"
-            class="toolbar-button"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-              />
-            </svg>
-            Open in new tab
-          </a>
-        </div>
         <iframe src="http://localhost:8080"></iframe>
       </div>
       <div class="interface-container" id="chat-container">
-        <div class="toolbar">
-          <a
-            href="../tools/rag_server/templates/rag_chat.html"
-            target="_blank"
-            class="toolbar-button"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-              />
-            </svg>
-            Open in new tab
-          </a>
-        </div>
         <iframe src="../tools/rag_server/templates/rag_chat.html"></iframe>
       </div>
       <div class="interface-container" id="inspector-container">
-        <div class="toolbar">
-          <a
-            href="http://localhost:5173"
-            target="_blank"
-            class="toolbar-button"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-              />
-            </svg>
-            Open in new tab
-          </a>
-        </div>
         <iframe src="http://localhost:5173"></iframe>
       </div>
       <div class="interface-container" id="minio-container">
-        <div class="toolbar">
-          <a
-            href="http://localhost:9001"
-            target="_blank"
-            class="toolbar-button"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-              />
-            </svg>
-            Open in new tab
-          </a>
-        </div>
         <iframe src="http://localhost:8081"></iframe>
       </div>
     </div>
