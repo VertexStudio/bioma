@@ -204,13 +204,14 @@ impl ActorError for ModelContextProtocolClientError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
+    tools: Option<ListToolsResult>,
     #[serde(skip)]
     client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
 }
 
 impl ModelContextProtocolClientActor {
     pub fn new(server: ServerConfig) -> Self {
-        ModelContextProtocolClientActor { server, client: None }
+        ModelContextProtocolClientActor { server, tools: None, client: None }
     }
 }
 
@@ -258,11 +259,33 @@ impl Message<ListTools> for ModelContextProtocolClientActor {
     async fn handle(
         &mut self,
         ctx: &mut ActorContext<Self>,
-        message: &ListTools,
+        _message: &ListTools,
+    ) -> Result<(), ModelContextProtocolClientError> {
+        let tools = match &self.tools {
+            Some(tools) => tools.clone(),
+            None => ListToolsResult { meta: None, tools: vec![], next_cursor: None },
+        };
+        ctx.reply(tools).await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchTools(pub Option<ListToolsRequestParams>);
+
+impl Message<FetchTools> for ModelContextProtocolClientActor {
+    type Response = ListToolsResult;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &FetchTools,
     ) -> Result<(), ModelContextProtocolClientError> {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
         let response = client.list_tools(message.0.clone()).await?;
+        self.tools = Some(response.clone());
+        self.save(ctx).await?;
         ctx.reply(response).await?;
         Ok(())
     }

@@ -1,17 +1,21 @@
 use anyhow::Result;
+use bioma_actor::EngineOptions;
 use bioma_tool::client::ClientConfig;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use tracing::info;
+use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default = "default_engine_endpoint")]
-    pub engine_endpoint: Cow<'static, str>,
+    #[serde(default = "default_engine")]
+    pub engine: EngineOptions,
     #[serde(default = "default_rag_endpoint")]
-    pub rag_endpoint: Cow<'static, str>,
+    pub rag_endpoint: Url,
+    #[serde(default = "default_chat_endpoint")]
+    pub chat_endpoint: Url,
     #[serde(default = "default_chat_model")]
     pub chat_model: Cow<'static, str>,
     #[serde(default = "default_chat_prompt")]
@@ -19,12 +23,16 @@ pub struct Config {
     pub tools: Vec<ClientConfig>,
 }
 
-fn default_engine_endpoint() -> Cow<'static, str> {
-    "ws://0.0.0.0:9123".into()
+fn default_engine() -> EngineOptions {
+    EngineOptions::builder().endpoint("ws://0.0.0.0:9123".into()).build()
 }
 
-fn default_rag_endpoint() -> Cow<'static, str> {
-    "http://0.0.0.0:5766".into()
+fn default_rag_endpoint() -> Url {
+    Url::parse("http://0.0.0.0:5766").unwrap()
+}
+
+fn default_chat_endpoint() -> Url {
+    Url::parse("http://0.0.0.0:11434").unwrap()
 }
 
 fn default_chat_model() -> Cow<'static, str> {
@@ -43,8 +51,9 @@ answer the user's query:
 impl Default for Config {
     fn default() -> Self {
         Self {
-            engine_endpoint: default_engine_endpoint(),
+            engine: default_engine(),
             rag_endpoint: default_rag_endpoint(),
+            chat_endpoint: default_chat_endpoint(),
             chat_model: default_chat_model(),
             chat_prompt: default_chat_prompt(),
             tools: vec![],
@@ -54,7 +63,6 @@ impl Default for Config {
 
 #[derive(Parser)]
 pub struct Args {
-    #[arg(short, long)]
     pub config: Option<PathBuf>,
 }
 
@@ -71,7 +79,16 @@ impl Args {
                 Config::default()
             }
         };
-        info!("├─ Engine Endpoint: {}", config.engine_endpoint);
+        info!("├─ Engine Configuration:");
+        info!("│  ├─ Endpoint: {}", config.engine.endpoint);
+        info!("│  ├─ Namespace: {}", config.engine.namespace);
+        info!("│  ├─ Database: {}", config.engine.database);
+        info!("│  ├─ Username: {}", config.engine.username);
+        info!("│  ├─ Output Directory: {}", config.engine.output_dir.display());
+        info!("│  ├─ Local Store Directory: {}", config.engine.local_store_dir.display());
+        info!("│  └─ HuggingFace Cache Directory: {}", config.engine.hf_cache_dir.display());
+        info!("├─ RAG Endpoint: {}", config.rag_endpoint);
+        info!("├─ Chat Endpoint: {}", config.chat_endpoint);
         info!("├─ Chat Model: {}", config.chat_model);
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
         info!("├─ Tool Servers: {} configured", config.tools.len());
@@ -79,6 +96,7 @@ impl Args {
             let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };
             info!("{}  {}", prefix, tool.server.name);
         }
+
         Ok(config)
     }
 }

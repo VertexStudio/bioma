@@ -1461,6 +1461,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
+name = "cognition"
+version = "0.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-multipart",
+ "actix-web",
+ "anyhow",
+ "base64 0.22.1",
+ "bioma_actor",
+ "bioma_llm",
+ "bioma_tool",
+ "clap",
+ "futures-util",
+ "glob",
+ "ollama-rs",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
+ "url",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "color-backtrace"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4751,35 +4781,6 @@ dependencies = [
  "endian-type",
  "nibble_vec",
  "serde",
-]
-
-[[package]]
-name = "rag_server"
-version = "0.1.0"
-dependencies = [
- "actix-cors",
- "actix-multipart",
- "actix-web",
- "anyhow",
- "base64 0.22.1",
- "bioma_actor",
- "bioma_llm",
- "bioma_tool",
- "clap",
- "futures-util",
- "glob",
- "ollama-rs",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
- "ulid",
- "uuid",
- "zip",
 ]
 
 [[package]]
