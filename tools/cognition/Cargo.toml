@@ -1,5 +1,5 @@
 [package]
-name = "rag_server"
+name = "cognition"
 version = "0.1.0"
 edition = "2021"
 
@@ -23,6 +23,7 @@ anyhow = { workspace = true }
 ollama-rs = { workspace = true }
 schemars = { workspace = true }
 utoipa = { workspace = true }
+url = { workspace = true }
 
 bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
@@ -33,3 +34,11 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 glob = { workspace = true }
 reqwest = { workspace = true }
+
+[[bin]]
+name = "cognition-client"
+path = "src/client.rs"
+
+[[bin]]
+name = "cognition-server"
+path = "src/server.rs"

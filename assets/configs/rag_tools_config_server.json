@@ -17,31 +17,16 @@
             "host": true,
             "server": {
                 "name": "bioma-tool",
-                "transport": "stdio",
                 "command": "target/release/examples/mcp_server",
-                "args": [
-                    "--transport",
-                    "stdio",
-                    "--log-file",
-                    ".output/mcp_server-bioma.log"
-                ]
+                "args": []
             }
         },
         {
             "host": true,
             "server": {
                 "name": "filesystem",
-                "transport": "stdio",
                 "command": "docker",
-                "args": [
-                    "run",
-                    "-i",
-                    "--rm",
-                    "--mount",
-                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/data/BiomaAI,ro",
-                    "mcp/filesystem",
-                    "/data/BiomaAI"
-                ]
+                "args": []
             }
         }
     ]
