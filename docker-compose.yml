@@ -74,7 +74,7 @@ services:
     environment:
       - SWAGGER_JSON=/app/openapi.json
     volumes:
-      - ./tools/rag_server/docs:/app
+      - ./tools/cognition/docs:/app
 
 volumes:
   bioma-ollama_data:

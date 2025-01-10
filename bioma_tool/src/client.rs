@@ -1,8 +1,8 @@
 use crate::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, GetPromptRequestParams, GetPromptResult, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsRequestParams, ListPromptsResult, ListResourcesRequestParams,
-    ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult,
-    ServerCapabilities,
+    InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
+    ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
+    ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use bioma_actor::prelude::*;
@@ -16,10 +16,14 @@ use tracing::{debug, error, info};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub name: String,
+    #[serde(default = "default_version")]
+    pub version: String,
     #[serde(default = "default_transport")]
     pub transport: String,
     pub command: String,
     pub args: Vec<String>,
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,11 +32,20 @@ pub struct ClientConfig {
     pub server: ServerConfig,
 }
 
+fn default_version() -> String {
+    "0.1.0".to_string()
+}
+
 fn default_transport() -> String {
     "stdio".to_string()
 }
 
+fn default_request_timeout() -> u64 {
+    5
+}
+
 pub struct ModelContextProtocolClient {
+    server: ServerConfig,
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
@@ -69,6 +82,7 @@ impl ModelContextProtocolClient {
         });
 
         Ok(Self {
+            server,
             transport,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
@@ -89,11 +103,17 @@ impl ModelContextProtocolClient {
         Ok(serde_json::from_value(response)?)
     }
 
+    pub async fn initialized(&mut self) -> Result<(), ModelContextProtocolClientError> {
+        let params = InitializedNotificationParams { meta: None };
+        self.notify("notifications/initialized".to_string(), serde_json::to_value(params)?).await?;
+        Ok(())
+    }
+
     pub async fn list_resources(
         &mut self,
         params: Option<ListResourcesRequestParams>,
     ) -> Result<ListResourcesResult, ModelContextProtocolClientError> {
-        debug!("Sending resources/list request");
+        debug!("Server {} - Sending resources/list request", self.server.name);
         let response = self.request("resources/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -102,7 +122,7 @@ impl ModelContextProtocolClient {
         &mut self,
         params: ReadResourceRequestParams,
     ) -> Result<ReadResourceResult, ModelContextProtocolClientError> {
-        debug!("Sending resources/read request");
+        debug!("Server {} - Sending resources/read request", self.server.name);
         let response = self.request("resources/read".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -111,7 +131,7 @@ impl ModelContextProtocolClient {
         &mut self,
         params: Option<ListPromptsRequestParams>,
     ) -> Result<ListPromptsResult, ModelContextProtocolClientError> {
-        debug!("Sending prompts/list request");
+        debug!("Server {} - Sending prompts/list request", self.server.name);
         let response = self.request("prompts/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -120,7 +140,7 @@ impl ModelContextProtocolClient {
         &mut self,
         params: GetPromptRequestParams,
     ) -> Result<GetPromptResult, ModelContextProtocolClientError> {
-        debug!("Sending prompts/get request");
+        debug!("Server {} - Sending prompts/get request", self.server.name);
         let response = self.request("prompts/get".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -129,7 +149,7 @@ impl ModelContextProtocolClient {
         &mut self,
         params: Option<ListToolsRequestParams>,
     ) -> Result<ListToolsResult, ModelContextProtocolClientError> {
-        debug!("Sending tools/list request");
+        debug!("Server {} - Sending tools/list request", self.server.name);
         let response = self.request("tools/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -138,7 +158,7 @@ impl ModelContextProtocolClient {
         &mut self,
         params: CallToolRequestParams,
     ) -> Result<CallToolResult, ModelContextProtocolClientError> {
-        debug!("Sending tools/call request");
+        debug!("Server {} - Sending tools/call request", self.server.name);
         let response = self.request("tools/call".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -166,22 +186,57 @@ impl ModelContextProtocolClient {
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e.to_string()).into()));
         }
 
-        // Parse response as proper JSON-RPC response
-        if let Some(response) = self.response_rx.recv().await {
-            let response: jsonrpc_core::Response = serde_json::from_str(&response)?;
-            match response {
-                jsonrpc_core::Response::Single(output) => match output {
-                    jsonrpc_core::Output::Success(success) => Ok(success.result),
-                    jsonrpc_core::Output::Failure(failure) => {
-                        error!("RPC error: {:?}", failure.error);
-                        Err(ModelContextProtocolClientError::Request(format!("RPC error: {:?}", failure.error).into()))
-                    }
-                },
-                _ => Err(ModelContextProtocolClientError::Request("Unexpected response type".into())),
+        // Wait for response with timeout
+        match tokio::time::timeout(std::time::Duration::from_secs(self.server.request_timeout), self.response_rx.recv())
+            .await
+        {
+            Ok(Some(response)) => {
+                let response: jsonrpc_core::Response = serde_json::from_str(&response)?;
+                match response {
+                    jsonrpc_core::Response::Single(output) => match output {
+                        jsonrpc_core::Output::Success(success) => {
+                            // Verify that response ID matches request ID
+                            if success.id != jsonrpc_core::Id::Num(id) {
+                                return Err(ModelContextProtocolClientError::ResponseIdMismatch {
+                                    expected: id,
+                                    actual: success.id,
+                                });
+                            }
+                            Ok(success.result)
+                        }
+                        jsonrpc_core::Output::Failure(failure) => {
+                            error!("RPC error: {:?}", failure.error);
+                            Err(ModelContextProtocolClientError::Request(
+                                format!("RPC error: {:?}", failure.error).into(),
+                            ))
+                        }
+                    },
+                    _ => Err(ModelContextProtocolClientError::Request("Unexpected response type".into())),
+                }
             }
-        } else {
-            Err(ModelContextProtocolClientError::Request("No response received".into()))
+            Ok(None) => Err(ModelContextProtocolClientError::Request("No response received".into())),
+            Err(_) => Err(ModelContextProtocolClientError::Request("Request timed out".into())),
         }
+    }
+
+    pub async fn notify(
+        &mut self,
+        method: String,
+        params: serde_json::Value,
+    ) -> Result<(), ModelContextProtocolClientError> {
+        // Create JSON-RPC 2.0 notification (no id)
+        let notification = jsonrpc_core::Notification {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method,
+            params: Params::Map(params.as_object().map(|obj| obj.clone()).unwrap_or_default()),
+        };
+
+        // Send notification without waiting for response
+        let request_str = serde_json::to_string(&notification)?;
+        self.transport
+            .send(request_str)
+            .await
+            .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e.to_string()).into()))
     }
 }
 
@@ -195,6 +250,8 @@ pub enum ModelContextProtocolClientError {
     JsonError(#[from] serde_json::Error),
     #[error("Request: {0}")]
     Request(Cow<'static, str>),
+    #[error("Response ID mismatch: expected {expected}, got {actual:?}")]
+    ResponseIdMismatch { expected: u64, actual: jsonrpc_core::Id },
     #[error("MCP Client not initialized")]
     ClientNotInitialized,
 }
@@ -204,13 +261,15 @@ impl ActorError for ModelContextProtocolClientError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
+    tools: Option<ListToolsResult>,
     #[serde(skip)]
     client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
+    server_capabilities: Option<ServerCapabilities>,
 }
 
 impl ModelContextProtocolClientActor {
     pub fn new(server: ServerConfig) -> Self {
-        ModelContextProtocolClientActor { server, client: None }
+        ModelContextProtocolClientActor { server, tools: None, client: None, server_capabilities: None }
     }
 }
 
@@ -224,9 +283,19 @@ impl Actor for ModelContextProtocolClientActor {
     type Error = ModelContextProtocolClientError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
-        info!("{} Started", ctx.id());
+        info!("{} Started (server: {})", ctx.id(), self.server.name);
 
-        let client = ModelContextProtocolClient::new(self.server.clone()).await?;
+        let mut client = ModelContextProtocolClient::new(self.server.clone()).await?;
+
+        // Initialize the client
+        let init_result =
+            client.initialize(Implementation { name: self.server.name.clone(), version: "0.1.0".to_string() }).await?;
+        info!("Server {} capabilities: {:?}", self.server.name, init_result.capabilities);
+        self.server_capabilities = Some(init_result.capabilities);
+
+        // Notify the server that the client has initialized
+        client.initialized().await?;
+
         self.client = Some(Arc::new(Mutex::new(client)));
 
         let mut stream = ctx.recv().await?;
@@ -234,17 +303,17 @@ impl Actor for ModelContextProtocolClientActor {
             if let Some(input) = frame.is::<CallTool>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
+                    error!("{} {} {:?}", ctx.id(), self.server.name, err);
                 }
             } else if let Some(input) = frame.is::<ListTools>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
+                    error!("{} {} {:?}", ctx.id(), self.server.name, err);
                 }
             }
         }
 
-        info!("{} Finished", ctx.id());
+        info!("{} Finished (server: {})", ctx.id(), self.server.name);
         Ok(())
     }
 }
@@ -263,6 +332,8 @@ impl Message<ListTools> for ModelContextProtocolClientActor {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
         let response = client.list_tools(message.0.clone()).await?;
+        self.tools = Some(response.clone());
+        self.save(ctx).await?;
         ctx.reply(response).await?;
         Ok(())
     }
