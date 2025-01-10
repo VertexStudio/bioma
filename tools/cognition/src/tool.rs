@@ -111,6 +111,27 @@ impl Tools {
     pub async fn list_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
         let mut all_tools = Vec::new();
         for client in &mut self.clients {
+            // Only fetch if tools are empty (not cached)
+            if client.tools.is_empty() {
+                match client.list_tools(user).await {
+                    Ok(tools) => {
+                        client.tools = tools.clone();
+                        all_tools.extend(tools);
+                    }
+                    Err(e) => error!("Failed to fetch tools: {}", e),
+                }
+            } else {
+                // Use cached tools
+                all_tools.extend(client.tools.clone());
+            }
+        }
+        Ok(all_tools)
+    }
+
+    // Force refresh the cache if needed
+    pub async fn refresh_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let mut all_tools = Vec::new();
+        for client in &mut self.clients {
             match client.list_tools(user).await {
                 Ok(tools) => {
                     client.tools = tools.clone();
