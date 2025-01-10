@@ -434,9 +434,6 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             // Set up streaming channel with sufficient buffer for chat responses
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
-            let tx_tool = tx.clone();
-            let tx_chat = tx.clone();
-
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 // If tool calls are generated, call tools and add them to the conversation
@@ -474,7 +471,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                             let chat_stream_response = ChatResponse { response: streaming_response, context: vec![] };
 
                             // Send the response through the channel
-                            if tx_tool.send(Ok(web::Json(chat_stream_response))).await.is_err() {
+                            if tx.send(Ok(web::Json(chat_stream_response))).await.is_err() {
                                 break;
                             }
                             conversation.push(tool_result_message);
@@ -511,19 +508,19 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                                     };
                                     is_first_message = false;
 
-                                    if tx_chat.send(Ok::<_, String>(web::Json(response))).await.is_err() {
+                                    if tx.send(Ok::<_, String>(web::Json(response))).await.is_err() {
                                         break;
                                     }
                                 }
                                 Err(e) => {
-                                    let _ = tx_chat.send(Err(e.to_string())).await;
+                                    let _ = tx.send(Err(e.to_string())).await;
                                     break;
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        let _ = tx_chat.send(Err(e.to_string())).await;
+                        let _ = tx.send(Err(e.to_string())).await;
                     }
                 }
             });
@@ -973,12 +970,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
-            .route("/ask", web::post().to(self::ask))
-            .route("/chat", web::post().to(self::chat))
+            .route("/ask", web::post().to(ask))
+            .route("/chat", web::post().to(chat))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            // Compatibility
+            .route("/api/chat", web::post().to(chat))
+            .route("/api/embed", web::post().to(embed))
     })
     .bind((rag_endpoint_host, rag_endpoint_port))?
     .run();

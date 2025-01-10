@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for tool in &config.tools {
         tools.add_tool(&engine, tool.clone(), "/rag".into()).await?;
     }
-    tools.fetch_tools(&tools_user).await?;
+    tools.list_tools(&tools_user).await?;
 
     // Wait for interrupt signal
     tokio::signal::ctrl_c().await?;
