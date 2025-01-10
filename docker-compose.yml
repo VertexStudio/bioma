@@ -99,7 +99,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
       MINIO_BROWSER: "on"
       MINIO_BROWSER_REDIRECT: "false"
-      MINIO_BROWSER_REDIRECT_URL: "http://localhost:8081"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:8082"
       MINIO_BROWSER_CONTENT_SECURITY_POLICY: "frame-ancestors * 'self' file://* http://* https://*; default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * ws: wss:;"
       MINIO_BROWSER_X_FRAME_OPTIONS: "ALLOWALL"
       MINIO_BROWSER_COOKIE_SAMESITE: "None"
@@ -162,7 +162,7 @@ services:
     image: nginx:alpine
     container_name: bioma-nginx
     ports:
-      - "8081:80"
+      - "8082:80"
     volumes:
       - ./assets/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
