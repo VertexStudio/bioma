@@ -24,7 +24,9 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
 }
 
-pub async fn start<T: ModelContextProtocolServer>(mut transport: TransportType) -> Result<()> {
+pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: TransportType) -> Result<()> {
+    debug!("Starting ModelContextProtocol server: {}", name);
+
     let server = T::new();
     let mut io_handler = MetaIoHandler::default();
 
