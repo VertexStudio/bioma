@@ -1,7 +1,7 @@
 {
     "openapi": "3.1.0",
     "info": {
-        "title": "rag_server",
+        "title": "cognition",
         "description": "",
         "license": {
             "name": ""
