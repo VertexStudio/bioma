@@ -3,6 +3,7 @@ use std::vec;
 use bioma_llm::{
     chat,
     prelude::{ChatMessage, DeleteSource, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
+    rerank::{RankTexts, TruncationDirection},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -191,4 +192,43 @@ impl Into<DeleteSource> for DeleteSourceRequestSchema {
 pub struct EmbeddingsQueryRequestSchema {
     pub model: String,
     pub input: serde_json::Value,
+}
+
+// /rerank Endpoint Schemas
+
+#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+pub enum TruncationDirectionRequestSchema {
+    #[serde(rename = "left")]
+    Left,
+    #[serde(rename = "right")]
+    Right,
+}
+#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+pub struct RankTextsRequestSchema {
+    pub query: String,
+    pub raw_scores: Option<bool>,
+    pub return_text: Option<bool>,
+    pub texts: Vec<String>,
+    pub truncate: Option<bool>,
+    #[schema(value_type = TruncationDirectionRequestSchema)]
+    pub truncation_direction: Option<TruncationDirectionRequestSchema>,
+}
+
+impl Into<RankTexts> for RankTextsRequestSchema {
+    fn into(self) -> RankTexts {
+        let truncation_direction = match self.truncation_direction {
+            Some(TruncationDirectionRequestSchema::Left) => TruncationDirection::Left,
+            Some(TruncationDirectionRequestSchema::Right) => TruncationDirection::Right,
+            None => TruncationDirection::Right,
+        };
+
+        RankTexts {
+            query: self.query,
+            raw_scores: self.raw_scores.unwrap_or(false),
+            return_text: self.return_text.unwrap_or(false),
+            texts: self.texts,
+            truncate: self.truncate.unwrap_or(false),
+            truncation_direction,
+        }
+    }
 }
