@@ -1,7 +1,9 @@
 use crate::user::UserActor;
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_tool::client::{CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ServerConfig};
+use bioma_tool::client::{
+    CallTool, ClientConfig, FetchTools, ListTools, ModelContextProtocolClientActor, ServerConfig,
+};
 use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use schemars::{
@@ -15,10 +17,10 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 pub struct ToolClient {
+    pub hosting: bool,
     pub server: ServerConfig,
     pub client_id: ActorId,
     pub _client_handle: Option<JoinHandle<()>>,
-    pub tools: Vec<ToolInfo>,
 }
 
 impl ToolClient {
@@ -39,27 +41,54 @@ impl ToolClient {
             .await?;
         Ok(response)
     }
+
+    pub async fn fetch_tools(&self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let list_tools: ListToolsResult = user
+            .send_and_wait_reply::<ModelContextProtocolClientActor, FetchTools>(
+                FetchTools(None),
+                &self.client_id,
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+            )
+            .await?;
+        info!("Loaded {} tools from {}", list_tools.tools.len(), self.server.name);
+        for tool in &list_tools.tools {
+            info!("├─ Tool: {}", tool.name);
+        }
+        Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+    }
+
+    pub async fn list_tools(&self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let list_tools: ListToolsResult = user
+            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+                ListTools(None),
+                &self.client_id,
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+            )
+            .await?;
+        info!("Loaded {} tools from {}", list_tools.tools.len(), self.server.name);
+        for tool in &list_tools.tools {
+            info!("├─ Tool: {}", tool.name);
+        }
+        Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+    }
 }
 
 pub struct Tools {
     pub clients: Vec<ToolClient>,
+    pub tools: Vec<ToolInfo>,
 }
 
 impl Tools {
     pub fn new() -> Self {
-        Self { clients: vec![] }
+        Self { clients: vec![], tools: vec![] }
     }
 
-    pub async fn add_tool(
-        &mut self,
-        engine: &Engine,
-        user: &ActorContext<UserActor>,
-        config: ClientConfig,
-        prefix: String,
-    ) -> Result<()> {
+    pub async fn add_tool(&mut self, engine: &Engine, config: ClientConfig, prefix: String) -> Result<()> {
+        let hosting = config.host;
         let server = config.server;
         let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
 
+        // If hosting, spawn client, which will spawn and host a ModelContextProtocol server
         let client_handle = if config.host {
             let (mut client_ctx, mut client_actor) = Actor::spawn(
                 engine.clone(),
@@ -78,27 +107,14 @@ impl Tools {
             None
         };
 
-        let list_tools: ListToolsResult = user
-            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
-                ListTools(None),
-                &client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
-            )
-            .await?;
-        info!("Loaded {} tools from {}", list_tools.tools.len(), server.name);
-        for tool in &list_tools.tools {
-            info!("├─ Tool: {}", tool.name);
-        }
-        let tools: Vec<ToolInfo> = list_tools.tools.into_iter().map(parse_tool_info).collect();
-
-        self.clients.push(ToolClient { server, client_id, _client_handle: client_handle, tools });
+        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle });
 
         Ok(())
     }
 
     pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
         for client in &self.clients {
-            for tool in &client.tools {
+            for tool in &self.tools {
                 if tool.name() == tool_name {
                     return Some((tool.clone(), client));
                 }
@@ -107,8 +123,26 @@ impl Tools {
         None
     }
 
-    pub fn get_tools(&self) -> Vec<ToolInfo> {
-        self.clients.iter().flat_map(|c| c.tools.clone()).collect()
+    pub async fn fetch_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let mut all_tools = Vec::new();
+        for client in &mut self.clients {
+            match client.fetch_tools(user).await {
+                Ok(tools) => all_tools.extend(tools),
+                Err(e) => error!("Failed to fetch tools: {}", e),
+            }
+        }
+        Ok(all_tools)
+    }
+
+    pub async fn list_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
+        let mut all_tools = Vec::new();
+        for client in &mut self.clients {
+            match client.list_tools(user).await {
+                Ok(tools) => all_tools.extend(tools),
+                Err(e) => error!("Failed to fetch tools: {}", e),
+            }
+        }
+        Ok(all_tools)
     }
 }
 
