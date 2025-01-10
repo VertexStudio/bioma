@@ -13,10 +13,12 @@
         --text-secondary: #4b5563;
         --text-muted: #6b7280;
         --bg-sidebar: #ffffff;
+        --bg-sidebar-collapsed: #ffffff;
         --bg-main: #f9fafb;
         --border-color: #e5e7eb;
         --transition-speed: 0.2s;
         --sidebar-width: 256px;
+        --sidebar-width-collapsed: 60px;
         --header-height: 64px;
         --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
           Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
@@ -32,6 +34,7 @@
           --text-secondary: #e5e7eb;
           --text-muted: #9ca3af;
           --bg-sidebar: #111827;
+          --bg-sidebar-collapsed: #111827;
           --bg-main: #030712;
           --border-color: #374151;
         }
@@ -42,6 +45,7 @@
         color: var(--text-primary);
         min-height: 100vh;
         font-family: var(--font-family);
+        transition: margin-left 0.3s ease;
       }
 
       .sidebar {
@@ -49,17 +53,50 @@
         left: 0;
         top: 0;
         height: 100vh;
-        width: 256px;
+        width: var(--sidebar-width);
         background-color: var(--bg-sidebar);
         border-right: 1px solid var(--border-color);
         padding: 1.5rem;
+        padding-top: 1rem; /* Adjust top padding to accommodate toggle button */
+        transition: width 0.3s ease;
+        z-index: 10;
+        overflow-x: hidden;
+        box-sizing: border-box; /* Important for width calculations */
+      }
+
+      .sidebar.collapsed {
+        width: var(--sidebar-width-collapsed);
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+        padding-top: 1rem;
+        background-color: var(--bg-sidebar-collapsed);
+      }
+
+      .sidebar.collapsed h1 {
+        display: none;
+      }
+
+      .sidebar.collapsed h2 {
+        display: none;
+      }
+
+      .sidebar.collapsed .nav-item .external-link {
+        display: none;
+      }
+
+      .sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
       }
 
       .sidebar h1 {
         font-size: 1.5rem;
         font-weight: 600;
         color: var(--text-primary);
-        margin-bottom: 2rem;
+        white-space: nowrap;
+        margin: 0; /* Remove default margin */
       }
 
       .sidebar h2 {
@@ -67,26 +104,34 @@
         font-weight: 500;
         color: var(--text-muted);
         margin-bottom: 1rem;
+        white-space: nowrap;
       }
 
       .nav-items {
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+        margin-bottom: 1rem; /* Add some space before the toggle button */
       }
 
       .nav-item {
         display: grid;
-        grid-template-columns: 24px auto 48px;
+        grid-template-columns: 24px auto;
         align-items: center;
         gap: 0.75rem;
         padding: 0.5rem;
-        padding-right: 2rem;
         border-radius: 0.5rem;
         color: var(--text-secondary);
         text-decoration: none;
         cursor: pointer;
         transition: background-color 0.2s;
+        position: relative;
+        white-space: nowrap;
+        box-sizing: border-box; /* Important */
+      }
+
+      .sidebar.collapsed .nav-item span {
+        display: none;
       }
 
       .nav-item svg {
@@ -98,8 +143,8 @@
         opacity: 0;
         transition: opacity 0.2s;
         color: currentColor;
-        justify-self: end;
-        margin-right: 8px;
+        position: absolute;
+        right: 0.5rem;
       }
 
       .nav-item:hover .external-link {
@@ -112,8 +157,14 @@
       }
 
       .main-content {
-        margin-left: 256px;
+        margin-left: var(--sidebar-width);
         padding: 2rem;
+        transition: margin-left 0.3s ease;
+        box-sizing: border-box; /* Important */
+      }
+
+      .main-content.sidebar-collapsed {
+        margin-left: var(--sidebar-width-collapsed);
       }
 
       .main-content h1 {
@@ -135,6 +186,7 @@
         border-radius: 0.5rem;
         padding: 1.5rem;
         box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        box-sizing: border-box; /* Important */
       }
 
       .card h2 {
@@ -165,16 +217,23 @@
       .content-area {
         position: fixed;
         top: 0;
-        left: 256px;
+        left: var(--sidebar-width);
         right: 0;
         bottom: 0;
         background: white;
+        transition: left 0.3s ease;
+        box-sizing: border-box; /* Important */
+      }
+
+      .content-area.sidebar-collapsed {
+        left: var(--sidebar-width-collapsed);
       }
 
       .interface-container {
         width: 100%;
         height: 100%;
         display: none;
+        box-sizing: border-box; /* Important */
       }
 
       .interface-container.active {
@@ -185,6 +244,7 @@
         width: 100%;
         height: 100%;
         border: none;
+        box-sizing: border-box; /* Important */
       }
 
       .iframe-error {
@@ -196,6 +256,7 @@
         background-color: #f8f9fa;
         padding: 2rem;
         text-align: center;
+        box-sizing: border-box; /* Important */
       }
 
       .iframe-error p {
@@ -217,41 +278,27 @@
       }
 
       .toolbar {
-        position: absolute;
-        top: 1rem;
-        right: 1rem;
-        z-index: 20;
-        display: flex;
-        gap: 0.5rem;
-        background-color: white;
+        display: none;
+      }
+
+      .hide-bar-button {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
         padding: 0.5rem;
         border-radius: 0.375rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        border: 1px solid #e5e7eb;
+        transition: background-color 0.2s, color 0.2s;
       }
 
-      .toolbar-button {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 0.75rem;
-        border: none;
-        border-radius: 0.375rem;
-        background-color: #2563eb;
-        color: white;
-        cursor: pointer;
-        font-size: 0.875rem;
-        transition: background-color 0.2s;
-        text-decoration: none;
+      .hide-bar-button:hover {
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
       }
 
-      .toolbar-button:hover {
-        background-color: #1d4ed8;
-      }
-
-      .toolbar-button svg {
-        width: 16px;
-        height: 16px;
+      .hide-bar-button svg {
+        width: 20px;
+        height: 20px;
       }
     </style>
   </head>
@@ -259,10 +306,25 @@
     <div class="sidebar">
       <div class="sidebar-header">
         <h1>Bioma</h1>
+        <button class="hide-bar-button" id="toggle-sidebar">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 19l-7-7 7-7m8 14l-7-7 7-7"
+            />
+          </svg>
+        </button>
       </div>
       <h2>Services</h2>
       <div class="nav-items">
-        <div class="nav-item" data-target="surrealist">
+        <div class="nav-item active" data-target="surrealist">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
@@ -380,7 +442,7 @@
             ></path>
           </svg>
           <span>Minio</span>
-          <a href="http://localhost:9001" target="_blank" class="external-link">
+          <a href="http://localhost:8081" target="_blank" class="external-link">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
@@ -402,7 +464,7 @@
     </div>
 
     <div class="content-area">
-      <div class="interface-container" id="surrealist-container">
+      <div class="interface-container active" id="surrealist-container">
         <iframe src="http://localhost:8080"></iframe>
       </div>
       <div class="interface-container" id="chat-container">
@@ -415,6 +477,8 @@
         <iframe src="http://localhost:8081"></iframe>
       </div>
     </div>
+
+    <div class="toolbar"></div>
 
     <button
       class="mobile-menu-toggle"
@@ -442,7 +506,10 @@
       const navItems = document.querySelectorAll(".nav-item");
       const containers = document.querySelectorAll(".interface-container");
       const sidebar = document.querySelector(".sidebar");
+      const contentArea = document.querySelector(".content-area");
+      const mainContent = document.querySelector(".main-content");
       const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
+      const toggleSidebarButton = document.getElementById("toggle-sidebar");
 
       function setActiveNavItem(target) {
         navItems.forEach((nav) => nav.classList.remove("active"));
@@ -465,11 +532,24 @@
         });
       });
 
-      setActiveNavItem(navItems[0].dataset.target);
+      // Set initial active state
+      const initialActive = window.location.hash.substring(1);
+      if (initialActive) {
+        setActiveNavItem(initialActive);
+        const activeNavItem = Array.from(navItems).find(
+          (nav) => nav.dataset.target === initialActive
+        );
+        if (activeNavItem) {
+          activeNavItem.classList.add("active");
+        }
+      } else {
+        setActiveNavItem(navItems[0].dataset.target);
+      }
 
       const iframes = document.querySelectorAll("iframe");
       iframes.forEach((iframe) => {
         const container = iframe.closest(".interface-container");
+        iframe.style.width = "100%";
         const loading = container.querySelector(".loading");
 
         if (loading) {
@@ -483,9 +563,29 @@
         }
       });
 
+      toggleSidebarButton.addEventListener("click", () => {
+        sidebar.classList.toggle("collapsed");
+        contentArea.classList.toggle("sidebar-collapsed");
+        mainContent.classList.toggle("sidebar-collapsed");
+
+        const svgPath = toggleSidebarButton.querySelector("svg path");
+        if (sidebar.classList.contains("collapsed")) {
+          svgPath.setAttribute("d", "M19 19l-7-7 7-7M13 5l-7 7 7 7");
+        } else {
+          svgPath.setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
+        }
+      });
+
       window.addEventListener("resize", () => {
         if (window.innerWidth > 768) {
-          sidebar.classList.remove("active");
+          if (sidebar.classList.contains("collapsed")) {
+            sidebar.classList.remove("collapsed");
+            contentArea.classList.remove("sidebar-collapsed");
+            mainContent.classList.remove("sidebar-collapsed");
+            toggleSidebarButton
+              .querySelector("svg path")
+              .setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
+          }
           mobileMenuToggle.setAttribute("aria-expanded", "false");
         }
       });
