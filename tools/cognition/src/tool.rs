@@ -19,6 +19,7 @@ pub struct ToolClient {
     pub server: ServerConfig,
     pub client_id: ActorId,
     pub _client_handle: Option<JoinHandle<()>>,
+    pub tools: Vec<ToolInfo>,
 }
 
 impl ToolClient {
@@ -58,12 +59,11 @@ impl ToolClient {
 
 pub struct Tools {
     pub clients: Vec<ToolClient>,
-    pub tools: Vec<ToolInfo>,
 }
 
 impl Tools {
     pub fn new() -> Self {
-        Self { clients: vec![], tools: vec![] }
+        Self { clients: vec![] }
     }
 
     pub async fn add_tool(&mut self, engine: &Engine, config: ClientConfig, prefix: String) -> Result<()> {
@@ -92,14 +92,14 @@ impl Tools {
             None
         };
 
-        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle });
+        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
 
         Ok(())
     }
 
     pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
         for client in &self.clients {
-            for tool in &self.tools {
+            for tool in &client.tools {
                 if tool.name() == tool_name {
                     return Some((tool.clone(), client));
                 }
@@ -112,11 +112,13 @@ impl Tools {
         let mut all_tools = Vec::new();
         for client in &mut self.clients {
             match client.list_tools(user).await {
-                Ok(tools) => all_tools.extend(tools),
+                Ok(tools) => {
+                    client.tools = tools.clone();
+                    all_tools.extend(tools);
+                }
                 Err(e) => error!("Failed to fetch tools: {}", e),
             }
         }
-        self.tools = all_tools.clone();
         Ok(all_tools)
     }
 }
