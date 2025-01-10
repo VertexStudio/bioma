@@ -10,7 +10,14 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::{ AskQueryRequest, ChatQueryRequest, DeleteSourceRequest, EmbeddingsQueryRequest, IndexGlobsRequest, RetrieveContextRequest };
+use request_schemas::{ 
+    AskQueryRequestSchema, 
+    ChatQueryRequestSchema, 
+    DeleteSourceRequestSchema, 
+    EmbeddingsQueryRequestSchema, 
+    IndexGlobsRequestSchema, 
+    RetrieveContextRequest 
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error as StdError;
@@ -256,12 +263,12 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     post,
     path = "/index",
     description = "This endpoint receives an array of path of files to index",
-    request_body = IndexGlobsRequest,
+    request_body = IndexGlobsRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn index(body: web::Json<IndexGlobsRequest>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -344,12 +351,12 @@ struct ToolResponse {
     post,
     path = "/chat",
     description = "Chat endpoint",
-    request_body = ChatQueryRequest,
+    request_body = ChatQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn chat(body: web::Json<ChatQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
+async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -626,12 +633,12 @@ struct AskResponse {
     post,
     path = "/ask",
     description = "Ask question",
-    request_body = AskQueryRequest,
+    request_body = AskQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
+async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -808,12 +815,12 @@ async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> Htt
     post,
     path = "/delete_source",
     description = "Delete indexed sources",
-    request_body = DeleteSourceRequest,
+    request_body = DeleteSourceRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn delete_source(body: web::Json<DeleteSourceRequest>, data: web::Data<AppState>) -> HttpResponse {
+async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -849,12 +856,12 @@ async fn delete_source(body: web::Json<DeleteSourceRequest>, data: web::Data<App
     post,
     path = "/embed",
     description = "Embed endpoint",
-    request_body = EmbeddingsQueryRequest,
+    request_body = EmbeddingsQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
+async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -945,6 +952,15 @@ async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState
     HttpResponse::Ok().json(generated_embeddings)
 }
 
+#[utoipa::path(
+    post,
+    path = "/embed",
+    description = "Embed endpoint",
+    request_body = EmbeddingsQueryRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
 async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -989,7 +1005,7 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         //upload,
         delete_source,
         embed,
-        //rerank
+        rerank
     )
 )]
 struct ApiDoc;

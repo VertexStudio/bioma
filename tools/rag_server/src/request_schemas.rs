@@ -55,21 +55,21 @@ impl Into<ChatMessage> for ChatMessageRequestSchema {
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
-pub struct IndexGlobsRequest {
+pub struct IndexGlobsRequestSchema {
     pub globs: Vec<String>,
-    #[schema(value_type = ChunkCapacity)]
-    pub chunk_capacity: Option<ChunkCapacity>,
+    #[schema(value_type = ChunkCapacityRequestSchema)]
+    pub chunk_capacity: Option<ChunkCapacityRequestSchema>,
     pub chunk_overlap: Option<usize>,
     pub chunk_batch_size: Option<usize>,
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
-pub struct ChunkCapacity {
+pub struct ChunkCapacityRequestSchema {
     pub start: usize,
     pub end: usize,
 }
 
-impl Into<IndexGlobs> for IndexGlobsRequest {
+impl Into<IndexGlobs> for IndexGlobsRequestSchema {
     fn into(self) -> IndexGlobs {
         let chunk_capacity = match self.chunk_capacity {
             Some(capacity) => capacity.start..capacity.end,
@@ -92,7 +92,7 @@ const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
 
-pub enum RetrieveQueryRequest {
+pub enum RetrieveQueryRequestSchema {
     #[serde(rename = "query")]
     Text(String),
     Segundo(String),
@@ -100,9 +100,9 @@ pub enum RetrieveQueryRequest {
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveContextRequest {
-    #[schema(value_type = RetrieveQueryRequest)]
+    #[schema(value_type = RetrieveQueryRequestSchema)]
     #[serde(flatten)]
-    pub query: RetrieveQueryRequest,
+    pub query: RetrieveQueryRequestSchema,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
     pub source: Option<String>,
@@ -111,8 +111,8 @@ pub struct RetrieveContextRequest {
 impl Into<RetrieveContext> for RetrieveContextRequest {
     fn into(self) -> RetrieveContext {
         let query = match self.query {
-            RetrieveQueryRequest::Text(query) => RetrieveQuery::Text(query),
-            RetrieveQueryRequest::Segundo(query) => RetrieveQuery::Text(query),
+            RetrieveQueryRequestSchema::Text(query) => RetrieveQuery::Text(query),
+            RetrieveQueryRequestSchema::Segundo(query) => RetrieveQuery::Text(query),
         };
 
         RetrieveContext::builder()
@@ -127,13 +127,13 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 // ask
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct AskQueryRequest {
+pub struct AskQueryRequestSchema {
     pub messages: Vec<ChatMessageRequestSchema>,
     pub source: Option<String>,
     pub format: Option<Value>,
 }
 
-impl TryInto<AskQuery> for AskQueryRequest {
+impl TryInto<AskQuery> for AskQueryRequestSchema {
     type Error = String;
 
     fn try_into(self) -> Result<AskQuery, Self::Error> {
@@ -152,13 +152,13 @@ impl TryInto<AskQuery> for AskQueryRequest {
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ChatQueryRequest {
+pub struct ChatQueryRequestSchema {
     pub messages: Vec<ChatMessageRequestSchema>,
     pub source: Option<String>,
     pub format: Option<Value>,
 }
 
-impl TryInto<ChatQuery> for ChatQueryRequest {
+impl TryInto<ChatQuery> for ChatQueryRequestSchema {
     type Error = String;
 
     fn try_into(self) -> Result<ChatQuery, Self::Error> {
@@ -177,19 +177,18 @@ impl TryInto<ChatQuery> for ChatQueryRequest {
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct DeleteSourceRequest {
+pub struct DeleteSourceRequestSchema {
     pub source: String,
 }
 
-impl Into<DeleteSource> for DeleteSourceRequest {
+impl Into<DeleteSource> for DeleteSourceRequestSchema {
     fn into(self) -> DeleteSource {
         DeleteSource { source: self.source }
     }
 }
 
-
 #[derive(ToSchema, Deserialize)]
-pub struct EmbeddingsQueryRequest {
+pub struct EmbeddingsQueryRequestSchema {
     pub model: String,
     pub input: serde_json::Value,
 }
