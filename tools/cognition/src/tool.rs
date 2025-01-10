@@ -122,23 +122,24 @@ impl ToolClient {
             .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default();
         let request = CallToolRequestParams { name: tool_call.function.name.clone(), arguments: Some(args) };
-        let response = user
+        let response = match user
             .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
                 CallTool(request),
                 &self.client_id,
                 SendOptions::builder().timeout(Duration::from_secs(30)).build(),
             )
             .await
-            .map_err(|e| anyhow!("Error sending CallTool message: {}", e))?;
-
-        if let Err(e) = &response {
-            if let SystemActorError::MessageTimeout(_, _) = e {
+        {
+            Ok(result) => result,
+            Err(e @ SystemActorError::MessageTimeout(_, _)) => {
                 error!("Timeout calling tool {} on client {}: {}", tool_call.function.name, self.client_id, e);
                 if let Err(send_err) = self.health_check_tx.send(()).await {
                     error!("Failed to send health check trigger: {}", send_err);
                 }
+                return Err(anyhow!("Tool call timeout: {}", e));
             }
-        }
+            Err(e) => return Err(anyhow!("Tool call failed: {}", e)),
+        };
 
         Ok(response)
     }
@@ -179,54 +180,6 @@ impl Tools {
         let client = ToolClient::new(engine, config, prefix, user, self.health_check_interval).await?;
         self.clients.push(client);
         Ok(())
-    }
-
-    pub async fn start_health_checks(&self, user: &ActorContext<UserActor>) {
-        for client in &self.clients {
-            let client_id = client.client_id.clone();
-            let healthy = client.healthy.clone();
-            let user = user.clone();
-            let interval = self.health_check_interval;
-            let mut health_check_rx = mpsc::channel(32).1;
-
-            tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = health_check_rx.recv() => {
-                            debug!("Health check triggered for client {}", client_id);
-                        },
-                        _ = tokio::time::sleep(interval) => {
-                            if !*healthy.read().await {
-                                debug!("Periodic health check for client {}", client_id);
-                            } else {
-                                continue;
-                            }
-                        }
-                    }
-
-                    let health_check_result = user
-                        .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
-                            ListTools(None),
-                            &client_id,
-                            SendOptions::builder().timeout(Duration::from_secs(5)).build(),
-                        )
-                        .await;
-
-                    match health_check_result {
-                        Ok(_) => {
-                            let mut healthy_guard = healthy.write().await;
-                            if !*healthy_guard {
-                                info!("Client {} is now healthy", client_id);
-                                *healthy_guard = true;
-                            }
-                        }
-                        Err(e) => {
-                            error!("Health check failed for client {}: {}", client_id, e);
-                        }
-                    }
-                }
-            });
-        }
     }
 
     pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
