@@ -57,6 +57,11 @@ impl Into<ChatMessage> for ChatMessageRequestSchema {
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
+#[schema(example = json!({
+    "globs": ["./path/to/files/**/*.rs"], 
+    "chunk_capacity": {"start": 500, "end": 2000},
+    "chunk_overlap": 200
+}))]
 pub struct IndexGlobsRequestSchema {
     pub globs: Vec<String>,
     #[schema(value_type = ChunkCapacityRequestSchema)]
