@@ -366,6 +366,9 @@
                     "source": {
                         "type": "string"
                     }
+                },
+                "example": {
+                    "source": "path/to/source1"
                 }
             },
             "EmbeddingsQueryRequestSchema": {
