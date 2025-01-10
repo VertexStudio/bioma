@@ -11,7 +11,7 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [ gpu ]
+              capabilities: [gpu]
     volumes:
       - bioma-ollama_data:/root/.ollama
     ports:
@@ -51,7 +51,19 @@ services:
       context: ../pdf-document-layout-analysis
       dockerfile: Dockerfile
     container_name: pdf-document-layout-analysis
-    entrypoint: [ "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--chdir", "./src", "app:app", "--bind", "0.0.0.0:5060", "--timeout", "10000"]
+    entrypoint:
+      [
+        "gunicorn",
+        "-k",
+        "uvicorn.workers.UvicornWorker",
+        "--chdir",
+        "./src",
+        "app:app",
+        "--bind",
+        "0.0.0.0:5060",
+        "--timeout",
+        "10000",
+      ]
     init: true
     restart: unless-stopped
     ports:
@@ -62,7 +74,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [ gpu ]
+              capabilities: [gpu]
 
   surrealist:
     image: surrealdb/surrealist:3.1.9
@@ -77,20 +89,23 @@ services:
     image: quay.io/minio/minio
     container_name: bioma-minio
     ports:
-      - 9000:9000
-      - 9001:9001
+      - "9000:9000"
+      - "9001:9001"
     networks:
       - bioma-network
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
-      MINIO_REGION_NAME: us-east-1
-      MINIO_CORS_ALLOW_ORIGIN: "*"
-      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "default-src * 'unsafe-inline' 'unsafe-eval'; frame-ancestors * 'self' file://* http://localhost:* http://127.0.0.1:* http://0.0.0.0:*"
-      MINIO_BROWSER_REFERRER_POLICY: "no-referrer-when-downgrade"
+      MINIO_BROWSER: "on"
+      MINIO_BROWSER_REDIRECT: "false"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:8081"
+      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "frame-ancestors * 'self' file://* http://* https://*; default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * ws: wss:;"
+      MINIO_BROWSER_X_FRAME_OPTIONS: "ALLOWALL"
+      MINIO_BROWSER_COOKIE_SAMESITE: "None"
+      MINIO_BROWSER_COOKIE_SECURE: "false"
     volumes:
       - bioma-minio-data:/data
-    command: server /data --console-address ':9001'
+    command: server /data --console-address ":9001"
     healthcheck:
       test: mc ready local
       start_period: 1s
