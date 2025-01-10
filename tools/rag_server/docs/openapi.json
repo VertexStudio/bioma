@@ -1,0 +1,510 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "rag_server",
+        "description": "",
+        "license": {
+            "name": ""
+        },
+        "version": "0.1.0"
+    },
+    "paths": {
+        "/ask": {
+            "post": {
+                "tags": [],
+                "description": "Ask question",
+                "operationId": "ask",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AskQueryRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/chat": {
+            "post": {
+                "tags": [],
+                "description": "Chat endpoint",
+                "operationId": "chat",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ChatQueryRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/delete_source": {
+            "post": {
+                "tags": [],
+                "description": "Delete indexed sources",
+                "operationId": "delete_source",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DeleteSourceRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/embed": {
+            "post": {
+                "tags": [],
+                "description": "Embed endpoint",
+                "operationId": "embed",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EmbeddingsQueryRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "tags": [],
+                "description": "Check server health",
+                "operationId": "health",
+                "responses": {
+                    "200": {
+                        "description": "Server health check"
+                    }
+                }
+            }
+        },
+        "/hello": {
+            "get": {
+                "tags": [],
+                "description": "Hello, world! from the server",
+                "operationId": "hello",
+                "responses": {
+                    "200": {
+                        "description": "Server health check"
+                    }
+                }
+            }
+        },
+        "/index": {
+            "post": {
+                "tags": [],
+                "description": "This endpoint receives an array of path of files to index",
+                "operationId": "index",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IndexGlobsRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/rerank": {
+            "post": {
+                "tags": [],
+                "description": "Rerank endpoint",
+                "operationId": "rerank",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RankTextsRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/reset": {
+            "get": {
+                "tags": [],
+                "description": "Reset bioma engine",
+                "operationId": "reset",
+                "responses": {
+                    "200": {
+                        "description": "Server health check"
+                    }
+                }
+            }
+        },
+        "/retrive": {
+            "post": {
+                "tags": [],
+                "description": "Retrieve context in .md format",
+                "operationId": "retrieve",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RetrieveContextRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        },
+        "/upload": {
+            "post": {
+                "tags": [],
+                "description": "Upload endpoint",
+                "operationId": "upload",
+                "requestBody": {
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UploadRequestSchema"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Ok"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "AskQueryRequestSchema": {
+                "type": "object",
+                "required": [
+                    "messages"
+                ],
+                "properties": {
+                    "format": {},
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
+                        }
+                    },
+                    "source": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "ChatMessageRequestSchema": {
+                "type": "object",
+                "required": [
+                    "role",
+                    "content"
+                ],
+                "properties": {
+                    "content": {
+                        "type": "string"
+                    },
+                    "images": {
+                        "type": [
+                            "array",
+                            "null"
+                        ],
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/MessageRoleRequestSchema"
+                    }
+                }
+            },
+            "ChatQueryRequestSchema": {
+                "type": "object",
+                "required": [
+                    "messages"
+                ],
+                "properties": {
+                    "format": {},
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
+                        }
+                    },
+                    "source": {
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    }
+                }
+            },
+            "ChunkCapacityRequestSchema": {
+                "type": "object",
+                "required": [
+                    "start",
+                    "end"
+                ],
+                "properties": {
+                    "end": {
+                        "type": "integer",
+                        "minimum": 0
+                    },
+                    "start": {
+                        "type": "integer",
+                        "minimum": 0
+                    }
+                }
+            },
+            "DeleteSourceRequestSchema": {
+                "type": "object",
+                "required": [
+                    "source"
+                ],
+                "properties": {
+                    "source": {
+                        "type": "string"
+                    }
+                }
+            },
+            "EmbeddingsQueryRequestSchema": {
+                "type": "object",
+                "required": [
+                    "model",
+                    "input"
+                ],
+                "properties": {
+                    "input": {},
+                    "model": {
+                        "type": "string"
+                    }
+                }
+            },
+            "IndexGlobsRequestSchema": {
+                "type": "object",
+                "required": [
+                    "globs",
+                    "chunk_capacity"
+                ],
+                "properties": {
+                    "chunk_batch_size": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "minimum": 0
+                    },
+                    "chunk_capacity": {
+                        "$ref": "#/components/schemas/ChunkCapacityRequestSchema"
+                    },
+                    "chunk_overlap": {
+                        "type": [
+                            "integer",
+                            "null"
+                        ],
+                        "minimum": 0
+                    },
+                    "globs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "MessageRoleRequestSchema": {
+                "type": "string",
+                "enum": [
+                    "user",
+                    "assistant",
+                    "system",
+                    "tool"
+                ]
+            },
+            "RankTextsRequestSchema": {
+                "type": "object",
+                "required": [
+                    "query",
+                    "texts",
+                    "truncation_direction"
+                ],
+                "properties": {
+                    "query": {
+                        "type": "string"
+                    },
+                    "raw_scores": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ]
+                    },
+                    "return_text": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ]
+                    },
+                    "texts": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "truncate": {
+                        "type": [
+                            "boolean",
+                            "null"
+                        ]
+                    },
+                    "truncation_direction": {
+                        "$ref": "#/components/schemas/TruncationDirectionRequestSchema"
+                    }
+                }
+            },
+            "RetrieveContextRequest": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/RetrieveQueryRequestSchema"
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "limit": {
+                                "type": [
+                                    "integer",
+                                    "null"
+                                ],
+                                "minimum": 0
+                            },
+                            "source": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ]
+                            },
+                            "threshold": {
+                                "type": [
+                                    "number",
+                                    "null"
+                                ],
+                                "format": "float"
+                            }
+                        }
+                    }
+                ]
+            },
+            "RetrieveQueryRequestSchema": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "required": [
+                            "query"
+                        ],
+                        "properties": {
+                            "query": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    {
+                        "type": "object",
+                        "required": [
+                            "Segundo"
+                        ],
+                        "properties": {
+                            "Segundo": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ]
+            },
+            "TruncationDirectionRequestSchema": {
+                "type": "string",
+                "enum": [
+                    "left",
+                    "right"
+                ]
+            },
+            "UploadMetadataRequestSchema": {
+                "type": "object",
+                "required": [
+                    "path"
+                ],
+                "properties": {
+                    "path": {
+                        "type": "string"
+                    }
+                }
+            },
+            "UploadRequestSchema": {
+                "type": "object",
+                "required": [
+                    "file",
+                    "metadata"
+                ],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "contentMediaType": "application/octet-stream"
+                    },
+                    "metadata": {
+                        "$ref": "#/components/schemas/UploadMetadataRequestSchema"
+                    }
+                }
+            }
+        }
+    }
+}

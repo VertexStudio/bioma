@@ -46,14 +46,14 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5001:5001"
-    entrypoint: ["gunicorn", "--bind", "0.0.0.0:5001", "markitdown_script:app"]
+    entrypoint: [ "gunicorn", "--bind", "0.0.0.0:5001", "markitdown_script:app" ]
 
   pdf-analyzer:
     build:
       context: ../pdf-document-layout-analysis
       dockerfile: Dockerfile
     container_name: pdf-document-layout-analysis
-    entrypoint: [ "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--chdir", "./src", "app:app", "--bind", "0.0.0.0:5060", "--timeout", "10000"]
+    entrypoint: [ "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--chdir", "./src", "app:app", "--bind", "0.0.0.0:5060", "--timeout", "10000" ]
     init: true
     restart: unless-stopped
     ports:
@@ -66,9 +66,20 @@ services:
               count: 1
               capabilities: [ gpu ]
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    container_name: swagger-ui
+    ports:
+      - "80:8080"
+    environment:
+      - SWAGGER_JSON=/app/openapi.json
+    volumes:
+      - ./tools/rag_server/docs:/app
+
 volumes:
   bioma-ollama_data:
   bioma-surreal_data:
+
 
 networks:
   bioma-network:
