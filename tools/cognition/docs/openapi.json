@@ -367,6 +367,16 @@
                             "type": "string"
                         }
                     }
+                },
+                "example": {
+                    "globs": [
+                        "./path/to/files/**/*.rs"
+                    ],
+                    "chunk_capacity": {
+                        "start": 500,
+                        "end": 2000
+                    },
+                    "chunk_overlap": 200
                 }
             },
             "MessageRoleRequestSchema": {
