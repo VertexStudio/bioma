@@ -157,6 +157,18 @@ services:
       }' > /tmp/policy.json &&
       mc anonymous set-json /tmp/policy.json myminio/bioma"
 
+  nginx:
+    image: nginx:alpine
+    container_name: bioma-nginx
+    ports:
+      - "8081:80"
+    volumes:
+      - ./assets/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - minio
+    networks:
+      - bioma-network
+
 volumes:
   bioma-ollama_data:
   bioma-surreal_data:
