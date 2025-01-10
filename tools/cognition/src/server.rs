@@ -25,9 +25,9 @@ use user::UserActor;
 use utoipa::OpenApi;
 
 pub mod config;
+pub mod request_schemas;
 pub mod tool;
 pub mod user;
-pub mod request_schemas;
 
 struct AppState {
     config: Config,
@@ -137,7 +137,6 @@ struct Uploaded {
     )
 )]
 async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
-
     let form: Upload = form.into();
 
     let output_dir = data.engine.local_store_dir().clone();
@@ -952,7 +951,12 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
 }
 
 #[derive(OpenApi)]
-#[openapi(paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank))]
+#[openapi(
+    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank),
+    servers(
+        (url = "http://localhost:5766", description = "Localhost"),
+    )
+)]
 struct ApiDoc;
 
 #[tokio::main]

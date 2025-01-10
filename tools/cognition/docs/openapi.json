@@ -8,6 +8,12 @@
         },
         "version": "0.1.0"
     },
+    "servers": [
+        {
+            "url": "http://localhost:5766",
+            "description": "Localhost"
+        }
+    ],
     "paths": {
         "/ask": {
             "post": {
