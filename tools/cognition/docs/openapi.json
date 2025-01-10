@@ -183,7 +183,7 @@
                 }
             }
         },
-        "/retrive": {
+        "/retrieve": {
             "post": {
                 "tags": [],
                 "description": "Retrieve context in .md format",
@@ -448,7 +448,14 @@
                             }
                         }
                     }
-                ]
+                ],
+                "example": {
+                    "type": "Text",
+                    "query": "What is Bioma?",
+                    "threshold": 0.0,
+                    "limit": 10,
+                    "source": ".*"
+                }
             },
             "RetrieveQueryRequestSchema": {
                 "oneOf": [

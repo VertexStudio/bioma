@@ -101,6 +101,13 @@ pub enum RetrieveQueryRequestSchema {
 }
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+#[schema(example = json!({
+    "type": "Text",
+    "query": "What is Bioma?",
+    "threshold": 0.0,
+    "limit": 10,
+    "source": ".*"
+}))]
 pub struct RetrieveContextRequest {
     #[schema(value_type = RetrieveQueryRequestSchema)]
     #[serde(flatten)]
