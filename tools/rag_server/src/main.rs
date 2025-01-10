@@ -10,8 +10,9 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
-use request_schemas::{ 
-    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema, IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest 
+use request_schemas::{
+    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
+    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -22,9 +23,9 @@ use user::UserActor;
 use utoipa::OpenApi;
 
 mod config;
+mod request_schemas;
 mod tool;
 mod user;
-mod request_schemas;
 
 /// RAG server using the Bioma Actor framework
 ///
@@ -109,16 +110,16 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct UploadMetadata {
-    path: std::path::PathBuf,
+pub struct UploadMetadata {
+    pub path: std::path::PathBuf,
 }
 
 #[derive(Debug, MultipartForm)]
-struct Upload {
+pub struct Upload {
     #[multipart(limit = "100MB")]
-    file: TempFile,
+    pub file: TempFile,
     #[multipart(rename = "metadata")]
-    metadata: MpJson<UploadMetadata>,
+    pub metadata: MpJson<UploadMetadata>,
 }
 
 #[derive(Debug, Serialize)]
@@ -128,7 +129,19 @@ struct Uploaded {
     size: usize,
 }
 
-async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
+#[utoipa::path(
+    post,
+    path = "/upload",
+    description = "Upload endpoint",
+    request_body(content = UploadRequestSchema, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
+
+    let form: Upload = form.into();
+
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
 
@@ -608,7 +621,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     }
 }
 
-
 #[derive(Debug)]
 pub struct AskQuery {
     pub messages: Vec<ChatMessage>,
@@ -729,7 +741,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                     format: body.format.clone(),
                     tools: Some(tools),
                 };
-                
+
                 // Get tool calls from chat
                 if let Ok(tool_response) = user_actor
                     .send_and_wait_reply::<Chat, ChatMessages>(
@@ -744,10 +756,12 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                         if let Some((_tool_info, tool_client)) = data.tools.get_tool(&tool_call.function.name) {
                             // Execute the tool call
                             let execution_result = tool_client.call(&user_actor, tool_call).await;
-                            
+
                             // Format the tool response
                             let result_json = match execution_result {
-                                Ok(execution_output) => serde_json::to_value(execution_output.content).unwrap_or_default(),
+                                Ok(execution_output) => {
+                                    serde_json::to_value(execution_output.content).unwrap_or_default()
+                                }
                                 Err(e) => serde_json::json!({
                                     "error": format!("Error calling tool: {:?}", e)
                                 }),
@@ -762,9 +776,8 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                             };
 
                             // Add tool result to conversation
-                            let tool_result_message = ChatMessage::tool(
-                                serde_json::to_string(&formatted_tool_response).unwrap_or_default()
-                            );
+                            let tool_result_message =
+                                ChatMessage::tool(serde_json::to_string(&formatted_tool_response).unwrap_or_default());
                             conversation.push(tool_result_message);
                         }
                     }
@@ -990,21 +1003,7 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
 }
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(
-        health, 
-        hello,
-        reset,
-        index,
-        retrieve,
-        ask,
-        chat,
-        //upload,
-        delete_source,
-        embed,
-        rerank
-    )
-)]
+#[openapi(paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank))]
 struct ApiDoc;
 
 #[tokio::main]
@@ -1148,11 +1147,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
-            .route("/api-docs/openapi.json", web::get().to(move || async {
-                let openapi = ApiDoc::openapi();
+            .route(
+                "/api-docs/openapi.json",
+                web::get().to(move || async {
+                    let openapi = ApiDoc::openapi();
 
-                HttpResponse::Ok().json(openapi.clone())
-            }))
+                    HttpResponse::Ok().json(openapi.clone())
+                }),
+            )
     })
     .bind("0.0.0.0:5766")?
     .run();

@@ -1,5 +1,6 @@
-use std::vec;
+use std::{path::PathBuf, vec};
 
+use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
     prelude::{ChatMessage, DeleteSource, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use crate::{AskQuery, ChatQuery};
+use crate::{AskQuery, ChatQuery, Upload, UploadMetadata};
 
 // /index Endpoint Schemas
 
@@ -230,5 +231,37 @@ impl Into<RankTexts> for RankTextsRequestSchema {
             truncate: self.truncate.unwrap_or(false),
             truncation_direction,
         }
+    }
+}
+
+// /upload Endpoint Schemas
+
+#[derive(ToSchema, Debug, Deserialize)]
+pub struct UploadMetadataRequestSchema {
+    pub path: String,
+}
+
+impl Into<UploadMetadata> for UploadMetadataRequestSchema {
+    fn into(self) -> UploadMetadata {
+        UploadMetadata { path: PathBuf::from(self.path) }
+    }
+}
+
+#[derive(ToSchema, Debug, MultipartForm)]
+pub struct UploadRequestSchema {
+    #[multipart(limit = "100MB")]
+    #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
+    pub file: TempFile,
+    #[schema(value_type = UploadMetadataRequestSchema)]
+    #[multipart(rename = "metadata")]
+    pub metadata: MpJson<UploadMetadataRequestSchema>,
+}
+
+impl Into<Upload> for UploadRequestSchema {
+    fn into(self) -> Upload {
+        let upload_metadata: UploadMetadata = self.metadata.into_inner().into();
+        let metadata: MpJson<UploadMetadata> = MpJson(upload_metadata);
+
+        Upload { file: self.file, metadata }
     }
 }
