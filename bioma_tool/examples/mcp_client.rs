@@ -36,6 +36,7 @@ async fn main() -> Result<()> {
         args: args.args.unwrap_or_default(),
         request_timeout: 5,
         version: "0.1.0".to_string(),
+        enabled: true,
     };
 
     // Create client
