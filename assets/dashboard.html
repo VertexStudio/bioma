@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Bioma services dashboard" />
+    <title>Bioma Dashboard</title>
+    <style>
+      :root {
+        --primary: #2563eb;
+        --primary-hover: #1d4ed8;
+        --text-primary: #1f2937;
+        --text-secondary: #4b5563;
+        --text-muted: #6b7280;
+        --bg-sidebar: #ffffff;
+        --bg-sidebar-collapsed: #ffffff;
+        --bg-main: #f9fafb;
+        --border-color: #e5e7eb;
+        --transition-speed: 0.2s;
+        --sidebar-width: 256px;
+        --sidebar-width-collapsed: 60px;
+        --header-height: 64px;
+        --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+          "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+          "Noto Color Emoji";
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --primary: #3b82f6;
+          --primary-hover: #2563eb;
+          --text-primary: #f9fafb;
+          --text-secondary: #e5e7eb;
+          --text-muted: #9ca3af;
+          --bg-sidebar: #111827;
+          --bg-sidebar-collapsed: #111827;
+          --bg-main: #030712;
+          --border-color: #374151;
+        }
+      }
+
+      body {
+        background-color: var(--bg-main);
+        color: var(--text-primary);
+        min-height: 100vh;
+        font-family: var(--font-family);
+        transition: margin-left 0.3s ease;
+      }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 100vh;
+        width: var(--sidebar-width);
+        background-color: var(--bg-sidebar);
+        border-right: 1px solid var(--border-color);
+        padding: 1.5rem;
+        padding-top: 1rem; /* Adjust top padding to accommodate toggle button */
+        transition: width 0.3s ease;
+        z-index: 10;
+        overflow-x: hidden;
+        box-sizing: border-box; /* Important for width calculations */
+      }
+
+      .sidebar.collapsed {
+        width: var(--sidebar-width-collapsed);
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+        padding-top: 1rem;
+        background-color: var(--bg-sidebar-collapsed);
+      }
+
+      .sidebar.collapsed h1 {
+        display: none;
+      }
+
+      .sidebar.collapsed h2 {
+        display: none;
+      }
+
+      .sidebar.collapsed .nav-item .external-link {
+        display: none;
+      }
+
+      .sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+      }
+
+      .sidebar h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        margin: 0; /* Remove default margin */
+      }
+
+      .sidebar h2 {
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+        white-space: nowrap;
+      }
+
+      .nav-items {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1rem; /* Add some space before the toggle button */
+      }
+
+      .nav-item {
+        display: grid;
+        grid-template-columns: 24px auto;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem;
+        border-radius: 0.5rem;
+        color: var(--text-secondary);
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        position: relative;
+        white-space: nowrap;
+        box-sizing: border-box; /* Important */
+      }
+
+      .sidebar.collapsed .nav-item span {
+        display: none;
+      }
+
+      .nav-item svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .nav-item .external-link {
+        opacity: 0;
+        transition: opacity 0.2s;
+        color: currentColor;
+        position: absolute;
+        right: 0.5rem;
+      }
+
+      .nav-item:hover .external-link {
+        opacity: 1;
+      }
+
+      .nav-item:hover {
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
+      }
+
+      .main-content {
+        margin-left: var(--sidebar-width);
+        padding: 2rem;
+        transition: margin-left 0.3s ease;
+        box-sizing: border-box; /* Important */
+      }
+
+      .main-content.sidebar-collapsed {
+        margin-left: var(--sidebar-width-collapsed);
+      }
+
+      .main-content h1 {
+        font-size: 1.875rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 2rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+      }
+
+      .card {
+        background-color: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        box-sizing: border-box; /* Important */
+      }
+
+      .card h2 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 1rem;
+      }
+
+      .card-content {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        color: #4b5563;
+      }
+
+      .card-content svg {
+        width: 24px;
+        height: 24px;
+      }
+
+      .nav-item.active {
+        background-color: color-mix(in srgb, var(--primary) 15%, transparent);
+        color: var(--primary);
+        font-weight: 500;
+      }
+
+      .content-area {
+        position: fixed;
+        top: 0;
+        left: var(--sidebar-width);
+        right: 0;
+        bottom: 0;
+        background: white;
+        transition: left 0.3s ease;
+        box-sizing: border-box; /* Important */
+      }
+
+      .content-area.sidebar-collapsed {
+        left: var(--sidebar-width-collapsed);
+      }
+
+      .interface-container {
+        width: 100%;
+        height: 100%;
+        display: none;
+        box-sizing: border-box; /* Important */
+      }
+
+      .interface-container.active {
+        display: block;
+      }
+
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        box-sizing: border-box; /* Important */
+      }
+
+      .iframe-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        background-color: #f8f9fa;
+        padding: 2rem;
+        text-align: center;
+        box-sizing: border-box; /* Important */
+      }
+
+      .iframe-error p {
+        color: #4b5563;
+        margin-bottom: 1rem;
+      }
+
+      .iframe-error a {
+        padding: 0.5rem 1rem;
+        background-color: #2563eb;
+        color: white;
+        text-decoration: none;
+        border-radius: 0.375rem;
+        transition: background-color 0.2s;
+      }
+
+      .iframe-error a:hover {
+        background-color: #1d4ed8;
+      }
+
+      .toolbar {
+        display: none;
+      }
+
+      .hide-bar-button {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0.5rem;
+        border-radius: 0.375rem;
+        transition: background-color 0.2s, color 0.2s;
+      }
+
+      .hide-bar-button:hover {
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
+      }
+
+      .hide-bar-button svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .sidebar-toggle {
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        padding: 0.5rem;
+        border-radius: 0.375rem;
+        transition: all var(--transition-speed);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+      }
+
+      .sidebar-toggle svg {
+        width: 16px;
+        height: 16px;
+        transition: transform var(--transition-speed);
+      }
+
+      .sidebar.collapsed .sidebar-toggle svg {
+        transform: rotate(180deg);
+      }
+
+      .sidebar-toggle:hover {
+        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h1>Bioma</h1>
+        <button
+          class="sidebar-toggle"
+          id="toggle-sidebar"
+          aria-label="Toggle sidebar"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M15 19l-7-7 7-7M8 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+      </div>
+      <h2>Services</h2>
+      <div class="nav-items">
+        <div class="nav-item active" data-target="surrealist">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"
+            ></path>
+          </svg>
+          <span>Surrealist</span>
+          <a href="http://localhost:8080" target="_blank" class="external-link">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+        <div class="nav-item" data-target="chat">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+            ></path>
+          </svg>
+          <span>Chat</span>
+          <a
+            href="../tools/cognition/templates/rag_chat.html"
+            target="_blank"
+            class="external-link"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+        <div class="nav-item" data-target="inspector">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4.879-4.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242z"
+            ></path>
+          </svg>
+          <span>Inspector</span>
+          <a href="http://localhost:5173" target="_blank" class="external-link">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+        <div class="nav-item" data-target="minio">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+            ></path>
+          </svg>
+          <span>Minio</span>
+          <a href="http://localhost:8082" target="_blank" class="external-link">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="interface-container active" id="surrealist-container">
+        <iframe src="http://localhost:8080"></iframe>
+      </div>
+      <div class="interface-container" id="chat-container">
+        <iframe src="../tools/cognition/templates/rag_chat.html"></iframe>
+      </div>
+      <div class="interface-container" id="inspector-container">
+        <iframe src="http://localhost:5173"></iframe>
+      </div>
+      <div class="interface-container" id="minio-container">
+        <iframe src="http://localhost:8082"></iframe>
+      </div>
+    </div>
+
+    <div class="toolbar"></div>
+
+    <button
+      class="mobile-menu-toggle"
+      aria-label="Toggle mobile menu"
+      aria-expanded="false"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        width="24"
+        height="24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M4 6h16M4 12h16M4 18h16"
+        />
+      </svg>
+    </button>
+
+    <script>
+      const navItems = document.querySelectorAll(".nav-item");
+      const containers = document.querySelectorAll(".interface-container");
+      const sidebar = document.querySelector(".sidebar");
+      const contentArea = document.querySelector(".content-area");
+      const mainContent = document.querySelector(".main-content");
+      const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
+      const toggleSidebarButton = document.getElementById("toggle-sidebar");
+
+      function setActiveNavItem(target) {
+        navItems.forEach((nav) => nav.classList.remove("active"));
+        containers.forEach((container) => container.classList.remove("active"));
+
+        const activeNav = Array.from(navItems).find(
+          (nav) => nav.dataset.target === target
+        );
+        const activeContainer = document.getElementById(`${target}-container`);
+
+        if (activeNav && activeContainer) {
+          activeNav.classList.add("active");
+          activeContainer.classList.add("active");
+        }
+      }
+
+      navItems.forEach((item) => {
+        item.addEventListener("click", () => {
+          setActiveNavItem(item.dataset.target);
+        });
+      });
+
+      // Set initial active state
+      const initialActive = window.location.hash.substring(1);
+      if (initialActive) {
+        setActiveNavItem(initialActive);
+        const activeNavItem = Array.from(navItems).find(
+          (nav) => nav.dataset.target === initialActive
+        );
+        if (activeNavItem) {
+          activeNavItem.classList.add("active");
+        }
+      } else {
+        setActiveNavItem(navItems[0].dataset.target);
+      }
+
+      const iframes = document.querySelectorAll("iframe");
+      iframes.forEach((iframe) => {
+        const container = iframe.closest(".interface-container");
+        iframe.style.width = "100%";
+        const loading = container.querySelector(".loading");
+
+        if (loading) {
+          loading.classList.add("active");
+          iframe.addEventListener("load", () =>
+            loading.classList.remove("active")
+          );
+          iframe.addEventListener("error", () =>
+            loading.classList.remove("active")
+          );
+        }
+      });
+
+      toggleSidebarButton.addEventListener("click", () => {
+        sidebar.classList.toggle("collapsed");
+        contentArea.classList.toggle("sidebar-collapsed");
+        mainContent.classList.toggle("sidebar-collapsed");
+
+        const svgPath = toggleSidebarButton.querySelector("svg path");
+        if (sidebar.classList.contains("collapsed")) {
+          svgPath.setAttribute("d", "M19 19l-7-7 7-7M13 5l-7 7 7 7");
+        } else {
+          svgPath.setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        if (window.innerWidth > 768) {
+          if (sidebar.classList.contains("collapsed")) {
+            sidebar.classList.remove("collapsed");
+            contentArea.classList.remove("sidebar-collapsed");
+            mainContent.classList.remove("sidebar-collapsed");
+            toggleSidebarButton
+              .querySelector("svg path")
+              .setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
+          }
+          mobileMenuToggle.setAttribute("aria-expanded", "false");
+        }
+      });
+    </script>
+  </body>
+</html>
