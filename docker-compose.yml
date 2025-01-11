@@ -13,7 +13,7 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [ gpu ]
+              capabilities: [gpu]
     volumes:
       - bioma-ollama_data:/root/.ollama
     ports:
@@ -53,7 +53,19 @@ services:
       context: ../pdf-document-layout-analysis
       dockerfile: Dockerfile
     container_name: pdf-document-layout-analysis
-    entrypoint: [ "gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--chdir", "./src", "app:app", "--bind", "0.0.0.0:5060", "--timeout", "10000"]
+    entrypoint:
+      [
+        "gunicorn",
+        "-k",
+        "uvicorn.workers.UvicornWorker",
+        "--chdir",
+        "./src",
+        "app:app",
+        "--bind",
+        "0.0.0.0:5060",
+        "--timeout",
+        "10000",
+      ]
     init: true
     restart: unless-stopped
     ports:
@@ -64,11 +76,104 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [ gpu ]
+              capabilities: [gpu]
+
+  surrealist:
+    image: surrealdb/surrealist:3.1.9
+    container_name: bioma-surrealist
+    ports:
+      - "8080:8080"
+    networks:
+      - bioma-network
+
+  minio:
+    image: quay.io/minio/minio
+    container_name: bioma-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - bioma-network
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BROWSER: "on"
+      MINIO_BROWSER_REDIRECT: "false"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:8082"
+      MINIO_BROWSER_CONTENT_SECURITY_POLICY: "frame-ancestors * 'self' file://* http://* https://*; default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * ws: wss:;"
+      MINIO_BROWSER_X_FRAME_OPTIONS: "ALLOWALL"
+      MINIO_BROWSER_COOKIE_SAMESITE: "None"
+      MINIO_BROWSER_COOKIE_SECURE: "false"
+    volumes:
+      - bioma-minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: mc ready local
+      start_period: 1s
+      interval: 2s
+      timeout: 10s
+      retries: 10
+
+  mc:
+    image: minio/mc
+    container_name: bioma-mc
+    depends_on:
+      - minio
+    networks:
+      - bioma-network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5 &&
+      mc alias set myminio http://minio:9000 minioadmin minioadmin &&
+      mc mb -p myminio/bioma &&
+      echo '{
+        \"Version\": \"2012-10-17\",
+        \"Statement\": [
+          {
+            \"Effect\": \"Allow\",
+            \"Principal\": \"*\",
+            \"Action\": \"s3:GetObject\",
+            \"Resource\": \"arn:aws:s3:::bioma/*\"
+          },
+          {
+            \"Effect\": \"Allow\",
+            \"Principal\": {
+              \"AWS\": \"*\"
+            },
+            \"Action\": [
+              \"s3:GetBucketLocation\",
+              \"s3:ListBucket\",
+              \"s3:ListBucketMultipartUploads\",
+              \"s3:AbortMultipartUpload\", 
+              \"s3:DeleteObject\",
+              \"s3:ListMultipartUploadParts\",
+              \"s3:PutObject\"
+            ],
+            \"Resource\": [
+              \"arn:aws:s3:::bioma\",
+              \"arn:aws:s3:::bioma/*\"
+            ]
+          }
+        ]
+      }' > /tmp/policy.json &&
+      mc anonymous set-json /tmp/policy.json myminio/bioma"
+
+  nginx:
+    image: nginx:alpine
+    container_name: bioma-nginx
+    ports:
+      - "8082:80"
+    volumes:
+      - ./assets/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - minio
+    networks:
+      - bioma-network
 
 volumes:
   bioma-ollama_data:
   bioma-surreal_data:
+  bioma-minio-data:
 
 networks:
   bioma-network:
