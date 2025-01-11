@@ -24,6 +24,7 @@ pub struct ServerConfig {
     pub args: Vec<String>,
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -933,10 +933,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     actor_handles.push(chat_handle);
 
     // Tools setup
+    // let tools_user = UserActor::new(&engine, "/rag/client/tool/".into()).await?;
     let mut tools = Tools::new();
     for tool in &config.tools {
         tools.add_tool(&engine, tool.clone(), "/rag".into()).await?;
     }
+    // tools.list_tools(&tools_user).await?;
 
     // Create app state
     let data = web::Data::new(AppState {
