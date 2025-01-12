@@ -421,18 +421,14 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                // Create message container for streaming response
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message assistant-message';
-                chatContainer.appendChild(messageDiv);
-
-                let contentDiv = document.createElement('div');
-                messageDiv.appendChild(contentDiv);
-
+                // Remove the early message div creation
+                let messageDiv = null;
+                let contentDiv = null;
+                
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let accumulatedContent = '';
-                let buffer = ''; // Buffer for incomplete JSON lines
+                let buffer = '';
 
                 // Reset streaming state
                 contextSet = false;
@@ -444,13 +440,11 @@
                     const chunk = decoder.decode(value);
                     buffer += chunk;
 
-                    // Process complete lines, keeping any partial line in buffer
                     const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';  // Keep last potentially incomplete line
+                    buffer = lines.pop() || '';
 
-                    // Process each complete line
                     for (const line of lines) {
-                        if (!line.trim()) continue;  // Skip empty lines
+                        if (!line.trim()) continue;
                         try {
                             accumulatedContent = processJsonLine(line, messageDiv, contentDiv, accumulatedContent);
                         } catch (e) {
@@ -459,17 +453,8 @@
                     }
                 }
 
-                // Handle any remaining complete JSON at the end
-                if (buffer.trim()) {
-                    try {
-                        accumulatedContent = processJsonLine(buffer, messageDiv, contentDiv, accumulatedContent);
-                    } catch (e) {
-                        console.error('Error processing final JSON:', e);
-                    }
-                }
-
-                // Re-initialize mermaid diagrams after complete response
-                mermaid.init(undefined, messageDiv.querySelectorAll('.mermaid'));
+                // Initialize mermaid diagrams in the entire chat container instead of just messageDiv
+                mermaid.init(undefined, chatContainer.querySelectorAll('.mermaid'));
 
             } catch (error) {
                 console.error('Error:', error);
@@ -481,41 +466,90 @@
         function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
             const data = JSON.parse(json_line);
 
+            // Get the last message div in the chat
+            const lastMessageDiv = chatContainer.lastElementChild;
+            const lastMessageRole = lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+
             // Handle system and tool messages
             if (data.message?.role === 'system' || data.message?.role === 'tool') {
-                // Create new message div for system or tool messages
-                const specialMessageDiv = document.createElement('div');
-                specialMessageDiv.className = `message ${data.message.role}-message`;
-
-                // Special formatting for tool messages
-                if (data.message.role === 'tool') {
-                    const toolData = JSON.parse(data.message.content);
-                    const formattedContent = `
-                        <div class="tool-header">
-                            <strong>🔧 Tool Call:</strong> ${toolData.tool} (${toolData.server})
-                        </div>
-                        <div class="tool-function">
-                            <strong>Function:</strong> ${toolData.call.function.name}
-                        </div>
-                        <div class="tool-details">
-                            <strong>Arguments:</strong>
-                            <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                            <strong>Response:</strong>
-                            <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                        </div>
-                    `;
-                    specialMessageDiv.innerHTML = formattedContent;
+                // Check if we can append to the previous message
+                if (lastMessageRole === data.message.role) {
+                    // Append to existing message
+                    if (data.message.role === 'tool') {
+                        const toolData = JSON.parse(data.message.content);
+                        const formattedContent = `
+                            <div class="source-separator"></div>
+                            <div class="tool-header">
+                                <strong>🔧 Tool Call:</strong> ${toolData.tool} (${toolData.server})
+                            </div>
+                            <div class="tool-function">
+                                <strong>Function:</strong> ${toolData.call.function.name}
+                            </div>
+                            <div class="tool-details">
+                                <strong>Arguments:</strong>
+                                <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                                <strong>Response:</strong>
+                                <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                            </div>
+                        `;
+                        lastMessageDiv.innerHTML += formattedContent;
+                    } else {
+                        lastMessageDiv.innerHTML += '<div class="source-separator"></div>' + md.render(data.message.content);
+                    }
                 } else {
-                    specialMessageDiv.innerHTML = md.render(data.message.content);
+                    // Create new message div
+                    const specialMessageDiv = document.createElement('div');
+                    specialMessageDiv.className = `message ${data.message.role}-message`;
+                    
+                    if (data.message.role === 'tool') {
+                        const toolData = JSON.parse(data.message.content);
+                        const formattedContent = `
+                            <div class="tool-header">
+                                <strong>🔧 Tool Call:</strong> ${toolData.tool} (${toolData.server})
+                            </div>
+                            <div class="tool-function">
+                                <strong>Function:</strong> ${toolData.call.function.name}
+                            </div>
+                            <div class="tool-details">
+                                <strong>Arguments:</strong>
+                                <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                                <strong>Response:</strong>
+                                <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                            </div>
+                        `;
+                        specialMessageDiv.innerHTML = formattedContent;
+                    } else {
+                        specialMessageDiv.innerHTML = md.render(data.message.content);
+                    }
+                    chatContainer.appendChild(specialMessageDiv);
                 }
+                return accumulatedContent;
+            }
 
-                chatContainer.insertBefore(specialMessageDiv, messageDiv);
+            // Handle assistant messages
+            if (data.message?.role === 'assistant') {
+                // Check if we can append to existing assistant message
+                if (lastMessageRole === 'assistant' && !messageDiv) {
+                    messageDiv = lastMessageDiv;
+                    contentDiv = lastMessageDiv.querySelector('div:not(.context-container)');
+                    if (!contentDiv) {
+                        contentDiv = document.createElement('div');
+                        messageDiv.insertBefore(contentDiv, messageDiv.firstChild);
+                    }
+                }
+                // Create new message div if needed
+                else if (!messageDiv && (data.message.content || data.message.images)) {
+                    messageDiv = document.createElement('div');
+                    messageDiv.className = 'message assistant-message';
+                    contentDiv = document.createElement('div');
+                    messageDiv.appendChild(contentDiv);
+                    chatContainer.appendChild(messageDiv);
+                }
             }
 
             // Handle context with images
-            if (!contextSet && data.context?.length > 0) {
+            if (!contextSet && data.context?.length > 0 && messageDiv) {
                 const contextSection = createContextSection(data.context);
-                // Remove any existing context first
                 const existingContext = messageDiv.querySelector('.context-container');
                 if (existingContext) {
                     existingContext.remove();
@@ -527,14 +561,12 @@
             }
 
             // Handle message content and images
-            if (data.message?.content || data.message?.images) {
-                // Only process content if it's not a system or tool message
+            if (messageDiv && contentDiv && (data.message?.content || data.message?.images)) {
                 if (data.message.role !== 'system' && data.message.role !== 'tool') {
                     if (data.message.content) {
                         accumulatedContent = (accumulatedContent || '') + data.message.content;
                     }
 
-                    // Handle images if present
                     if (data.message.images && data.message.images.length > 0) {
                         data.message.images.forEach(imageBase64 => {
                             const imgElement = document.createElement('img');
@@ -544,12 +576,11 @@
                         });
                     }
 
-                    // Render the markdown content
                     contentDiv.innerHTML = md.render(accumulatedContent || '');
                 }
             }
 
-            if (data.done) {
+            if (data.done && accumulatedContent) {
                 messageHistory.push({
                     role: 'assistant',
                     content: accumulatedContent,
