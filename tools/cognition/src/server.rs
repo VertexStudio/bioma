@@ -1091,7 +1091,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .total_limit(100 * 1024 * 1024),
             )
             .route("/health", web::get().to(health))
-            .route("/hello", web::post().to(hello))
+            .route("/hello", web::get().to(hello))
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
