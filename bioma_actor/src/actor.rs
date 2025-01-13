@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::{Duration, SystemTime};
 use std::{borrow::Cow, sync::atomic::AtomicU64};
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
 use tracing::{debug, error, trace};
@@ -16,6 +17,8 @@ use tracing::{debug, error, trace};
 const DB_TABLE_ACTOR: &str = "actor";
 const DB_TABLE_MESSAGE: &str = "message";
 const DB_TABLE_REPLY: &str = "reply";
+const DB_TABLE_LAST_SEEN: &str = "last_seen";
+const DB_TABLE_ACTOR_LAST_SEEN: &str = "actor_last_seen";
 
 /// Implement this trait to define custom actor error types
 pub trait ActorError: std::error::Error + Debug + Send + Sync + From<SystemActorError> {}
@@ -443,7 +446,7 @@ where
         to: &ActorId,
     ) -> impl Future<Output = Result<(), SystemActorError>> {
         async move {
-            let _ = ctx.prepare_and_send_message::<MT>(&message, to).await?;
+            let _ = ctx.prepare_and_send_message::<MT>(&message, to, None).await?;
             Ok(())
         }
     }
@@ -460,7 +463,7 @@ where
         Self::Response: 'static,
     {
         async move {
-            let (_, reply_id, _) = ctx.prepare_and_send_message::<MT>(&message, to).await?;
+            let (_, reply_id, _) = ctx.prepare_and_send_message::<MT>(&message, to, Some(options.clone())).await?;
             ctx.wait_for_replies::<Self::Response>(&reply_id, options).await
         }
     }
@@ -486,15 +489,17 @@ where
 ///     options
 /// ).await?;
 /// ```
-#[derive(bon::Builder)]
+#[derive(bon::Builder, Clone)]
 pub struct SendOptions {
     /// The maximum duration to wait for a reply before timing out.
     pub timeout: std::time::Duration,
+    /// Whether to check actor health before sending messages
+    pub check_health: bool,
 }
 
 impl Default for SendOptions {
     fn default() -> Self {
-        Self { timeout: std::time::Duration::from_secs(30) }
+        Self { timeout: std::time::Duration::from_secs(30), check_health: false }
     }
 }
 
@@ -596,11 +601,13 @@ pub struct SpawnOptions {
     /// This field determines the behavior of the spawning process when it encounters
     /// an existing actor with the same ID as the one being spawned.
     exists: SpawnExistsOptions,
+    /// Health configuration for the actor
+    health_config: Option<HealthConfig>,
 }
 
 impl Default for SpawnOptions {
     fn default() -> Self {
-        Self { exists: SpawnExistsOptions::Error }
+        Self { exists: SpawnExistsOptions::Error, health_config: None }
     }
 }
 
@@ -750,8 +757,25 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                 .await
                 .map_err(SystemActorError::from)?;
 
-            // Create and return the actor context
+            // Create the context
             let ctx = ActorContext::new(engine.clone(), id.clone());
+
+            // Initialize health monitoring if configured
+            if let Some(health_config) = options.health_config {
+                // We need to add this to SpawnOptions
+                ctx.init_health(health_config.clone()).await?;
+
+                // Start periodic health updates
+                if let Some(handle) = ctx.start_health_updates().await? {
+                    // Store handle somewhere or spawn a task to await it
+                    tokio::spawn(async move {
+                        if let Err(e) = handle.await {
+                            error!("Health update task failed: {}", e);
+                        }
+                    });
+                }
+            }
+
             Ok((ctx, actor))
         }
     }
@@ -826,6 +850,44 @@ pub struct ActorRecord {
     state: Value,
 }
 
+/// Configuration for actor health monitoring
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HealthConfig {
+    /// Whether health monitoring is enabled for this actor
+    pub enabled: bool,
+    /// Interval at which the actor updates its last_seen timestamp
+    #[serde(with = "humantime_serde")]
+    pub update_interval: Duration,
+    /// Maximum time without updates before an actor is considered unhealthy
+    #[serde(with = "humantime_serde")]
+    pub max_time_without_update: Duration,
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            update_interval: Duration::from_secs(60),
+            max_time_without_update: Duration::from_secs(180),
+        }
+    }
+}
+
+/// Record for storing last seen timestamps
+#[derive(Debug, Serialize, Deserialize)]
+struct LastSeenRecord {
+    id: RecordId,
+    last_seen: SystemTime,
+}
+
+/// Record for relating actors to their last seen records
+#[derive(Debug, Serialize, Deserialize)]
+struct ActorLastSeenRecord {
+    id: RecordId,
+    actor: RecordId,
+    config: HealthConfig,
+}
+
 /// The context for an actor, providing access to the actor system.
 ///
 /// The context allows an actor to:
@@ -882,6 +944,125 @@ impl<T: Actor> ActorContext<T> {
             true
         } else {
             false
+        }
+    }
+
+    /// Initialize health monitoring for this actor
+    pub async fn init_health(&self, config: HealthConfig) -> Result<(), SystemActorError> {
+        if !config.enabled {
+            return Ok(());
+        }
+
+        // Create last seen record
+        let last_seen_id = RecordId::from_table_key(DB_TABLE_LAST_SEEN, self.id().name());
+        let last_seen = LastSeenRecord { id: last_seen_id.clone(), last_seen: SystemTime::now() };
+
+        let _: Option<Record> = self
+            .engine()
+            .db()
+            .lock()
+            .await
+            .create(DB_TABLE_LAST_SEEN)
+            .content(last_seen)
+            .await
+            .map_err(SystemActorError::from)?;
+
+        // Create relation record
+        let relation_id = RecordId::from_table_key(DB_TABLE_ACTOR_LAST_SEEN, self.id().name());
+        let relation = ActorLastSeenRecord { id: relation_id, actor: self.id().record_id(), config };
+
+        let _: Option<Record> = self
+            .engine()
+            .db()
+            .lock()
+            .await
+            .create(DB_TABLE_ACTOR_LAST_SEEN)
+            .content(relation)
+            .await
+            .map_err(SystemActorError::from)?;
+
+        Ok(())
+    }
+
+    /// Update the last seen timestamp for this actor
+    pub async fn update_last_seen(&self) -> Result<(), SystemActorError> {
+        let last_seen_id = RecordId::from_table_key(DB_TABLE_LAST_SEEN, self.id().name());
+        let last_seen = LastSeenRecord { id: last_seen_id.clone(), last_seen: SystemTime::now() };
+
+        let _: Option<Record> = self
+            .engine()
+            .db()
+            .lock()
+            .await
+            .update(&last_seen_id)
+            .content(last_seen)
+            .await
+            .map_err(SystemActorError::from)?;
+
+        Ok(())
+    }
+
+    /// Start the health update task for this actor
+    pub async fn start_health_updates(&self) -> Result<Option<tokio::task::JoinHandle<()>>, SystemActorError> {
+        // Get the health config
+        let relation_id = RecordId::from_table_key(DB_TABLE_ACTOR_LAST_SEEN, self.id().name());
+        let relation: Option<ActorLastSeenRecord> =
+            self.engine().db().lock().await.select(&relation_id).await.map_err(SystemActorError::from)?;
+
+        if let Some(relation) = relation {
+            if !relation.config.enabled {
+                return Ok(None);
+            }
+
+            let engine = self.engine().clone();
+            let actor_id = self.id().clone();
+            let update_interval = relation.config.update_interval;
+
+            let handle = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(update_interval).await;
+
+                    let last_seen_id = RecordId::from_table_key(DB_TABLE_LAST_SEEN, actor_id.name());
+                    let last_seen = LastSeenRecord { id: last_seen_id.clone(), last_seen: SystemTime::now() };
+
+                    if let Err(e) =
+                        engine.db().lock().await.update::<Option<Record>>(&last_seen_id).content(last_seen).await
+                    {
+                        error!("Failed to update last_seen: {}", e);
+                        break;
+                    }
+                }
+            });
+
+            Ok(Some(handle))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Check if an actor is healthy
+    pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
+        let relation_id = RecordId::from_table_key(DB_TABLE_ACTOR_LAST_SEEN, actor_id.name());
+        let relation: Option<ActorLastSeenRecord> =
+            self.engine().db().lock().await.select(&relation_id).await.map_err(SystemActorError::from)?;
+
+        if let Some(relation) = relation {
+            if !relation.config.enabled {
+                return Ok(true);
+            }
+
+            let last_seen_id = RecordId::from_table_key(DB_TABLE_LAST_SEEN, actor_id.name());
+            let last_seen: Option<LastSeenRecord> =
+                self.engine().db().lock().await.select(&last_seen_id).await.map_err(SystemActorError::from)?;
+
+            if let Some(last_seen) = last_seen {
+                let elapsed = SystemTime::now().duration_since(last_seen.last_seen).unwrap_or(Duration::MAX);
+                Ok(elapsed <= relation.config.max_time_without_update)
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(true) // If no health monitoring is configured, consider it healthy
         }
     }
 
@@ -1069,10 +1250,19 @@ impl<T: Actor> ActorContext<T> {
         &self,
         message: &MT,
         to: &ActorId,
+        options: Option<SendOptions>,
     ) -> Result<(RecordId, RecordId, FrameMessage), SystemActorError>
     where
         MT: MessageType,
     {
+        // Check health if enabled
+        if options.is_some() && options.unwrap().check_health {
+            let is_healthy = self.check_actor_health(to).await?;
+            if !is_healthy {
+                return Err(SystemActorError::MessageReply("Target actor is not healthy".into()));
+            }
+        }
+
         let msg_value = serde_json::to_value(&message)?;
         let name = std::any::type_name::<MT>();
         let msg_id = Id::ulid();
@@ -1140,7 +1330,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let _ = self.prepare_and_send_message::<MT>(&message, to).await?;
+        let _ = self.prepare_and_send_message::<MT>(&message, to, None).await?;
         Ok(())
     }
 
@@ -1172,7 +1362,7 @@ impl<T: Actor> ActorContext<T> {
     where
         MT: MessageType,
     {
-        let (_, _, _) = self.prepare_and_send_message(&message, to).await?;
+        let (_, _, _) = self.prepare_and_send_message(&message, to, None).await?;
         Ok(())
     }
 
@@ -1224,7 +1414,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to, Some(options.clone())).await?;
         self.wait_for_replies::<M::Response>(&reply_id, options).await
     }
 
@@ -1259,7 +1449,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
         RT: MessageType + 'static,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to, Some(options.clone())).await?;
         self.wait_for_replies::<RT>(&reply_id, options).await
     }
 
