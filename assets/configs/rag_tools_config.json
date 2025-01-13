@@ -17,6 +17,7 @@
             "host": true,
             "server": {
                 "name": "bioma-tool",
+                "enabled": true,
                 "transport": "stdio",
                 "command": "target/release/examples/mcp_server",
                 "args": [
@@ -30,7 +31,8 @@
         {
             "host": true,
             "server": {
-                "name": "filesystem",
+                "name": "text-editor",
+                "enabled": true,
                 "transport": "stdio",
                 "command": "docker",
                 "args": [
@@ -38,9 +40,26 @@
                     "-i",
                     "--rm",
                     "--mount",
-                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/data/BiomaAI,ro",
+                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/Users/rozgo/BiomaAI",
+                    "mcp/text-editor"
+                ]
+            }
+        },
+        {
+            "host": true,
+            "server": {
+                "name": "filesystem",
+                "enabled": true,
+                "transport": "stdio",
+                "command": "docker",
+                "args": [
+                    "run",
+                    "-i",
+                    "--rm",
+                    "--mount",
+                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/Users/rozgo/BiomaAI",
                     "mcp/filesystem",
-                    "/data/BiomaAI"
+                    "/Users/rozgo/BiomaAI"
                 ]
             }
         }
