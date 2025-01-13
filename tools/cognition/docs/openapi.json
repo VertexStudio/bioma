@@ -241,7 +241,10 @@
                         "type": "object"
                     },
                     "messages": {
-                        "$ref": "#/components/schemas/ChatMessageRequestSchema"
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
+                        }
                     },
                     "source": {
                         "type": [
@@ -321,7 +324,10 @@
                         "type": "object"
                     },
                     "messages": {
-                        "$ref": "#/components/schemas/ChatMessageRequestSchema"
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
+                        }
                     },
                     "source": {
                         "type": [

@@ -2,7 +2,7 @@ use std::{path::PathBuf, vec};
 
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
-    chat::{self},
+    chat,
     prelude::{ChatMessage, DeleteSource, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
     rerank::{RankTexts, TruncationDirection},
 };
@@ -176,7 +176,7 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
     }
 }))]
 pub struct AskQueryRequestSchema {
-    #[schema(value_type = ChatMessageRequestSchema)]
+    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
     #[schema(value_type = Schema::Object)]
@@ -197,7 +197,7 @@ pub struct AskQueryRequestSchema {
 }))]
 
 pub struct ChatQueryRequestSchema {
-    #[schema(value_type = ChatMessageRequestSchema)]
+    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
     #[schema(value_type = Schema::Object)]
