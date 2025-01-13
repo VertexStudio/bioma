@@ -11,8 +11,8 @@ use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
 use request_schemas::{
-    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
+    AskQuery, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema, IndexGlobsRequestSchema,
+    RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -516,7 +516,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                         match response {
                             Ok(chunk) => {
                                 last_response = Some(chunk.clone());
-                                
+
                                 // Stream the response chunk
                                 let response = ChatResponse {
                                     response: chunk,
@@ -552,7 +552,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                             if let Some((_tool_info, tool_client)) = tools.get_tool(&tool_call.function.name) {
                                 // Execute the tool call
                                 let execution_result = tool_client.call(&user_actor, tool_call).await;
-                                
+
                                 // Process the result
                                 let result_json = match execution_result {
                                     Ok(output) => serde_json::to_value(output.content).unwrap_or_default(),
@@ -570,17 +570,13 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
                                 // Stream tool response
                                 let tool_result_message = ChatMessage::tool(
-                                    serde_json::to_string(&formatted_tool_response).unwrap_or_default()
+                                    serde_json::to_string(&formatted_tool_response).unwrap_or_default(),
                                 );
-                                let streaming_response = ChatMessageResponse {
-                                    message: tool_result_message.clone(),
-                                    ..response.clone()
-                                };
-                                
-                                let chat_stream_response = ChatResponse {
-                                    response: streaming_response,
-                                    context: vec![],
-                                };
+                                let streaming_response =
+                                    ChatMessageResponse { message: tool_result_message.clone(), ..response.clone() };
+
+                                let chat_stream_response =
+                                    ChatResponse { response: streaming_response, context: vec![] };
 
                                 if tx.send(Ok(web::Json(chat_stream_response))).await.is_err() {
                                     return;
@@ -617,13 +613,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     }
 }
 
-#[derive(Debug)]
-pub struct AskQuery {
-    pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
-    pub format: Option<chat::Schema>,
-}
-
 #[derive(Serialize)]
 struct AskResponse {
     #[serde(flatten)]
@@ -636,12 +625,12 @@ struct AskResponse {
     post,
     path = "/ask",
     description = "Generates a chat response. Specific response format can be specified.",
-    request_body = AskQueryRequestSchema,
+    request_body = AskQuery,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
