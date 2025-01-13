@@ -572,14 +572,16 @@
                     "right"
                 ]
             },
-            "UploadMetadataRequestSchema": {
+            "UploadMetadata": {
                 "type": "object",
                 "required": [
                     "path"
                 ],
                 "properties": {
                     "path": {
-                        "type": "string"
+                        "type": "string",
+                        "format": "binary",
+                        "contentMediaType": "application/octet-stream"
                     }
                 }
             },
@@ -596,7 +598,7 @@
                         "contentMediaType": "application/octet-stream"
                     },
                     "metadata": {
-                        "$ref": "#/components/schemas/UploadMetadataRequestSchema"
+                        "$ref": "#/components/schemas/UploadMetadata"
                     }
                 }
             }
