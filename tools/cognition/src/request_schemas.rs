@@ -1,16 +1,11 @@
-use std::{path::PathBuf, vec};
-
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
-    prelude::{ChatMessage, DeleteSource, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
+    prelude::{ChatMessage, DeleteSource, IndexGlobs, RetrieveContext, RetrieveQuery},
     rerank::{RankTexts, TruncationDirection},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use utoipa::ToSchema;
-
-use crate::{AskQuery, ChatQuery, Upload, UploadMetadata};
 
 // /index Endpoint Schemas
 
@@ -36,24 +31,6 @@ pub struct ChatMessageRequestSchema {
     pub role: MessageRoleRequestSchema,
     pub content: String,
     pub images: Option<Vec<String>>,
-}
-
-impl Into<ChatMessage> for ChatMessageRequestSchema {
-    fn into(self) -> ChatMessage {
-        let images: Vec<Image> = match self.images {
-            Some(images) => images.into_iter().map(|image| Image::from_base64(image)).collect(),
-            None => vec![],
-        };
-
-        let role = match self.role {
-            MessageRoleRequestSchema::Assistant => bioma_llm::prelude::MessageRole::Assistant,
-            MessageRoleRequestSchema::System => bioma_llm::prelude::MessageRole::System,
-            MessageRoleRequestSchema::User => bioma_llm::prelude::MessageRole::User,
-            MessageRoleRequestSchema::Tool => bioma_llm::prelude::MessageRole::Tool,
-        };
-
-        ChatMessage::new(role, self.content).with_images(images)
-    }
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
@@ -177,27 +154,11 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
     }
 }))]
 pub struct AskQueryRequestSchema {
-    pub messages: Vec<ChatMessageRequestSchema>,
+    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
-    pub format: Option<Value>,
-}
-
-impl TryInto<AskQuery> for AskQueryRequestSchema {
-    type Error = String;
-
-    fn try_into(self) -> Result<AskQuery, Self::Error> {
-        let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
-
-        let format: Option<chat::Schema> = match self.format {
-            Some(format) => match serde_json::from_value(format) {
-                Ok(format) => Some(format),
-                Err(_) => return Err("\"format\" field structure is not valid".to_string()),
-            },
-            None => None,
-        };
-
-        Ok(AskQuery { format, source: self.source, messages })
-    }
+    #[schema(value_type = Schema::Object)]
+    pub format: Option<chat::Schema>,
 }
 
 // /chat Endpoint Schemas
@@ -212,28 +173,13 @@ impl TryInto<AskQuery> for AskQueryRequestSchema {
         }
     ]
 }))]
+
 pub struct ChatQueryRequestSchema {
-    pub messages: Vec<ChatMessageRequestSchema>,
+    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
-    pub format: Option<Value>,
-}
-
-impl TryInto<ChatQuery> for ChatQueryRequestSchema {
-    type Error = String;
-
-    fn try_into(self) -> Result<ChatQuery, Self::Error> {
-        let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
-
-        let format: Option<chat::Schema> = match self.format {
-            Some(format) => match serde_json::from_value(format) {
-                Ok(format) => Some(format),
-                Err(_) => return Err("\"format\" field structure is not valid".to_string()),
-            },
-            None => None,
-        };
-
-        Ok(ChatQuery { format, source: self.source, messages })
-    }
+    #[schema(value_type = Schema::Object)]
+    pub format: Option<chat::Schema>,
 }
 
 // /delete_resource Endpoint Schemas
@@ -265,7 +211,7 @@ pub enum ModelEmbedRequestSchema {
     "input": "This text will generate embeddings",
     "model": "nomic-embed-text"
   }))]
-  #[schema(example = json!({
+#[schema(example = json!({
     "model": "nomic-embed-vision",
     "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
 }))]
@@ -324,15 +270,10 @@ impl Into<RankTexts> for RankTextsRequestSchema {
 
 // /upload Endpoint Schemas
 
-#[derive(ToSchema, Debug, Deserialize)]
-pub struct UploadMetadataRequestSchema {
-    pub path: String,
-}
-
-impl Into<UploadMetadata> for UploadMetadataRequestSchema {
-    fn into(self) -> UploadMetadata {
-        UploadMetadata { path: PathBuf::from(self.path) }
-    }
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UploadMetadata {
+    #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
+    pub path: std::path::PathBuf,
 }
 
 #[derive(ToSchema, Debug, MultipartForm)]
@@ -340,16 +281,7 @@ pub struct UploadRequestSchema {
     #[multipart(limit = "100MB")]
     #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
     pub file: TempFile,
-    #[schema(value_type = UploadMetadataRequestSchema)]
     #[multipart(rename = "metadata")]
-    pub metadata: MpJson<UploadMetadataRequestSchema>,
-}
-
-impl Into<Upload> for UploadRequestSchema {
-    fn into(self) -> Upload {
-        let upload_metadata: UploadMetadata = self.metadata.into_inner().into();
-        let metadata: MpJson<UploadMetadata> = MpJson(upload_metadata);
-
-        Upload { file: self.file, metadata }
-    }
+    #[schema(value_type = UploadMetadata)]
+    pub metadata: MpJson<UploadMetadata>,
 }
