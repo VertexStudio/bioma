@@ -184,4 +184,14 @@ curl -X POST http://localhost:5766/ask \
 curl -X POST http://localhost:5766/delete_source \
     -H "Content-Type: application/json" \
     -d '{"sources": ["path/to/source1", "path/to/source2"]}'
+```  
+
+### Swagger-ui documentation
+
+To run the Swagger-ui page, please use:
+
+```bash
+docker compose up swagger-ui
 ```
+
+Then, open the browser at `http://localhost:80`. 
