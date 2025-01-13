@@ -886,21 +886,6 @@ impl HealthRecord {
     }
 }
 
-/// Record for storing last seen timestamps
-#[derive(Debug, Serialize, Deserialize)]
-struct LastSeenRecord {
-    id: RecordId,
-    last_seen: SystemTime,
-}
-
-/// Record for relating actors to their last seen records
-#[derive(Debug, Serialize, Deserialize)]
-struct ActorLastSeenRecord {
-    id: RecordId,
-    actor: RecordId,
-    config: HealthConfig,
-}
-
 /// The context for an actor, providing access to the actor system.
 ///
 /// The context allows an actor to:
@@ -970,36 +955,35 @@ impl<T: Actor> ActorContext<T> {
         let health_id = RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name());
         let health_record = HealthRecord::new(health_id.clone(), &config);
 
-        let _: Option<Record> = self
+        // Use the health.surql file to create health record and relation
+        let query = include_str!("../sql/health.surql");
+        let result = self
             .engine()
             .db()
             .lock()
             .await
-            .create(DB_TABLE_HEALTH)
-            .content(health_record)
+            .query(query)
+            .bind(("health_id", health_id))
+            .bind(("health", health_record))
+            .bind(("actor_id", self.id().record_id()))
             .await
             .map_err(SystemActorError::from)?;
 
-        // Create relation record
-        let query = format!("RELATE {}->actor_health->{}", self.id().record_id(), health_id);
+        println!("Result: {:?}", result);
 
-        let result = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
-
-        println!("result: {:?}", result);
+        trace!("Health initialization result: {:?}", result);
 
         Ok(())
     }
 
     /// Update the last seen timestamp
     pub async fn update_last_seen(&self) -> Result<(), SystemActorError> {
-        let query = format!(
-            "UPDATE {} SET last_seen = d'{}' WHERE id = {}",
-            DB_TABLE_HEALTH,
-            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
-            RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name())
-        );
+        // UPDATE health:⟨actor_id⟩ SET last_seen = time::now
+        let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, self.id().name());
 
-        self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
+        let update_result = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
+
+        println!("update_result: {:?}", update_result);
 
         Ok(())
     }
@@ -1024,12 +1008,9 @@ impl<T: Actor> ActorContext<T> {
                 loop {
                     tokio::time::sleep(update_interval.into()).await;
 
-                    let query = format!(
-                        "UPDATE {} SET last_seen = d'{}' WHERE id = {}",
-                        DB_TABLE_HEALTH,
-                        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
-                        RecordId::from_table_key(DB_TABLE_HEALTH, actor_id.name())
-                    );
+                    let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, actor_id.name());
+
+                    println!("Loop update: {:?}", query);
 
                     if let Err(e) = engine.db().lock().await.query(&query).await {
                         error!("Failed to update health status: {}", e);
