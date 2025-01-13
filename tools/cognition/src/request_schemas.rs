@@ -253,8 +253,20 @@ impl Into<DeleteSource> for DeleteSourceRequestSchema {
 // /embed Endpoint Schemas
 
 #[derive(ToSchema, Deserialize)]
-// #[schema(example = json!({"source": "path/to/source1"}))]
+pub enum ModelEmbedRequestSchema {
+    #[serde(rename = "nomic-embed-text")]
+    NomicEmbedTextV15,
+    #[serde(rename = "nomic-embed-vision")]
+    NomicEmbedVisionV15,
+}
+
+#[derive(ToSchema, Deserialize)]
+#[schema(example = json!({
+    "input": "This text will generate embeddings",
+    "model": "nomic-embed-text"
+  }))]
 pub struct EmbeddingsQueryRequestSchema {
+    #[schema(value_type = ModelEmbedRequestSchema)]
     pub model: String,
     pub input: serde_json::Value,
 }

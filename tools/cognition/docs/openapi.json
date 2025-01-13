@@ -18,7 +18,7 @@
         "/ask": {
             "post": {
                 "tags": [],
-                "description": "Ask question",
+                "description": "Generates a chat response. Specific response format can be specified.",
                 "operationId": "ask",
                 "requestBody": {
                     "content": {
@@ -40,7 +40,7 @@
         "/chat": {
             "post": {
                 "tags": [],
-                "description": "Chat endpoint",
+                "description": "Generates a chat response.",
                 "operationId": "chat",
                 "requestBody": {
                     "content": {
@@ -62,7 +62,7 @@
         "/delete_source": {
             "post": {
                 "tags": [],
-                "description": "Delete indexed sources",
+                "description": "Delete indexed sources.",
                 "operationId": "delete_source",
                 "requestBody": {
                     "content": {
@@ -84,7 +84,7 @@
         "/embed": {
             "post": {
                 "tags": [],
-                "description": "Embed endpoint",
+                "description": "Generate embeddings for text or images.",
                 "operationId": "embed",
                 "requestBody": {
                     "content": {
@@ -106,11 +106,11 @@
         "/health": {
             "get": {
                 "tags": [],
-                "description": "Check server health",
+                "description": "Check server health.",
                 "operationId": "health",
                 "responses": {
                     "200": {
-                        "description": "Server health check"
+                        "description": "Ok"
                     }
                 }
             }
@@ -118,11 +118,11 @@
         "/hello": {
             "get": {
                 "tags": [],
-                "description": "Hello, world! from the server",
+                "description": "Hello, world! from the server.",
                 "operationId": "hello",
                 "responses": {
                     "200": {
-                        "description": "Server health check"
+                        "description": "Ok"
                     }
                 }
             }
@@ -130,7 +130,7 @@
         "/index": {
             "post": {
                 "tags": [],
-                "description": "This endpoint receives an array of path of files to index",
+                "description": "Receives an array of path of files to index.",
                 "operationId": "index",
                 "requestBody": {
                     "content": {
@@ -152,7 +152,7 @@
         "/rerank": {
             "post": {
                 "tags": [],
-                "description": "Rerank endpoint",
+                "description": "Rerank texts based on a query.",
                 "operationId": "rerank",
                 "requestBody": {
                     "content": {
@@ -174,11 +174,11 @@
         "/reset": {
             "get": {
                 "tags": [],
-                "description": "Reset bioma engine",
+                "description": "Reset bioma engine.",
                 "operationId": "reset",
                 "responses": {
                     "200": {
-                        "description": "Server health check"
+                        "description": "Ok"
                     }
                 }
             }
@@ -186,7 +186,7 @@
         "/retrieve": {
             "post": {
                 "tags": [],
-                "description": "Retrieve context in .md format",
+                "description": "Retrieve context in .md format.",
                 "operationId": "retrieve",
                 "requestBody": {
                     "content": {
@@ -208,7 +208,7 @@
         "/upload": {
             "post": {
                 "tags": [],
-                "description": "Upload endpoint",
+                "description": "Upload files to the server.",
                 "operationId": "upload",
                 "requestBody": {
                     "content": {
@@ -380,8 +380,12 @@
                 "properties": {
                     "input": {},
                     "model": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/ModelEmbedRequestSchema"
                     }
+                },
+                "example": {
+                    "input": "This text will generate embeddings",
+                    "model": "nomic-embed-text"
                 }
             },
             "IndexGlobsRequestSchema": {
@@ -433,6 +437,13 @@
                     "assistant",
                     "system",
                     "tool"
+                ]
+            },
+            "ModelEmbedRequestSchema": {
+                "type": "string",
+                "enum": [
+                    "nomic-embed-text",
+                    "nomic-embed-vision"
                 ]
             },
             "RankTextsRequestSchema": {
