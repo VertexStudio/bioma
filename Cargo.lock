@@ -885,6 +885,7 @@ name = "bioma_actor"
 version = "0.1.0"
 dependencies = [
  "bon",
+ "chrono",
  "color-backtrace",
  "console-subscriber",
  "derive_more",
