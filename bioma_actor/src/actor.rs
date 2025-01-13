@@ -1047,7 +1047,7 @@ impl<T: Actor> ActorContext<T> {
     /// Check if an actor is healthy
     pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
         println!("check_actor_health: {}", actor_id.name());
-        let query = format!("SELECT * FROM ⟨{}⟩", actor_id.name());
+        let query = format!("SELECT * FROM health:⟨{}⟩", actor_id.name());
 
         let mut res = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
 
@@ -2016,6 +2016,7 @@ mod tests {
             )
             .await;
 
+        println!("response: {:?}", response);
         assert!(response.is_err(), "Should fail to send message to unhealthy actor");
         assert!(matches!(
             response.unwrap_err(),
