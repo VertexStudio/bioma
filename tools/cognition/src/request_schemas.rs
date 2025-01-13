@@ -1,9 +1,9 @@
-use std::{path::PathBuf, vec};
+use std::path::PathBuf;
 
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
-    prelude::{ChatMessage, DeleteSource, Image, IndexGlobs, RetrieveContext, RetrieveQuery},
+    prelude::{ChatMessage, DeleteSource, IndexGlobs, RetrieveContext, RetrieveQuery},
     rerank::{RankTexts, TruncationDirection},
 };
 use serde::{Deserialize, Serialize};
@@ -35,24 +35,6 @@ pub struct ChatMessageRequestSchema {
     pub role: MessageRoleRequestSchema,
     pub content: String,
     pub images: Option<Vec<String>>,
-}
-
-impl Into<ChatMessage> for ChatMessageRequestSchema {
-    fn into(self) -> ChatMessage {
-        let images: Vec<Image> = match self.images {
-            Some(images) => images.into_iter().map(|image| Image::from_base64(image)).collect(),
-            None => vec![],
-        };
-
-        let role = match self.role {
-            MessageRoleRequestSchema::Assistant => bioma_llm::prelude::MessageRole::Assistant,
-            MessageRoleRequestSchema::System => bioma_llm::prelude::MessageRole::System,
-            MessageRoleRequestSchema::User => bioma_llm::prelude::MessageRole::User,
-            MessageRoleRequestSchema::Tool => bioma_llm::prelude::MessageRole::Tool,
-        };
-
-        ChatMessage::new(role, self.content).with_images(images)
-    }
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
