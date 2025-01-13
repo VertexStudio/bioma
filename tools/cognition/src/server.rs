@@ -11,8 +11,8 @@ use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::tools::ToolCall;
 use request_schemas::{
-    AskQuery, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema, IndexGlobsRequestSchema,
-    RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
+    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
+    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -329,13 +329,6 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     }
 }
 
-#[derive(Deserialize)]
-pub struct ChatQuery {
-    pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
-    pub format: Option<chat::Schema>,
-}
-
 #[derive(Serialize)]
 struct ChatResponse {
     #[serde(flatten)]
@@ -367,13 +360,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: ChatQuery = match body.clone().try_into() {
-        Ok(query) => query,
-        Err(e) => {
-            error!("Error converting ChatQuery: {:?}", e);
-            return HttpResponse::BadRequest().body(e);
-        }
-    };
+    let body = body.clone();
 
     // Combine all user messages into a single query string for the retrieval system.
     // This helps find relevant context across all parts of the user's conversation.
@@ -625,24 +612,18 @@ struct AskResponse {
     post,
     path = "/ask",
     description = "Generates a chat response. Specific response format can be specified.",
-    request_body = AskQuery,
+    request_body = AskQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
+async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: AskQuery = match body.clone().try_into() {
-        Ok(query) => query,
-        Err(e) => {
-            error!("Error converting AskQueryRequest: {:?}", e);
-            return HttpResponse::BadRequest().body(e);
-        }
-    };
+    let body = body.clone();
 
     let query = body
         .messages
