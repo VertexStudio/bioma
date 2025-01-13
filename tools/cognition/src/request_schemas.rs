@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
@@ -8,8 +6,6 @@ use bioma_llm::{
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-
-use crate::{Upload, UploadMetadata};
 
 // /index Endpoint Schemas
 
@@ -274,15 +270,10 @@ impl Into<RankTexts> for RankTextsRequestSchema {
 
 // /upload Endpoint Schemas
 
-#[derive(ToSchema, Debug, Deserialize)]
-pub struct UploadMetadataRequestSchema {
-    pub path: String,
-}
-
-impl Into<UploadMetadata> for UploadMetadataRequestSchema {
-    fn into(self) -> UploadMetadata {
-        UploadMetadata { path: PathBuf::from(self.path) }
-    }
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UploadMetadata {
+    #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
+    pub path: std::path::PathBuf,
 }
 
 #[derive(ToSchema, Debug, MultipartForm)]
@@ -290,16 +281,7 @@ pub struct UploadRequestSchema {
     #[multipart(limit = "100MB")]
     #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
     pub file: TempFile,
-    #[schema(value_type = UploadMetadataRequestSchema)]
     #[multipart(rename = "metadata")]
-    pub metadata: MpJson<UploadMetadataRequestSchema>,
-}
-
-impl Into<Upload> for UploadRequestSchema {
-    fn into(self) -> Upload {
-        let upload_metadata: UploadMetadata = self.metadata.into_inner().into();
-        let metadata: MpJson<UploadMetadata> = MpJson(upload_metadata);
-
-        Upload { file: self.file, metadata }
-    }
+    #[schema(value_type = UploadMetadata)]
+    pub metadata: MpJson<UploadMetadata>,
 }

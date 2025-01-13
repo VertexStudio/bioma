@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
+use actix_multipart::form::MultipartForm;
 use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -14,7 +14,7 @@ use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::error::Error as StdError;
 use std::sync::Arc;
@@ -107,19 +107,6 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UploadMetadata {
-    pub path: std::path::PathBuf,
-}
-
-#[derive(Debug, MultipartForm)]
-pub struct Upload {
-    #[multipart(limit = "100MB")]
-    pub file: TempFile,
-    #[multipart(rename = "metadata")]
-    pub metadata: MpJson<UploadMetadata>,
-}
-
 #[derive(Debug, Serialize)]
 struct Uploaded {
     message: String,
@@ -137,8 +124,6 @@ struct Uploaded {
     )
 )]
 async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
-    let form: Upload = form.into();
-
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
 
