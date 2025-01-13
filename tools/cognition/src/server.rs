@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
+use actix_multipart::form::MultipartForm;
 use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -14,7 +14,7 @@ use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::error::Error as StdError;
 use std::sync::Arc;
@@ -107,19 +107,6 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UploadMetadata {
-    pub path: std::path::PathBuf,
-}
-
-#[derive(Debug, MultipartForm)]
-pub struct Upload {
-    #[multipart(limit = "100MB")]
-    pub file: TempFile,
-    #[multipart(rename = "metadata")]
-    pub metadata: MpJson<UploadMetadata>,
-}
-
 #[derive(Debug, Serialize)]
 struct Uploaded {
     message: String,
@@ -137,8 +124,6 @@ struct Uploaded {
     )
 )]
 async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
-    let form: Upload = form.into();
-
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
 
@@ -329,13 +314,6 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     }
 }
 
-#[derive(Deserialize)]
-pub struct ChatQuery {
-    pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
-    pub format: Option<chat::Schema>,
-}
-
 #[derive(Serialize)]
 struct ChatResponse {
     #[serde(flatten)]
@@ -367,13 +345,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: ChatQuery = match body.clone().try_into() {
-        Ok(query) => query,
-        Err(e) => {
-            error!("Error converting ChatQuery: {:?}", e);
-            return HttpResponse::BadRequest().body(e);
-        }
-    };
+    let body = body.clone();
 
     // Combine all user messages into a single query string for the retrieval system.
     // This helps find relevant context across all parts of the user's conversation.
@@ -516,7 +488,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                         match response {
                             Ok(chunk) => {
                                 last_response = Some(chunk.clone());
-                                
+
                                 // Stream the response chunk
                                 let response = ChatResponse {
                                     response: chunk,
@@ -552,7 +524,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                             if let Some((_tool_info, tool_client)) = tools.get_tool(&tool_call.function.name) {
                                 // Execute the tool call
                                 let execution_result = tool_client.call(&user_actor, tool_call).await;
-                                
+
                                 // Process the result
                                 let result_json = match execution_result {
                                     Ok(output) => serde_json::to_value(output.content).unwrap_or_default(),
@@ -570,17 +542,13 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
                                 // Stream tool response
                                 let tool_result_message = ChatMessage::tool(
-                                    serde_json::to_string(&formatted_tool_response).unwrap_or_default()
+                                    serde_json::to_string(&formatted_tool_response).unwrap_or_default(),
                                 );
-                                let streaming_response = ChatMessageResponse {
-                                    message: tool_result_message.clone(),
-                                    ..response.clone()
-                                };
-                                
-                                let chat_stream_response = ChatResponse {
-                                    response: streaming_response,
-                                    context: vec![],
-                                };
+                                let streaming_response =
+                                    ChatMessageResponse { message: tool_result_message.clone(), ..response.clone() };
+
+                                let chat_stream_response =
+                                    ChatResponse { response: streaming_response, context: vec![] };
 
                                 if tx.send(Ok(web::Json(chat_stream_response))).await.is_err() {
                                     return;
@@ -617,13 +585,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     }
 }
 
-#[derive(Debug)]
-pub struct AskQuery {
-    pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
-    pub format: Option<chat::Schema>,
-}
-
 #[derive(Serialize)]
 struct AskResponse {
     #[serde(flatten)]
@@ -647,13 +608,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: AskQuery = match body.clone().try_into() {
-        Ok(query) => query,
-        Err(e) => {
-            error!("Error converting AskQueryRequest: {:?}", e);
-            return HttpResponse::BadRequest().body(e);
-        }
-    };
+    let body = body.clone();
 
     let query = body
         .messages
