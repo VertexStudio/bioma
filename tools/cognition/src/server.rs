@@ -62,9 +62,9 @@ impl AppState {
 #[utoipa::path(
     get,
     path = "/health",
-    description = "Check server health",
+    description = "Check server health.",
     responses(
-        (status = 200, description = "Server health check"),
+        (status = 200, description = "Ok"),
     )
 )]
 async fn health() -> impl Responder {
@@ -74,9 +74,9 @@ async fn health() -> impl Responder {
 #[utoipa::path(
     get,
     path = "/hello",
-    description = "Hello, world! from the server",
+    description = "Hello, world! from the server.",
     responses(
-        (status = 200, description = "Server health check"),
+        (status = 200, description = "Ok"),
     )
 )]
 async fn hello() -> impl Responder {
@@ -86,9 +86,9 @@ async fn hello() -> impl Responder {
 #[utoipa::path(
     get,
     path = "/reset",
-    description = "Reset bioma engine",
+    description = "Reset bioma engine.",
     responses(
-        (status = 200, description = "Server health check"),
+        (status = 200, description = "Ok"),
     )
 )]
 async fn reset(data: web::Data<AppState>) -> HttpResponse {
@@ -130,7 +130,7 @@ struct Uploaded {
 #[utoipa::path(
     post,
     path = "/upload",
-    description = "Upload endpoint",
+    description = "Upload files to the server.",
     request_body(content = UploadRequestSchema, content_type = "multipart/form-data"),
     responses(
         (status = 200, description = "Ok"),
@@ -267,7 +267,7 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
 #[utoipa::path(
     post,
     path = "/index",
-    description = "This endpoint receives an array of path of files to index",
+    description = "Receives an array of path of files to index.",
     request_body = IndexGlobsRequestSchema,
     responses(
         (status = 200, description = "Ok"),
@@ -293,7 +293,7 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
 #[utoipa::path(
     post,
     path = "/retrieve",
-    description = "Retrieve context in .md format",
+    description = "Retrieve context in .md format.",
     request_body = RetrieveContextRequest,
     responses(
         (status = 200, description = "Ok"),
@@ -355,7 +355,7 @@ struct ToolResponse {
 #[utoipa::path(
     post,
     path = "/chat",
-    description = "Chat endpoint",
+    description = "Generates a chat response.",
     request_body = ChatQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
@@ -642,7 +642,7 @@ struct AskResponse {
 #[utoipa::path(
     post,
     path = "/ask",
-    description = "Ask question",
+    description = "Generates a chat response. Specific response format can be specified.",
     request_body = AskQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
@@ -770,7 +770,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
 #[utoipa::path(
     post,
     path = "/delete_source",
-    description = "Delete indexed sources",
+    description = "Delete indexed sources.",
     request_body = DeleteSourceRequestSchema,
     responses(
         (status = 200, description = "Ok"),
@@ -811,7 +811,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
 #[utoipa::path(
     post,
     path = "/embed",
-    description = "Embed endpoint",
+    description = "Generate embeddings for text or images.",
     request_body = EmbeddingsQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
@@ -911,7 +911,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
 #[utoipa::path(
     post,
     path = "/rerank",
-    description = "Rerank endpoint",
+    description = "Rerank texts based on a query.",
     request_body = RankTextsRequestSchema,
     responses(
         (status = 200, description = "Ok"),
