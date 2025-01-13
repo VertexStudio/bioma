@@ -7,10 +7,9 @@ use bioma_llm::{
     rerank::{RankTexts, TruncationDirection},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use utoipa::ToSchema;
 
-use crate::{ChatQuery, Upload, UploadMetadata};
+use crate::{Upload, UploadMetadata};
 
 // /index Endpoint Schemas
 
@@ -176,7 +175,7 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
         }
     }
 }))]
-pub struct AskQuery {
+pub struct AskQueryRequestSchema {
     #[schema(value_type = ChatMessageRequestSchema)]
     pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
@@ -196,28 +195,13 @@ pub struct AskQuery {
         }
     ]
 }))]
+
 pub struct ChatQueryRequestSchema {
-    pub messages: Vec<ChatMessageRequestSchema>,
+    #[schema(value_type = ChatMessageRequestSchema)]
+    pub messages: Vec<ChatMessage>,
     pub source: Option<String>,
-    pub format: Option<Value>,
-}
-
-impl TryInto<ChatQuery> for ChatQueryRequestSchema {
-    type Error = String;
-
-    fn try_into(self) -> Result<ChatQuery, Self::Error> {
-        let messages: Vec<ChatMessage> = self.messages.into_iter().map(|message| message.into()).collect();
-
-        let format: Option<chat::Schema> = match self.format {
-            Some(format) => match serde_json::from_value(format) {
-                Ok(format) => Some(format),
-                Err(_) => return Err("\"format\" field structure is not valid".to_string()),
-            },
-            None => None,
-        };
-
-        Ok(ChatQuery { format, source: self.source, messages })
-    }
+    #[schema(value_type = Schema::Object)]
+    pub format: Option<chat::Schema>,
 }
 
 // /delete_resource Endpoint Schemas

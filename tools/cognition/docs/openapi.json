@@ -233,15 +233,15 @@
             "AskQueryRequestSchema": {
                 "type": "object",
                 "required": [
-                    "messages"
+                    "messages",
+                    "format"
                 ],
                 "properties": {
-                    "format": {},
+                    "format": {
+                        "type": "object"
+                    },
                     "messages": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
-                        }
+                        "$ref": "#/components/schemas/ChatMessageRequestSchema"
                     },
                     "source": {
                         "type": [
@@ -313,15 +313,15 @@
             "ChatQueryRequestSchema": {
                 "type": "object",
                 "required": [
-                    "messages"
+                    "messages",
+                    "format"
                 ],
                 "properties": {
-                    "format": {},
+                    "format": {
+                        "type": "object"
+                    },
                     "messages": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
-                        }
+                        "$ref": "#/components/schemas/ChatMessageRequestSchema"
                     },
                     "source": {
                         "type": [
