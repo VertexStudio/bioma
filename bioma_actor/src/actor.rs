@@ -499,14 +499,24 @@ where
 #[derive(bon::Builder, Clone)]
 pub struct SendOptions {
     /// The maximum duration to wait for a reply before timing out.
+    #[builder(default = default_timeout())]
     pub timeout: std::time::Duration,
     /// Whether to check actor health before sending messages
+    #[builder(default = default_check_health())]
     pub check_health: bool,
+}
+
+fn default_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(30)
+}
+
+fn default_check_health() -> bool {
+    false
 }
 
 impl Default for SendOptions {
     fn default() -> Self {
-        Self { timeout: std::time::Duration::from_secs(30), check_health: false }
+        Self::builder().build()
     }
 }
 
@@ -619,14 +629,24 @@ pub struct SpawnOptions {
     ///
     /// This field determines the behavior of the spawning process when it encounters
     /// an existing actor with the same ID as the one being spawned.
+    #[builder(default = default_spawn_exists())]
     exists: SpawnExistsOptions,
     /// Health configuration for the actor
+    #[builder(default = default_health_config())]
     health_config: HealthConfig,
+}
+
+fn default_spawn_exists() -> SpawnExistsOptions {
+    SpawnExistsOptions::Reset
+}
+
+fn default_health_config() -> HealthConfig {
+    HealthConfig::builder().build()
 }
 
 impl Default for SpawnOptions {
     fn default() -> Self {
-        Self { exists: SpawnExistsOptions::Error, health_config: HealthConfig::default() }
+        Self::builder().build()
     }
 }
 
@@ -857,7 +877,7 @@ pub struct ActorRecord {
 }
 
 /// Configuration for actor health monitoring
-/// 
+///
 /// Provides settings to control how an actor's health status is tracked and updated.
 /// Health monitoring allows the system to detect unhealthy or unresponsive actors
 /// by tracking periodic health updates.
@@ -881,19 +901,15 @@ pub struct ActorRecord {
 ///
 /// let (ctx, actor) = MyActor::spawn(engine, id, actor, options).await?;
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(bon::Builder, Clone, Debug, Serialize, Deserialize)]
 pub struct HealthConfig {
     /// Whether health monitoring is enabled for this actor
+    #[builder(default = false)]
     pub enabled: bool,
     /// Interval at which the actor updates its last_seen timestamp
     #[serde(with = "humantime_serde")]
+    #[builder(default = Duration::from_secs(60))]
     pub update_interval: Duration,
-}
-
-impl Default for HealthConfig {
-    fn default() -> Self {
-        Self { enabled: false, update_interval: Duration::from_secs(60) }
-    }
 }
 
 /// Record for storing health status
@@ -1006,12 +1022,7 @@ impl<T: Actor> ActorContext<T> {
     /// * `Ok(())` if initialization and startup succeed
     /// * `Err(SystemActorError)` if any step fails
     pub async fn init_health(&mut self, config: HealthConfig) -> Result<(), SystemActorError> {
-        debug!(
-            "[{}] health-init enabled={} interval={:?}",
-            self.id().name(),
-            config.enabled,
-            config.update_interval
-        );
+        debug!("[{}] health-init enabled={} interval={:?}", self.id().name(), config.enabled, config.update_interval);
 
         let health_id = self.id().health_id();
         let health_record = HealthRecord::new(health_id.clone(), &config);
@@ -1039,10 +1050,12 @@ impl<T: Actor> ActorContext<T> {
                     tokio::time::sleep(update_interval.into()).await;
 
                     let update = UpdateHealth { last_seen: sql::Datetime::default() };
-                    
+
                     debug!("[{}] health-update", actor_name);
 
-                    if let Err(e) = engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await {
+                    if let Err(e) =
+                        engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
+                    {
                         error!("[{}] health-update-error: {}", actor_name, e);
                         break;
                     }
@@ -1066,7 +1079,7 @@ impl<T: Actor> ActorContext<T> {
     /// * `actor_id` - ID of the actor to check
     ///
     /// # Returns
-    /// 
+    ///
     /// * `Ok(true)` if the actor is healthy
     /// * `Ok(false)` if the actor is unhealthy or not found
     /// * `Err(SystemActorError)` if checking health status fails
@@ -1084,9 +1097,8 @@ impl<T: Actor> ActorContext<T> {
                 return Ok(true);
             }
 
-            let elapsed = SystemTime::now()
-                .duration_since(SystemTime::from(health.last_seen.0))
-                .unwrap_or(Duration::MAX);
+            let elapsed =
+                SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
 
             let update_interval: std::time::Duration = health.update_interval.into();
             let is_healthy = elapsed <= update_interval;
@@ -1858,7 +1870,8 @@ mod tests {
                 info!("{} Ping", ctx.id());
                 attempts += 1;
 
-                let pong = ctx.send_and_wait_reply::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
+                let pong =
+                    ctx.send_and_wait_reply::<PongActor, Ping>(Ping, &pong_id, SendOptions::builder().build()).await?;
                 info!("{} Pong {}", ctx.id(), pong.times);
 
                 if pong.times == 0 {
