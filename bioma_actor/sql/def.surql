@@ -42,12 +42,3 @@ DEFINE TABLE health TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD last_seen ON health TYPE datetime PERMISSIONS FULL;
 DEFINE FIELD enabled ON health TYPE bool PERMISSIONS FULL;
 DEFINE FIELD update_interval ON health TYPE duration PERMISSIONS FULL;
-
--- ------------------------------
--- TABLE: actor_health
--- ------------------------------
-
-DEFINE TABLE actor_health TYPE RELATION IN actor OUT health SCHEMALESS PERMISSIONS NONE;
-
-DEFINE FIELD in ON actor_health TYPE record<actor> PERMISSIONS FULL;
-DEFINE FIELD out ON actor_health TYPE record<health> PERMISSIONS FULL;

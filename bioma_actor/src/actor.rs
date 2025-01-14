@@ -982,40 +982,24 @@ impl<T: Actor> ActorContext<T> {
     /// * `Ok(())` if initialization and startup succeed
     /// * `Err(SystemActorError)` if any step fails
     pub async fn init_health(&mut self, config: HealthConfig) -> Result<(), SystemActorError> {
-        println!("Initializing health monitoring for actor: {}", self.id().name());
+        debug!("[{}] init-health enabled={}", self.id().name(), config.enabled);
 
-        if !config.enabled {
-            println!("Health monitoring disabled for actor: {}", self.id().name());
-            return Ok(());
-        }
-
-        // Create health record
         let health_id = self.id().health_id();
-        println!("Creating health record with ID: {}", health_id);
-
         let health_record = HealthRecord::new(health_id.clone(), &config);
-        println!("Health record created: {:?}", health_record);
 
-        // Use the health.surql file to create health record and relation
-        let query = include_str!("../sql/health.surql");
-        println!("Executing health query:\n{}", query);
-
-        let result = self
+        // Explicitly specify Record type for upsert operation
+        let _: Option<HealthRecord> = self
             .engine()
             .db()
             .lock()
             .await
-            .query(query)
-            .bind(("health_id", health_id.clone()))
-            .bind(("health", health_record.clone()))
-            .bind(("actor_id", self.id().record_id()))
+            .upsert(&health_id)
+            .content(health_record.clone())
             .await
             .map_err(SystemActorError::from)?;
 
-        println!("Health initialization result: {:?}", result);
-
+        // Start health update task if enabled
         if config.enabled {
-            // Only spawn the update task if health monitoring is enabled
             let engine = self.engine().clone();
             let update_interval = health_record.update_interval;
 
@@ -1023,10 +1007,8 @@ impl<T: Actor> ActorContext<T> {
                 loop {
                     tokio::time::sleep(update_interval.into()).await;
 
-                    // Create update data with current timestamp
                     let update = UpdateHealth { last_seen: sql::Datetime::default() };
 
-                    // Use reference and specify Option<HealthRecord> as the return type
                     if let Err(e) =
                         engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
                     {
@@ -1044,38 +1026,28 @@ impl<T: Actor> ActorContext<T> {
 
     /// Check if an actor is healthy
     pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
-        println!("check_actor_health called for actor: {}", actor_id.name());
-
         let health_id = actor_id.health_id();
         let query = format!("SELECT * FROM {}", health_id);
-        println!("Executing health check query:\n{}", query);
 
         let mut res = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
-        println!("Health check query result: {:?}", res);
 
         let health: Option<HealthRecord> = res.take(0)?;
-        println!("Retrieved health record: {:?}", health);
 
         if let Some(health) = health {
             if !health.enabled {
-                println!("Health monitoring disabled for actor: {}", actor_id.name());
                 return Ok(true);
             }
 
             let elapsed =
                 SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
-            println!("Time elapsed since last health update: {:?}", elapsed);
 
             let update_interval: std::time::Duration = health.update_interval.into();
-            println!("Health update interval: {:?}", update_interval);
 
             let is_healthy = elapsed <= update_interval;
-            println!("Actor {} is healthy: {}", actor_id.name(), is_healthy);
 
             Ok(is_healthy)
         } else {
-            println!("No health record found for actor: {}, considering unhealthy", actor_id.name());
-            Ok(false) // No health monitoring configured, consider unhealthy
+            Ok(false)
         }
     }
 
