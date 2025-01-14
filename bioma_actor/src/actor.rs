@@ -894,6 +894,11 @@ impl HealthRecord {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct UpdateHealth {
+    last_seen: sql::Datetime,
+}
+
 /// The context for an actor, providing access to the actor system.
 ///
 /// The context allows an actor to:
@@ -1013,15 +1018,20 @@ impl<T: Actor> ActorContext<T> {
 
         // Start periodic health updates
         let engine = self.engine().clone();
+        let health_id = self.id().health_id();
         let update_interval = health_record.update_interval;
 
         let handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(update_interval.into()).await;
 
-                let query = format!("UPDATE {} SET last_seen = time::now()", health_id);
+                // Create update data with current timestamp
+                let update = UpdateHealth { last_seen: sql::Datetime::default() };
 
-                if let Err(e) = engine.db().lock().await.query(&query).await {
+                // Use reference and specify Option<HealthRecord> as the return type
+                if let Err(e) =
+                    engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
+                {
                     error!("Failed to update health status: {}", e);
                     break;
                 }
@@ -1029,20 +1039,6 @@ impl<T: Actor> ActorContext<T> {
         });
 
         self.health_task = Some(handle);
-
-        Ok(())
-    }
-
-    /// Update the last seen timestamp
-    pub async fn update_last_seen(&self) -> Result<(), SystemActorError> {
-        println!("update_last_seen called for actor: {}", self.id().name());
-
-        let health_id = self.id().health_id();
-        let query = format!("UPDATE {} SET last_seen = time::now()", health_id);
-        println!("Executing update query:\n{}", query);
-
-        let update_result = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
-        println!("Last seen update result: {:?}", update_result);
 
         Ok(())
     }
