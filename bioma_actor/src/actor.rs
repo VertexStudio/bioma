@@ -637,7 +637,7 @@ pub struct SpawnOptions {
 }
 
 fn default_spawn_exists() -> SpawnExistsOptions {
-    SpawnExistsOptions::Reset
+    SpawnExistsOptions::Error
 }
 
 impl Default for SpawnOptions {
