@@ -48,7 +48,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
                 ListTools(None),
                 &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
             )
             .await?;
         info!("Tools from {} ({})", self.server.name, list_tools.tools.len());
@@ -79,7 +79,15 @@ impl Tools {
                 engine.clone(),
                 client_id.clone(),
                 ModelContextProtocolClientActor::new(server.clone()),
-                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+                SpawnOptions::builder()
+                    .exists(SpawnExistsOptions::Reset)
+                    .health_config(
+                        HealthConfig::builder()
+                            .enabled(true)
+                            .update_interval(std::time::Duration::from_secs(1).into())
+                            .build(),
+                    )
+                    .build(),
             )
             .await?;
             let client_id_spawn = client_id.clone();
