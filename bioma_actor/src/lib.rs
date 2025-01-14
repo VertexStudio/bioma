@@ -4,8 +4,8 @@ mod factory;
 mod util;
 
 pub use crate::actor::{
-    Actor, ActorContext, ActorError, ActorId, FrameMessage, Message, MessageType, SendOptions, SpawnExistsOptions,
-    SpawnOptions, SystemActorError,
+    Actor, ActorContext, ActorError, ActorId, FrameMessage, HealthConfig, Message, MessageType, SendOptions,
+    SpawnExistsOptions, SpawnOptions, SystemActorError,
 };
 pub use crate::engine::{Engine, EngineOptions, Record};
 pub use crate::factory::{ActorFactory, ActorHandle, ActorTagRegistry};
