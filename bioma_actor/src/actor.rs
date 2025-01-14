@@ -19,7 +19,6 @@ const DB_TABLE_ACTOR: &str = "actor";
 const DB_TABLE_MESSAGE: &str = "message";
 const DB_TABLE_REPLY: &str = "reply";
 const DB_TABLE_HEALTH: &str = "health";
-const DB_TABLE_ACTOR_HEALTH: &str = "actor_health";
 
 /// Implement this trait to define custom actor error types
 pub trait ActorError: std::error::Error + Debug + Send + Sync + From<SystemActorError> {}
@@ -142,6 +141,13 @@ pub enum SystemActorError {
     /// that hasn't been registered with the actor system.
     #[error("Actor tag not found: {0}")]
     ActorTagNotFound(Cow<'static, str>),
+
+    /// Error when attempting to communicate with an unhealthy actor.
+    ///
+    /// This occurs when trying to send a message to an actor that hasn't
+    /// updated its health status within the configured interval.
+    #[error("Actor is unhealthy: {0}")]
+    UnhealthyActor(ActorId),
 }
 
 impl ActorError for SystemActorError {}
@@ -572,6 +578,18 @@ impl ActorId {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// Creates a health record ID for this actor
+    ///
+    /// This method generates a RecordId for the health record associated with this actor.
+    /// The health record ID uses the same name as the actor but in the health table.
+    ///
+    /// # Returns
+    ///
+    /// A `RecordId` for the health record
+    pub fn health_id(&self) -> RecordId {
+        RecordId::from_table_key(DB_TABLE_HEALTH, self.name.as_ref())
+    }
 }
 
 /// Options for configuring actor spawn behavior.
@@ -764,9 +782,6 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             // Initialize health monitoring if configured
             if let Some(health_config) = options.health_config {
                 ctx.init_health(health_config.clone()).await?;
-
-                // Start periodic health updates
-                ctx.start_health_updates().await?;
             }
 
             Ok((ctx, actor))
@@ -948,9 +963,23 @@ impl<T: Actor> ActorContext<T> {
         }
     }
 
-    /// Initialize health monitoring for this actor
+    /// Initialize health monitoring and start periodic health updates for this actor
+    ///
+    /// This function:
+    /// 1. Creates initial health record if health monitoring is enabled
+    /// 2. Establishes relation between actor and health record
+    /// 3. Starts periodic health update task if enabled
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Health monitoring configuration
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if initialization and startup succeed
+    /// * `Err(SystemActorError)` if any step fails
     pub async fn init_health(&mut self, config: HealthConfig) -> Result<(), SystemActorError> {
-        println!("init_health called for actor: {}", self.id().name());
+        println!("Initializing health monitoring for actor: {}", self.id().name());
 
         if !config.enabled {
             println!("Health monitoring disabled for actor: {}", self.id().name());
@@ -958,7 +987,7 @@ impl<T: Actor> ActorContext<T> {
         }
 
         // Create health record
-        let health_id = RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name());
+        let health_id = self.id().health_id();
         println!("Creating health record with ID: {}", health_id);
 
         let health_record = HealthRecord::new(health_id.clone(), &config);
@@ -974,13 +1003,33 @@ impl<T: Actor> ActorContext<T> {
             .lock()
             .await
             .query(query)
-            .bind(("health_id", health_id))
-            .bind(("health", health_record))
+            .bind(("health_id", health_id.clone()))
+            .bind(("health", health_record.clone()))
             .bind(("actor_id", self.id().record_id()))
             .await
             .map_err(SystemActorError::from)?;
 
         println!("Health initialization result: {:?}", result);
+
+        // Start periodic health updates
+        let engine = self.engine().clone();
+        let update_interval = health_record.update_interval;
+
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(update_interval.into()).await;
+
+                let query = format!("UPDATE {} SET last_seen = time::now()", health_id);
+
+                if let Err(e) = engine.db().lock().await.query(&query).await {
+                    error!("Failed to update health status: {}", e);
+                    break;
+                }
+            }
+        });
+
+        self.health_task = Some(handle);
+
         Ok(())
     }
 
@@ -988,7 +1037,8 @@ impl<T: Actor> ActorContext<T> {
     pub async fn update_last_seen(&self) -> Result<(), SystemActorError> {
         println!("update_last_seen called for actor: {}", self.id().name());
 
-        let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, self.id().name());
+        let health_id = self.id().health_id();
+        let query = format!("UPDATE {} SET last_seen = time::now()", health_id);
         println!("Executing update query:\n{}", query);
 
         let update_result = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
@@ -997,45 +1047,12 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
-    /// Start the health update task
-    pub async fn start_health_updates(&mut self) -> Result<(), SystemActorError> {
-        let health_id = RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name());
-        let health: Option<HealthRecord> =
-            self.engine().db().lock().await.select(&health_id).await.map_err(SystemActorError::from)?;
-
-        if let Some(health) = health {
-            if !health.enabled {
-                return Ok(());
-            }
-
-            let engine = self.engine().clone();
-            let actor_id = self.id().clone();
-            let update_interval = health.update_interval;
-
-            let handle = tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(update_interval.into()).await;
-
-                    let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, actor_id.name());
-
-                    if let Err(e) = engine.db().lock().await.query(&query).await {
-                        error!("Failed to update health status: {}", e);
-                        break;
-                    }
-                }
-            });
-
-            self.health_task = Some(handle);
-        }
-
-        Ok(())
-    }
-
     /// Check if an actor is healthy
     pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
         println!("check_actor_health called for actor: {}", actor_id.name());
 
-        let query = format!("SELECT * FROM health:⟨{}⟩", actor_id.name());
+        let health_id = actor_id.health_id();
+        let query = format!("SELECT * FROM {}", health_id);
         println!("Executing health check query:\n{}", query);
 
         let mut res = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
@@ -1260,7 +1277,7 @@ impl<T: Actor> ActorContext<T> {
         if options.is_some() && options.unwrap().check_health {
             let is_healthy = self.check_actor_health(to).await?;
             if !is_healthy {
-                return Err(SystemActorError::MessageReply("Target actor is not healthy".into()));
+                return Err(SystemActorError::UnhealthyActor(to.clone()));
             }
         }
 
@@ -2009,7 +2026,7 @@ mod tests {
 
         assert!(matches!(
             response.unwrap_err(),
-            SystemActorError::MessageReply(msg) if msg == "Target actor is not healthy"
+            SystemActorError::UnhealthyActor(id) if id == test_id
         ));
 
         Ok(())
