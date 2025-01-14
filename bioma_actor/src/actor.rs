@@ -632,16 +632,12 @@ pub struct SpawnOptions {
     #[builder(default = default_spawn_exists())]
     exists: SpawnExistsOptions,
     /// Health configuration for the actor
-    #[builder(default = default_health_config())]
-    health_config: HealthConfig,
+    /// Some = enabled with config, None = disabled
+    health_config: Option<HealthConfig>,
 }
 
 fn default_spawn_exists() -> SpawnExistsOptions {
     SpawnExistsOptions::Reset
-}
-
-fn default_health_config() -> HealthConfig {
-    HealthConfig::builder().build()
 }
 
 impl Default for SpawnOptions {
@@ -878,9 +874,8 @@ pub struct ActorRecord {
 
 /// Configuration for actor health monitoring
 ///
-/// Provides settings to control how an actor's health status is tracked and updated.
-/// Health monitoring allows the system to detect unhealthy or unresponsive actors
-/// by tracking periodic health updates.
+/// When Some, health monitoring is enabled with the specified configuration.
+/// When None, health monitoring is disabled.
 ///
 /// Health monitoring works by:
 /// 1. Creating a health record when the actor is spawned (if enabled)
@@ -890,10 +885,10 @@ pub struct ActorRecord {
 /// # Example
 ///
 /// ```rust
-/// let config = HealthConfig {
-///     enabled: true,
+/// // Enable health monitoring with 60 second interval
+/// let config = Some(HealthConfig {
 ///     update_interval: Duration::from_secs(60)
-/// };
+/// });
 ///
 /// let options = SpawnOptions::builder()
 ///     .health_config(config)
@@ -903,9 +898,6 @@ pub struct ActorRecord {
 /// ```
 #[derive(bon::Builder, Clone, Debug, Serialize, Deserialize)]
 pub struct HealthConfig {
-    /// Whether health monitoring is enabled for this actor
-    #[builder(default = false)]
-    pub enabled: bool,
     /// Interval at which the actor updates its last_seen timestamp
     #[builder(default = sql::Duration::from_secs(60))]
     pub update_interval: sql::Duration,
@@ -921,12 +913,17 @@ struct HealthRecord {
 }
 
 impl HealthRecord {
-    fn new(id: RecordId, config: &HealthConfig) -> Self {
-        Self {
-            id,
-            last_seen: sql::Datetime::default(),
-            enabled: config.enabled,
-            update_interval: config.update_interval,
+    fn new(id: RecordId, config: Option<&HealthConfig>) -> Self {
+        match config {
+            Some(config) => {
+                Self { id, last_seen: sql::Datetime::default(), enabled: true, update_interval: config.update_interval }
+            }
+            None => Self {
+                id,
+                last_seen: sql::Datetime::default(),
+                enabled: false,
+                update_interval: sql::Duration::from_secs(60), // default value not used
+            },
         }
     }
 }
@@ -1014,17 +1011,22 @@ impl<T: Actor> ActorContext<T> {
     ///
     /// # Arguments
     ///
-    /// * `config` - Health monitoring configuration
+    /// * `config` - Optional health monitoring configuration
     ///
     /// # Returns
     ///
     /// * `Ok(())` if initialization and startup succeed
     /// * `Err(SystemActorError)` if any step fails
-    pub async fn init_health(&mut self, config: HealthConfig) -> Result<(), SystemActorError> {
-        debug!("[{}] health-init enabled={} interval={:?}", self.id().name(), config.enabled, config.update_interval);
+    pub async fn init_health(&mut self, config: Option<HealthConfig>) -> Result<(), SystemActorError> {
+        debug!(
+            "[{}] health-init enabled={} interval={:?}",
+            self.id().name(),
+            config.is_some(),
+            config.as_ref().map(|c| c.update_interval)
+        );
 
         let health_id = self.id().health_id();
-        let health_record = HealthRecord::new(health_id.clone(), &config);
+        let health_record = HealthRecord::new(health_id.clone(), config.as_ref());
 
         // Explicitly specify Record type for upsert operation
         let _: Option<HealthRecord> = self
@@ -1038,9 +1040,9 @@ impl<T: Actor> ActorContext<T> {
             .map_err(SystemActorError::from)?;
 
         // Start health update task if enabled
-        if config.enabled {
+        if let Some(config) = config {
             let engine = self.engine().clone();
-            let update_interval = health_record.update_interval;
+            let update_interval = config.update_interval;
             let health_id = health_id.clone();
             let actor_name = self.id().name().to_string();
 
@@ -1807,13 +1809,10 @@ impl<T: Actor> ActorContext<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use crate::dbg_export_db;
     use crate::prelude::*;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
-    use surrealdb::sql;
     use test_log::test;
     use tracing::{error, info};
 

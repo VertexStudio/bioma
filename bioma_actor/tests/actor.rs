@@ -588,7 +588,7 @@ async fn test_health_monitoring_enabled() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     // Create health config with short update interval
-    let health_config = HealthConfig::builder().enabled(true).update_interval(sql::Duration::from_millis(100)).build();
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
 
     let options = SpawnOptions::builder().health_config(health_config).build();
 
@@ -628,7 +628,7 @@ async fn test_health_monitoring_disabled() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     // Create health config with monitoring disabled
-    let health_config = HealthConfig::builder().enabled(false).build();
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
 
     let options = SpawnOptions::builder().health_config(health_config).build();
 
@@ -666,7 +666,7 @@ async fn test_health_check_before_send() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
     // Create health config with short update interval
-    let health_config = HealthConfig::builder().enabled(true).update_interval(sql::Duration::from_millis(100)).build();
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
 
     let options = SpawnOptions::builder().health_config(health_config).build();
 
@@ -713,7 +713,7 @@ async fn test_health_check_before_send() -> Result<(), TestError> {
 async fn test_health_record_persistence() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
-    let health_config = HealthConfig::builder().enabled(true).update_interval(sql::Duration::from_millis(100)).build();
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
 
     let options = SpawnOptions::builder().health_config(health_config.clone()).build();
 
