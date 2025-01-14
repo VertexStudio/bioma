@@ -1096,7 +1096,7 @@ impl<T: Actor> ActorContext<T> {
                 SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
 
             let update_interval: std::time::Duration = health.update_interval.into();
-            let is_healthy = elapsed <= update_interval;
+            let is_healthy = elapsed <= update_interval + (update_interval / 10);
 
             debug!(
                 "[{}] health-check {} elapsed={:?} interval={:?} healthy={}",
