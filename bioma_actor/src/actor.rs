@@ -1098,14 +1098,17 @@ impl<T: Actor> ActorContext<T> {
                 SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
 
             let update_interval: std::time::Duration = health.update_interval.into();
-            let is_healthy = elapsed <= update_interval + (update_interval / 10);
+            // Cap grace period at 1 second
+            let grace_period = std::cmp::min(update_interval / 10, Duration::from_secs(1));
+            let is_healthy = elapsed <= update_interval + grace_period;
 
             debug!(
-                "[{}] health-check {} elapsed={:?} interval={:?} healthy={}",
+                "[{}] health-check {} elapsed={:?} interval={:?} grace={:?} healthy={}",
                 self.id().name(),
                 actor_id.name(),
                 elapsed,
                 update_interval,
+                grace_period,
                 is_healthy
             );
 
