@@ -857,6 +857,30 @@ pub struct ActorRecord {
 }
 
 /// Configuration for actor health monitoring
+/// 
+/// Provides settings to control how an actor's health status is tracked and updated.
+/// Health monitoring allows the system to detect unhealthy or unresponsive actors
+/// by tracking periodic health updates.
+///
+/// Health monitoring works by:
+/// 1. Creating a health record when the actor is spawned (if enabled)
+/// 2. Periodically updating a timestamp in the health record
+/// 3. Checking the timestamp before sending messages to ensure the actor is healthy
+///
+/// # Example
+///
+/// ```rust
+/// let config = HealthConfig {
+///     enabled: true,
+///     update_interval: Duration::from_secs(60)
+/// };
+///
+/// let options = SpawnOptions::builder()
+///     .health_config(config)
+///     .build();
+///
+/// let (ctx, actor) = MyActor::spawn(engine, id, actor, options).await?;
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HealthConfig {
     /// Whether health monitoring is enabled for this actor
@@ -1024,7 +1048,21 @@ impl<T: Actor> ActorContext<T> {
         Ok(())
     }
 
-    /// Check if an actor is healthy
+    /// Check if an actor is healthy based on its health record
+    ///
+    /// An actor is considered healthy if either:
+    /// - Health monitoring is disabled for the actor
+    /// - The actor has updated its health status within its configured update interval
+    ///
+    /// # Arguments
+    ///
+    /// * `actor_id` - ID of the actor to check
+    ///
+    /// # Returns
+    /// 
+    /// * `Ok(true)` if the actor is healthy
+    /// * `Ok(false)` if the actor is unhealthy or not found
+    /// * `Err(SystemActorError)` if checking health status fails
     pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
         let health_id = actor_id.health_id();
         let query = format!("SELECT * FROM {}", health_id);
