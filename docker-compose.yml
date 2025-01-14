@@ -167,6 +167,7 @@ services:
       - ./assets/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - minio
+      - swagger-ui
     networks:
       - bioma-network
 
@@ -174,11 +175,14 @@ services:
     image: swaggerapi/swagger-ui:latest
     container_name: swagger-ui
     ports:
-      - "80:8080"
+      - "8081:8080"
     environment:
       - SWAGGER_JSON=/app/openapi.json
+      - EMBEDDING=true
     volumes:
       - ./tools/cognition/docs:/app
+    networks:
+      - bioma-network
 
 volumes:
   bioma-ollama_data:
