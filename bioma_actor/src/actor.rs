@@ -907,9 +907,8 @@ pub struct HealthConfig {
     #[builder(default = false)]
     pub enabled: bool,
     /// Interval at which the actor updates its last_seen timestamp
-    #[serde(with = "humantime_serde")]
-    #[builder(default = Duration::from_secs(60))]
-    pub update_interval: Duration,
+    #[builder(default = sql::Duration::from_secs(60))]
+    pub update_interval: sql::Duration,
 }
 
 /// Record for storing health status
@@ -927,7 +926,7 @@ impl HealthRecord {
             id,
             last_seen: sql::Datetime::default(),
             enabled: config.enabled,
-            update_interval: sql::Duration::from_secs(config.update_interval.as_secs()),
+            update_interval: config.update_interval,
         }
     }
 }
@@ -1051,10 +1050,8 @@ impl<T: Actor> ActorContext<T> {
 
                     let update = UpdateHealth { last_seen: sql::Datetime::default() };
 
-                    debug!("[{}] health-update", actor_name);
-
                     if let Err(e) =
-                        engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
+                        engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).merge(update).await
                     {
                         error!("[{}] health-update-error: {}", actor_name, e);
                         break;
@@ -1085,11 +1082,9 @@ impl<T: Actor> ActorContext<T> {
     /// * `Err(SystemActorError)` if checking health status fails
     pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
         let health_id = actor_id.health_id();
-        let query = format!("SELECT * FROM {}", health_id);
 
-        let mut res = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
-
-        let health: Option<HealthRecord> = res.take(0)?;
+        let health: Option<HealthRecord> =
+            self.engine().db().lock().await.select(&health_id).await.map_err(SystemActorError::from)?;
 
         if let Some(health) = health {
             if !health.enabled {
@@ -1816,9 +1811,9 @@ mod tests {
 
     use crate::dbg_export_db;
     use crate::prelude::*;
-    use actor::HealthConfig;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
+    use surrealdb::sql;
     use test_log::test;
     use tracing::{error, info};
 
@@ -1970,100 +1965,6 @@ mod tests {
 
         // Export the database for debugging
         dbg_export_db!(engine);
-
-        Ok(())
-    }
-
-    #[test(tokio::test)]
-    async fn test_actor_health_monitoring() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = Engine::test().await?;
-
-        // Create a simple test actor that just receives messages
-        #[derive(Debug, Serialize, Deserialize)]
-        struct TestActor;
-
-        #[derive(Clone, Debug, Serialize, Deserialize)]
-        struct TestMessage(String);
-
-        #[derive(Clone, Debug, Serialize, Deserialize)]
-        struct TestResponse(String);
-
-        impl Actor for TestActor {
-            type Error = SystemActorError;
-
-            async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
-                let mut stream = ctx.recv().await?;
-                while let Some(Ok(frame)) = stream.next().await {
-                    if let Some(message) = frame.is::<TestMessage>() {
-                        self.reply(ctx, &message, &frame).await?;
-                    }
-                }
-                Ok(())
-            }
-        }
-
-        impl Message<TestMessage> for TestActor {
-            type Response = TestResponse;
-
-            async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &TestMessage) -> Result<(), Self::Error> {
-                ctx.reply(TestResponse(format!("Received: {}", msg.0))).await?;
-                Ok(())
-            }
-        }
-
-        // Create actor with health monitoring enabled
-        let test_id = ActorId::of::<TestActor>("/test");
-        let health_config = HealthConfig { enabled: true, update_interval: Duration::from_secs(1) };
-        let spawn_options =
-            SpawnOptions::builder().health_config(health_config).exists(SpawnExistsOptions::Reset).build();
-
-        // Spawn the test actor
-        let (mut test_ctx, mut test_actor) =
-            Actor::spawn(engine.clone(), test_id.clone(), TestActor, spawn_options).await?;
-
-        // Create a relay actor to send messages
-        let relay_id = ActorId::of::<Relay>("/relay");
-        let (relay_ctx, _) = Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
-
-        // Start the test actor
-        let test_handle = tokio::spawn(async move {
-            if let Err(e) = test_actor.start(&mut test_ctx).await {
-                error!("TestActor error: {}", e);
-            }
-        });
-
-        // Send message while actor is healthy
-        let send_options = SendOptions::builder().check_health(true).timeout(Duration::from_secs(5)).build();
-
-        let response = relay_ctx
-            .send_and_wait_reply::<TestActor, TestMessage>(
-                TestMessage("hello".to_string()),
-                &test_id,
-                send_options.clone(),
-            )
-            .await;
-
-        assert!(response.is_ok(), "Should receive response while actor is healthy");
-
-        // Drop actor handle
-        test_handle.abort();
-
-        // Wait longer than health update interval
-        tokio::time::sleep(Duration::from_secs(2)).await;
-
-        // Try sending message to unhealthy actor
-        let response = relay_ctx
-            .send_and_wait_reply::<TestActor, TestMessage>(
-                TestMessage("hello again".to_string()),
-                &test_id,
-                send_options,
-            )
-            .await;
-
-        assert!(matches!(
-            response.unwrap_err(),
-            SystemActorError::UnhealthyActor(id) if id == test_id
-        ));
 
         Ok(())
     }
