@@ -1006,7 +1006,12 @@ impl<T: Actor> ActorContext<T> {
     /// * `Ok(())` if initialization and startup succeed
     /// * `Err(SystemActorError)` if any step fails
     pub async fn init_health(&mut self, config: HealthConfig) -> Result<(), SystemActorError> {
-        debug!("[{}] init-health enabled={}", self.id().name(), config.enabled);
+        debug!(
+            "[{}] health-init enabled={} interval={:?}",
+            self.id().name(),
+            config.enabled,
+            config.update_interval
+        );
 
         let health_id = self.id().health_id();
         let health_record = HealthRecord::new(health_id.clone(), &config);
@@ -1026,17 +1031,19 @@ impl<T: Actor> ActorContext<T> {
         if config.enabled {
             let engine = self.engine().clone();
             let update_interval = health_record.update_interval;
+            let health_id = health_id.clone();
+            let actor_name = self.id().name().to_string();
 
             let handle = tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(update_interval.into()).await;
 
                     let update = UpdateHealth { last_seen: sql::Datetime::default() };
+                    
+                    debug!("[{}] health-update", actor_name);
 
-                    if let Err(e) =
-                        engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
-                    {
-                        error!("Failed to update health status: {}", e);
+                    if let Err(e) = engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await {
+                        error!("[{}] health-update-error: {}", actor_name, e);
                         break;
                     }
                 }
@@ -1073,18 +1080,29 @@ impl<T: Actor> ActorContext<T> {
 
         if let Some(health) = health {
             if !health.enabled {
+                debug!("[{}] health-check {} disabled=true", self.id().name(), actor_id.name());
                 return Ok(true);
             }
 
-            let elapsed =
-                SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
+            let elapsed = SystemTime::now()
+                .duration_since(SystemTime::from(health.last_seen.0))
+                .unwrap_or(Duration::MAX);
 
             let update_interval: std::time::Duration = health.update_interval.into();
-
             let is_healthy = elapsed <= update_interval;
+
+            debug!(
+                "[{}] health-check {} elapsed={:?} interval={:?} healthy={}",
+                self.id().name(),
+                actor_id.name(),
+                elapsed,
+                update_interval,
+                is_healthy
+            );
 
             Ok(is_healthy)
         } else {
+            debug!("[{}] health-check {} record-not-found", self.id().name(), actor_id.name());
             Ok(false)
         }
     }
