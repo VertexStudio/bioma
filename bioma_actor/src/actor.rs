@@ -621,12 +621,12 @@ pub struct SpawnOptions {
     /// an existing actor with the same ID as the one being spawned.
     exists: SpawnExistsOptions,
     /// Health configuration for the actor
-    health_config: Option<HealthConfig>,
+    health_config: HealthConfig,
 }
 
 impl Default for SpawnOptions {
     fn default() -> Self {
-        Self { exists: SpawnExistsOptions::Error, health_config: None }
+        Self { exists: SpawnExistsOptions::Error, health_config: HealthConfig::default() }
     }
 }
 
@@ -779,10 +779,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
             // Create the context
             let mut ctx = ActorContext::new(engine.clone(), id.clone());
 
-            // Initialize health monitoring if configured
-            if let Some(health_config) = options.health_config {
-                ctx.init_health(health_config.clone()).await?;
-            }
+            // Initialize health monitoring with the provided config
+            ctx.init_health(options.health_config.clone()).await?;
 
             Ok((ctx, actor))
         }
@@ -1016,29 +1014,30 @@ impl<T: Actor> ActorContext<T> {
 
         println!("Health initialization result: {:?}", result);
 
-        // Start periodic health updates
-        let engine = self.engine().clone();
-        let health_id = self.id().health_id();
-        let update_interval = health_record.update_interval;
+        if config.enabled {
+            // Only spawn the update task if health monitoring is enabled
+            let engine = self.engine().clone();
+            let update_interval = health_record.update_interval;
 
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(update_interval.into()).await;
+            let handle = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(update_interval.into()).await;
 
-                // Create update data with current timestamp
-                let update = UpdateHealth { last_seen: sql::Datetime::default() };
+                    // Create update data with current timestamp
+                    let update = UpdateHealth { last_seen: sql::Datetime::default() };
 
-                // Use reference and specify Option<HealthRecord> as the return type
-                if let Err(e) =
-                    engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
-                {
-                    error!("Failed to update health status: {}", e);
-                    break;
+                    // Use reference and specify Option<HealthRecord> as the return type
+                    if let Err(e) =
+                        engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).content(update).await
+                    {
+                        error!("Failed to update health status: {}", e);
+                        break;
+                    }
                 }
-            }
-        });
+            });
 
-        self.health_task = Some(handle);
+            self.health_task = Some(handle);
+        }
 
         Ok(())
     }
@@ -1075,8 +1074,8 @@ impl<T: Actor> ActorContext<T> {
 
             Ok(is_healthy)
         } else {
-            println!("No health record found for actor: {}, considering healthy", actor_id.name());
-            Ok(true) // No health monitoring configured, consider healthy
+            println!("No health record found for actor: {}, considering unhealthy", actor_id.name());
+            Ok(false) // No health monitoring configured, consider unhealthy
         }
     }
 

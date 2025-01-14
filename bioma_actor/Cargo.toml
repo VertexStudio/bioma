@@ -19,8 +19,6 @@ bon = { workspace = true }
 object_store = { workspace = true, features = ["serde", "aws"] }
 url = { workspace = true, features = ["serde"] }
 
-chrono = "0.4"
-
 [dev-dependencies]
 test-log = { workspace = true, default-features = false, features = [
     "trace",
