@@ -715,7 +715,8 @@ async fn test_health_record_persistence() -> Result<(), TestError> {
 
     let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
 
-    let options = SpawnOptions::builder().health_config(health_config.clone()).build();
+    let options =
+        SpawnOptions::builder().health_config(health_config.clone()).exists(SpawnExistsOptions::Reset).build();
 
     let actor_id = ActorId::of::<TestActor>("/health-persist");
 
