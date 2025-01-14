@@ -759,21 +759,14 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                 .map_err(SystemActorError::from)?;
 
             // Create the context
-            let ctx = ActorContext::new(engine.clone(), id.clone());
+            let mut ctx = ActorContext::new(engine.clone(), id.clone());
 
             // Initialize health monitoring if configured
             if let Some(health_config) = options.health_config {
                 ctx.init_health(health_config.clone()).await?;
 
                 // Start periodic health updates
-                if let Some(handle) = ctx.start_health_updates().await? {
-                    // Store handle somewhere or spawn a task to await it
-                    tokio::spawn(async move {
-                        if let Err(e) = handle.await {
-                            error!("Health update task failed: {}", e);
-                        }
-                    });
-                }
+                ctx.start_health_updates().await?;
             }
 
             Ok((ctx, actor))
@@ -904,15 +897,25 @@ pub struct ActorContext<T: Actor> {
     id: ActorId,
     /// Channel for sending reply chunks during message processing
     tx: Option<mpsc::UnboundedSender<Value>>,
+    /// Handle to health update task
+    health_task: Option<tokio::task::JoinHandle<()>>,
     /// Type marker for the actor
     _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Actor> Drop for ActorContext<T> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.health_task.take() {
+            handle.abort();
+        }
+    }
 }
 
 impl<T: Actor> ActorContext<T> {
     /// Create a new actor context
     fn new(engine: Engine, id: ActorId) -> Self {
         debug!("[{}] ctx-new", id.record_id());
-        Self { engine, id, tx: None, _marker: std::marker::PhantomData }
+        Self { engine, id, tx: None, health_task: None, _marker: std::marker::PhantomData }
     }
 
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
@@ -946,7 +949,7 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Initialize health monitoring for this actor
-    pub async fn init_health(&self, config: HealthConfig) -> Result<(), SystemActorError> {
+    pub async fn init_health(&mut self, config: HealthConfig) -> Result<(), SystemActorError> {
         println!("init_health called for actor: {}", self.id().name());
 
         if !config.enabled {
@@ -995,50 +998,37 @@ impl<T: Actor> ActorContext<T> {
     }
 
     /// Start the health update task
-    pub async fn start_health_updates(&self) -> Result<Option<tokio::task::JoinHandle<()>>, SystemActorError> {
-        println!("start_health_updates called for actor: {}", self.id().name());
-
-        // Get the health record
+    pub async fn start_health_updates(&mut self) -> Result<(), SystemActorError> {
         let health_id = RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name());
-        println!("Fetching health record with ID: {}", health_id);
-
         let health: Option<HealthRecord> =
             self.engine().db().lock().await.select(&health_id).await.map_err(SystemActorError::from)?;
-        println!("Retrieved health record: {:?}", health);
 
         if let Some(health) = health {
             if !health.enabled {
-                println!("Health monitoring disabled in record for actor: {}", self.id().name());
-                return Ok(None);
+                return Ok(());
             }
 
             let engine = self.engine().clone();
             let actor_id = self.id().clone();
             let update_interval = health.update_interval;
-            println!("Starting health update task with interval: {:?}", update_interval);
 
             let handle = tokio::spawn(async move {
-                println!("Health update task started for actor: {}", actor_id.name());
                 loop {
                     tokio::time::sleep(update_interval.into()).await;
-                    println!("Updating health for actor: {}", actor_id.name());
 
                     let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, actor_id.name());
-                    println!("Executing update query:\n{}", query);
 
                     if let Err(e) = engine.db().lock().await.query(&query).await {
-                        println!("Failed to update health status: {}", e);
                         error!("Failed to update health status: {}", e);
                         break;
                     }
                 }
             });
 
-            Ok(Some(handle))
-        } else {
-            println!("No health record found for actor: {}", self.id().name());
-            Ok(None)
+            self.health_task = Some(handle);
         }
+
+        Ok(())
     }
 
     /// Check if an actor is healthy
@@ -1970,10 +1960,7 @@ mod tests {
 
         // Create actor with health monitoring enabled
         let test_id = ActorId::of::<TestActor>("/test");
-        let health_config = HealthConfig {
-            enabled: true,
-            update_interval: Duration::from_secs(1), // Short interval for testing
-        };
+        let health_config = HealthConfig { enabled: true, update_interval: Duration::from_secs(1) };
         let spawn_options =
             SpawnOptions::builder().health_config(health_config).exists(SpawnExistsOptions::Reset).build();
 
@@ -1992,7 +1979,7 @@ mod tests {
             }
         });
 
-        // Send a message while actor is healthy
+        // Send message while actor is healthy
         let send_options = SendOptions::builder().check_health(true).timeout(Duration::from_secs(5)).build();
 
         let response = relay_ctx
@@ -2003,17 +1990,15 @@ mod tests {
             )
             .await;
 
-        println!("response: {:?}", response);
-
         assert!(response.is_ok(), "Should receive response while actor is healthy");
 
-        // Drop the actor handle to stop health updates
+        // Drop actor handle
         test_handle.abort();
 
-        // Wait longer than the health update interval
+        // Wait longer than health update interval
         tokio::time::sleep(Duration::from_secs(2)).await;
 
-        // Try to send a message to the unhealthy actor
+        // Try sending message to unhealthy actor
         let response = relay_ctx
             .send_and_wait_reply::<TestActor, TestMessage>(
                 TestMessage("hello again".to_string()),
@@ -2022,8 +2007,6 @@ mod tests {
             )
             .await;
 
-        println!("response: {:?}", response);
-        assert!(response.is_err(), "Should fail to send message to unhealthy actor");
         assert!(matches!(
             response.unwrap_err(),
             SystemActorError::MessageReply(msg) if msg == "Target actor is not healthy"
