@@ -947,16 +947,24 @@ impl<T: Actor> ActorContext<T> {
 
     /// Initialize health monitoring for this actor
     pub async fn init_health(&self, config: HealthConfig) -> Result<(), SystemActorError> {
+        println!("init_health called for actor: {}", self.id().name());
+
         if !config.enabled {
+            println!("Health monitoring disabled for actor: {}", self.id().name());
             return Ok(());
         }
 
         // Create health record
         let health_id = RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name());
+        println!("Creating health record with ID: {}", health_id);
+
         let health_record = HealthRecord::new(health_id.clone(), &config);
+        println!("Health record created: {:?}", health_record);
 
         // Use the health.surql file to create health record and relation
         let query = include_str!("../sql/health.surql");
+        println!("Executing health query:\n{}", query);
+
         let result = self
             .engine()
             .db()
@@ -969,50 +977,57 @@ impl<T: Actor> ActorContext<T> {
             .await
             .map_err(SystemActorError::from)?;
 
-        println!("Result: {:?}", result);
-
-        trace!("Health initialization result: {:?}", result);
-
+        println!("Health initialization result: {:?}", result);
         Ok(())
     }
 
     /// Update the last seen timestamp
     pub async fn update_last_seen(&self) -> Result<(), SystemActorError> {
-        // UPDATE health:⟨actor_id⟩ SET last_seen = time::now
+        println!("update_last_seen called for actor: {}", self.id().name());
+
         let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, self.id().name());
+        println!("Executing update query:\n{}", query);
 
         let update_result = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
-
-        println!("update_result: {:?}", update_result);
+        println!("Last seen update result: {:?}", update_result);
 
         Ok(())
     }
 
     /// Start the health update task
     pub async fn start_health_updates(&self) -> Result<Option<tokio::task::JoinHandle<()>>, SystemActorError> {
+        println!("start_health_updates called for actor: {}", self.id().name());
+
         // Get the health record
         let health_id = RecordId::from_table_key(DB_TABLE_HEALTH, self.id().name());
+        println!("Fetching health record with ID: {}", health_id);
+
         let health: Option<HealthRecord> =
             self.engine().db().lock().await.select(&health_id).await.map_err(SystemActorError::from)?;
+        println!("Retrieved health record: {:?}", health);
 
         if let Some(health) = health {
             if !health.enabled {
+                println!("Health monitoring disabled in record for actor: {}", self.id().name());
                 return Ok(None);
             }
 
             let engine = self.engine().clone();
             let actor_id = self.id().clone();
             let update_interval = health.update_interval;
+            println!("Starting health update task with interval: {:?}", update_interval);
 
             let handle = tokio::spawn(async move {
+                println!("Health update task started for actor: {}", actor_id.name());
                 loop {
                     tokio::time::sleep(update_interval.into()).await;
+                    println!("Updating health for actor: {}", actor_id.name());
 
                     let query = format!("UPDATE {}:⟨{}⟩ SET last_seen = time::now()", DB_TABLE_HEALTH, actor_id.name());
-
-                    println!("Loop update: {:?}", query);
+                    println!("Executing update query:\n{}", query);
 
                     if let Err(e) = engine.db().lock().await.query(&query).await {
+                        println!("Failed to update health status: {}", e);
                         error!("Failed to update health status: {}", e);
                         break;
                     }
@@ -1021,33 +1036,43 @@ impl<T: Actor> ActorContext<T> {
 
             Ok(Some(handle))
         } else {
+            println!("No health record found for actor: {}", self.id().name());
             Ok(None)
         }
     }
 
     /// Check if an actor is healthy
     pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
-        println!("check_actor_health: {}", actor_id.name());
+        println!("check_actor_health called for actor: {}", actor_id.name());
+
         let query = format!("SELECT * FROM health:⟨{}⟩", actor_id.name());
+        println!("Executing health check query:\n{}", query);
 
         let mut res = self.engine().db().lock().await.query(&query).await.map_err(SystemActorError::from)?;
-
-        println!("health: {:?}", res);
+        println!("Health check query result: {:?}", res);
 
         let health: Option<HealthRecord> = res.take(0)?;
+        println!("Retrieved health record: {:?}", health);
 
         if let Some(health) = health {
             if !health.enabled {
+                println!("Health monitoring disabled for actor: {}", actor_id.name());
                 return Ok(true);
             }
 
             let elapsed =
                 SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
+            println!("Time elapsed since last health update: {:?}", elapsed);
 
             let update_interval: std::time::Duration = health.update_interval.into();
+            println!("Health update interval: {:?}", update_interval);
 
-            Ok(elapsed <= update_interval)
+            let is_healthy = elapsed <= update_interval;
+            println!("Actor {} is healthy: {}", actor_id.name(), is_healthy);
+
+            Ok(is_healthy)
         } else {
+            println!("No health record found for actor: {}, considering healthy", actor_id.name());
             Ok(true) // No health monitoring configured, consider healthy
         }
     }
@@ -1971,9 +1996,9 @@ mod tests {
         let send_options = SendOptions::builder().check_health(true).timeout(Duration::from_secs(5)).build();
 
         let response = relay_ctx
-            .send_as_and_wait_reply::<TestMessage, TestResponse>(
+            .send_and_wait_reply::<TestActor, TestMessage>(
                 TestMessage("hello".to_string()),
-                test_id.clone(),
+                &test_id,
                 send_options.clone(),
             )
             .await;
@@ -1990,9 +2015,9 @@ mod tests {
 
         // Try to send a message to the unhealthy actor
         let response = relay_ctx
-            .send_as_and_wait_reply::<TestMessage, TestResponse>(
+            .send_and_wait_reply::<TestActor, TestMessage>(
                 TestMessage("hello again".to_string()),
-                test_id.clone(),
+                &test_id,
                 send_options,
             )
             .await;
