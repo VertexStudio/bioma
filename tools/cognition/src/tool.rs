@@ -82,10 +82,7 @@ impl Tools {
                 SpawnOptions::builder()
                     .exists(SpawnExistsOptions::Reset)
                     .health_config(
-                        HealthConfig::builder()
-                            .enabled(true)
-                            .update_interval(std::time::Duration::from_secs(1).into())
-                            .build(),
+                        HealthConfig::builder().update_interval(std::time::Duration::from_secs(1).into()).build(),
                     )
                     .build(),
             )
