@@ -31,23 +31,6 @@
         {
             "host": true,
             "server": {
-                "name": "text-editor",
-                "enabled": true,
-                "transport": "stdio",
-                "command": "docker",
-                "args": [
-                    "run",
-                    "-i",
-                    "--rm",
-                    "--mount",
-                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/Users/rozgo/BiomaAI",
-                    "mcp/text-editor"
-                ]
-            }
-        },
-        {
-            "host": true,
-            "server": {
                 "name": "filesystem",
                 "enabled": true,
                 "transport": "stdio",

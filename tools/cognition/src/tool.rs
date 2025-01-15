@@ -59,11 +59,11 @@ impl ToolClient {
     }
 }
 
-pub struct Tools {
+pub struct ToolsHub {
     pub clients: Vec<ToolClient>,
 }
 
-impl Tools {
+impl ToolsHub {
     pub fn new() -> Self {
         Self { clients: vec![] }
     }
