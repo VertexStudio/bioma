@@ -1,7 +1,7 @@
 use bioma_actor::prelude::*;
 use clap::Parser;
 use config::Args;
-use tool::Tools;
+use tool::ToolsHub;
 use tracing::info;
 use user::UserActor;
 
@@ -24,11 +24,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Tools setup
     let tools_user = UserActor::new(&engine, "/rag/client/tool/".into()).await?;
-    let mut tools = Tools::new();
+    let mut tools_hub = ToolsHub::new();
     for tool in &config.tools {
-        tools.add_tool(&engine, tool.clone(), "/rag".into()).await?;
+        tools_hub.add_tool(&engine, tool.clone(), "/rag".into()).await?;
     }
-    tools.list_tools(&tools_user).await?;
+    tools_hub.list_tools(&tools_user).await?;
 
     // Wait for interrupt signal
     tokio::signal::ctrl_c().await?;

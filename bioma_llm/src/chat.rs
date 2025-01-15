@@ -152,6 +152,22 @@ impl Message<ChatMessages> for Chat {
                 .format(FormatType::StructuredJson(JsonStructure::from_schema(format.schema.clone())));
         }
 
+        // // Save chat request to debug file
+        // let debug_path = std::path::Path::new(".output/chat_request.json");
+        // if let Some(parent) = debug_path.parent() {
+        //     if !parent.exists() {
+        //         if let Err(e) = std::fs::create_dir_all(parent) {
+        //             error!("Failed to create debug output directory: {}", e);
+        //         }
+        //     }
+        // }
+        // if let Err(e) = std::fs::write(
+        //     debug_path,
+        //     serde_json::to_string_pretty(&chat_message_request).unwrap_or_default()
+        // ) {
+        //     error!("Failed to write chat request debug file: {}", e);
+        // }
+
         if stream {
             // Get streaming response from Ollama
             let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
