@@ -5,33 +5,29 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use clap::Parser;
+use cognition::{ToolsHub, UserActor};
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::tools::ToolCall;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
 };
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::error::Error as StdError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tool::Tools;
 use tracing::{debug, error, info};
-use user::UserActor;
 use utoipa::OpenApi;
 
-pub mod config;
-pub mod request_schemas;
-pub mod tool;
-pub mod user;
+mod config;
+mod request_schemas;
 
 struct AppState {
     config: Config,
-    tools: Arc<Mutex<Tools>>,
+    tools: Arc<Mutex<ToolsHub>>,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -314,22 +310,6 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     }
 }
 
-#[derive(Serialize)]
-struct ChatResponse {
-    #[serde(flatten)]
-    response: ChatMessageResponse,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    context: Vec<ChatMessage>,
-}
-
-#[derive(Serialize)]
-struct ToolResponse {
-    server: String,
-    tool: String,
-    call: ToolCall,
-    response: Value,
-}
-
 #[utoipa::path(
     post,
     path = "/chat",
@@ -431,7 +411,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let mut conversation = {
+                let conversation = {
                     let mut conv = Vec::with_capacity(body.messages.len() + 1);
                     if !body.messages.is_empty() {
                         conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
@@ -443,123 +423,41 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
-                loop {
-                    // Get available tools for each iteration
-                    let tools = data.tools.lock().await.list_tools(&user_actor).await;
-                    let tools = match tools {
-                        Ok(tools) => tools,
-                        Err(e) => {
-                            error!("Error fetching tools: {:?}", e);
-                            let _ = tx.send(Err(e.to_string())).await;
-                            break;
-                        }
-                    };
-
-                    // Make chat request with current conversation and tools
-                    let chat_request = ChatMessages {
-                        messages: conversation.clone(),
-                        restart: true,
-                        persist: false,
-                        stream: true,
-                        format: body.format.clone(),
-                        tools: Some(tools),
-                    };
-
-                    let mut chat_response = match user_actor
-                        .send::<Chat, ChatMessages>(
-                            chat_request,
-                            &data.chat,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
-                        )
-                        .await
-                    {
-                        Ok(stream) => stream,
-                        Err(e) => {
-                            let _ = tx.send(Err(e.to_string())).await;
-                            break;
-                        }
-                    };
-
-                    // Stream the AI's thinking process
-                    let mut last_response = None;
-                    let mut is_first_message = true;
-
-                    while let Some(response) = chat_response.next().await {
-                        match response {
-                            Ok(chunk) => {
-                                last_response = Some(chunk.clone());
-
-                                // Stream the response chunk
-                                let response = ChatResponse {
-                                    response: chunk,
-                                    context: if is_first_message { conversation.clone() } else { vec![] },
-                                };
-                                is_first_message = false;
-
-                                if tx.send(Ok(web::Json(response))).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Err(e.to_string())).await;
-                                return;
-                            }
-                        }
+                // Get available tools
+                let tools = data.tools.lock().await.list_tools(&user_actor).await;
+                let tools = match tools {
+                    Ok(tools) => tools,
+                    Err(e) => {
+                        error!("Error fetching tools: {:?}", e);
+                        let _ = tx.send(Err(e.to_string())).await;
+                        return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
                     }
+                };
+                for tool_info in &tools {
+                    info!("Tool: {}", tool_info.name());
+                }
 
-                    // Process tool calls if present
-                    if let Some(response) = last_response {
-                        if response.message.tool_calls.is_empty() {
-                            // No more tool calls, we're done
-                            break;
-                        }
+                let chat_with_tools_tx = tx.clone();
+                let tool_call_tree = cognition::chat_with_tools(
+                    &user_actor,
+                    &data.chat,
+                    &conversation,
+                    &tools,
+                    data.tools.clone(),
+                    chat_with_tools_tx,
+                    body.format.clone(),
+                )
+                .await;
 
-                        // Add the AI's response with tool calls to conversation
-                        conversation.push(response.message.clone());
-
-                        // Execute tool calls sequentially
-                        let tools = data.tools.lock().await;
-
-                        for tool_call in &response.message.tool_calls {
-                            if let Some((_tool_info, tool_client)) = tools.get_tool(&tool_call.function.name) {
-                                // Execute the tool call
-                                let execution_result = tool_client.call(&user_actor, tool_call).await;
-
-                                // Process the result
-                                let result_json = match execution_result {
-                                    Ok(output) => serde_json::to_value(output.content).unwrap_or_default(),
-                                    Err(e) => serde_json::json!({
-                                        "error": format!("Error calling tool: {:?}", e)
-                                    }),
-                                };
-
-                                let formatted_tool_response = ToolResponse {
-                                    server: tool_client.server.name.clone(),
-                                    tool: tool_call.function.name.clone(),
-                                    call: tool_call.clone(),
-                                    response: result_json,
-                                };
-
-                                // Stream tool response
-                                let tool_result_message = ChatMessage::tool(
-                                    serde_json::to_string(&formatted_tool_response).unwrap_or_default(),
-                                );
-                                let streaming_response =
-                                    ChatMessageResponse { message: tool_result_message.clone(), ..response.clone() };
-
-                                let chat_stream_response =
-                                    ChatResponse { response: streaming_response, context: vec![] };
-
-                                if tx.send(Ok(web::Json(chat_stream_response))).await.is_err() {
-                                    return;
-                                }
-
-                                // Add tool response to conversation
-                                conversation.push(tool_result_message);
-                            }
-                        }
+                if let Err(e) = tool_call_tree {
+                    if tools.len() > 0 {
+                        error!("Error during chat with tools: {:?}", e);
+                    } else {
+                        error!("Error during chat: {:?}", e);
                     }
                 }
+
+                Ok(())
             });
 
             // Stream responses as NDJSON
@@ -1006,12 +904,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     actor_handles.push(chat_handle);
 
     // Tools setup
-    // let tools_user = UserActor::new(&engine, "/rag/client/tool/".into()).await?;
-    let mut tools = Tools::new();
+    let mut tools = ToolsHub::new();
     for tool_config in &config.tools {
         tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
     }
-    // tools.list_tools(&tools_user).await?;
 
     // Create app state
     let data = web::Data::new(AppState {
