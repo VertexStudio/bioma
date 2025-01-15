@@ -63,7 +63,7 @@ pub async fn chat_with_tools(
         persist: false,
         stream: true,
         format: format.clone(),
-        tools: Some(tools.clone()),
+        tools: if tools.is_empty() { None } else { Some(tools.clone()) },
     };
 
     info!("chat_with_tools: {} tools, {} messages, actor: {}", tools.len(), messages.len(), chat_actor);
