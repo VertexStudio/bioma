@@ -770,7 +770,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                         let actor_state = actor_record.state;
                         let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
-                        let ctx = ActorContext::new(engine.clone(), id.clone());
+                        let mut ctx = ActorContext::new(engine.clone(), id.clone());
+                        ctx.init_health(options.health_config.clone()).await?;
                         return Ok((ctx, actor));
                     }
                 }
@@ -1173,12 +1174,20 @@ impl<T: Actor> ActorContext<T> {
                         &frame.msg
                     );
                 }
-                Err(error) => debug!("msg-recv {} {:?}", self_id.record_id(), error),
+                Err(error) => error!("msg-recv {} {:?}", self_id.record_id(), error),
             });
 
         let unreplied_messages = self.unreplied_messages().await?;
         let unreplied_stream = futures::stream::iter(unreplied_messages).map(Ok);
-        let chained_stream = unreplied_stream.chain(live_query);
+
+        let mut seen = std::collections::HashSet::new();
+        let chained_stream =
+            futures::stream::select_all(vec![unreplied_stream.boxed(), live_query.boxed()]).filter(move |result| {
+                future::ready(match result {
+                    Ok(frame) => seen.insert(frame.id.clone()),
+                    Err(_) => true,
+                })
+            });
 
         Ok(Box::pin(chained_stream))
     }
