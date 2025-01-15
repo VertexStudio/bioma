@@ -25,15 +25,6 @@
         {
             "host": false,
             "server": {
-                "name": "text-editor",
-                "enabled": true,
-                "command": "uvx",
-                "args": []
-            }
-        },
-        {
-            "host": false,
-            "server": {
                 "name": "filesystem",
                 "enabled": true,
                 "command": "docker",
