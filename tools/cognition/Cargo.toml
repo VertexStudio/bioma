@@ -24,7 +24,8 @@ ollama-rs = { workspace = true }
 schemars = { workspace = true }
 utoipa = { workspace = true }
 url = { workspace = true }
-
+thiserror = { workspace = true }
+chrono = { workspace = true }
 bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
 bioma_tool = { path = "../../bioma_tool" }

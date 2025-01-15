@@ -8,6 +8,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
     <style>
+        html,
+        body {
+            background-color: #282C34;
+        }
+
         /* Main container styling - centers content and adds padding */
         body {
             font-family: Arial, sans-serif;
@@ -96,7 +101,7 @@
 
         /* Context section styling */
         .context-toggle {
-            font-size: 0.8em;
+            font-size: 0.6em;
             color: #666;
             cursor: pointer;
             margin-top: 8px;
@@ -150,16 +155,38 @@
 
         /* Tool message specific styling */
         .tool-message {
-            /* Light purple/lavender */
             background-color: #e6e6fa;
             align-self: flex-start;
             font-family: monospace;
+            position: relative;
+        }
+
+        .tool-toggle {
+            color: #666;
+            position: absolute;
+            top: 16px;
+            left: 8px;
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(255, 255, 255, 0.5);
+            border-radius: 4px;
+            user-select: none;
+        }
+
+        .tool-content {
+            margin-left: 28px;
+            display: none;
+            /* Hidden by default */
         }
 
         .tool-header {
-            margin-bottom: 8px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #ccc;
+            margin-left: 28px;
+            padding: 4px 0;
+            color: #666;
         }
 
         .tool-function {
@@ -310,7 +337,7 @@
 
             const contextHtml = `
                 <div class="context-container">
-                    <div class="context-toggle" onclick="toggleContext(this)">Show Context ▼</div>
+                    <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
                     <div class="context-content">
                         ${regularMessages}
                         ${regularMessages && systemMessage ? '<div class="source-separator"></div>' : ''}
@@ -378,7 +405,7 @@
 
             // Update the toggle button text and arrow direction (▲/▼)
             // to indicate current state
-            toggleElement.textContent = isHidden ? 'Hide Context ▲' : 'Show Context ▼';
+            toggleElement.textContent = isHidden ? 'Hide Context ▼' : 'Show Context ◀';
         };
 
         // Handles sending user queries to the backend and displaying responses
@@ -424,7 +451,7 @@
                 // Remove the early message div creation
                 let messageDiv = null;
                 let contentDiv = null;
-                
+
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let accumulatedContent = '';
@@ -466,62 +493,59 @@
         function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
             const data = JSON.parse(json_line);
 
-            // Get the last message div in the chat
             const lastMessageDiv = chatContainer.lastElementChild;
             const lastMessageRole = lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
-            // Handle system and tool messages
             if (data.message?.role === 'system' || data.message?.role === 'tool') {
-                // Check if we can append to the previous message
                 if (lastMessageRole === data.message.role) {
-                    // Append to existing message
                     if (data.message.role === 'tool') {
                         const toolData = JSON.parse(data.message.content);
                         const formattedContent = `
-                            <div class="source-separator"></div>
-                            <div class="tool-header">
-                                <strong>🔧 Tool Call:</strong> ${toolData.tool} (${toolData.server})
-                            </div>
-                            <div class="tool-function">
-                                <strong>Function:</strong> ${toolData.call.function.name}
-                            </div>
-                            <div class="tool-details">
-                                <strong>Arguments:</strong>
-                                <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                                <strong>Response:</strong>
-                                <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                            </div>
-                        `;
+                <div class="source-separator"></div>
+                <div class="tool-toggle">▶</div>
+                <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+                <div class="tool-content">
+                    <div class="tool-function">
+                        <strong>Function:</strong> ${toolData.call.function.name}
+                    </div>
+                    <div class="tool-details">
+                        <strong>Arguments:</strong>
+                        <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                        <strong>Response:</strong>
+                        <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                    </div>
+                </div>
+            `;
                         lastMessageDiv.innerHTML += formattedContent;
+                        initializeToolToggles(lastMessageDiv);
                     } else {
                         lastMessageDiv.innerHTML += '<div class="source-separator"></div>' + md.render(data.message.content);
                     }
                 } else {
-                    // Create new message div
                     const specialMessageDiv = document.createElement('div');
                     specialMessageDiv.className = `message ${data.message.role}-message`;
-                    
+
                     if (data.message.role === 'tool') {
                         const toolData = JSON.parse(data.message.content);
                         const formattedContent = `
-                            <div class="tool-header">
-                                <strong>🔧 Tool Call:</strong> ${toolData.tool} (${toolData.server})
-                            </div>
-                            <div class="tool-function">
-                                <strong>Function:</strong> ${toolData.call.function.name}
-                            </div>
-                            <div class="tool-details">
-                                <strong>Arguments:</strong>
-                                <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                                <strong>Response:</strong>
-                                <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                            </div>
-                        `;
+                <div class="tool-toggle">▶</div>
+                <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+                <div class="tool-content">
+                    <div class="tool-details">
+                        <strong>Arguments:</strong>
+                        <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                        <strong>Response:</strong>
+                        <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                    </div>
+                </div>
+            `;
                         specialMessageDiv.innerHTML = formattedContent;
+                        chatContainer.appendChild(specialMessageDiv);
+                        initializeToolToggles(specialMessageDiv);
                     } else {
                         specialMessageDiv.innerHTML = md.render(data.message.content);
+                        chatContainer.appendChild(specialMessageDiv);
                     }
-                    chatContainer.appendChild(specialMessageDiv);
                 }
                 return accumulatedContent;
             }
@@ -592,6 +616,20 @@
             return accumulatedContent;
         }
 
+        function initializeToolToggles(container) {
+            container.querySelectorAll('.tool-toggle').forEach(toggle => {
+                if (!toggle.hasListener) {
+                    toggle.addEventListener('click', function () {
+                        const content = this.parentElement.querySelector('.tool-content');
+                        const isHidden = content.style.display === 'none' || !content.style.display;
+                        content.style.display = isHidden ? 'block' : 'none';
+                        this.textContent = isHidden ? '▼' : '▶';
+                    });
+                    toggle.hasListener = true;
+                }
+            });
+        }
+
         // Dynamically adjusts the height of the textarea based on its content
         function resizeTextarea() {
             // Reset height to auto to get the correct scrollHeight
@@ -636,6 +674,7 @@
                 return null;
             }
         }
+
     </script>
 </body>
 
