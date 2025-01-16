@@ -7,15 +7,16 @@
     <title>Bioma Dashboard</title>
     <style>
       :root {
-        --primary: #2563eb;
-        --primary-hover: #1d4ed8;
-        --text-primary: #1f2937;
-        --text-secondary: #4b5563;
-        --text-muted: #6b7280;
-        --bg-sidebar: #ffffff;
-        --bg-sidebar-collapsed: #ffffff;
-        --bg-main: #f9fafb;
-        --border-color: #e5e7eb;
+        /* Default dark theme colors (Surrealist's default pink theme) */
+        --primary: #ff00a0;
+        --primary-hover: #e4008e;
+        --text-primary: #f9fafb;
+        --text-secondary: #e5e7eb;
+        --text-muted: #9ca3af;
+        --bg-sidebar: #19191d;
+        --bg-sidebar-collapsed: #19191d;
+        --bg-main: #19191d;
+        --border-color: #39393c;
         --transition-speed: 0.2s;
         --sidebar-width: 256px;
         --sidebar-width-collapsed: 60px;
@@ -24,20 +25,6 @@
           Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
           "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
           "Noto Color Emoji";
-      }
-
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --primary: #3b82f6;
-          --primary-hover: #2563eb;
-          --text-primary: #f9fafb;
-          --text-secondary: #e5e7eb;
-          --text-muted: #9ca3af;
-          --bg-sidebar: #111827;
-          --bg-sidebar-collapsed: #111827;
-          --bg-main: #030712;
-          --border-color: #374151;
-        }
       }
 
       body {
@@ -152,7 +139,7 @@
       }
 
       .nav-item:hover {
-        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        background-color: rgba(255, 0, 160, 0.1);
         color: var(--primary);
       }
 
@@ -209,7 +196,7 @@
       }
 
       .nav-item.active {
-        background-color: color-mix(in srgb, var(--primary) 15%, transparent);
+        background-color: rgba(255, 0, 160, 0.15);
         color: var(--primary);
         font-weight: 500;
       }
