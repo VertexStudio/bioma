@@ -617,17 +617,17 @@
       });
 
       window.addEventListener("resize", () => {
-        if (window.innerWidth > 768) {
-          if (sidebar.classList.contains("collapsed")) {
+        // Only handle actual mobile/desktop breakpoint changes
+        if (window.innerWidth > 768 && window.innerWidth < 769) {
+          const sidebarCollapsed =
+            localStorage.getItem("sidebarCollapsed") === "true";
+          if (!sidebarCollapsed) {
             sidebar.classList.remove("collapsed");
             contentArea.classList.remove("sidebar-collapsed");
-            mainContent.classList.remove("sidebar-collapsed");
+            if (mainContent) mainContent.classList.remove("sidebar-collapsed");
             toggleSidebarButton
               .querySelector("svg path")
-              .setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
-
-            // Update local storage when sidebar is expanded on resize
-            localStorage.setItem("sidebarCollapsed", "false");
+              .setAttribute("d", "M15 19l-7-7 7-7");
           }
           mobileMenuToggle.setAttribute("aria-expanded", "false");
         }
