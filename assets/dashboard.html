@@ -594,7 +594,7 @@
           if (mainContent) mainContent.classList.add("sidebar-collapsed");
           toggleSidebarButton
             .querySelector("svg path")
-            .setAttribute("d", "M19 19l-7-7 7-7M13 5l-7 7 7 7");
+            .setAttribute("d", "M15 19l-7-7 7-7M13 5l-7 7 7 7");
         }
       });
 
@@ -607,9 +607,9 @@
 
         const svgPath = toggleSidebarButton.querySelector("svg path");
         if (isCollapsed) {
-          svgPath.setAttribute("d", "M19 19l-7-7 7-7M13 5l-7 7 7 7");
+          svgPath.setAttribute("d", "M15 19l-7-7 7-7");
         } else {
-          svgPath.setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
+          svgPath.setAttribute("d", "M15 19l-7-7 7-7");
         }
 
         // Save sidebar state to local storage
