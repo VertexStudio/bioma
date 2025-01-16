@@ -597,17 +597,36 @@
         }
       });
 
+      // Load sidebar state from local storage immediately when DOM loads
+      document.addEventListener("DOMContentLoaded", () => {
+        const sidebarCollapsed =
+          localStorage.getItem("sidebarCollapsed") === "true";
+        if (sidebarCollapsed) {
+          sidebar.classList.add("collapsed");
+          contentArea.classList.add("sidebar-collapsed");
+          if (mainContent) mainContent.classList.add("sidebar-collapsed");
+          toggleSidebarButton
+            .querySelector("svg path")
+            .setAttribute("d", "M19 19l-7-7 7-7M13 5l-7 7 7 7");
+        }
+      });
+
       toggleSidebarButton.addEventListener("click", () => {
+        const isCollapsed = !sidebar.classList.contains("collapsed"); // Note: we toggle, so use opposite
+
         sidebar.classList.toggle("collapsed");
         contentArea.classList.toggle("sidebar-collapsed");
-        mainContent.classList.toggle("sidebar-collapsed");
+        if (mainContent) mainContent.classList.toggle("sidebar-collapsed");
 
         const svgPath = toggleSidebarButton.querySelector("svg path");
-        if (sidebar.classList.contains("collapsed")) {
+        if (isCollapsed) {
           svgPath.setAttribute("d", "M19 19l-7-7 7-7M13 5l-7 7 7 7");
         } else {
           svgPath.setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
         }
+
+        // Save sidebar state to local storage
+        localStorage.setItem("sidebarCollapsed", isCollapsed);
       });
 
       window.addEventListener("resize", () => {
@@ -619,6 +638,9 @@
             toggleSidebarButton
               .querySelector("svg path")
               .setAttribute("d", "M5 19l-7-7 7-7m8 14l-7-7 7-7");
+
+            // Update local storage when sidebar is expanded on resize
+            localStorage.setItem("sidebarCollapsed", "false");
           }
           mobileMenuToggle.setAttribute("aria-expanded", "false");
         }
