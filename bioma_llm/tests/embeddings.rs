@@ -33,6 +33,8 @@ async fn test_embeddings_generate_nomic_v15() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Spawn a relay actor for the Nomic v1.5 embeddings
     let nomic_relay_id = ActorId::of::<Relay>("/relay/nomic_v15");
     let (nomic_relay_ctx, _nomic_relay_actor) =
@@ -85,11 +87,14 @@ async fn test_embeddings_generate_clipvit32() -> Result<(), TestError> {
         SpawnOptions::default(),
     )
     .await?;
+
     let embeddings_clipvit32_handle = tokio::spawn(async move {
         if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor for the CLIP-ViT-32 embeddings
     let clipvit32_relay_id = ActorId::of::<Relay>("/relay/clipvit32");
@@ -141,6 +146,8 @@ async fn test_embeddings_generate_multiple_types() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Spawn the CLIP-ViT-32 embeddings actor
     let embeddings_clipvit32_id = ActorId::of::<Embeddings>("/embeddings/clipvit32");
     let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
@@ -159,6 +166,8 @@ async fn test_embeddings_generate_multiple_types() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor for the Nomic v1.5 embeddings
     let nomic_relay_id = ActorId::of::<Relay>("/relay/nomic_v15");
@@ -238,6 +247,8 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
@@ -322,6 +333,8 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
@@ -374,6 +387,8 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Check if the previously generated embedding is still available
     let top_k = embeddings::TopK {
         query: embeddings::Query::Text("Persistent test".to_string()),
@@ -414,6 +429,8 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
@@ -628,6 +645,8 @@ async fn test_image_embeddings_generate() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
@@ -673,6 +692,8 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
@@ -758,6 +779,8 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
@@ -827,6 +850,8 @@ async fn test_embeddings_multiple_images_batch() -> Result<(), TestError> {
         }
     });
 
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
@@ -875,6 +900,8 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
@@ -968,6 +995,8 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
@@ -1107,6 +1136,8 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
             error!("Embeddings actor error: {}", e);
         }
     });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Spawn a relay actor
     let relay_id = ActorId::of::<Relay>("/relay");
