@@ -235,7 +235,7 @@
 }
 
 .swagger-ui .debug-white * {
-    outline: 1px solid #282C34
+    outline: 1px solid #222226
 }
 
 .swagger-ui .debug-black * {
@@ -251,11 +251,11 @@
 }
 
 .swagger-ui .debug-grid-8-solid {
-    background: #282C34 url(data:image/jpeg;base64,/9j/4QAYRXhpZgAASUkqAAgAAAAAAAAAAAAAAP/sABFEdWNreQABAAQAAAAAAAD/4QMxaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8P3hwYWNrZXQgYmVnaW49Iu+7vyIgaWQ9Ilc1TTBNcENlaGlIenJlU3pOVGN6a2M5ZCI/PiA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJBZG9iZSBYTVAgQ29yZSA1LjYtYzExMSA3OS4xNTgzMjUsIDIwMTUvMDkvMTAtMDE6MTA6MjAgICAgICAgICI+IDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+IDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bXA6Q3JlYXRvclRvb2w9IkFkb2JlIFBob3Rvc2hvcCBDQyAyMDE1IChNYWNpbnRvc2gpIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOkIxMjI0OTczNjdCMzExRTZCMkJDRTI0MDgxMDAyMTcxIiB4bXBNTTpEb2N1bWVudElEPSJ4bXAuZGlkOkIxMjI0OTc0NjdCMzExRTZCMkJDRTI0MDgxMDAyMTcxIj4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6QjEyMjQ5NzE2N0IzMTFFNkIyQkNFMjQwODEwMDIxNzEiIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6QjEyMjQ5NzI2N0IzMTFFNkIyQkNFMjQwODEwMDIxNzEiLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz7/7gAOQWRvYmUAZMAAAAAB/9sAhAAbGhopHSlBJiZBQi8vL0JHPz4+P0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHAR0pKTQmND8oKD9HPzU/R0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0f/wAARCAAIAAgDASIAAhEBAxEB/8QAWQABAQAAAAAAAAAAAAAAAAAAAAYBAQEAAAAAAAAAAAAAAAAAAAIEEAEBAAMBAAAAAAAAAAAAAAABADECA0ERAAEDBQAAAAAAAAAAAAAAAAARITFBUWESIv/aAAwDAQACEQMRAD8AoOnTV1QTD7JJshP3vSM3P//Z) repeat 0 0
+    background: #222226 url(data:image/jpeg;base64,/9j/4QAYRXhpZgAASUkqAAgAAAAAAAAAAAAAAP/sABFEdWNreQABAAQAAAAAAAD/4QMxaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8P3hwYWNrZXQgYmVnaW49Iu+7vyIgaWQ9Ilc1TTBNcENlaGlIenJlU3pOVGN6a2M5ZCI/PiA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJBZG9iZSBYTVAgQ29yZSA1LjYtYzExMSA3OS4xNTgzMjUsIDIwMTUvMDkvMTAtMDE6MTA6MjAgICAgICAgICI+IDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+IDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bXA6Q3JlYXRvclRvb2w9IkFkb2JlIFBob3Rvc2hvcCBDQyAyMDE1IChNYWNpbnRvc2gpIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOkIxMjI0OTczNjdCMzExRTZCMkJDRTI0MDgxMDAyMTcxIiB4bXBNTTpEb2N1bWVudElEPSJ4bXAuZGlkOkIxMjI0OTc0NjdCMzExRTZCMkJDRTI0MDgxMDAyMTcxIj4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6QjEyMjQ5NzE2N0IzMTFFNkIyQkNFMjQwODEwMDIxNzEiIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6QjEyMjQ5NzI2N0IzMTFFNkIyQkNFMjQwODEwMDIxNzEiLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz7/7gAOQWRvYmUAZMAAAAAB/9sAhAAbGhopHSlBJiZBQi8vL0JHPz4+P0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHAR0pKTQmND8oKD9HPzU/R0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0f/wAARCAAIAAgDASIAAhEBAxEB/8QAWQABAQAAAAAAAAAAAAAAAAAAAAYBAQEAAAAAAAAAAAAAAAAAAAIEEAEBAAMBAAAAAAAAAAAAAAABADECA0ERAAEDBQAAAAAAAAAAAAAAAAARITFBUWESIv/aAAwDAQACEQMRAD8AoOnTV1QTD7JJshP3vSM3P//Z) repeat 0 0
 }
 
 .swagger-ui .debug-grid-16-solid {
-    background: #282C34 url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyhpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuNi1jMTExIDc5LjE1ODMyNSwgMjAxNS8wOS8xMC0wMToxMDoyMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENDIDIwMTUgKE1hY2ludG9zaCkiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6NzY3MkJEN0U2N0M1MTFFNkIyQkNFMjQwODEwMDIxNzEiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6NzY3MkJEN0Y2N0M1MTFFNkIyQkNFMjQwODEwMDIxNzEiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo3NjcyQkQ3QzY3QzUxMUU2QjJCQ0UyNDA4MTAwMjE3MSIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDo3NjcyQkQ3RDY3QzUxMUU2QjJCQ0UyNDA4MTAwMjE3MSIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/Pve6J3kAAAAzSURBVHjaYvz//z8D0UDsMwMjSRoYP5Gq4SPNbRjVMEQ1fCRDg+in/6+J1AJUxsgAEGAA31BAJMS0GYEAAAAASUVORK5CYII=) repeat 0 0
+    background: #222226 url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyhpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuNi1jMTExIDc5LjE1ODMyNSwgMjAxNS8wOS8xMC0wMToxMDoyMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENDIDIwMTUgKE1hY2ludG9zaCkiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6NzY3MkJEN0U2N0M1MTFFNkIyQkNFMjQwODEwMDIxNzEiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6NzY3MkJEN0Y2N0M1MTFFNkIyQkNFMjQwODEwMDIxNzEiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo3NjcyQkQ3QzY3QzUxMUU2QjJCQ0UyNDA4MTAwMjE3MSIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDo3NjcyQkQ3RDY3QzUxMUU2QjJCQ0UyNDA4MTAwMjE3MSIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/Pve6J3kAAAAzSURBVHjaYvz//z8D0UDsMwMjSRoYP5Gq4SPNbRjVMEQ1fCRDg+in/6+J1AJUxsgAEGAA31BAJMS0GYEAAAAASUVORK5CYII=) repeat 0 0
 }
 
 .swagger-ui .border-box,
@@ -915,7 +915,7 @@
 }
 
 .swagger-ui .b--white {
-    border-color: #282C34
+    border-color: #222226
 }
 
 .swagger-ui .b--white-90 {
@@ -4895,7 +4895,7 @@
 }
 
 .swagger-ui .white {
-    color: #282C34
+    color: #222226
 }
 
 .swagger-ui .dark-red {
@@ -5119,7 +5119,7 @@
 }
 
 .swagger-ui .bg-white {
-    background-color: #282C34
+    background-color: #222226
 }
 
 .swagger-ui .bg-transparent {
@@ -5282,7 +5282,7 @@
 
 .swagger-ui .hover-white:focus,
 .swagger-ui .hover-white:hover {
-    color: #282C34
+    color: #222226
 }
 
 .swagger-ui .hover-black-90:focus,
@@ -5432,7 +5432,7 @@
 
 .swagger-ui .hover-bg-white:focus,
 .swagger-ui .hover-bg-white:hover {
-    background-color: #282C34
+    background-color: #222226
 }
 
 .swagger-ui .hover-bg-transparent:focus,
@@ -9272,7 +9272,7 @@
 }
 
 .swagger-ui .opblock-tag small {
-    color: #282C34;
+    color: #222226;
     flex: 2;
     font-family: sans-serif;
     font-size: 14px;
@@ -9301,7 +9301,7 @@
 }
 
 .swagger-ui .parameter__type {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 600;
@@ -9405,7 +9405,7 @@
 
 .swagger-ui .opblock .opblock-section-header {
     align-items: center;
-    background: #282C34;
+    background: #222226;
     box-shadow: 0 1px 2px rgba(0, 0, 0, .1);
     display: flex;
     min-height: 50px;
@@ -9494,7 +9494,7 @@
 }
 
 .swagger-ui .opblock .opblock-summary-description {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 13px;
     word-break: break-word
@@ -9543,20 +9543,20 @@
 }
 
 .swagger-ui .opblock.opblock-post {
-    background: rgba(73, 204, 144, .1);
-    border-color: #293428
+    background: rgba(254, 56, 180, .1);
+    border-color: #fe38b4
 }
 
 .swagger-ui .opblock.opblock-post .opblock-summary-method {
-    background: #293428
+    background: #fe38b4
 }
 
 .swagger-ui .opblock.opblock-post .opblock-summary {
-    border-color: #293428
+    border-color: #fe38b4
 }
 
 .swagger-ui .opblock.opblock-post .tab-header .tab-item.active h4 span:after {
-    background: #293428
+    background: #fe38b4
 }
 
 .swagger-ui .opblock.opblock-put {
@@ -9594,20 +9594,20 @@
 }
 
 .swagger-ui .opblock.opblock-get {
-    background: rgba(97, 175, 254, .1);
-    border-color: #283334
+    background: rgba(254, 56, 180, .1);
+    border-color: #be4bdb
 }
 
 .swagger-ui .opblock.opblock-get .opblock-summary-method {
-    background: #283334
+    background: #be4bdb
 }
 
 .swagger-ui .opblock.opblock-get .opblock-summary {
-    border-color: #283334
+    border-color: #be4bdb
 }
 
 .swagger-ui .opblock.opblock-get .tab-header .tab-item.active h4 span:after {
-    background: #283334
+    background: #be4bdb
 }
 
 .swagger-ui .opblock.opblock-patch {
@@ -9915,7 +9915,7 @@
     border: none;
     border-radius: 4px;
     bottom: 10px;
-    color: #282C34;
+    color: #222226;
     display: flex;
     font-family: sans-serif;
     font-size: 14px;
@@ -9929,7 +9929,7 @@
 }
 
 .swagger-ui .scheme-container {
-    background: #282C34;
+    background: #222226;
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, .15);
     margin: 0 0 20px;
     padding: 30px 0
@@ -9950,7 +9950,7 @@
 }
 
 .swagger-ui .scheme-container .schemes>.schemes-server-container>label {
-    color: #282C34;
+    color: #222226;
     display: flex;
     flex-direction: column;
     font-family: sans-serif;
@@ -9995,7 +9995,7 @@
 }
 
 .swagger-ui .loading-container .loading:after {
-    color: #282C34;
+    color: #222226;
     content: "loading";
     font-family: sans-serif;
     font-size: 10px;
@@ -10083,7 +10083,7 @@
 }
 
 .swagger-ui section h3 {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif
 }
 
@@ -10182,8 +10182,8 @@
 
 .swagger-ui .btn.authorize {
     background-color: transparent;
-    border-color: #293428;
-    color: #293428;
+    border-color: #fe38b4;
+    color: #fe38b4;
     display: inline;
     line-height: 1
 }
@@ -10194,13 +10194,13 @@
 }
 
 .swagger-ui .btn.authorize svg {
-    fill: #293428
+    fill: #fe38b4
 }
 
 .swagger-ui .btn.execute {
     background-color: #4990e2;
     border-color: #4990e2;
-    color: #282C34
+    color: #222226
 }
 
 .swagger-ui .btn-group {
@@ -10342,7 +10342,7 @@
     border: 2px solid #41444e;
     border-radius: 4px;
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, .25);
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 14px;
     font-weight: 700;
@@ -10379,7 +10379,7 @@
 }
 
 .swagger-ui label {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 12px;
     font-weight: 700;
@@ -10411,7 +10411,7 @@
 .swagger-ui input[type=search],
 .swagger-ui input[type=text],
 .swagger-ui textarea {
-    background: #282C34;
+    background: #222226;
     border: 1px solid #d9d9d9;
     border-radius: 4px;
     margin: 5px 0;
@@ -10444,7 +10444,7 @@
 
 .swagger-ui textarea[disabled] {
     background-color: #41444e;
-    color: #282C34
+    color: #222226
 }
 
 @keyframes shake {
@@ -10475,7 +10475,7 @@
     background: hsla(0, 0%, 100%, .8);
     border: none;
     border-radius: 4px;
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 600;
@@ -10486,13 +10486,13 @@
 }
 
 .swagger-ui textarea:focus {
-    border: 2px solid #283334
+    border: 2px solid #be4bdb
 }
 
 .swagger-ui textarea.curl {
     background: #41444e;
     border-radius: 4px;
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 600;
@@ -10513,7 +10513,7 @@
 }
 
 .swagger-ui .checkbox p {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-style: italic;
     font-weight: 400 !important;
@@ -10567,7 +10567,7 @@
 }
 
 .swagger-ui .dialog-ux .modal-ux {
-    background: #282C34;
+    background: #222226;
     border: 1px solid #ebebeb;
     border-radius: 4px;
     box-shadow: 0 10px 30px 0 rgba(0, 0, 0, .2);
@@ -10589,14 +10589,14 @@
 
 .swagger-ui .dialog-ux .modal-ux-content p {
     color: #41444e;
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 12px;
     margin: 0 0 5px
 }
 
 .swagger-ui .dialog-ux .modal-ux-content h4 {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 18px;
     font-weight: 600;
@@ -10620,7 +10620,7 @@
 }
 
 .swagger-ui .dialog-ux .modal-ux-header h3 {
-    color: #282C34;
+    color: #222226;
     flex: 1;
     font-family: sans-serif;
     font-size: 20px;
@@ -10630,7 +10630,7 @@
 }
 
 .swagger-ui .model {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 300;
@@ -10898,7 +10898,7 @@
 }
 
 .swagger-ui .servers>label {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 12px;
     margin: -20px 15px 0 0
@@ -10973,7 +10973,7 @@
 }
 
 .swagger-ui table.headers td {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 300;
@@ -11027,7 +11027,7 @@
 }
 
 .swagger-ui .parameter__name {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 16px;
     font-weight: 400;
@@ -11130,7 +11130,7 @@
 
 .swagger-ui .topbar a {
     align-items: center;
-    color: #282C34;
+    color: #222226;
     display: flex;
     flex: 1;
     font-family: sans-serif;
@@ -11153,7 +11153,7 @@
 }
 
 .swagger-ui .topbar .download-url-wrapper input[type=text] {
-    border: 2px solid #62a03f;
+    border: 2px solid #fe38b4;
     border-radius: 4px 0 0 4px;
     margin: 0;
     max-width: 100%;
@@ -11178,7 +11178,7 @@
 }
 
 .swagger-ui .topbar .download-url-wrapper .select-label select {
-    border: 2px solid #62a03f;
+    border: 2px solid #fe38b4;
     box-shadow: none;
     flex: 2;
     outline: none;
@@ -11186,10 +11186,10 @@
 }
 
 .swagger-ui .topbar .download-url-wrapper .download-url-button {
-    background: #62a03f;
+    background: #fe38b4;
     border: none;
     border-radius: 0 4px 4px 0;
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 16px;
     font-weight: 700;
@@ -11228,7 +11228,7 @@
 .swagger-ui .info li,
 .swagger-ui .info p,
 .swagger-ui .info table {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 14px
 }
@@ -11238,7 +11238,7 @@
 .swagger-ui .info h3,
 .swagger-ui .info h4,
 .swagger-ui .info h5 {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif
 }
 
@@ -11258,7 +11258,7 @@
 }
 
 .swagger-ui .info .base-url {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 300 !important;
@@ -11286,11 +11286,11 @@
 }
 
 .swagger-ui .info .title small.version-stamp {
-    background-color: #89bf04
+    background-color: #fe38b4
 }
 
 .swagger-ui .info .title small pre {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     margin: 0;
     padding: 0
@@ -11348,7 +11348,7 @@
     background-color: #fee;
     border-radius: 4px;
     color: red;
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 600;
@@ -11362,7 +11362,7 @@
 }
 
 .swagger-ui .scopes h2 {
-    color: #282C34;
+    color: #222226;
     font-family: sans-serif;
     font-size: 14px
 }
@@ -11394,7 +11394,7 @@
 }
 
 .swagger-ui .errors-wrapper .errors h4 {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 14px;
     font-weight: 600;
@@ -11425,7 +11425,7 @@
 }
 
 .swagger-ui .errors-wrapper hgroup h4 {
-    color: #282C34;
+    color: #222226;
     flex: 1;
     font-family: sans-serif;
     font-size: 20px;
@@ -11515,7 +11515,7 @@
 }
 
 .swagger-ui .json-schema-2020-12-accordion {
-    background: #282C34;
+    background: #222226;
     border: none;
     outline: none;
     padding-left: 0
@@ -11552,7 +11552,7 @@
 .swagger-ui .json-schema-2020-12-expand-deep-button {
     border: none;
     /* color: #505050; */
-    background-color: #282C34;
+    background-color: #222226;
     color: #fff;
     font-family: sans-serif;
     font-size: 12px;
@@ -11597,7 +11597,7 @@
 }
 
 .swagger-ui .json-schema-2020-12-keyword__value--primary {
-    color: #282C34;
+    color: #222226;
     font-style: normal
 }
 
@@ -11610,7 +11610,7 @@
 .swagger-ui .json-schema-2020-12-keyword__value--warning {
     border: 1px dashed #6b6b6b;
     border-radius: 4px;
-    color: #282C34;
+    color: #222226;
     color: #6b6b6b;
     display: inline-block;
     font-family: monospace;
@@ -11631,7 +11631,7 @@
 }
 
 .swagger-ui .json-schema-2020-12__attribute {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     padding-left: 10px;
@@ -11692,7 +11692,7 @@
 }
 
 .swagger-ui .json-schema-2020-12-property .json-schema-2020-12__title {
-    color: #282C34;
+    color: #222226;
     font-family: monospace;
     font-size: 12px;
     font-weight: 600;
@@ -11741,8 +11741,8 @@
 .swagger-ui .json-schema-2020-12__constraint {
     background-color: #805ad5;
     border-radius: 4px;
-    color: #282C34;
-    /* color: #282C34; */
+    color: #222226;
+    /* color: #222226; */
     font-family: monospace;
     font-weight: 600;
     line-height: 1.5;
@@ -11752,7 +11752,7 @@
 
 .swagger-ui .json-schema-2020-12__constraint--string {
     background-color: #d69e2e;
-    color: #282C34
+    color: #222226
 }
 
 .swagger-ui .json-schema-2020-12-keyword--dependentRequired>ul {
@@ -11781,7 +11781,7 @@
 
 .swagger-ui .model-box .json-schema-2020-12-accordion,
 .swagger-ui .model-box .json-schema-2020-12-expand-deep-button {
-    background: #282C34;
+    background: #222226;
     background-color: transparent
 }
 
