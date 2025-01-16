@@ -167,7 +167,6 @@ services:
       - ./assets/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - minio
-      - swagger-ui
     networks:
       - bioma-network
 
