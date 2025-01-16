@@ -57,6 +57,11 @@ impl ToolClient {
         }
         Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
     }
+
+    pub async fn health(&self, user: &ActorContext<UserActor>) -> Result<bool> {
+        let health = user.check_actor_health(&self.client_id).await?;
+        Ok(health)
+    }
 }
 
 pub struct ToolsHub {
@@ -128,7 +133,11 @@ impl ToolsHub {
                 }
             } else {
                 // Use cached tools
-                all_tools.extend(client.tools.clone());
+                if client.health(user).await? {
+                    all_tools.extend(client.tools.clone());
+                } else {
+                    error!("Client {} is unhealthy, skipping tools", client.client_id);
+                }
             }
         }
         Ok(all_tools)
