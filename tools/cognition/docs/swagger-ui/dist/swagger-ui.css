@@ -11515,6 +11515,7 @@
 }
 
 .swagger-ui .json-schema-2020-12-accordion {
+    background: #282C34;
     border: none;
     outline: none;
     padding-left: 0
@@ -11550,8 +11551,9 @@
 
 .swagger-ui .json-schema-2020-12-expand-deep-button {
     border: none;
-    color: #505050;
-    color: #afaeae;
+    /* color: #505050; */
+    background-color: #282C34;
+    color: #fff;
     font-family: sans-serif;
     font-size: 12px;
     padding-right: 0
@@ -11578,7 +11580,7 @@
 }
 
 .swagger-ui .json-schema-2020-12-keyword__name--primary {
-    color: #282C34;
+    color: #fff;
     font-style: normal
 }
 
@@ -11673,7 +11675,7 @@
 }
 
 .swagger-ui .json-schema-2020-12__title {
-    color: #505050;
+    color: #fff !important;
     display: inline-block;
     font-family: sans-serif;
     font-size: 12px;
@@ -11740,7 +11742,7 @@
     background-color: #805ad5;
     border-radius: 4px;
     color: #282C34;
-    color: #282C34;
+    /* color: #282C34; */
     font-family: monospace;
     font-weight: 600;
     line-height: 1.5;
@@ -11779,6 +11781,7 @@
 
 .swagger-ui .model-box .json-schema-2020-12-accordion,
 .swagger-ui .model-box .json-schema-2020-12-expand-deep-button {
+    background: #282C34;
     background-color: transparent
 }
 
