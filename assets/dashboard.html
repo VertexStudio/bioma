@@ -71,6 +71,10 @@
         display: none;
       }
 
+      .sidebar.collapsed .sidebar-header {
+        justify-content: center;
+      }
+
       .sidebar-header {
         display: flex;
         align-items: center;
@@ -115,6 +119,12 @@
         position: relative;
         white-space: nowrap;
         box-sizing: border-box; /* Important */
+      }
+
+      .sidebar.collapsed .nav-items .nav-item {
+        display: flex;
+        justify-content: center;
+        gap: 0;
       }
 
       .sidebar.collapsed .nav-item span {
