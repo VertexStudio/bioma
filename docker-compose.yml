@@ -180,7 +180,7 @@ services:
       - SWAGGER_JSON=/app/openapi.json
       - EMBEDDING=true
     volumes:
-      - ./tools/cognition/docs:/app
+      - ./tools/cognition/docs/swagger-ui:/app
     networks:
       - bioma-network
 

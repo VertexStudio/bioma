@@ -1,0 +1,11 @@
+body {
+    background-color: #282C34 !important;
+}
+
+.swagger-ui .scheme-container {
+    background: #282C34 !important;
+}
+
+.opblock-summary-path{
+    color: #FFF;
+}
