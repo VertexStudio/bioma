@@ -37,7 +37,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
                 CallTool(request),
                 &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
             )
             .await?;
         Ok(response)
@@ -56,11 +56,6 @@ impl ToolClient {
             info!("├─ {}", tool.name);
         }
         Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
-    }
-
-    pub async fn health(&self, user: &ActorContext<UserActor>) -> Result<bool> {
-        let health = user.check_actor_health(&self.client_id).await?;
-        Ok(health)
     }
 }
 
@@ -132,12 +127,8 @@ impl ToolsHub {
                     }
                 }
             } else {
-                // Check health before using cached tools
-                if client.health(user).await? {
-                    all_tools.extend(client.tools.clone());
-                } else {
-                    error!("Client {} is unhealthy, skipping tools", client.client_id);
-                }
+                // Use cached tools
+                all_tools.extend(client.tools.clone());
             }
         }
         Ok(all_tools)
