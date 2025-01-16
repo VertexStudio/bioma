@@ -37,7 +37,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
                 CallTool(request),
                 &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
             )
             .await?;
         Ok(response)
@@ -48,7 +48,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
                 ListTools(None),
                 &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
             )
             .await?;
         info!("Tools from {} ({})", self.server.name, list_tools.tools.len());
@@ -56,6 +56,11 @@ impl ToolClient {
             info!("├─ {}", tool.name);
         }
         Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+    }
+
+    pub async fn health(&self, user: &ActorContext<UserActor>) -> Result<bool> {
+        let health = user.check_actor_health(&self.client_id).await?;
+        Ok(health)
     }
 }
 
@@ -79,7 +84,12 @@ impl ToolsHub {
                 engine.clone(),
                 client_id.clone(),
                 ModelContextProtocolClientActor::new(server.clone()),
-                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+                SpawnOptions::builder()
+                    .exists(SpawnExistsOptions::Reset)
+                    .health_config(
+                        HealthConfig::builder().update_interval(std::time::Duration::from_secs(1).into()).build(),
+                    )
+                    .build(),
             )
             .await?;
             let client_id_spawn = client_id.clone();
@@ -123,7 +133,11 @@ impl ToolsHub {
                 }
             } else {
                 // Use cached tools
-                all_tools.extend(client.tools.clone());
+                if client.health(user).await? {
+                    all_tools.extend(client.tools.clone());
+                } else {
+                    error!("Client {} is unhealthy, skipping tools", client.client_id);
+                }
             }
         }
         Ok(all_tools)

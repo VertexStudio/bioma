@@ -2,12 +2,14 @@ use crate::engine::{Engine, Record};
 use futures::{future, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use surrealdb::sql;
 use surrealdb::RecordIdKey;
 use tokio::sync::mpsc;
 // use std::any::type_name;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::{Duration, SystemTime};
 use std::{borrow::Cow, sync::atomic::AtomicU64};
 use surrealdb::{sql::Id, value::RecordId, Action, Notification};
 use tracing::{debug, error, trace};
@@ -16,6 +18,7 @@ use tracing::{debug, error, trace};
 const DB_TABLE_ACTOR: &str = "actor";
 const DB_TABLE_MESSAGE: &str = "message";
 const DB_TABLE_REPLY: &str = "reply";
+const DB_TABLE_HEALTH: &str = "health";
 
 /// Implement this trait to define custom actor error types
 pub trait ActorError: std::error::Error + Debug + Send + Sync + From<SystemActorError> {}
@@ -138,6 +141,13 @@ pub enum SystemActorError {
     /// that hasn't been registered with the actor system.
     #[error("Actor tag not found: {0}")]
     ActorTagNotFound(Cow<'static, str>),
+
+    /// Error when attempting to communicate with an unhealthy actor.
+    ///
+    /// This occurs when trying to send a message to an actor that hasn't
+    /// updated its health status within the configured interval.
+    #[error("Actor is unhealthy: {0}")]
+    UnhealthyActor(ActorId),
 }
 
 impl ActorError for SystemActorError {}
@@ -443,7 +453,7 @@ where
         to: &ActorId,
     ) -> impl Future<Output = Result<(), SystemActorError>> {
         async move {
-            let _ = ctx.prepare_and_send_message::<MT>(&message, to).await?;
+            let _ = ctx.prepare_and_send_message::<MT>(&message, to, None).await?;
             Ok(())
         }
     }
@@ -460,7 +470,7 @@ where
         Self::Response: 'static,
     {
         async move {
-            let (_, reply_id, _) = ctx.prepare_and_send_message::<MT>(&message, to).await?;
+            let (_, reply_id, _) = ctx.prepare_and_send_message::<MT>(&message, to, Some(options.clone())).await?;
             ctx.wait_for_replies::<Self::Response>(&reply_id, options).await
         }
     }
@@ -486,15 +496,27 @@ where
 ///     options
 /// ).await?;
 /// ```
-#[derive(bon::Builder)]
+#[derive(bon::Builder, Clone)]
 pub struct SendOptions {
     /// The maximum duration to wait for a reply before timing out.
+    #[builder(default = default_timeout())]
     pub timeout: std::time::Duration,
+    /// Whether to check actor health before sending messages
+    #[builder(default = default_check_health())]
+    pub check_health: bool,
+}
+
+fn default_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(30)
+}
+
+fn default_check_health() -> bool {
+    false
 }
 
 impl Default for SendOptions {
     fn default() -> Self {
-        Self { timeout: std::time::Duration::from_secs(30) }
+        Self::builder().build()
     }
 }
 
@@ -566,6 +588,18 @@ impl ActorId {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// Creates a health record ID for this actor
+    ///
+    /// This method generates a RecordId for the health record associated with this actor.
+    /// The health record ID uses the same name as the actor but in the health table.
+    ///
+    /// # Returns
+    ///
+    /// A `RecordId` for the health record
+    pub fn health_id(&self) -> RecordId {
+        RecordId::from_table_key(DB_TABLE_HEALTH, self.name.as_ref())
+    }
 }
 
 /// Options for configuring actor spawn behavior.
@@ -595,12 +629,20 @@ pub struct SpawnOptions {
     ///
     /// This field determines the behavior of the spawning process when it encounters
     /// an existing actor with the same ID as the one being spawned.
+    #[builder(default = default_spawn_exists())]
     exists: SpawnExistsOptions,
+    /// Health configuration for the actor
+    /// Some = enabled with config, None = disabled
+    health_config: Option<HealthConfig>,
+}
+
+fn default_spawn_exists() -> SpawnExistsOptions {
+    SpawnExistsOptions::Error
 }
 
 impl Default for SpawnOptions {
     fn default() -> Self {
-        Self { exists: SpawnExistsOptions::Error }
+        Self::builder().build()
     }
 }
 
@@ -728,7 +770,8 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                         let actor_state = actor_record.state;
                         let actor: Self = serde_json::from_value(actor_state).map_err(SystemActorError::from)?;
                         // Create and return the actor context with restored state
-                        let ctx = ActorContext::new(engine.clone(), id.clone());
+                        let mut ctx = ActorContext::new(engine.clone(), id.clone());
+                        ctx.init_health(options.health_config.clone()).await?;
                         return Ok((ctx, actor));
                     }
                 }
@@ -750,8 +793,12 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                 .await
                 .map_err(SystemActorError::from)?;
 
-            // Create and return the actor context
-            let ctx = ActorContext::new(engine.clone(), id.clone());
+            // Create the context
+            let mut ctx = ActorContext::new(engine.clone(), id.clone());
+
+            // Initialize health monitoring with the provided config
+            ctx.init_health(options.health_config.clone()).await?;
+
             Ok((ctx, actor))
         }
     }
@@ -826,6 +873,67 @@ pub struct ActorRecord {
     state: Value,
 }
 
+/// Configuration for actor health monitoring
+///
+/// When Some, health monitoring is enabled with the specified configuration.
+/// When None, health monitoring is disabled.
+///
+/// Health monitoring works by:
+/// 1. Creating a health record when the actor is spawned (if enabled)
+/// 2. Periodically updating a timestamp in the health record
+/// 3. Checking the timestamp before sending messages to ensure the actor is healthy
+///
+/// # Example
+///
+/// ```rust
+/// // Enable health monitoring with 60 second interval
+/// let config = Some(HealthConfig {
+///     update_interval: Duration::from_secs(60)
+/// });
+///
+/// let options = SpawnOptions::builder()
+///     .health_config(config)
+///     .build();
+///
+/// let (ctx, actor) = MyActor::spawn(engine, id, actor, options).await?;
+/// ```
+#[derive(bon::Builder, Clone, Debug, Serialize, Deserialize)]
+pub struct HealthConfig {
+    /// Interval at which the actor updates its last_seen timestamp
+    #[builder(default = sql::Duration::from_secs(60))]
+    pub update_interval: sql::Duration,
+}
+
+/// Record for storing health status
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct HealthRecord {
+    id: RecordId,
+    last_seen: sql::Datetime,
+    enabled: bool,
+    update_interval: sql::Duration,
+}
+
+impl HealthRecord {
+    fn new(id: RecordId, config: Option<&HealthConfig>) -> Self {
+        match config {
+            Some(config) => {
+                Self { id, last_seen: sql::Datetime::default(), enabled: true, update_interval: config.update_interval }
+            }
+            None => Self {
+                id,
+                last_seen: sql::Datetime::default(),
+                enabled: false,
+                update_interval: sql::Duration::from_secs(60), // default value not used
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct UpdateHealth {
+    last_seen: sql::Datetime,
+}
+
 /// The context for an actor, providing access to the actor system.
 ///
 /// The context allows an actor to:
@@ -844,15 +952,25 @@ pub struct ActorContext<T: Actor> {
     id: ActorId,
     /// Channel for sending reply chunks during message processing
     tx: Option<mpsc::UnboundedSender<Value>>,
+    /// Handle to health update task
+    health_task: Option<tokio::task::JoinHandle<()>>,
     /// Type marker for the actor
     _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Actor> Drop for ActorContext<T> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.health_task.take() {
+            handle.abort();
+        }
+    }
 }
 
 impl<T: Actor> ActorContext<T> {
     /// Create a new actor context
     fn new(engine: Engine, id: ActorId) -> Self {
         debug!("[{}] ctx-new", id.record_id());
-        Self { engine, id, tx: None, _marker: std::marker::PhantomData }
+        Self { engine, id, tx: None, health_task: None, _marker: std::marker::PhantomData }
     }
 
     async fn unreplied_messages(&self) -> Result<Vec<FrameMessage>, SystemActorError> {
@@ -882,6 +1000,123 @@ impl<T: Actor> ActorContext<T> {
             true
         } else {
             false
+        }
+    }
+
+    /// Initialize health monitoring and start periodic health updates for this actor
+    ///
+    /// This function:
+    /// 1. Creates initial health record if health monitoring is enabled
+    /// 2. Establishes relation between actor and health record
+    /// 3. Starts periodic health update task if enabled
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Optional health monitoring configuration
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if initialization and startup succeed
+    /// * `Err(SystemActorError)` if any step fails
+    pub async fn init_health(&mut self, config: Option<HealthConfig>) -> Result<(), SystemActorError> {
+        debug!(
+            "[{}] health-init enabled={} interval={:?}",
+            self.id().name(),
+            config.is_some(),
+            config.as_ref().map(|c| c.update_interval)
+        );
+
+        let health_id = self.id().health_id();
+        let health_record = HealthRecord::new(health_id.clone(), config.as_ref());
+
+        // Explicitly specify Record type for upsert operation
+        let _: Option<HealthRecord> = self
+            .engine()
+            .db()
+            .lock()
+            .await
+            .upsert(&health_id)
+            .content(health_record.clone())
+            .await
+            .map_err(SystemActorError::from)?;
+
+        // Start health update task if enabled
+        if let Some(config) = config {
+            let engine = self.engine().clone();
+            let update_interval = config.update_interval;
+            let health_id = health_id.clone();
+            let actor_name = self.id().name().to_string();
+
+            let handle = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(update_interval.into()).await;
+
+                    let update = UpdateHealth { last_seen: sql::Datetime::default() };
+
+                    if let Err(e) =
+                        engine.db().lock().await.update::<Option<HealthRecord>>(&health_id).merge(update).await
+                    {
+                        error!("[{}] health-update-error: {}", actor_name, e);
+                        break;
+                    }
+                }
+            });
+
+            self.health_task = Some(handle);
+        }
+
+        Ok(())
+    }
+
+    /// Check if an actor is healthy based on its health record
+    ///
+    /// An actor is considered healthy if either:
+    /// - Health monitoring is disabled for the actor
+    /// - The actor has updated its health status within its configured update interval
+    ///
+    /// # Arguments
+    ///
+    /// * `actor_id` - ID of the actor to check
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` if the actor is healthy
+    /// * `Ok(false)` if the actor is unhealthy or not found
+    /// * `Err(SystemActorError)` if checking health status fails
+    pub async fn check_actor_health(&self, actor_id: &ActorId) -> Result<bool, SystemActorError> {
+        let health_id = actor_id.health_id();
+
+        let health: Option<HealthRecord> =
+            self.engine().db().lock().await.select(&health_id).await.map_err(SystemActorError::from)?;
+
+        if let Some(health) = health {
+            if !health.enabled {
+                debug!("[{}] health-check {} disabled=true", self.id().name(), actor_id.name());
+                return Ok(true);
+            }
+
+            let elapsed =
+                SystemTime::now().duration_since(SystemTime::from(health.last_seen.0)).unwrap_or(Duration::MAX);
+
+            let update_interval: std::time::Duration = health.update_interval.into();
+            // Cap grace period at 1 second
+            let grace_period = std::cmp::min(update_interval / 10, Duration::from_secs(1));
+            let is_healthy = elapsed <= update_interval + grace_period;
+
+            debug!(
+                "[{}] health-check {} elapsed={:?} interval={:?} grace={:?} healthy={}",
+                self.id().name(),
+                actor_id.name(),
+                elapsed,
+                update_interval,
+                grace_period,
+                is_healthy
+            );
+
+            Ok(is_healthy)
+        } else {
+            debug!("[{}] health-check {} record-not-found", self.id().name(), actor_id.name());
+            Ok(false)
         }
     }
 
@@ -1069,10 +1304,19 @@ impl<T: Actor> ActorContext<T> {
         &self,
         message: &MT,
         to: &ActorId,
+        options: Option<SendOptions>,
     ) -> Result<(RecordId, RecordId, FrameMessage), SystemActorError>
     where
         MT: MessageType,
     {
+        // Check health if enabled
+        if options.is_some() && options.unwrap().check_health {
+            let is_healthy = self.check_actor_health(to).await?;
+            if !is_healthy {
+                return Err(SystemActorError::UnhealthyActor(to.clone()));
+            }
+        }
+
         let msg_value = serde_json::to_value(&message)?;
         let name = std::any::type_name::<MT>();
         let msg_id = Id::ulid();
@@ -1140,7 +1384,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let _ = self.prepare_and_send_message::<MT>(&message, to).await?;
+        let _ = self.prepare_and_send_message::<MT>(&message, to, None).await?;
         Ok(())
     }
 
@@ -1172,7 +1416,7 @@ impl<T: Actor> ActorContext<T> {
     where
         MT: MessageType,
     {
-        let (_, _, _) = self.prepare_and_send_message(&message, to).await?;
+        let (_, _, _) = self.prepare_and_send_message(&message, to, None).await?;
         Ok(())
     }
 
@@ -1224,7 +1468,7 @@ impl<T: Actor> ActorContext<T> {
         M: Message<MT>,
         MT: MessageType,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, to, Some(options.clone())).await?;
         self.wait_for_replies::<M::Response>(&reply_id, options).await
     }
 
@@ -1259,7 +1503,7 @@ impl<T: Actor> ActorContext<T> {
         MT: MessageType,
         RT: MessageType + 'static,
     {
-        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to).await?;
+        let (_, reply_id, _) = self.prepare_and_send_message::<MT>(&message, &to, Some(options.clone())).await?;
         self.wait_for_replies::<RT>(&reply_id, options).await
     }
 
@@ -1624,7 +1868,8 @@ mod tests {
                 info!("{} Ping", ctx.id());
                 attempts += 1;
 
-                let pong = ctx.send_and_wait_reply::<PongActor, Ping>(Ping, &pong_id, SendOptions::default()).await?;
+                let pong =
+                    ctx.send_and_wait_reply::<PongActor, Ping>(Ping, &pong_id, SendOptions::builder().build()).await?;
                 info!("{} Pong {}", ctx.id(), pong.times);
 
                 if pong.times == 0 {

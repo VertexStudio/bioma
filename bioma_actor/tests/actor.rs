@@ -1,6 +1,7 @@
 use bioma_actor::prelude::*;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use surrealdb::sql;
 use test_log::test;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
@@ -579,5 +580,177 @@ async fn test_actor_streaming_messages() -> Result<(), Box<dyn std::error::Error
     }
 
     actor_handle.abort();
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_health_monitoring_enabled() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Create health config with short update interval
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
+
+    let options = SpawnOptions::builder().health_config(health_config).build();
+
+    let actor_id = ActorId::of::<TestActor>("/health-test");
+    let (mut actor_ctx, mut actor) =
+        Actor::spawn(engine.clone(), actor_id.clone(), TestActor { count: 0 }, options).await?;
+
+    // Start actor in background
+    let actor_handle = tokio::spawn(async move {
+        if let Err(e) = actor.start(&mut actor_ctx).await {
+            error!("TestActor error: {}", e);
+        }
+    });
+
+    // Create sender context
+    let sender_id = ActorId::of::<TestActor>("/sender");
+    let (sender_ctx, _) =
+        Actor::spawn(engine.clone(), sender_id.clone(), TestActor { count: 0 }, SpawnOptions::default()).await?;
+
+    // Check health immediately after spawn
+    assert!(sender_ctx.check_actor_health(&actor_id).await?);
+
+    // Wait a bit and check health again (should still be healthy due to updates)
+    sleep(Duration::from_millis(300)).await;
+    assert!(sender_ctx.check_actor_health(&actor_id).await?);
+
+    // Kill actor and verify health reports as unhealthy
+    actor_handle.abort();
+    sleep(Duration::from_millis(200)).await;
+    assert!(!sender_ctx.check_actor_health(&actor_id).await?);
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_health_monitoring_disabled() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Create health config with monitoring disabled
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
+
+    let options = SpawnOptions::builder().health_config(health_config).build();
+
+    let actor_id = ActorId::of::<TestActor>("/health-disabled");
+    let (mut actor_ctx, mut actor) =
+        Actor::spawn(engine.clone(), actor_id.clone(), TestActor { count: 0 }, options).await?;
+
+    // Start actor in background
+    let actor_handle = tokio::spawn(async move {
+        if let Err(e) = actor.start(&mut actor_ctx).await {
+            error!("TestActor error: {}", e);
+        }
+    });
+
+    // Create sender context
+    let sender_id = ActorId::of::<TestActor>("/sender");
+    let (sender_ctx, _) =
+        Actor::spawn(engine.clone(), sender_id.clone(), TestActor { count: 0 }, SpawnOptions::default()).await?;
+
+    // Check health - should return true since monitoring is disabled
+    assert!(sender_ctx.check_actor_health(&actor_id).await?);
+
+    // Wait longer than default update interval
+    sleep(Duration::from_secs(2)).await;
+
+    // Should still return true since monitoring is disabled
+    assert!(sender_ctx.check_actor_health(&actor_id).await?);
+
+    actor_handle.abort();
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_health_check_before_send() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Create health config with short update interval
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
+
+    let options = SpawnOptions::builder().health_config(health_config).build();
+
+    let actor_id = ActorId::of::<TestActor>("/health-check");
+    let (mut actor_ctx, mut actor) =
+        Actor::spawn(engine.clone(), actor_id.clone(), TestActor { count: 0 }, options).await?;
+
+    // Start actor in background
+    let actor_handle = tokio::spawn(async move {
+        if let Err(e) = actor.start(&mut actor_ctx).await {
+            error!("TestActor error: {}", e);
+        }
+    });
+
+    // Create sender context
+    let sender_id = ActorId::of::<TestActor>("/sender");
+    let (sender_ctx, _) =
+        Actor::spawn(engine.clone(), sender_id.clone(), TestActor { count: 0 }, SpawnOptions::default()).await?;
+
+    // Send message with health check enabled
+    let send_options = SendOptions::builder().check_health(true).timeout(Duration::from_secs(1)).build();
+
+    // First message should succeed
+    let message = TestMessage { content: "Health check test".to_string() };
+    let result = sender_ctx.send::<TestActor, TestMessage>(message.clone(), &actor_id, send_options.clone()).await;
+    assert!(result.is_ok());
+
+    // Kill the actor
+    actor_handle.abort();
+    sleep(Duration::from_millis(200)).await;
+
+    // Message after kill should fail with UnhealthyActor error
+    let result = sender_ctx.send::<TestActor, TestMessage>(message, &actor_id, send_options).await;
+
+    match result {
+        Err(SystemActorError::UnhealthyActor(_)) => (),
+        _ => panic!("Expected UnhealthyActor error"),
+    }
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_health_record_persistence() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    let health_config = HealthConfig::builder().update_interval(sql::Duration::from_millis(100)).build();
+
+    let options =
+        SpawnOptions::builder().health_config(health_config.clone()).exists(SpawnExistsOptions::Reset).build();
+
+    let actor_id = ActorId::of::<TestActor>("/health-persist");
+
+    // First spawn
+    let (mut actor_ctx, mut actor) =
+        Actor::spawn(engine.clone(), actor_id.clone(), TestActor { count: 0 }, options.clone()).await?;
+
+    let actor_handle = tokio::spawn(async move {
+        if let Err(e) = actor.start(&mut actor_ctx).await {
+            error!("TestActor error: {}", e);
+        }
+    });
+
+    sleep(Duration::from_millis(200)).await;
+    actor_handle.abort();
+
+    // Respawn with same ID
+    let (mut actor_ctx2, mut actor2) =
+        Actor::spawn(engine.clone(), actor_id.clone(), TestActor { count: 0 }, options).await?;
+
+    let actor_handle2 = tokio::spawn(async move {
+        if let Err(e) = actor2.start(&mut actor_ctx2).await {
+            error!("TestActor error: {}", e);
+        }
+    });
+
+    // Create sender context
+    let sender_id = ActorId::of::<TestActor>("/sender");
+    let (sender_ctx, _) =
+        Actor::spawn(engine.clone(), sender_id.clone(), TestActor { count: 0 }, SpawnOptions::default()).await?;
+
+    // Health should be good after respawn
+    assert!(sender_ctx.check_actor_health(&actor_id).await?);
+
+    actor_handle2.abort();
     Ok(())
 }
