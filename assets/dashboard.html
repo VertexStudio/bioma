@@ -25,8 +25,13 @@
           Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
           "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
           "Noto Color Emoji";
-        --surrealist-gradient: linear-gradient(135deg, var(--primary) 0%, #9600FF 100%);
-        --surrealist-glow: 0 5px 20px -4px rgba(186, 0, 171, 1), 0 3px 15px rgba(186, 0, 171, .5);
+        --surrealist-gradient: linear-gradient(
+          135deg,
+          var(--primary) 0%,
+          #9600ff 100%
+        );
+        --surrealist-glow: 0 5px 20px -4px rgba(186, 0, 171, 1),
+          0 3px 15px rgba(186, 0, 171, 0.5);
       }
 
       body {
@@ -149,13 +154,18 @@
         color: currentColor;
         position: absolute;
         right: 0.5rem;
+        display: flex;
+        align-items: center;
+        height: 100%;
+        top: 0;
       }
 
       .nav-item:hover .external-link {
         opacity: 1;
       }
 
-      .nav-item:hover, .nav-item.active {
+      .nav-item:hover,
+      .nav-item.active {
         background-color: rgba(255, 255, 255, 0.1);
         box-shadow: var(--surrealist-glow);
       }
