@@ -17,55 +17,51 @@
             --bg-main: #121214;
             --bg-secondary: #1c1c1f;
             --border-color: #2a2a2d;
-            --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-                Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
-                "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
-                "Noto Color Emoji";
+            --font-family: 'JetBrains Mono', monospace;
+            --surrealist-gradient: linear-gradient(135deg, var(--primary) 0%, #9600FF 100%);
+        }
+
+        @font-face {
+            font-family: 'JetBrains Mono';
+            src: url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         }
 
         html, body {
             background-color: var(--bg-main);
             color: var(--text-primary);
             font-family: var(--font-family);
+            margin: 0;
+            padding: 0;
         }
 
-        /* Main container styling - centers content and adds padding */
         body {
             max-width: 800px;
-            /* Center the content */
             margin: 0 auto;
             padding: 20px;
-            /* Extra padding for fixed input container */
             padding-bottom: 80px;
         }
 
-        /* Chat messages container - vertical flex layout */
         #chat-container {
             margin-bottom: 10px;
             display: flex;
             flex-direction: column;
         }
 
-        /* Fixed input container at bottom of screen */
         #input-container {
-            max-width: 800px;
             position: fixed;
             bottom: 0;
             left: 50%;
             transform: translateX(-50%);
-            /* Center the container */
             padding: 20px;
-            background-color: var(--bg-secondary);
-            /* Subtle shadow above */
+            background-color: var(--bg-main);
             box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
             width: 100%;
+            max-width: 800px;
             box-sizing: border-box;
-            /* Rounded top corners */
             border-radius: 10px 10px 0 0;
             border-top: 1px solid var(--border-color);
         }
 
-        /* Textarea input styling with auto-resize capability */
         #query-input {
             width: 100%;
             padding: 10px;
@@ -78,9 +74,9 @@
             min-height: 40px;
             max-height: 200px;
             overflow-y: auto;
+            font-family: var(--font-family);
         }
 
-        /* Base message styling */
         .message {
             margin-bottom: 15px;
             padding: 12px;
@@ -89,9 +85,8 @@
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
-        /* Message variants for different roles */
         .user-message {
-            background-color: var(--primary);
+            background: var(--surrealist-gradient);
             align-self: flex-end;
             margin-left: auto;
             color: var(--text-primary);
@@ -114,15 +109,14 @@
         .tool-message {
             background-color: #1a1a1d;
             align-self: flex-start;
-            font-family: monospace;
+            font-family: var(--font-family);
             position: relative;
             border: 1px solid var(--border-color);
             color: var(--text-secondary);
         }
 
-        /* Context section styling */
         .context-toggle {
-            font-size: 0.7em;
+            font-size: 0.8em;
             color: var(--text-muted);
             cursor: pointer;
             margin-top: 10px;
@@ -136,11 +130,10 @@
         }
 
         .context-toggle:hover {
-            background-color: var(--primary);
+            background: var(--surrealist-gradient);
             color: var(--text-primary);
         }
 
-        /* Hidden by default, shown when toggled */
         .context-content {
             display: none;
             margin-top: 10px;
@@ -151,7 +144,6 @@
             color: var(--text-secondary);
         }
 
-        /* Context message styling */
         .context-content .message {
             margin: 8px 0;
             padding: 10px;
@@ -160,9 +152,8 @@
             background-color: var(--bg-main);
         }
 
-        /* Specific styling for different message types within context */
         .context-content .user-message {
-            background-color: rgba(255, 0, 160, 0.15); /* Subtle pink for user messages */
+            background: linear-gradient(135deg, rgba(255, 0, 160, 0.15) 0%, rgba(150, 0, 255, 0.15) 100%);
             border: 1px solid rgba(255, 0, 160, 0.2);
             color: var(--text-primary);
         }
@@ -174,13 +165,13 @@
         }
 
         .context-content .system-message {
-            background-color: rgba(42, 42, 45, 0.5); /* Darker background for system */
+            background-color: rgba(42, 42, 45, 0.5);
             border: 1px solid var(--border-color);
             color: var(--text-muted);
         }
 
         .context-content .tool-message {
-            background-color: rgba(26, 26, 29, 0.8); /* Even darker for tool messages */
+            background-color: rgba(26, 26, 29, 0.8);
             border: 1px solid var(--border-color);
             color: var(--text-secondary);
         }
@@ -192,18 +183,15 @@
         }
 
         .source-separator {
-            border-top: 1px solid #ddd;
+            border-top: 1px solid var(--border-color);
             margin-top: 10px;
             padding-top: 10px;
         }
 
-        .source,
-        .uri,
-        .chunk {
+        .source, .uri, .chunk {
             margin-bottom: 5px;
         }
 
-        /* Tool message specific styling */
         .tool-toggle {
             color: var(--text-muted);
             position: absolute;
@@ -251,7 +239,6 @@
             color: #ff80cc;
         }
 
-        /* Add hover states for interactive elements */
         #query-input:focus {
             border-color: var(--primary);
             outline: none;
@@ -259,16 +246,30 @@
         }
 
         .tool-toggle:hover {
-            background-color: var(--primary);
+            background: var(--surrealist-gradient);
             color: var(--text-primary);
         }
 
-        /* Add a subtle transition for smoother color changes */
-        .message,
-        .context-toggle,
-        .tool-toggle,
-        #query-input {
+        .message, .context-toggle, .tool-toggle, #query-input {
             transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-hover);
         }
     </style>
 </head>
@@ -414,7 +415,6 @@
                 </div>
             `;
 
-            console.debug("Final context HTML:", contextHtml);
             return contextHtml;
         }
 
@@ -423,7 +423,7 @@
             // Can be 'user', 'system', or 'assistant' (default)
             const role = sender.toLowerCase() === 'user' ? 'user' :
                 sender.toLowerCase() === 'system' ? 'system' :
-                    sender.toLowerCase() === 'tool' ? 'tool' : 'assistant';
+                sender.toLowerCase() === 'tool' ? 'tool' : 'assistant';
 
             // Add the new message to the chat history array
             // This history is used when making new API requests
@@ -450,6 +450,7 @@
 
             // Add the message to the chat container and scroll to bottom
             chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
             window.scrollTo(0, document.body.scrollHeight);
 
             // Re-initialize any Mermaid diagrams in the new message
@@ -480,10 +481,13 @@
             const queryText = queryInput.value.trim();
             if (!queryText) return;
 
-            // Construct the request object with chat history and new message
+            appendMessage('User', queryText);
+            queryInput.value = '';
+            resizeTextarea();
+
             const queryObject = {
                 messages: [
-                    ...messageHistory,  // Include all previous messages (TODO: prune)
+                    ...messageHistory,
                     {
                         role: "user",
                         content: queryText
@@ -493,14 +497,7 @@
                 stream: true
             };
 
-            // Display user's message in the chat UI
-            appendMessage('User', queryText);
-            // Clear input field and resize it
-            queryInput.value = '';
-            resizeTextarea();
-
             try {
-                // Send POST request to local API endpoint
                 const response = await fetch('http://localhost:5766/chat', {
                     method: 'POST',
                     headers: {
@@ -514,9 +511,11 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                // Remove the early message div creation
-                let messageDiv = null;
-                let contentDiv = null;
+                let messageDiv = document.createElement('div');
+                messageDiv.className = 'message assistant-message';
+                let contentDiv = document.createElement('div');
+                messageDiv.appendChild(contentDiv);
+                chatContainer.appendChild(messageDiv);
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -555,7 +554,6 @@
             }
         }
 
-
         function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
             const data = JSON.parse(json_line);
 
@@ -567,21 +565,21 @@
                     if (data.message.role === 'tool') {
                         const toolData = JSON.parse(data.message.content);
                         const formattedContent = `
-                <div class="source-separator"></div>
-                <div class="tool-toggle">▶</div>
-                <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-                <div class="tool-content">
-                    <div class="tool-function">
-                        <strong>Function:</strong> ${toolData.call.function.name}
-                    </div>
-                    <div class="tool-details">
-                        <strong>Arguments:</strong>
-                        <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                        <strong>Response:</strong>
-                        <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                    </div>
-                </div>
-            `;
+                            <div class="source-separator"></div>
+                            <div class="tool-toggle">▶</div>
+                            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+                            <div class="tool-content">
+                                <div class="tool-function">
+                                    <strong>Function:</strong> ${toolData.call.function.name}
+                                </div>
+                                <div class="tool-details">
+                                    <strong>Arguments:</strong>
+                                    <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                                    <strong>Response:</strong>
+                                    <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                                </div>
+                            </div>
+                        `;
                         lastMessageDiv.innerHTML += formattedContent;
                         initializeToolToggles(lastMessageDiv);
                     } else {
@@ -594,25 +592,31 @@
                     if (data.message.role === 'tool') {
                         const toolData = JSON.parse(data.message.content);
                         const formattedContent = `
-                <div class="tool-toggle">▶</div>
-                <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-                <div class="tool-content">
-                    <div class="tool-details">
-                        <strong>Arguments:</strong>
-                        <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                        <strong>Response:</strong>
-                        <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                    </div>
-                </div>
-            `;
+                            <div class="tool-toggle">▶</div>
+                            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+                            <div class="tool-content">
+                                <div class="tool-details">
+                                    <strong>Arguments:</strong>
+                                    <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                                    <strong>Response:</strong>
+                                    <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                                </div>
+                            </div>
+                        `;
                         specialMessageDiv.innerHTML = formattedContent;
-                        chatContainer.appendChild(specialMessageDiv);
+                        if (lastMessageRole === 'assistant') {
+                            chatContainer.insertBefore(specialMessageDiv, lastMessageDiv);
+                        } else {
+                            chatContainer.appendChild(specialMessageDiv);
+                        }
                         initializeToolToggles(specialMessageDiv);
                     } else {
                         specialMessageDiv.innerHTML = md.render(data.message.content);
                         chatContainer.appendChild(specialMessageDiv);
                     }
                 }
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                window.scrollTo(0, document.body.scrollHeight);
                 return accumulatedContent;
             }
 
@@ -667,6 +671,8 @@
                     }
 
                     contentDiv.innerHTML = md.render(accumulatedContent || '');
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                    window.scrollTo(0, document.body.scrollHeight);
                 }
             }
 
@@ -678,6 +684,7 @@
                 });
             }
 
+            chatContainer.scrollTop = chatContainer.scrollHeight;
             window.scrollTo(0, document.body.scrollHeight);
             return accumulatedContent;
         }
@@ -740,8 +747,8 @@
                 return null;
             }
         }
-
     </script>
 </body>
 
 </html>
+
