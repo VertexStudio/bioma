@@ -670,6 +670,25 @@
           mobileMenuToggle.setAttribute("aria-expanded", "false");
         }
       });
+
+      // Add event listener for F5 key
+      document.addEventListener("keydown", (e) => {
+        // Check if F5 was pressed (keyCode 116)
+        if (e.keyCode === 116) {
+          e.preventDefault(); // Prevent default refresh behavior
+
+          // Find the active container and its iframe
+          const activeContainer = document.querySelector(
+            ".interface-container.active"
+          );
+          if (activeContainer) {
+            const iframe = activeContainer.querySelector("iframe");
+            if (iframe) {
+              iframe.src = iframe.src; // Reload the iframe content
+            }
+          }
+        }
+      });
     </script>
   </body>
 </html>
