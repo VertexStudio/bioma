@@ -188,10 +188,4 @@ curl -X POST http://localhost:5766/delete_source \
 
 ### Swagger-ui documentation
 
-To run the Swagger-ui page, please use:
-
-```bash
-docker compose up swagger-ui
-```
-
-Then, open the browser at `http://localhost:80`. 
+Documentation is provided in the dashboard and the `congition` server should be runing to visualize it.
