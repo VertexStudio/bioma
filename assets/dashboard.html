@@ -330,6 +330,13 @@
         height: 32px;
       }
 
+      .sidebar-toggle:hover,
+      .sidebar-toggle:active {
+        background-color: rgba(255, 255, 255, 0.1);
+        box-shadow: var(--surrealist-glow);
+        color: var(--primary);
+      }
+
       .sidebar-toggle svg {
         width: 16px;
         height: 16px;
@@ -343,11 +350,6 @@
 
       .sidebar.collapsed .sidebar-toggle svg {
         transform: rotate(180deg);
-      }
-
-      .sidebar-toggle:hover {
-        background-color: color-mix(in srgb, var(--primary) 10%, transparent);
-        color: var(--primary);
       }
 
       .interface-container h2 {
