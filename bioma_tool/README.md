@@ -79,7 +79,7 @@ cargo build -p bioma_tool --example mcp_server
 
 Inspect example server:
 ```
-npx @modelcontextprotocol/inspector ./target/debug/examples/mcp_server --log-file .output/mcp_server-inspector.log
+npx github:VertexStudio/inspector#feature/ui-ux ./target/debug/examples/mcp_server --log-file .output/mcp_server-inspector.log
 ```
 
 Connecting to docker server:
