@@ -336,6 +336,11 @@
         transition: transform var(--transition-speed);
       }
 
+      .sidebar.collapsed .sidebar-header .sidebar-toggle {
+        width: 100%;
+        height: 100%;
+      }
+
       .sidebar.collapsed .sidebar-toggle svg {
         transform: rotate(180deg);
       }
@@ -627,7 +632,7 @@
           if (mainContent) mainContent.classList.add("sidebar-collapsed");
           toggleSidebarButton
             .querySelector("svg path")
-            .setAttribute("d", "M15 19l-7-7 7-7M13 5l-7 7 7 7");
+            .setAttribute("d", "M15 19l-7-7 7-7");
         }
       });
 
