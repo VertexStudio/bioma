@@ -22,6 +22,7 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 ollama-rs = { workspace = true }
 schemars = { workspace = true }
+utoipa = { workspace = true }
 url = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }

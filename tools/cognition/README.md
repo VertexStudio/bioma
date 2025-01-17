@@ -29,7 +29,7 @@ surreal start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass roo
 cargo run --release -p cognition --bin cognition-server
 
 # Launch with custom tools configuration
-cargo run --release -p cognition --bin cognition-server --config assets/configs/rag_tools_config_server.json
+cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server.json
 ```
 
 ## Endpoints
@@ -184,4 +184,8 @@ curl -X POST http://localhost:5766/ask \
 curl -X POST http://localhost:5766/delete_source \
     -H "Content-Type: application/json" \
     -d '{"sources": ["path/to/source1", "path/to/source2"]}'
-```
+```  
+
+### Swagger-ui documentation
+
+Documentation is provided in the dashboard and the `congition` server should be runing to visualize it.
