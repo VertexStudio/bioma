@@ -25,6 +25,8 @@
           Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
           "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
           "Noto Color Emoji";
+        --surrealist-gradient: linear-gradient(135deg, var(--primary) 0%, #9600FF 100%);
+        --surrealist-glow: 0 5px 20px -4px rgba(186, 0, 171, 1), 0 3px 15px rgba(186, 0, 171, .5);
       }
 
       body {
@@ -41,8 +43,9 @@
         top: 0;
         height: 100vh;
         width: var(--sidebar-width);
-        background-color: var(--bg-sidebar);
-        border-right: 1px solid var(--border-color);
+        background-color: rgba(25, 25, 29, 0.95);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
         padding: 1.5rem;
         padding-top: 1rem; /* Adjust top padding to accommodate toggle button */
         transition: width 0.3s ease;
@@ -88,6 +91,10 @@
         color: var(--text-primary);
         white-space: nowrap;
         margin: 0; /* Remove default margin */
+        background: var(--surrealist-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
       }
 
       .sidebar h2 {
@@ -148,9 +155,9 @@
         opacity: 1;
       }
 
-      .nav-item:hover {
-        background-color: rgba(255, 0, 160, 0.1);
-        color: var(--primary);
+      .nav-item:hover, .nav-item.active {
+        background-color: rgba(255, 255, 255, 0.1);
+        box-shadow: var(--surrealist-glow);
       }
 
       .main-content {
@@ -325,6 +332,12 @@
 
       .sidebar-toggle:hover {
         background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
+      }
+
+      .interface-container h2 {
+        font-size: 1.25rem;
+        margin-bottom: var(--mantine-spacing-md);
         color: var(--primary);
       }
     </style>
