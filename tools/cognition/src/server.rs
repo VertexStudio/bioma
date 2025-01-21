@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
+use actix_multipart::form::MultipartForm;
 use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -10,14 +10,20 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use serde::{Deserialize, Serialize};
+use request_schemas::{
+    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
+    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
+};
+use serde::Serialize;
 use serde_json::json;
 use std::error::Error as StdError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
+use utoipa::OpenApi;
 
 mod config;
+mod request_schemas;
 
 struct AppState {
     config: Config,
@@ -49,14 +55,38 @@ impl AppState {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    description = "Check server health.",
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
 async fn health() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
+#[utoipa::path(
+    get,
+    path = "/hello",
+    description = "Hello, world! from the server.",
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().json("Hello world!")
 }
 
+#[utoipa::path(
+    get,
+    path = "/reset",
+    description = "Reset bioma engine.",
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
 async fn reset(data: web::Data<AppState>) -> HttpResponse {
     info!("Resetting the engine");
     let engine = data.engine.clone();
@@ -73,19 +103,6 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct UploadMetadata {
-    path: std::path::PathBuf,
-}
-
-#[derive(Debug, MultipartForm)]
-struct Upload {
-    #[multipart(limit = "100MB")]
-    file: TempFile,
-    #[multipart(rename = "metadata")]
-    metadata: MpJson<UploadMetadata>,
-}
-
 #[derive(Debug, Serialize)]
 struct Uploaded {
     message: String,
@@ -93,7 +110,16 @@ struct Uploaded {
     size: usize,
 }
 
-async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppState>) -> impl Responder {
+#[utoipa::path(
+    post,
+    path = "/upload",
+    description = "Upload files to the server.",
+    request_body(content = UploadRequestSchema, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
 
@@ -219,13 +245,22 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     }
 }
 
-async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/index",
+    description = "Receives an array of path of files to index.",
+    request_body = IndexGlobsRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_globs = body.clone();
+    let index_globs: IndexGlobs = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response =
@@ -236,13 +271,22 @@ async fn index(body: web::Json<IndexGlobs>, data: web::Data<AppState>) -> HttpRe
     }
 }
 
-async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/retrieve",
+    description = "Retrieve context in .md format.",
+    request_body = RetrieveContextRequest,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let retrieve_context = body.clone();
+    let retrieve_context: RetrieveContext = body.clone().into();
 
     info!("Sending message to retriever actor");
     let response = user_actor
@@ -266,18 +310,22 @@ async fn retrieve(body: web::Json<RetrieveContext>, data: web::Data<AppState>) -
     }
 }
 
-#[derive(Deserialize)]
-struct ChatQuery {
-    messages: Vec<ChatMessage>,
-    source: Option<String>,
-    format: Option<chat::Schema>,
-}
-
-async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/chat",
+    description = "Generates a chat response.",
+    request_body = ChatQueryRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+
+    let body = body.clone();
 
     // Combine all user messages into a single query string for the retrieval system.
     // This helps find relevant context across all parts of the user's conversation.
@@ -435,13 +483,6 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     }
 }
 
-#[derive(Deserialize)]
-struct AskQuery {
-    messages: Vec<ChatMessage>,
-    source: Option<String>,
-    format: Option<chat::Schema>,
-}
-
 #[derive(Serialize)]
 struct AskResponse {
     #[serde(flatten)]
@@ -450,11 +491,22 @@ struct AskResponse {
     context: Vec<ChatMessage>,
 }
 
-async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/ask",
+    description = "Generates a chat response. Specific response format can be specified.",
+    request_body = AskQueryRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+
+    let body = body.clone();
 
     let query = body
         .messages
@@ -561,13 +613,22 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     }
 }
 
-async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/delete_source",
+    description = "Delete indexed sources.",
+    request_body = DeleteSourceRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let delete_source = body.clone();
+    let delete_source = body.clone().into();
 
     info!("Sending delete message to indexer actor for sources: {:?}", body.source);
     let response = user_actor
@@ -593,13 +654,16 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     }
 }
 
-#[derive(Deserialize)]
-struct EmbeddingsQuery {
-    model: String,
-    input: serde_json::Value,
-}
-
-async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/embed",
+    description = "Generate embeddings for text or images.",
+    request_body = EmbeddingsQueryRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -690,11 +754,22 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
     HttpResponse::Ok().json(generated_embeddings)
 }
 
-async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
+#[utoipa::path(
+    post,
+    path = "/rerank",
+    description = "Rerank texts based on a query.",
+    request_body = RankTextsRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
+
+    let body: RankTexts = body.clone().into();
 
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
@@ -720,6 +795,15 @@ async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpRe
         }
     }
 }
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank),
+    servers(
+        (url = "http://localhost:5766", description = "Localhost"),
+    )
+)]
+struct ApiDoc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -853,7 +937,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .total_limit(100 * 1024 * 1024),
             )
             .route("/health", web::get().to(health))
-            .route("/hello", web::post().to(hello))
+            .route("/hello", web::get().to(hello))
             .route("/reset", web::post().to(reset))
             .route("/index", web::post().to(index))
             .route("/retrieve", web::post().to(retrieve))
@@ -863,6 +947,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            .route(
+                "/api-docs/openapi.json",
+                web::get().to(move || async {
+                    let openapi = ApiDoc::openapi();
+
+                    HttpResponse::Ok().json(openapi.clone())
+                }),
+            )
             // Compatibility
             .route("/api/chat", web::post().to(chat))
             .route("/api/embed", web::post().to(embed))
