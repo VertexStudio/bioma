@@ -46,7 +46,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5001:5001"
-    entrypoint: ["gunicorn", "--bind", "0.0.0.0:5001", "markitdown_script:app"]
+    entrypoint: [ "gunicorn", "--bind", "0.0.0.0:5001", "markitdown_script:app" ]
 
   pdf-analyzer:
     build:
@@ -188,6 +188,7 @@ volumes:
   bioma-ollama_data:
   bioma-surreal_data:
   bioma-minio-data:
+
 
 networks:
   bioma-network:
