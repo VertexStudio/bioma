@@ -56,82 +56,104 @@ pub async fn chat_with_tools(
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
 ) -> Result<(), ChatToolError> {
-    // Make chat request with current messages and tools
     let chat_request = ChatMessages {
         messages: messages.clone(),
         restart: true,
         persist: false,
-        stream: true,
+        // Set stream false only for the initial tool call
+        stream: false,
         format: format.clone(),
         tools: if tools.is_empty() { None } else { Some(tools.clone()) },
     };
 
     info!("chat_with_tools: {} tools, {} messages, actor: {}", tools.len(), messages.len(), chat_actor);
-    debug!("Chat request: {:#?}", serde_json::to_string_pretty(&chat_request).unwrap_or_default());
 
     let mut messages = messages.clone();
 
-    // Send chat request
-    let mut chat_response = match user_actor
-        .send::<Chat, ChatMessages>(
+    // Initial request to get tool calls
+    let chat_response = match user_actor
+        .send_and_wait_reply::<Chat, ChatMessages>(
             chat_request,
             &chat_actor,
             SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
         )
         .await
     {
-        Ok(stream) => stream,
+        Ok(response) => response,
         Err(e) => {
             let _ = tx.send(Err(e.to_string())).await;
             return Err(ChatToolError::SendChatRequestError(e.to_string()));
         }
     };
 
-    // Stream response
-    let mut is_first_message = true;
-    while let Some(response) = chat_response.next().await {
-        match response {
-            Ok(message_response) => {
-                if message_response.message.tool_calls.is_empty() {
-                    info!("Chat response: {:#?}", message_response);
-                    // Stream the response chunk
-                    let response = ChatResponse {
-                        response: message_response,
-                        context: if is_first_message { messages.clone() } else { vec![] },
-                    };
-                    is_first_message = false;
+    // Handle any tool calls
+    if !chat_response.message.tool_calls.is_empty() {
+        // Send initial response without streaming
+        let initial_response = ChatResponse { response: chat_response.clone(), context: messages.clone() };
+        if tx.send(Ok(Json(initial_response))).await.is_err() {
+            return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
+        }
 
+        for tool_call in chat_response.message.tool_calls.iter() {
+            match chat_tool_call(user_actor, &tool_call, tools_hub.clone(), tx.clone()).await {
+                Ok(tool_response) => {
+                    messages.push(ChatMessage::tool(serde_json::to_string(&tool_response).unwrap_or_default()));
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(format!("Tool call failed: {}", e))).await;
+                    return Err(e);
+                }
+            }
+        }
+
+        // Make final request WITH streaming enabled
+        let final_request = ChatMessages {
+            messages: messages.clone(),
+            restart: true,
+            persist: false,
+            stream: true, // Enable streaming for final response
+            format: format.clone(),
+            tools: None, // No tools for final response
+        };
+
+        let mut final_stream = match user_actor
+            .send::<Chat, ChatMessages>(
+                final_request,
+                &chat_actor,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+            )
+            .await
+        {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = tx.send(Err(e.to_string())).await;
+                return Err(ChatToolError::SendChatRequestError(e.to_string()));
+            }
+        };
+
+        // Stream the final response
+        while let Some(response) = final_stream.next().await {
+            match response {
+                Ok(chunk) => {
+                    let response = ChatResponse {
+                        response: chunk,
+                        context: vec![], // Context already sent in initial response
+                    };
                     if tx.send(Ok(Json(response))).await.is_err() {
                         return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
                     }
-                } else {
-                    // We have tool calls, so we need to analyze the dependency tree
-                    info!("Tool calls: {:#?}", message_response.message.tool_calls);
-                    for tool_call in message_response.message.tool_calls.iter() {
-                        // Call the tool
-                        let tool_response = chat_tool_call(user_actor, &tool_call, tools_hub.clone(), tx.clone()).await;
-                        if let Ok(tool_response) = tool_response {
-                            messages.push(ChatMessage::tool(serde_json::to_string(&tool_response).unwrap_or_default()));
-                        } else {
-                            return Err(ChatToolError::ToolNotFound(tool_call.function.name.clone()));
-                        }
-                    }
-                    Box::pin(chat_with_tools(
-                        user_actor,
-                        chat_actor,
-                        &messages,
-                        tools,
-                        tools_hub.clone(),
-                        tx.clone(),
-                        format.clone(),
-                    ))
-                    .await?
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string())).await;
+                    return Err(ChatToolError::StreamResponseError(e.to_string()));
                 }
             }
-            Err(e) => {
-                let _ = tx.send(Err(e.to_string())).await;
-                return Err(ChatToolError::StreamResponseError(e.to_string()));
-            }
+        }
+    } else {
+        // No tools, just stream the response directly
+        let response = ChatResponse { response: chat_response, context: messages };
+        if tx.send(Ok(Json(response))).await.is_err() {
+            return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
         }
     }
 
