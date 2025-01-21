@@ -68,7 +68,7 @@ pub async fn chat_with_tools(
         tools: if tools.is_empty() { None } else { Some(tools.clone()) },
     };
 
-    // Get initial response with tool calls but DON'T send it to client
+    // Get initial response with tool calls
     let initial_response = match user_actor
         .send_and_wait_reply::<Chat, ChatMessages>(
             initial_request,
@@ -84,7 +84,7 @@ pub async fn chat_with_tools(
         }
     };
 
-    // If we have tool calls, execute them
+    // If we have tool calls, execute them first
     if !initial_response.message.tool_calls.is_empty() {
         // Execute tool calls and send their responses
         for tool_call in initial_response.message.tool_calls.iter() {
@@ -98,42 +98,43 @@ pub async fn chat_with_tools(
                 }
             }
         }
+    }
 
-        // Make final streaming request
-        let final_request = ChatMessages { messages, restart: true, persist: false, stream: true, format, tools: None };
+    // Always make a final streaming request, whether we had tool calls or not
+    let final_request =
+        ChatMessages { messages: messages, restart: true, persist: false, stream: true, format, tools: None };
 
-        // Stream final response
-        let mut chat_response = match user_actor
-            .send::<Chat, ChatMessages>(
-                final_request,
-                &chat_actor,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
-            )
-            .await
-        {
-            Ok(stream) => stream,
-            Err(e) => {
-                let _ = tx.send(Err(e.to_string())).await;
-                return Err(ChatToolError::SendChatRequestError(e.to_string()));
-            }
-        };
+    // Stream final response
+    let mut chat_response = match user_actor
+        .send::<Chat, ChatMessages>(
+            final_request,
+            &chat_actor,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+        )
+        .await
+    {
+        Ok(stream) => stream,
+        Err(e) => {
+            let _ = tx.send(Err(e.to_string())).await;
+            return Err(ChatToolError::SendChatRequestError(e.to_string()));
+        }
+    };
 
-        // Stream only content messages to client
-        while let Some(response) = chat_response.next().await {
-            match response {
-                Ok(chunk) => {
-                    // Only send chunks that have actual content
-                    if !chunk.message.content.is_empty() {
-                        let response = ChatResponse { response: chunk, context: vec![] };
-                        if tx.send(Ok(Json(response))).await.is_err() {
-                            return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
-                        }
+    // Stream only content messages to client
+    while let Some(response) = chat_response.next().await {
+        match response {
+            Ok(chunk) => {
+                // Only send chunks that have actual content
+                if !chunk.message.content.is_empty() {
+                    let response = ChatResponse { response: chunk, context: vec![] };
+                    if tx.send(Ok(Json(response))).await.is_err() {
+                        return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
                     }
                 }
-                Err(e) => {
-                    let _ = tx.send(Err(e.to_string())).await;
-                    return Err(ChatToolError::StreamResponseError(e.to_string()));
-                }
+            }
+            Err(e) => {
+                let _ = tx.send(Err(e.to_string())).await;
+                return Err(ChatToolError::StreamResponseError(e.to_string()));
             }
         }
     }
