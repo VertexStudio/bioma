@@ -1,12 +1,12 @@
 {
   "engine": {
-    "endpoint": "ws://0.0.0.0:9123",
-    "namespace": "dev",
-    "database": "bioma",
-    "username": "root",
-    "output_dir": ".output",
-    "local_store_dir": ".output/store",
-    "hf_cache_dir": ".output/cache/huggingface/hub"
+      "endpoint": "ws://0.0.0.0:9123",
+      "namespace": "dev",
+      "database": "bioma",
+      "username": "root",
+      "output_dir": ".output",
+      "local_store_dir": ".output/store",
+      "hf_cache_dir": ".output/cache/huggingface/hub"
   },
   "rag_endpoint": "http://0.0.0.0:5766",
   "chat_endpoint": "http://0.0.0.0:11434",
