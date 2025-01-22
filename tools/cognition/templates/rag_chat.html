@@ -291,6 +291,7 @@
         // Global variables for streaming state
         let partialLine = '';
         let contextSet = false;
+        let isFirstMessage = true;
 
         // Custom renderer for code fence blocks in markdown
         md.renderer.rules.fence = function (tokens, idx, options, env, self) {
@@ -451,7 +452,10 @@
             // Add the message to the chat container and scroll to bottom
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
-            window.scrollTo(0, document.body.scrollHeight);
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
 
             // Re-initialize any Mermaid diagrams in the new message
             mermaid.init(undefined, document.querySelectorAll('.mermaid'));
@@ -615,8 +619,7 @@
                         chatContainer.appendChild(specialMessageDiv);
                     }
                 }
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-                window.scrollTo(0, document.body.scrollHeight);
+
                 return accumulatedContent;
             }
 
@@ -671,8 +674,6 @@
                     }
 
                     contentDiv.innerHTML = md.render(accumulatedContent || '');
-                    chatContainer.scrollTop = chatContainer.scrollHeight;
-                    window.scrollTo(0, document.body.scrollHeight);
                 }
             }
 
@@ -684,8 +685,6 @@
                 });
             }
 
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-            window.scrollTo(0, document.body.scrollHeight);
             return accumulatedContent;
         }
 
