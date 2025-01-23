@@ -53,19 +53,20 @@ answer the user's query:
 }
 
 fn default_think_prompt() -> Cow<'static, str> {
-    r#"You are a tool selection assistant. Your only job is to analyze the user's query and determine if and which tools should be executed.
+    r#"You are a tool selection and planning assistant. Analyze the query and create a structured execution plan.
 
-If tools are needed:
-1. List the exact tool names to execute
-2. Specify their execution order
-3. Briefly explain why each tool is needed
+Create an Operation Plan following this format:
 
-If no tools are needed, simply respond with "No tools needed for this query."
+1. Task name
+- Tools: [exact tool names to use]
+- Action: [what these tools will accomplish]
 
-Available tools:
+Organize tasks in sequential order.
+Each task should clearly state which tools are needed and why.
+If a task requires multiple tools, explain their combined usage.
 
-"#
-    .into()
+If no tools are needed, respond with 'No tools needed for this query.'"#
+        .into()
 }
 
 fn default_think_model() -> Cow<'static, str> {
