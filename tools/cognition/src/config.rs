@@ -20,6 +20,10 @@ pub struct Config {
     pub chat_model: Cow<'static, str>,
     #[serde(default = "default_chat_prompt")]
     pub chat_prompt: Cow<'static, str>,
+    #[serde(default = "default_think_prompt")]
+    pub think_prompt: Cow<'static, str>,
+    #[serde(default = "default_think_model")]
+    pub think_model: Cow<'static, str>,
     pub tools: Vec<ClientConfig>,
 }
 
@@ -48,6 +52,26 @@ answer the user's query:
     .into()
 }
 
+fn default_think_prompt() -> Cow<'static, str> {
+    r#"You are a tool selection assistant. Your only job is to analyze the user's query and determine if and which tools should be executed.
+
+If tools are needed:
+1. List the exact tool names to execute
+2. Specify their execution order
+3. Briefly explain why each tool is needed
+
+If no tools are needed, simply respond with "No tools needed for this query."
+
+Available tools:
+
+"#
+    .into()
+}
+
+fn default_think_model() -> Cow<'static, str> {
+    "deepseek-r1:1.5b".into()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -56,6 +80,8 @@ impl Default for Config {
             chat_endpoint: default_chat_endpoint(),
             chat_model: default_chat_model(),
             chat_prompt: default_chat_prompt(),
+            think_prompt: default_think_prompt(),
+            think_model: default_think_model(),
             tools: vec![],
         }
     }
@@ -91,6 +117,8 @@ impl Args {
         info!("├─ Chat Endpoint: {}", config.chat_endpoint);
         info!("├─ Chat Model: {}", config.chat_model);
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
+        info!("├─ Think Prompt: {}...", config.think_prompt.chars().take(50).collect::<String>());
+        info!("├─ Think Model: {}", config.think_model);
         info!("├─ Tool Servers: {} configured", config.tools.len());
         for (i, tool) in config.tools.iter().enumerate() {
             let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };
