@@ -557,8 +557,10 @@ async fn think(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>
         retrieved.to_markdown()
     };
 
-    let system_prompt =
-        format!("{}\n\nAvailable tools:\n{}\n\nContext:\n{}", data.config.think_prompt, tools_str, context_content);
+    let system_prompt = format!(
+        "{}\n\nAvailable tools:\n{}\n\nAdditional context:\n{}",
+        data.config.think_prompt, tools_str, context_content
+    );
     let mut context_message = ChatMessage::system(system_prompt);
 
     if let Some(ctx) =
