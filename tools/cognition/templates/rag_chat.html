@@ -481,7 +481,6 @@
 
         // Handles sending user queries to the backend and displaying responses
         async function sendQuery() {
-            // Get the user's input and remove whitespace
             const queryText = queryInput.value.trim();
             if (!queryText) return;
 
@@ -489,25 +488,46 @@
             queryInput.value = '';
             resizeTextarea();
 
-            const queryObject = {
-                messages: [
-                    ...messageHistory,
-                    {
-                        role: "user",
-                        content: queryText
-                    }
-                ],
-                model: "llama3.2",
-                stream: true
-            };
-
             try {
+                // First, send request to /think endpoint
+                const thinkResponse = await fetch('http://localhost:5766/think', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        messages: messageHistory,
+                        model: "llama3.2",
+                        stream: false
+                    })
+                });
+
+                if (!thinkResponse.ok) {
+                    throw new Error(`HTTP error from think! status: ${thinkResponse.status}`);
+                }
+
+                const thinkData = await thinkResponse.json();
+                
+                // Extract the actual response directly from thinkData
+                const thinkContent = thinkData.message?.content || '';
+                const actualResponse = thinkContent.split('</think>').pop()?.trim() || thinkContent;
+                
+                // Update the last user message to include the think response
+                messageHistory[messageHistory.length - 1].content += '\n\nThought Process:\n' + actualResponse;
+
+                const queryObject = {
+                    messages: messageHistory,
+                    model: "llama3.2",
+                    stream: true
+                };
+
+                // Then send to /chat endpoint
                 const response = await fetch('http://localhost:5766/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(queryObject),
+                    body: JSON.stringify(queryObject)
                 });
 
                 // Check if request was successful
