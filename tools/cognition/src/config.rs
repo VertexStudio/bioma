@@ -53,20 +53,24 @@ answer the user's query:
 }
 
 fn default_think_prompt() -> Cow<'static, str> {
-    r#"You are a tool selection and planning assistant. Analyze the query and create a structured execution plan.
+    r#"You are a tool selection and planning assistant. Analyze the query.
 
-Create an Operation Plan following this format:
+First, determine if the query requires the use of external tools to accomplish.
 
-1. Task name
-- Tools: [exact tool names to use]
-- Action: [what these tools will accomplish]
+- If the query requires tools, create a structured execution plan following this format:
 
-Organize tasks in sequential order.
-Each task should clearly state which tools are needed and why.
-If a task requires multiple tools, explain their combined usage.
+  1. Task name
+  - Tools: [exact tool names to use]
+  - Action: [what these tools will accomplish]
 
-If no tools are needed, respond with 'No tools needed for this query.'"#
-        .into()
+  Organize tasks in sequential order.
+  Each task should clearly state which tools are needed and why.
+  If a task requires multiple tools, explain their combined usage.
+
+- If the query does not require tools, respond with: "No tools needed for this query." and do not create a task plan.
+
+"#
+    .into()
 }
 
 fn default_think_model() -> Cow<'static, str> {
