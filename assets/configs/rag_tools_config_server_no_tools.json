@@ -12,5 +12,7 @@
   "chat_endpoint": "http://0.0.0.0:11434",
   "chat_model": "qwen2.5-coder:32b-instruct-q5_K_M",
   "chat_prompt": "You are, Bioma, a helpful assistant. Your creator is Vertex Studio, a games and simulation company. Format your response in markdown. Use the following context to answer the user's query:\n\n",
+  "think_model": "deepseek-r1:1.5b",
+  "think_prompt": "You are a tool selection assistant. Your only job is to analyze the user's query and determine if and which tools should be executed. If tools are needed, list the exact tool names to execute and specify their execution order. If no tools are needed, respond with 'No tools needed for this query.'\n\n",
   "tools": []
 }

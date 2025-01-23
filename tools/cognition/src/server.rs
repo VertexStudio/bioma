@@ -10,6 +10,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
+use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
@@ -34,6 +35,7 @@ struct AppState {
     embeddings: ActorId,
     rerank: ActorId,
     chat: ActorId,
+    think_chat: ActorId,
 }
 
 impl AppState {
@@ -483,6 +485,129 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/think",
+    description = "Analyzes query and determines which tools to use and in what order.",
+    request_body = AskQueryRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn think(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+    let user_actor = match data.user_actor().await {
+        Ok(actor) => actor,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    let query = body
+        .messages
+        .iter()
+        .filter(|message| message.role == MessageRole::User)
+        .map(|message| message.content.clone())
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    let retrieve_context = RetrieveContext {
+        query: RetrieveQuery::Text(query.clone()),
+        limit: 5,
+        threshold: 0.0,
+        source: body.source.clone(),
+    };
+
+    let retrieved = match user_actor
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await
+    {
+        Ok(context) => context,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e)),
+    };
+
+    let tools = match data.tools.lock().await.list_tools(&user_actor).await {
+        Ok(tools) => tools,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
+    };
+
+    let tools_str = if tools.is_empty() {
+        "No tools available".to_string()
+    } else {
+        tools
+            .iter()
+            .map(|t| {
+                let params = serde_json::to_string_pretty(t.parameters())
+                    .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                format!(
+                    "- {}: {}\n  Parameters:\n{}",
+                    t.name(),
+                    t.description(),
+                    params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+
+    let context_content = if retrieved.context.is_empty() {
+        "No additional context available".to_string()
+    } else {
+        retrieved.to_markdown()
+    };
+
+    let system_prompt =
+        format!("{}\n\nAvailable tools:\n{}\n\nContext:\n{}", data.config.think_prompt, tools_str, context_content);
+    let mut context_message = ChatMessage::system(system_prompt);
+
+    if let Some(ctx) =
+        retrieved.context.iter().find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+    {
+        if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+            if let Metadata::Image(_) = metadata {
+                if let Ok(image_data) = tokio::fs::read(&source.uri).await {
+                    if let Ok(base64_data) = tokio::task::spawn_blocking(move || {
+                        base64::engine::general_purpose::STANDARD.encode(image_data)
+                    })
+                    .await
+                    {
+                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut conversation = body.messages.clone();
+    if !conversation.is_empty() {
+        conversation.insert(conversation.len() - 1, context_message.clone());
+    } else {
+        conversation.push(context_message.clone());
+    }
+
+    let chat_request = ChatMessages {
+        messages: conversation.clone(),
+        restart: true,
+        persist: false,
+        stream: false,
+        format: body.format.clone(),
+        tools: None,
+    };
+
+    match user_actor
+        .send_and_wait_reply::<Chat, ChatMessages>(
+            chat_request,
+            &data.think_chat,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await
+    {
+        Ok(response) => HttpResponse::Ok().json(AskResponse { response, context: conversation }),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+    }
+}
+
 #[derive(Serialize)]
 struct AskResponse {
     #[serde(flatten)]
@@ -903,6 +1028,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(chat_handle);
 
+    // Think Chat setup
+    let think_chat_id = ActorId::of::<Chat>("/rag/think_chat");
+    let generation_options = GenerationOptions::default();
+    let (mut think_chat_ctx, mut think_chat_actor) = Actor::spawn(
+        engine.clone(),
+        think_chat_id.clone(),
+        Chat::builder()
+            .model(config.think_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .generation_options(
+                generation_options.temperature(0.2).top_p(0.9).top_k(40).num_predict(1024).repeat_penalty(1.1),
+            )
+            .build(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let think_chat_handle = tokio::spawn(async move {
+        if let Err(e) = think_chat_actor.start(&mut think_chat_ctx).await {
+            error!("Think Chat actor error: {}", e);
+        }
+    });
+    actor_handles.push(think_chat_handle);
+
     // Tools setup
     let mut tools = ToolsHub::new();
     for tool_config in &config.tools {
@@ -919,6 +1068,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         embeddings: embeddings_id,
         rerank: rerank_id,
         chat: chat_id,
+        think_chat: think_chat_id,
     });
 
     // Create and run server
@@ -943,6 +1093,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(ask))
             .route("/chat", web::post().to(chat))
+            .route("/think", web::post().to(think))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
