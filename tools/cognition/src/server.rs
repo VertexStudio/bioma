@@ -61,7 +61,7 @@ impl AppState {
 #[utoipa::path(
     get,
     path = "/health",
-    description = "Check server health.",
+    description = "Check health of the server and its services.",
     responses(
         (status = 200, description = "Ok"),
     )
