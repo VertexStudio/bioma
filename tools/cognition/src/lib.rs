@@ -208,6 +208,7 @@ pub enum Services {
     Minio,
 }
 
+/// Check if posible to create a TCP connection to the provided endpoint
 pub async fn check_endpoint(endpoint: Url) -> HealthStatus {
     info!("Checking {}", endpoint);
 
