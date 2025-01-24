@@ -5,7 +5,7 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use clap::Parser;
-use cognition::{HealthStatus, Services, ToolsHub, UserActor};
+use cognition::{ollama_healthcheck, HealthStatus, Services, ToolsHub, UserActor};
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -67,8 +67,10 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     let mut services: HashMap<Services, HealthStatus> = HashMap::new();
 
     // SurrealDB health check
-    let health = data.engine.health().await;
-    services.insert(Services::SurrealDB, HealthStatus { is_healthy: health });
+    services.insert(Services::SurrealDB, HealthStatus { is_healthy: data.engine.health().await });
+
+    // Ollama health check
+    services.insert(Services::Ollama, ollama_healthcheck(data.config.chat_endpoint.clone()).await);
 
     HttpResponse::Ok().json(services)
 }
