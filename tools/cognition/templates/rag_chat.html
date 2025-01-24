@@ -330,7 +330,6 @@
         font-size: 0.95rem;
       }
 
-      /* Remove the old icon and thinking-text styles */
       .thinking-header i,
       .thinking-header .thinking-text {
         background: linear-gradient(
@@ -408,12 +407,13 @@
       let thinkingDiv = null;
       let thinkingContentDiv = null;
       let assistantTextBuffer = ""; // store user-visible assistant text
+      let latestContext = null; // store context from the most recent chunk
+      let contextSet = false; // track if we've appended the context yet
+
       const md = window.markdownit();
       const chatContainer = document.getElementById("chat-container");
       const queryInput = document.getElementById("query-input");
       let messageHistory = [];
-      let partialLine = "";
-      let contextSet = false;
       let thinkingStartTime = null;
 
       mermaid.initialize({ startOnLoad: true });
@@ -428,20 +428,21 @@
         return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
       };
 
+      // Create HTML for context
       function createContextSection(context) {
         if (!context?.length) return "";
-
         let regularMessages = "";
         let systemMessage = "";
         let lastUserMessage = "";
 
+        // find the last user message index
         const lastUserIndex = [...context]
           .reverse()
           .findIndex((msg) => msg.role === "user");
         const lastMessageIndex =
           lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
 
-        // Process regular messages
+        // process normal messages
         context.forEach((msg, index) => {
           if (msg.role !== "system" && index !== lastMessageIndex) {
             const roleClass = msg.role + "-message";
@@ -480,14 +481,13 @@
           }
         });
 
-        // Process system messages
+        // system messages
         context.forEach((msg) => {
           if (msg.role === "system") {
             const roleClass = msg.role + "-message";
             const images = msg.images || [];
             let imageIndex = 0;
             let processedContent = "";
-
             const contentLines = msg.content ? msg.content.split("\n") : [];
             contentLines.forEach((line) => {
               const trimmedLine = line.trim();
@@ -514,7 +514,7 @@
           }
         });
 
-        // Last user message (if exists)
+        // the last user message
         if (lastMessageIndex !== -1) {
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
@@ -528,7 +528,7 @@
           `;
         }
 
-        const contextHtml = `
+        return `
           <div class="context-container">
             <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
             <div class="context-content">
@@ -548,7 +548,6 @@
             </div>
           </div>
         `;
-        return contextHtml;
       }
 
       function appendMessage(sender, content, context = null) {
@@ -623,11 +622,15 @@
           // We'll collect everything in a stream and process it
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
-          let accumulatedContent = "";
           let buffer = "";
 
+          // reset for new answer
+          isThinkingActive = false;
+          thinkingDiv = null;
+          thinkingContentDiv = null;
+          assistantTextBuffer = "";
           contextSet = false;
-          assistantTextBuffer = ""; // reset before each new answer
+          latestContext = null;
 
           while (true) {
             const { value, done } = await reader.read();
@@ -642,24 +645,22 @@
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
-                accumulatedContent = processJsonLine(line, accumulatedContent);
+                processJsonLine(line);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
               }
             }
           }
 
-          // If there's leftover text after streaming
+          // leftover text after streaming
           if (assistantTextBuffer) {
-            // We'll finalize the assistant message with leftover
-            createOrUpdateAssistantMessage(assistantTextBuffer);
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
 
-          // **Stop the thinking animation and make "Thinking..." static**
+          // Stop the thinking animation if active
           if (thinkingDiv) {
             const thinkingText = thinkingDiv.querySelector(".thinking-text");
             if (thinkingText) {
-              // Remove the animation
               thinkingText.classList.add("static");
             }
           }
@@ -674,24 +675,31 @@
         }
       }
 
-      function processJsonLine(json_line, accumulatedContent) {
+      function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
 
-        // If we have no content & we see done
+        // If this chunk includes context, store it
+        if (data.context) {
+          latestContext = data.context;
+        }
+
         if (!data.message?.content) {
-          if (data.done && accumulatedContent) {
+          // If there's no text, but we see done
+          if (data.done && assistantTextBuffer) {
+            // finalize
             messageHistory.push({
               role: "assistant",
-              content: accumulatedContent,
+              content: assistantTextBuffer,
               images: data.message?.images,
             });
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
-          return accumulatedContent;
+          return;
         }
 
         if (data.message.role === "system" || data.message.role === "tool") {
           handleSpecialRole(data.message);
-          return accumulatedContent;
+          return;
         }
 
         // If it's an assistant chunk
@@ -701,21 +709,24 @@
 
           while (idx < chunk.length) {
             if (!isThinkingActive) {
+              // Look for <think> start
               const openPos = chunk.indexOf("<think>", idx);
               if (openPos === -1) {
+                // No <think>
                 const visiblePart = chunk.substring(idx);
                 assistantTextBuffer += visiblePart;
                 idx = chunk.length;
               } else {
+                // Found <think>
                 assistantTextBuffer += chunk.substring(idx, openPos);
-                idx = openPos + 7;
+                idx = openPos + 7; // move past <think>
 
                 if (!thinkingDiv) {
                   thinkingDiv = createThinkingProcessContainer();
                   chatContainer.appendChild(thinkingDiv);
                   thinkingContentDiv =
                     thinkingDiv.querySelector(".thinking-content");
-                  // Start timer when thinking begins
+                  // Start timer when we first see <think>
                   thinkingStartTime = Date.now();
                   // Start animation
                   const thinkingText =
@@ -727,19 +738,31 @@
                 isThinkingActive = true;
               }
             } else {
+              // We're inside <think>
               const closePos = chunk.indexOf("</think>", idx);
               if (closePos === -1) {
-                appendThinkingChunk(chunk.substring(idx), thinkingContentDiv);
+                // no closing yet
+                const thoughtChunk = chunk.substring(idx);
+                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
                 idx = chunk.length;
               } else {
-                appendThinkingChunk(
-                  chunk.substring(idx, closePos),
-                  thinkingContentDiv
-                );
+                // found </think>
+                const thoughtChunk = chunk.substring(idx, closePos);
+                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                idx = closePos + 8; // move past </think>
                 isThinkingActive = false;
-                idx = closePos + 8;
 
-                // Calculate thinking duration and update text
+                // We just exited the think block,
+                // if we have any user-visible text accumulated,
+                // show it w/ context now
+                if (assistantTextBuffer.trim().length > 0) {
+                  createOrUpdateAssistantMessage(
+                    assistantTextBuffer,
+                    latestContext
+                  );
+                }
+
+                // Calculate thinking duration and finalize "Thinking..."
                 if (thinkingDiv && thinkingStartTime) {
                   const duration = (
                     (Date.now() - thinkingStartTime) /
@@ -757,23 +780,24 @@
             }
           }
 
-          // If we're fully done with the chunk and not inside <think>,
-          // let's show updated assistant text
+          // If we finished parsing the chunk
+          // and we're not in <think> mode,
+          // let's update partial user-facing text
           if (!isThinkingActive && assistantTextBuffer.length > 0) {
-            createOrUpdateAssistantMessage(assistantTextBuffer, data.context);
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
 
+          // If this chunk signals done
           if (data.done) {
             messageHistory.push({
               role: "assistant",
               content: assistantTextBuffer,
               images: data.message?.images,
             });
-            assistantTextBuffer = ""; // Only clear after done signal
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+            assistantTextBuffer = "";
           }
         }
-
-        return accumulatedContent;
       }
 
       function handleSpecialRole(msg) {
@@ -824,7 +848,6 @@
         }
       }
 
-      // Creates or updates the single assistant message block
       function createOrUpdateAssistantMessage(visibleText, context = null) {
         const lastMessageDiv = chatContainer.lastElementChild;
         const lastMessageRole =
@@ -852,7 +875,10 @@
           chatContainer.appendChild(assistantBlock);
         }
 
-        // Insert context once
+        // Render the user-visible text
+        assistantContent.innerHTML = md.render(visibleText || "");
+
+        // If we haven't shown context yet, but we have some context
         if (!contextSet && context?.length) {
           const contextSection = createContextSection(context);
           if (contextSection) {
@@ -863,58 +889,9 @@
           contextSet = true;
         }
 
-        // Render entire partial text so far
-        assistantContent.innerHTML = md.render(visibleText || "");
         chatContainer.scrollTop = chatContainer.scrollHeight;
       }
 
-      function resizeTextarea() {
-        queryInput.style.height = "auto";
-        queryInput.style.height = queryInput.scrollHeight + "px";
-      }
-
-      queryInput.addEventListener("input", resizeTextarea);
-
-      queryInput.addEventListener("keydown", async (e) => {
-        if (e.key === "Enter") {
-          if (e.shiftKey) {
-            resizeTextarea();
-            return;
-          }
-          e.preventDefault();
-          if (e.ctrlKey) {
-            await sendQuery("/chat", true);
-          } else if (e.altKey) {
-            await sendQuery("/think");
-          } else {
-            await sendQuery("/chat", false);
-          }
-        }
-      });
-
-      document.getElementById("send-button").addEventListener("click", () => {
-        sendQuery("/chat", true);
-      });
-
-      document.getElementById("think-button").addEventListener("click", () => {
-        sendQuery("/think");
-      });
-
-      function processBase64Image(base64String) {
-        base64String = base64String.trim();
-        if (base64String.startsWith("data:image")) {
-          return base64String;
-        }
-        try {
-          atob(base64String); // verify Base64
-          return `data:image/jpeg;base64,${base64String}`;
-        } catch (e) {
-          console.error("Invalid base64 string:", e);
-          return null;
-        }
-      }
-
-      // Creates a fresh "thinking process" container
       function createThinkingProcessContainer() {
         const div = document.createElement("div");
         div.className = "thinking-process";
@@ -951,6 +928,53 @@
           }
         });
       }
+
+      function processBase64Image(base64String) {
+        base64String = base64String.trim();
+        if (base64String.startsWith("data:image")) {
+          return base64String;
+        }
+        try {
+          atob(base64String); // verify Base64
+          return `data:image/jpeg;base64,${base64String}`;
+        } catch (e) {
+          console.error("Invalid base64 string:", e);
+          return null;
+        }
+      }
+
+      function resizeTextarea() {
+        queryInput.style.height = "auto";
+        queryInput.style.height = queryInput.scrollHeight + "px";
+      }
+
+      queryInput.addEventListener("input", resizeTextarea);
+
+      // Keyboard shortcuts
+      queryInput.addEventListener("keydown", async (e) => {
+        if (e.key === "Enter") {
+          if (e.shiftKey) {
+            resizeTextarea();
+            return;
+          }
+          e.preventDefault();
+          if (e.ctrlKey) {
+            await sendQuery("/chat", true);
+          } else if (e.altKey) {
+            await sendQuery("/think");
+          } else {
+            await sendQuery("/chat", false);
+          }
+        }
+      });
+
+      document.getElementById("send-button").addEventListener("click", () => {
+        sendQuery("/chat", true);
+      });
+
+      document.getElementById("think-button").addEventListener("click", () => {
+        sendQuery("/think");
+      });
     </script>
   </body>
 </html>
