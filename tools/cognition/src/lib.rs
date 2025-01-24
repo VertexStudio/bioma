@@ -5,7 +5,7 @@ use ollama_rs::generation::{
     chat::ChatMessageResponse,
     tools::{ToolCall, ToolInfo},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
@@ -185,4 +185,16 @@ async fn chat_tool_call(
     };
 
     Ok(response)
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct HealthStatus {
+    pub is_healthy: bool,
+    // timestamp: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum Services {
+    #[serde(rename = "surrealdb")]
+    SurrealDB,
 }
