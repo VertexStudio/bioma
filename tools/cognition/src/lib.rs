@@ -200,10 +200,16 @@ pub enum Services {
     SurrealDB,
     #[serde(rename = "ollama")]
     Ollama,
+    #[serde(rename = "pdf_analyzer")]
+    PdfAnalyzer,
+    #[serde(rename = "markitdown")]
+    Markitdown,
+    #[serde(rename = "minio")]
+    Minio,
 }
 
-pub async fn ollama_healthcheck(endpoint: Url) -> HealthStatus {
-    info!("Checking health of Ollama at {}", endpoint);
+pub async fn check_endpoint(endpoint: Url) -> HealthStatus {
+    info!("Checking {}", endpoint);
 
     let host = match endpoint.host_str() {
         Some(host) => host,
