@@ -63,7 +63,7 @@ TOOL USAGE REQUIREMENTS:
    - The full Name for general discussion
 
 SUGGESTED RESPONSE FORMAT:
-"For [specific task], I recommend using [Tool Name] (Id: [tool.name]) because its intent is [quote tool.description]
+"For [specific task], I recommend using [Tool Name] (Name: [tool.name]) because its intent is [quote tool.description]
 
 STRICT LIMITATIONS:
 - If a tool is not in the Approved Tools list, do not mention or suggest it
@@ -71,13 +71,14 @@ STRICT LIMITATIONS:
 - Never suggest alternative tools outside the approved list
 - Never acknowledge or reference tools outside the approved list
 
-APPROVED TOOLS LIST: {tools_list}
+APPROVED TOOLS LIST:
+{tools_list}
 
 When responding:
 1. Review the available tools and their documented intents
 2. Only suggest tools that precisely match the required capability
 3. Quote the tool's exact Intent when explaining its usage
-4. If no approved tool matches the required capability, state that no approved tool is available for that specific function
+4. If no approved tool matches the required capability, state that no approved tool is available for that specific function or case
 "#
     .into()
 }
