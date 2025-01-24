@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::{net::TcpStream, sync::Mutex};
 pub use tool::ToolsHub;
 use tracing::{debug, error, info};
+use url::Url;
 pub use user::UserActor;
 
 pub mod tool;
@@ -197,4 +198,35 @@ pub struct HealthStatus {
 pub enum Services {
     #[serde(rename = "surrealdb")]
     SurrealDB,
+    #[serde(rename = "ollama")]
+    Ollama,
+}
+
+pub async fn ollama_healthcheck(endpoint: Url) -> HealthStatus {
+    info!("Checking health of Ollama at {}", endpoint);
+
+    let host = match endpoint.host_str() {
+        Some(host) => host,
+        None => {
+            error!("Invalid host");
+            return HealthStatus { is_healthy: false };
+        }
+    };
+
+    let port = match endpoint.port() {
+        Some(port) => port,
+        None => {
+            error!("Invalid port");
+            return HealthStatus { is_healthy: false };
+        }
+    };
+
+    let endpoint = format!("{}:{}", host, port);
+
+    let is_healthy = match TcpStream::connect(&endpoint).await {
+        Ok(_) => true,
+        Err(_) => false,
+    };
+
+    HealthStatus { is_healthy }
 }
