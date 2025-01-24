@@ -307,6 +307,7 @@
             border-radius: 8px;
             margin-bottom: 15px;
             overflow: hidden;
+            position: relative;
         }
 
         .thinking-header {
@@ -343,6 +344,32 @@
 
         .chevron.rotated {
             transform: rotate(180deg);
+        }
+
+        /* New styles for the thinking animation */
+        .thinking-animation {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(to right, transparent, var(--primary), transparent);
+            animation: thinking-animation 2s infinite;
+            opacity: 0;
+        }
+
+        @keyframes thinking-animation {
+            0% {
+                left: -100%;
+                opacity: 0;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                left: 100%;
+                opacity: 0;
+            }
         }
     </style>
 </head>
@@ -802,6 +829,7 @@
             const thinkingDiv = document.createElement('div');
             thinkingDiv.className = 'thinking-process';
             thinkingDiv.innerHTML = `
+                <div class="thinking-animation"></div>
                 <div class="thinking-header" onclick="toggleThinking(this)">
                     <i class="fas fa-brain"></i>
                     Thinking Process
@@ -825,7 +853,7 @@
             
             if (!thinkingProcess) {
                 thinkingProcess = createThinkingProcess(content);
-                lastMessageDiv.insertBefore(thinkingProcess, lastMessageDiv.firstChild);
+                chatContainer.insertBefore(thinkingProcess, lastMessageDiv);
             } else {
                 const thinkingContent = thinkingProcess.querySelector('.thinking-content');
                 thinkingContent.textContent += content;
