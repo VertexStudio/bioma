@@ -387,17 +387,17 @@
     </div>
 
     <script>
+        let isThinkingActive = false;
+        let thinkingBuffer = "";
         const md = window.markdownit();
         const chatContainer = document.getElementById('chat-container');
         const queryInput = document.getElementById('query-input');
         let messageHistory = [];
-
-        mermaid.initialize({ startOnLoad: true });
-
-        // Global variables for streaming state
         let partialLine = '';
         let contextSet = false;
         let isFirstMessage = true;
+
+        mermaid.initialize({ startOnLoad: true });
 
         // Custom renderer for code fence blocks in markdown
         md.renderer.rules.fence = function (tokens, idx, options, env, self) {
@@ -409,7 +409,6 @@
                 return '<div class="mermaid">' + code + '</div>';
             }
             // Default handling for all other code blocks
-            // Escapes HTML to prevent XSS and wraps in pre/code tags
             return '<pre><code>' + md.utils.escapeHtml(code) + '</code></pre>';
         };
 
@@ -434,7 +433,6 @@
                     let uri = '';
                     let processedContent = '';
 
-                    // Process images and content
                     const images = msg.images || [];
                     let imageIndex = 0;
 
@@ -539,11 +537,9 @@
             messageDiv.className = `message ${role}-message`;
 
             const mainContent = md.render(sender === 'User' ? md.utils.escapeHtml(content) : content);
-
             const contextSection = role === 'assistant' ? createContextSection(context) : '';
 
             messageDiv.innerHTML = mainContent + contextSection;
-
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
             window.scrollTo({
@@ -638,10 +634,56 @@
 
         function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
             const data = JSON.parse(json_line);
-
             const lastMessageDiv = chatContainer.lastElementChild;
             const lastMessageRole = lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
+            // Early return if no content
+            if (!data.message?.content) {
+                if (data.done && accumulatedContent) {
+                    messageHistory.push({
+                        role: 'assistant',
+                        content: accumulatedContent,
+                        images: data.message?.images
+                    });
+                }
+                return accumulatedContent;
+            }
+
+            // Parse chunk content for think tags
+            let chunk = data.message.content;
+            let visibleText = "";
+            let idx = 0;
+
+            while (idx < chunk.length) {
+                if (!isThinkingActive) {
+                    const openTag = chunk.indexOf("<think>", idx);
+                    if (openTag === -1) {
+                        visibleText += chunk.substring(idx);
+                        idx = chunk.length;
+                    } else {
+                        visibleText += chunk.substring(idx, openTag);
+                        isThinkingActive = true;
+                        idx = openTag + 7;
+                    }
+                } else {
+                    const closeTag = chunk.indexOf("</think>", idx);
+                    if (closeTag === -1) {
+                        thinkingBuffer += chunk.substring(idx);
+                        idx = chunk.length;
+                    } else {
+                        thinkingBuffer += chunk.substring(idx, closeTag);
+                        updateThinkingContent(thinkingBuffer);
+                        thinkingBuffer = "";
+                        isThinkingActive = false;
+                        idx = closeTag + 8;
+                    }
+                }
+            }
+
+            // Update message content to cleaned version
+            data.message.content = visibleText;
+
+            // Handle system/tool messages
             if (data.message?.role === 'system' || data.message?.role === 'tool') {
                 if (lastMessageRole === data.message.role) {
                     if (data.message.role === 'tool') {
@@ -677,6 +719,9 @@
                             <div class="tool-toggle">▶</div>
                             <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
                             <div class="tool-content">
+                                <div class="tool-function">
+                                    <strong>Function:</strong> ${toolData.call.function.name}
+                                </div>
                                 <div class="tool-details">
                                     <strong>Arguments:</strong>
                                     <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
@@ -697,20 +742,19 @@
                         chatContainer.appendChild(specialMessageDiv);
                     }
                 }
-
                 return accumulatedContent;
             }
 
+            // Handle assistant messages
             if (data.message?.role === 'assistant') {
                 if (lastMessageRole === 'assistant' && !messageDiv) {
                     messageDiv = lastMessageDiv;
-                    contentDiv = lastMessageDiv.querySelector('div:not(.context-container)');
+                    contentDiv = lastMessageDiv.querySelector('div:not(.context-container):not(.thinking-process)');
                     if (!contentDiv) {
                         contentDiv = document.createElement('div');
-                        messageDiv.insertBefore(contentDiv, messageDiv.firstChild);
+                        messageDiv.appendChild(contentDiv);
                     }
-                }
-                else if (!messageDiv && (data.message.content || data.message.images)) {
+                } else if (!messageDiv && (data.message.content || data.message.images)) {
                     messageDiv = document.createElement('div');
                     messageDiv.className = 'message assistant-message';
                     contentDiv = document.createElement('div');
@@ -719,6 +763,7 @@
                 }
             }
 
+            // Handle context
             if (!contextSet && data.context?.length > 0 && messageDiv) {
                 const contextSection = createContextSection(data.context);
                 const existingContext = messageDiv.querySelector('.context-container');
@@ -731,12 +776,12 @@
                 contextSet = true;
             }
 
+            // Append content and images
             if (messageDiv && contentDiv && (data.message?.content || data.message?.images)) {
                 if (data.message.role !== 'system' && data.message.role !== 'tool') {
                     if (data.message.content) {
                         accumulatedContent = (accumulatedContent || '') + data.message.content;
                     }
-
                     if (data.message.images && data.message.images.length > 0) {
                         data.message.images.forEach(imageBase64 => {
                             const imgElement = document.createElement('img');
@@ -745,11 +790,11 @@
                             contentDiv.appendChild(imgElement);
                         });
                     }
-
                     contentDiv.innerHTML = md.render(accumulatedContent || '');
                 }
             }
 
+            // Store completed messages
             if (data.done && accumulatedContent) {
                 messageHistory.push({
                     role: 'assistant',
@@ -788,9 +833,8 @@
                     resizeTextarea();
                     return;
                 }
-                
+
                 e.preventDefault();
-                
                 if (e.ctrlKey) {
                     await sendQuery('/chat', true);
                 } else if (e.altKey) {
@@ -804,20 +848,18 @@
         document.getElementById('send-button').addEventListener('click', () => {
             sendQuery('/chat', true);
         });
-        
+
         document.getElementById('think-button').addEventListener('click', () => {
             sendQuery('/think');
         });
 
         function processBase64Image(base64String) {
             base64String = base64String.trim();
-
             if (base64String.startsWith('data:image')) {
                 return base64String;
             }
-
             try {
-                atob(base64String);
+                atob(base64String); // verify it's valid Base64
                 return `data:image/jpeg;base64,${base64String}`;
             } catch (e) {
                 console.error('Invalid base64 string:', e);
@@ -825,6 +867,7 @@
             }
         }
 
+        // Creates the collapsible "thinking process" container
         function createThinkingProcess(content) {
             const thinkingDiv = document.createElement('div');
             thinkingDiv.className = 'thinking-process';
@@ -840,6 +883,7 @@
             return thinkingDiv;
         }
 
+        // Toggles the "Thinking Process" section
         window.toggleThinking = function(header) {
             const content = header.nextElementSibling;
             const chevron = header.querySelector('.chevron');
@@ -847,10 +891,11 @@
             chevron.classList.toggle('rotated');
         };
 
+        // Updates or creates the "Thinking Process" section with new info
         function updateThinkingContent(content) {
             const lastMessageDiv = chatContainer.lastElementChild;
             let thinkingProcess = lastMessageDiv.querySelector('.thinking-process');
-            
+
             if (!thinkingProcess) {
                 thinkingProcess = createThinkingProcess(content);
                 chatContainer.insertBefore(thinkingProcess, lastMessageDiv);
@@ -859,139 +904,6 @@
                 thinkingContent.textContent += content;
             }
         }
-
-        // Update processJsonLine function to handle thinking content
-        function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
-            const data = JSON.parse(json_line);
-
-            if (data.message?.role === 'assistant' && data.message.content.startsWith('<think>')) {
-                const thinkingContent = data.message.content.replace('<think>', '').replace('</think>', '').trim();
-                updateThinkingContent(thinkingContent);
-                return accumulatedContent;
-            }
-
-            const lastMessageDiv = chatContainer.lastElementChild;
-            const lastMessageRole = lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
-
-            if (data.message?.role === 'system' || data.message?.role === 'tool') {
-                if (lastMessageRole === data.message.role) {
-                    if (data.message.role === 'tool') {
-                        const toolData = JSON.parse(data.message.content);
-                        const formattedContent = `
-                            <div class="source-separator"></div>
-                            <div class="tool-toggle">▶</div>
-                            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-                            <div class="tool-content">
-                                <div class="tool-function">
-                                    <strong>Function:</strong> ${toolData.call.function.name}
-                                </div>
-                                <div class="tool-details">
-                                    <strong>Arguments:</strong>
-                                    <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                                    <strong>Response:</strong>
-                                    <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                                </div>
-                            </div>
-                        `;
-                        lastMessageDiv.innerHTML += formattedContent;
-                        initializeToolToggles(lastMessageDiv);
-                    } else {
-                        lastMessageDiv.innerHTML += '<div class="source-separator"></div>' + md.render(data.message.content);
-                    }
-                } else {
-                    const specialMessageDiv = document.createElement('div');
-                    specialMessageDiv.className = `message ${data.message.role}-message`;
-
-                    if (data.message.role === 'tool') {
-                        const toolData = JSON.parse(data.message.content);
-                        const formattedContent = `
-                            <div class="tool-toggle">▶</div>
-                            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-                            <div class="tool-content">
-                                <div class="tool-details">
-                                    <strong>Arguments:</strong>
-                                    <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
-                                    <strong>Response:</strong>
-                                    <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
-                                </div>
-                            </div>
-                        `;
-                        specialMessageDiv.innerHTML = formattedContent;
-                        if (lastMessageRole === 'assistant') {
-                            chatContainer.insertBefore(specialMessageDiv, lastMessageDiv);
-                        } else {
-                            chatContainer.appendChild(specialMessageDiv);
-                        }
-                        initializeToolToggles(specialMessageDiv);
-                    } else {
-                        specialMessageDiv.innerHTML = md.render(data.message.content);
-                        chatContainer.appendChild(specialMessageDiv);
-                    }
-                }
-
-                return accumulatedContent;
-            }
-
-            if (data.message?.role === 'assistant') {
-                if (lastMessageRole === 'assistant' && !messageDiv) {
-                    messageDiv = lastMessageDiv;
-                    contentDiv = lastMessageDiv.querySelector('div:not(.context-container):not(.thinking-process)');
-                    if (!contentDiv) {
-                        contentDiv = document.createElement('div');
-                        messageDiv.appendChild(contentDiv);
-                    }
-                }
-                else if (!messageDiv && (data.message.content || data.message.images)) {
-                    messageDiv = document.createElement('div');
-                    messageDiv.className = 'message assistant-message';
-                    contentDiv = document.createElement('div');
-                    messageDiv.appendChild(contentDiv);
-                    chatContainer.appendChild(messageDiv);
-                }
-            }
-
-            if (!contextSet && data.context?.length > 0 && messageDiv) {
-                const contextSection = createContextSection(data.context);
-                const existingContext = messageDiv.querySelector('.context-container');
-                if (existingContext) {
-                    existingContext.remove();
-                }
-                const contextDiv = document.createElement('div');
-                contextDiv.innerHTML = contextSection;
-                messageDiv.appendChild(contextDiv);
-                contextSet = true;
-            }
-
-            if (messageDiv && contentDiv && (data.message?.content || data.message?.images)) {
-                if (data.message.role !== 'system' && data.message.role !== 'tool') {
-                    if (data.message.content) {
-                        accumulatedContent = (accumulatedContent || '') + data.message.content;
-                    }
-
-                    if (data.message.images && data.message.images.length > 0) {
-                        data.message.images.forEach(imageBase64 => {
-                            const imgElement = document.createElement('img');
-                            imgElement.src = processBase64Image(imageBase64);
-                            imgElement.style.maxWidth = '100%';
-                            contentDiv.appendChild(imgElement);
-                        });
-                    }
-
-                    contentDiv.innerHTML = md.render(accumulatedContent || '');
-                }
-            }
-
-            if (data.done && accumulatedContent) {
-                messageHistory.push({
-                    role: 'assistant',
-                    content: accumulatedContent,
-                    images: data.message?.images
-                });
-            }
-
-            return accumulatedContent;
-        }
     </script>
 </body>
 </html>
-
