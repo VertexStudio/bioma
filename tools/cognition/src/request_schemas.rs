@@ -180,6 +180,7 @@ pub struct ChatQueryRequestSchema {
     pub source: Option<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
+    pub use_tools: bool,
 }
 
 // /delete_resource Endpoint Schemas
