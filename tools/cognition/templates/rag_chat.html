@@ -7,6 +7,7 @@
     <title>RAG Server Chat</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
             --primary: #ff00a0;
@@ -60,10 +61,14 @@
             box-sizing: border-box;
             border-radius: 10px 10px 0 0;
             border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
         }
 
         #query-input {
-            width: 100%;
+            flex: 1;
+            margin-right: 10px;
             padding: 10px;
             box-sizing: border-box;
             border-radius: 5px;
@@ -271,6 +276,74 @@
         ::-webkit-scrollbar-thumb:hover {
             background: var(--primary-hover);
         }
+
+        .action-button {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .action-button:hover {
+            background: var(--surrealist-gradient);
+            border-color: var(--primary);
+        }
+
+        .action-button i {
+            font-size: 1.2em;
+        }
+
+        /* New styles for thinking process */
+        .thinking-process {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .thinking-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            background-color: rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .thinking-header i {
+            margin-right: 10px;
+            color: var(--primary);
+        }
+
+        .thinking-content {
+            padding: 15px;
+            display: none;
+            white-space: pre-wrap;
+            font-family: var(--font-family);
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+
+        .thinking-content.visible {
+            display: block;
+        }
+
+        .chevron {
+            margin-left: auto;
+            transition: transform 0.3s ease;
+        }
+
+        .chevron.rotated {
+            transform: rotate(180deg);
+        }
     </style>
 </head>
 
@@ -278,6 +351,12 @@
     <div id="chat-container"></div>
     <div id="input-container">
         <textarea id="query-input" placeholder="Enter your question here" rows="1"></textarea>
+        <button id="send-button" class="action-button" title="Chat with tools (Ctrl+Enter)">
+            <i class="fas fa-comments fa-wrench"></i>
+        </button>
+        <button id="think-button" class="action-button" title="Think deeply (Alt+Enter)">
+            <i class="fas fa-brain"></i>
+        </button>
     </div>
 
     <script>
@@ -420,36 +499,24 @@
         }
 
         function appendMessage(sender, content, context = null) {
-            // Determine the message role based on sender type
-            // Can be 'user', 'system', or 'assistant' (default)
             const role = sender.toLowerCase() === 'user' ? 'user' :
                 sender.toLowerCase() === 'system' ? 'system' :
                 sender.toLowerCase() === 'tool' ? 'tool' : 'assistant';
 
-            // Add the new message to the chat history array
-            // This history is used when making new API requests
             messageHistory.push({
                 role: role,
                 content: content
             });
 
-            // Create a new div element for the message
             const messageDiv = document.createElement('div');
-            // Apply appropriate CSS classes for styling based on the sender
             messageDiv.className = `message ${role}-message`;
 
-            // Convert message content to HTML:
-            // - User messages: escape HTML first to prevent XSS attacks
-            // - Other messages: render markdown directly (trusted content)
             const mainContent = md.render(sender === 'User' ? md.utils.escapeHtml(content) : content);
 
-            // For assistant messages only, add collapsible context/sources section
             const contextSection = role === 'assistant' ? createContextSection(context) : '';
 
-            // Combine main message and context into the message div
             messageDiv.innerHTML = mainContent + contextSection;
 
-            // Add the message to the chat container and scroll to bottom
             chatContainer.appendChild(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
             window.scrollTo({
@@ -457,30 +524,17 @@
                 behavior: 'smooth'
             });
 
-            // Re-initialize any Mermaid diagrams in the new message
             mermaid.init(undefined, document.querySelectorAll('.mermaid'));
         }
 
-        // Define a global function that toggles the visibility of context sections
-        // This needs to be on the window object since it's called from inline HTML onclick handlers
         window.toggleContext = function (toggleElement) {
-            // Get the content div that follows the toggle button
             const contextContent = toggleElement.nextElementSibling;
-
-            // Check if content is currently hidden
-            // Content is hidden if display is 'none' or if no display style is set
             const isHidden = contextContent.style.display === 'none' || !contextContent.style.display;
-
-            // Toggle visibility by setting display to either 'block' or 'none'
             contextContent.style.display = isHidden ? 'block' : 'none';
-
-            // Update the toggle button text and arrow direction (▲/▼)
-            // to indicate current state
             toggleElement.textContent = isHidden ? 'Hide Context ▼' : 'Show Context ◀';
         };
 
-        // Handles sending user queries to the backend and displaying responses
-        async function sendQuery() {
+        async function sendQuery(endpoint = '/chat', use_tools = false) {
             const queryText = queryInput.value.trim();
             if (!queryText) return;
 
@@ -488,49 +542,28 @@
             queryInput.value = '';
             resizeTextarea();
 
+            const queryObject = {
+                messages: [
+                    ...messageHistory,
+                    {
+                        role: "user",
+                        content: queryText
+                    }
+                ],
+                model: "llama3.2",
+                stream: true,
+                use_tools: use_tools
+            };
+
             try {
-                // First, send request to /think endpoint
-                const thinkResponse = await fetch('http://localhost:5766/think', {
+                const response = await fetch(`http://localhost:5766${endpoint}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        messages: messageHistory,
-                        model: "llama3.2",
-                        stream: false
-                    })
+                    body: JSON.stringify(queryObject),
                 });
 
-                if (!thinkResponse.ok) {
-                    throw new Error(`HTTP error from think! status: ${thinkResponse.status}`);
-                }
-
-                const thinkData = await thinkResponse.json();
-                
-                // Extract the actual response directly from thinkData
-                const thinkContent = thinkData.message?.content || '';
-                const actualResponse = thinkContent.split('</think>').pop()?.trim() || thinkContent;
-                
-                // Update the last user message to include the think response
-                messageHistory[messageHistory.length - 1].content += '\n\nThought Process:\n' + actualResponse;
-
-                const queryObject = {
-                    messages: messageHistory,
-                    model: "llama3.2",
-                    stream: true
-                };
-
-                // Then send to /chat endpoint
-                const response = await fetch('http://localhost:5766/chat', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(queryObject)
-                });
-
-                // Check if request was successful
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -546,7 +579,6 @@
                 let accumulatedContent = '';
                 let buffer = '';
 
-                // Reset streaming state
                 contextSet = false;
 
                 while (true) {
@@ -569,7 +601,6 @@
                     }
                 }
 
-                // Initialize mermaid diagrams in the entire chat container instead of just messageDiv
                 mermaid.init(undefined, chatContainer.querySelectorAll('.mermaid'));
 
             } catch (error) {
@@ -643,9 +674,7 @@
                 return accumulatedContent;
             }
 
-            // Handle assistant messages
             if (data.message?.role === 'assistant') {
-                // Check if we can append to existing assistant message
                 if (lastMessageRole === 'assistant' && !messageDiv) {
                     messageDiv = lastMessageDiv;
                     contentDiv = lastMessageDiv.querySelector('div:not(.context-container)');
@@ -654,7 +683,6 @@
                         messageDiv.insertBefore(contentDiv, messageDiv.firstChild);
                     }
                 }
-                // Create new message div if needed
                 else if (!messageDiv && (data.message.content || data.message.images)) {
                     messageDiv = document.createElement('div');
                     messageDiv.className = 'message assistant-message';
@@ -664,7 +692,6 @@
                 }
             }
 
-            // Handle context with images
             if (!contextSet && data.context?.length > 0 && messageDiv) {
                 const contextSection = createContextSection(data.context);
                 const existingContext = messageDiv.querySelector('.context-container');
@@ -677,7 +704,6 @@
                 contextSet = true;
             }
 
-            // Handle message content and images
             if (messageDiv && contentDiv && (data.message?.content || data.message?.images)) {
                 if (data.message.role !== 'system' && data.message.role !== 'tool') {
                     if (data.message.content) {
@@ -722,52 +748,222 @@
             });
         }
 
-        // Dynamically adjusts the height of the textarea based on its content
         function resizeTextarea() {
-            // Reset height to auto to get the correct scrollHeight
             queryInput.style.height = 'auto';
-            // Set the height to match the content (scrollHeight)
             queryInput.style.height = (queryInput.scrollHeight) + 'px';
         }
 
-        // Call resizeTextarea whenever user types or modifies the input
         queryInput.addEventListener('input', resizeTextarea);
 
-        // Handle keyboard events for the textarea
-        queryInput.addEventListener('keydown', (e) => {
-            // Enter without Shift: Send the message
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();  // Prevent default newline
-                sendQuery();
-            }
-            // Enter with Shift: Allow multiline input
-            else if (e.key === 'Enter' && e.shiftKey) {
-                resizeTextarea();
+        queryInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                if (e.shiftKey) {
+                    resizeTextarea();
+                    return;
+                }
+                
+                e.preventDefault();
+                
+                if (e.ctrlKey) {
+                    await sendQuery('/chat', true);
+                } else if (e.altKey) {
+                    await sendQuery('/think');
+                } else {
+                    await sendQuery('/chat', false);
+                }
             }
         });
 
+        document.getElementById('send-button').addEventListener('click', () => {
+            sendQuery('/chat', true);
+        });
+        
+        document.getElementById('think-button').addEventListener('click', () => {
+            sendQuery('/think');
+        });
+
         function processBase64Image(base64String) {
-            // Remove any whitespace or newlines
             base64String = base64String.trim();
 
-            // Check if it's already a complete data URL
             if (base64String.startsWith('data:image')) {
                 return base64String;
             }
 
-            // Check if it's a partial base64 string
             try {
-                // Try to decode the base64 string
                 atob(base64String);
-                // If successful, create a complete data URL
                 return `data:image/jpeg;base64,${base64String}`;
             } catch (e) {
                 console.error('Invalid base64 string:', e);
                 return null;
             }
         }
+
+        function createThinkingProcess(content) {
+            const thinkingDiv = document.createElement('div');
+            thinkingDiv.className = 'thinking-process';
+            thinkingDiv.innerHTML = `
+                <div class="thinking-header" onclick="toggleThinking(this)">
+                    <i class="fas fa-brain"></i>
+                    Thinking Process
+                    <i class="fas fa-chevron-down chevron"></i>
+                </div>
+                <div class="thinking-content">${content}</div>
+            `;
+            return thinkingDiv;
+        }
+
+        window.toggleThinking = function(header) {
+            const content = header.nextElementSibling;
+            const chevron = header.querySelector('.chevron');
+            content.classList.toggle('visible');
+            chevron.classList.toggle('rotated');
+        };
+
+        function updateThinkingContent(content) {
+            const lastMessageDiv = chatContainer.lastElementChild;
+            let thinkingProcess = lastMessageDiv.querySelector('.thinking-process');
+            
+            if (!thinkingProcess) {
+                thinkingProcess = createThinkingProcess(content);
+                lastMessageDiv.insertBefore(thinkingProcess, lastMessageDiv.firstChild);
+            } else {
+                const thinkingContent = thinkingProcess.querySelector('.thinking-content');
+                thinkingContent.textContent += content;
+            }
+        }
+
+        // Update processJsonLine function to handle thinking content
+        function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
+            const data = JSON.parse(json_line);
+
+            if (data.message?.role === 'assistant' && data.message.content.startsWith('<think>')) {
+                const thinkingContent = data.message.content.replace('<think>', '').replace('</think>', '').trim();
+                updateThinkingContent(thinkingContent);
+                return accumulatedContent;
+            }
+
+            const lastMessageDiv = chatContainer.lastElementChild;
+            const lastMessageRole = lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+
+            if (data.message?.role === 'system' || data.message?.role === 'tool') {
+                if (lastMessageRole === data.message.role) {
+                    if (data.message.role === 'tool') {
+                        const toolData = JSON.parse(data.message.content);
+                        const formattedContent = `
+                            <div class="source-separator"></div>
+                            <div class="tool-toggle">▶</div>
+                            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+                            <div class="tool-content">
+                                <div class="tool-function">
+                                    <strong>Function:</strong> ${toolData.call.function.name}
+                                </div>
+                                <div class="tool-details">
+                                    <strong>Arguments:</strong>
+                                    <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                                    <strong>Response:</strong>
+                                    <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                                </div>
+                            </div>
+                        `;
+                        lastMessageDiv.innerHTML += formattedContent;
+                        initializeToolToggles(lastMessageDiv);
+                    } else {
+                        lastMessageDiv.innerHTML += '<div class="source-separator"></div>' + md.render(data.message.content);
+                    }
+                } else {
+                    const specialMessageDiv = document.createElement('div');
+                    specialMessageDiv.className = `message ${data.message.role}-message`;
+
+                    if (data.message.role === 'tool') {
+                        const toolData = JSON.parse(data.message.content);
+                        const formattedContent = `
+                            <div class="tool-toggle">▶</div>
+                            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+                            <div class="tool-content">
+                                <div class="tool-details">
+                                    <strong>Arguments:</strong>
+                                    <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
+                                    <strong>Response:</strong>
+                                    <pre><code>${JSON.stringify(toolData.response, null, 2)}</code></pre>
+                                </div>
+                            </div>
+                        `;
+                        specialMessageDiv.innerHTML = formattedContent;
+                        if (lastMessageRole === 'assistant') {
+                            chatContainer.insertBefore(specialMessageDiv, lastMessageDiv);
+                        } else {
+                            chatContainer.appendChild(specialMessageDiv);
+                        }
+                        initializeToolToggles(specialMessageDiv);
+                    } else {
+                        specialMessageDiv.innerHTML = md.render(data.message.content);
+                        chatContainer.appendChild(specialMessageDiv);
+                    }
+                }
+
+                return accumulatedContent;
+            }
+
+            if (data.message?.role === 'assistant') {
+                if (lastMessageRole === 'assistant' && !messageDiv) {
+                    messageDiv = lastMessageDiv;
+                    contentDiv = lastMessageDiv.querySelector('div:not(.context-container):not(.thinking-process)');
+                    if (!contentDiv) {
+                        contentDiv = document.createElement('div');
+                        messageDiv.appendChild(contentDiv);
+                    }
+                }
+                else if (!messageDiv && (data.message.content || data.message.images)) {
+                    messageDiv = document.createElement('div');
+                    messageDiv.className = 'message assistant-message';
+                    contentDiv = document.createElement('div');
+                    messageDiv.appendChild(contentDiv);
+                    chatContainer.appendChild(messageDiv);
+                }
+            }
+
+            if (!contextSet && data.context?.length > 0 && messageDiv) {
+                const contextSection = createContextSection(data.context);
+                const existingContext = messageDiv.querySelector('.context-container');
+                if (existingContext) {
+                    existingContext.remove();
+                }
+                const contextDiv = document.createElement('div');
+                contextDiv.innerHTML = contextSection;
+                messageDiv.appendChild(contextDiv);
+                contextSet = true;
+            }
+
+            if (messageDiv && contentDiv && (data.message?.content || data.message?.images)) {
+                if (data.message.role !== 'system' && data.message.role !== 'tool') {
+                    if (data.message.content) {
+                        accumulatedContent = (accumulatedContent || '') + data.message.content;
+                    }
+
+                    if (data.message.images && data.message.images.length > 0) {
+                        data.message.images.forEach(imageBase64 => {
+                            const imgElement = document.createElement('img');
+                            imgElement.src = processBase64Image(imageBase64);
+                            imgElement.style.maxWidth = '100%';
+                            contentDiv.appendChild(imgElement);
+                        });
+                    }
+
+                    contentDiv.innerHTML = md.render(accumulatedContent || '');
+                }
+            }
+
+            if (data.done && accumulatedContent) {
+                messageHistory.push({
+                    role: 'assistant',
+                    content: accumulatedContent,
+                    images: data.message?.images
+                });
+            }
+
+            return accumulatedContent;
+        }
     </script>
 </body>
-
 </html>
 
