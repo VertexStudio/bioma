@@ -195,7 +195,7 @@ pub struct HealthStatus {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
-pub enum Services {
+pub enum Service {
     #[serde(rename = "surrealdb")]
     SurrealDB,
     #[serde(rename = "ollama")]

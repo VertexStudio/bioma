@@ -7,7 +7,7 @@ use bioma_llm::markitdown::MarkitDown;
 use bioma_llm::pdf_analyzer::PdfAnalyzer;
 use bioma_llm::prelude::*;
 use clap::Parser;
-use cognition::{check_endpoint, HealthStatus, Services, ToolsHub, UserActor};
+use cognition::{check_endpoint, HealthStatus, Service, ToolsHub, UserActor};
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -67,23 +67,23 @@ impl AppState {
     )
 )]
 async fn health(data: web::Data<AppState>) -> impl Responder {
-    let mut services: HashMap<Services, HealthStatus> = HashMap::new();
+    let mut services: HashMap<Service, HealthStatus> = HashMap::new();
 
     // SurrealDB health check
-    services.insert(Services::SurrealDB, HealthStatus { is_healthy: data.engine.health().await });
+    services.insert(Service::SurrealDB, HealthStatus { is_healthy: data.engine.health().await });
 
     // Ollama health check
-    services.insert(Services::Ollama, check_endpoint(data.config.chat_endpoint.clone()).await);
+    services.insert(Service::Ollama, check_endpoint(data.config.chat_endpoint.clone()).await);
 
     // pdf-analyzer health check
-    services.insert(Services::PdfAnalyzer, check_endpoint(PdfAnalyzer::default().pdf_analyzer_url).await);
+    services.insert(Service::PdfAnalyzer, check_endpoint(PdfAnalyzer::default().pdf_analyzer_url).await);
 
     // Markitdown health check
-    services.insert(Services::Markitdown, check_endpoint(MarkitDown::default().markitdown_url).await);
+    services.insert(Service::Markitdown, check_endpoint(MarkitDown::default().markitdown_url).await);
 
     // Minio health check
     let minio_url = Url::parse("http://127.0.0.1:9000").unwrap();
-    services.insert(Services::Minio, check_endpoint(minio_url).await);
+    services.insert(Service::Minio, check_endpoint(minio_url).await);
 
     HttpResponse::Ok().json(services)
 }
