@@ -414,6 +414,7 @@
       let messageHistory = [];
       let partialLine = "";
       let contextSet = false;
+      let thinkingStartTime = null;
 
       mermaid.initialize({ startOnLoad: true });
 
@@ -714,6 +715,8 @@
                   chatContainer.appendChild(thinkingDiv);
                   thinkingContentDiv =
                     thinkingDiv.querySelector(".thinking-content");
+                  // Start timer when thinking begins
+                  thinkingStartTime = Date.now();
                   // Start animation
                   const thinkingText =
                     thinkingDiv.querySelector(".thinking-text");
@@ -736,13 +739,19 @@
                 isThinkingActive = false;
                 idx = closePos + 8;
 
-                // Stop animation and make static
-                if (thinkingDiv) {
+                // Calculate thinking duration and update text
+                if (thinkingDiv && thinkingStartTime) {
+                  const duration = (
+                    (Date.now() - thinkingStartTime) /
+                    1000
+                  ).toFixed(1);
                   const thinkingText =
                     thinkingDiv.querySelector(".thinking-text");
                   if (thinkingText) {
+                    thinkingText.textContent = `Thought for ${duration}s`;
                     thinkingText.classList.add("static");
                   }
+                  thinkingStartTime = null;
                 }
               }
             }
