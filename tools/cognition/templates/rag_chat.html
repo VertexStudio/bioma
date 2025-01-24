@@ -340,7 +340,6 @@
         color: var(--primary);
       }
 
-      /* start hidden by default, toggle .visible to show */
       .thinking-content {
         padding: 15px;
         display: none;
@@ -420,13 +419,13 @@
       let isThinkingActive = false;
       let thinkingDiv = null;
       let thinkingContentDiv = null;
+      let assistantTextBuffer = ""; // store user-visible assistant text
       const md = window.markdownit();
       const chatContainer = document.getElementById("chat-container");
       const queryInput = document.getElementById("query-input");
       let messageHistory = [];
       let partialLine = "";
       let contextSet = false;
-      let isFirstMessage = true;
 
       mermaid.initialize({ startOnLoad: true });
 
@@ -440,7 +439,6 @@
         return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
       };
 
-      // Creates a collapsible context section for the AI's references
       function createContextSection(context) {
         if (!context?.length) return "";
 
@@ -484,12 +482,12 @@
             });
 
             regularMessages += `
-            <div class="message ${roleClass}">
-              ${source ? `<div class="source">Source: ${source}</div>` : ""}
-              ${uri ? `<div class="uri">URI: ${uri}</div>` : ""}
-              <div class="chunk">${processedContent}</div>
-            </div>
-          `;
+              <div class="message ${roleClass}">
+                ${source ? `<div class="source">Source: ${source}</div>` : ""}
+                ${uri ? `<div class="uri">URI: ${uri}</div>` : ""}
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
           }
         });
 
@@ -517,50 +515,50 @@
             });
 
             systemMessage += `
-            <div class="message ${roleClass}">
-              <strong>${
-                msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-              }:</strong>
-              <div class="chunk">${processedContent}</div>
-            </div>
-          `;
+              <div class="message ${roleClass}">
+                <strong>${
+                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                }:</strong>
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
           }
         });
 
-        // Process last user message if it exists
+        // Last user message (if exists)
         if (lastMessageIndex !== -1) {
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
           lastUserMessage = `
-          <div class="message ${roleClass}">
-            <strong>${
-              lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
-            }:</strong>
-            <div class="chunk">${md.render(lastMsg.content || "")}</div>
-          </div>
-        `;
+            <div class="message ${roleClass}">
+              <strong>${
+                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
+              }:</strong>
+              <div class="chunk">${md.render(lastMsg.content || "")}</div>
+            </div>
+          `;
         }
 
         const contextHtml = `
-        <div class="context-container">
-          <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
-          <div class="context-content">
-            ${regularMessages}
-            ${
-              regularMessages && systemMessage
-                ? '<div class="source-separator"></div>'
-                : ""
-            }
-            ${systemMessage}
-            ${
-              (regularMessages || systemMessage) && lastUserMessage
-                ? '<div class="source-separator"></div>'
-                : ""
-            }
-            ${lastUserMessage}
+          <div class="context-container">
+            <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+            <div class="context-content">
+              ${regularMessages}
+              ${
+                regularMessages && systemMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
+              ${systemMessage}
+              ${
+                (regularMessages || systemMessage) && lastUserMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
+              ${lastUserMessage}
+            </div>
           </div>
-        </div>
-      `;
+        `;
         return contextHtml;
       }
 
@@ -579,13 +577,13 @@
         const messageDiv = document.createElement("div");
         messageDiv.className = `message ${role}-message`;
 
-        const mainContent = md.render(
-          sender === "User" ? md.utils.escapeHtml(content) : content
-        );
+        const mainContent =
+          sender === "User" ? md.utils.escapeHtml(content) : content;
+        const rendered = md.render(mainContent);
         const contextSection =
           role === "assistant" ? createContextSection(context) : "";
 
-        messageDiv.innerHTML = mainContent + contextSection;
+        messageDiv.innerHTML = rendered + contextSection;
         chatContainer.appendChild(messageDiv);
         chatContainer.scrollTop = chatContainer.scrollHeight;
         window.scrollTo({
@@ -633,19 +631,14 @@
             throw new Error(`HTTP error! status: ${response.status}`);
           }
 
-          // Prepare the assistant container so we can stream into it
-          let messageDiv = document.createElement("div");
-          messageDiv.className = "message assistant-message";
-          let contentDiv = document.createElement("div");
-          messageDiv.appendChild(contentDiv);
-          chatContainer.appendChild(messageDiv);
-
+          // We'll collect everything in a stream and process it
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let accumulatedContent = "";
           let buffer = "";
 
           contextSet = false;
+          assistantTextBuffer = ""; // reset before each new answer
 
           while (true) {
             const { value, done } = await reader.read();
@@ -660,16 +653,17 @@
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
-                accumulatedContent = processJsonLine(
-                  line,
-                  messageDiv,
-                  contentDiv,
-                  accumulatedContent
-                );
+                accumulatedContent = processJsonLine(line, accumulatedContent);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
               }
             }
+          }
+
+          // If there's leftover text after streaming
+          if (assistantTextBuffer) {
+            // We'll finalize the assistant message with leftover
+            createOrUpdateAssistantMessage(assistantTextBuffer);
           }
 
           mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
@@ -682,18 +676,10 @@
         }
       }
 
-      function processJsonLine(
-        json_line,
-        messageDiv,
-        contentDiv,
-        accumulatedContent
-      ) {
+      function processJsonLine(json_line, accumulatedContent) {
         const data = JSON.parse(json_line);
-        const lastMessageDiv = chatContainer.lastElementChild;
-        const lastMessageRole =
-          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
-        // If there's no content, just handle "done"
+        // If we have no content & we see done
         if (!data.message?.content) {
           if (data.done && accumulatedContent) {
             messageHistory.push({
@@ -705,215 +691,179 @@
           return accumulatedContent;
         }
 
-        let chunk = data.message.content;
-
-        // We'll remove any <think> sections from "visibleText" and show them in a thinking container
-        let visibleText = "";
-        let idx = 0;
-
-        while (idx < chunk.length) {
-          if (!isThinkingActive) {
-            // not in a <think> block, look for <think>
-            const openPos = chunk.indexOf("<think>", idx);
-            if (openPos === -1) {
-              visibleText += chunk.substring(idx);
-              idx = chunk.length;
-            } else {
-              visibleText += chunk.substring(idx, openPos);
-              isThinkingActive = true;
-              idx = openPos + 7; // skip "<think>"
-
-              // Create a new thinking-process container
-              thinkingDiv = createThinkingProcessContainer();
-              // **Append the thinking container so that the final assistant message is below it**
-              chatContainer.appendChild(thinkingDiv);
-
-              thinkingContentDiv =
-                thinkingDiv.querySelector(".thinking-content");
-            }
-          } else {
-            // we ARE inside a <think> block, look for "</think>"
-            const closePos = chunk.indexOf("</think>", idx);
-            if (closePos === -1) {
-              // no closing tag
-              appendThinkingChunk(chunk.substring(idx), thinkingContentDiv);
-              idx = chunk.length;
-            } else {
-              // found the closing tag
-              appendThinkingChunk(
-                chunk.substring(idx, closePos),
-                thinkingContentDiv
-              );
-              isThinkingActive = false;
-              idx = closePos + 8; // skip "</think>"
-            }
-          }
-        }
-
-        // now that <think> is removed from "visibleText"
-        data.message.content = visibleText;
-
-        // System or tool messages
         if (data.message.role === "system" || data.message.role === "tool") {
-          if (lastMessageRole === data.message.role) {
-            if (data.message.role === "tool") {
-              const toolData = JSON.parse(data.message.content);
-              const formattedContent = `
-              <div class="source-separator"></div>
-              <div class="tool-toggle">▶</div>
-              <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-              <div class="tool-content">
-                <div class="tool-function">
-                  <strong>Function:</strong> ${toolData.call.function.name}
-                </div>
-                <div class="tool-details">
-                  <strong>Arguments:</strong>
-                  <pre><code>${JSON.stringify(
-                    toolData.call.function.arguments,
-                    null,
-                    2
-                  )}</code></pre>
-                  <strong>Response:</strong>
-                  <pre><code>${JSON.stringify(
-                    toolData.response,
-                    null,
-                    2
-                  )}</code></pre>
-                </div>
-              </div>
-            `;
-              lastMessageDiv.innerHTML += formattedContent;
-              initializeToolToggles(lastMessageDiv);
-            } else {
-              lastMessageDiv.innerHTML +=
-                '<div class="source-separator"></div>' +
-                md.render(data.message.content);
-            }
-          } else {
-            const specialMessageDiv = document.createElement("div");
-            specialMessageDiv.className = `message ${data.message.role}-message`;
-
-            if (data.message.role === "tool") {
-              const toolData = JSON.parse(data.message.content);
-              const formattedContent = `
-              <div class="tool-toggle">▶</div>
-              <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-              <div class="tool-content">
-                <div class="tool-details">
-                  <strong>Arguments:</strong>
-                  <pre><code>${JSON.stringify(
-                    toolData.call.function.arguments,
-                    null,
-                    2
-                  )}</code></pre>
-                  <strong>Response:</strong>
-                  <pre><code>${JSON.stringify(
-                    toolData.response,
-                    null,
-                    2
-                  )}</code></pre>
-                </div>
-              </div>
-            `;
-              specialMessageDiv.innerHTML = formattedContent;
-              if (lastMessageRole === "assistant") {
-                chatContainer.insertBefore(specialMessageDiv, lastMessageDiv);
-              } else {
-                chatContainer.appendChild(specialMessageDiv);
-              }
-              initializeToolToggles(specialMessageDiv);
-            } else {
-              specialMessageDiv.innerHTML = md.render(data.message.content);
-              chatContainer.appendChild(specialMessageDiv);
-            }
-          }
+          handleSpecialRole(data.message);
           return accumulatedContent;
         }
 
-        // Assistant message
+        // If it's an assistant chunk
         if (data.message.role === "assistant") {
-          if (lastMessageRole === "assistant" && !isThinkingActive) {
-            // update existing assistant block
-            messageDiv = lastMessageDiv;
-            contentDiv = lastMessageDiv.querySelector(
-              "div:not(.context-container):not(.thinking-process)"
-            );
-            if (!contentDiv) {
-              contentDiv = document.createElement("div");
-              messageDiv.appendChild(contentDiv);
+          let chunk = data.message.content;
+          // separate out <think> from visible text
+          let idx = 0;
+
+          while (idx < chunk.length) {
+            if (!isThinkingActive) {
+              // look for <think>
+              const openPos = chunk.indexOf("<think>", idx);
+              if (openPos === -1) {
+                // no <think>, so all text is visible
+                const visiblePart = chunk.substring(idx);
+                assistantTextBuffer += visiblePart;
+                idx = chunk.length;
+              } else {
+                // we found <think>; add what's before <think> to visible
+                assistantTextBuffer += chunk.substring(idx, openPos);
+                idx = openPos + 7; // skip "<think>"
+
+                // create the thinking container if we haven't
+                if (!thinkingDiv) {
+                  thinkingDiv = createThinkingProcessContainer();
+                  chatContainer.appendChild(thinkingDiv);
+                  thinkingContentDiv =
+                    thinkingDiv.querySelector(".thinking-content");
+                  // Turn on animation
+                  thinkingDiv
+                    .querySelector(".thinking-animation")
+                    .style.setProperty("opacity", "1");
+                }
+                isThinkingActive = true;
+              }
+            } else {
+              // we ARE inside <think>, look for </think>
+              const closePos = chunk.indexOf("</think>", idx);
+              if (closePos === -1) {
+                // no closing tag in this chunk
+                appendThinkingChunk(chunk.substring(idx), thinkingContentDiv);
+                idx = chunk.length;
+              } else {
+                // found a closing tag
+                appendThinkingChunk(
+                  chunk.substring(idx, closePos),
+                  thinkingContentDiv
+                );
+                isThinkingActive = false;
+                idx = closePos + 8; // skip "</think>"
+
+                // stop the loading animation
+                if (thinkingDiv) {
+                  thinkingDiv.querySelector(
+                    ".thinking-animation"
+                  ).style.display = "none";
+                }
+              }
             }
-          } else if (
-            !messageDiv &&
-            (data.message.content || data.message.images)
-          ) {
-            // create new assistant block if not existing
-            messageDiv = document.createElement("div");
-            messageDiv.className = "message assistant-message";
-            contentDiv = document.createElement("div");
-            messageDiv.appendChild(contentDiv);
-            chatContainer.appendChild(messageDiv);
           }
-        }
 
-        // Attach context if present (only once)
-        if (!contextSet && data.context?.length > 0 && messageDiv) {
-          const contextSection = createContextSection(data.context);
-          const existingContext =
-            messageDiv.querySelector(".context-container");
-          if (existingContext) existingContext.remove();
-          const contextDiv = document.createElement("div");
-          contextDiv.innerHTML = contextSection;
-          messageDiv.appendChild(contextDiv);
-          contextSet = true;
-        }
-
-        // Append visible text/images to assistant
-        if (
-          messageDiv &&
-          contentDiv &&
-          (data.message.content || data.message.images)
-        ) {
-          if (data.message.role !== "system" && data.message.role !== "tool") {
-            if (data.message.content) {
-              accumulatedContent =
-                (accumulatedContent || "") + data.message.content;
-            }
-            if (data.message.images && data.message.images.length > 0) {
-              data.message.images.forEach((imageBase64) => {
-                const imgElement = document.createElement("img");
-                imgElement.src = processBase64Image(imageBase64);
-                imgElement.style.maxWidth = "100%";
-                contentDiv.appendChild(imgElement);
-              });
-            }
-            contentDiv.innerHTML = md.render(accumulatedContent || "");
+          // If we're fully done with the chunk and not inside <think>,
+          // let's show updated assistant text
+          if (!isThinkingActive && assistantTextBuffer.length > 0) {
+            createOrUpdateAssistantMessage(assistantTextBuffer, data.context);
           }
-        }
 
-        if (data.done && accumulatedContent) {
-          messageHistory.push({
-            role: "assistant",
-            content: accumulatedContent,
-            images: data.message?.images,
-          });
+          if (data.done) {
+            messageHistory.push({
+              role: "assistant",
+              content: assistantTextBuffer,
+              images: data.message?.images,
+            });
+            assistantTextBuffer = ""; // Only clear after done signal
+          }
         }
 
         return accumulatedContent;
       }
 
-      function initializeToolToggles(container) {
-        container.querySelectorAll(".tool-toggle").forEach((toggle) => {
-          if (!toggle.hasListener) {
-            toggle.addEventListener("click", function () {
-              const content = this.parentElement.querySelector(".tool-content");
-              const isHidden =
-                content.style.display === "none" || !content.style.display;
-              content.style.display = isHidden ? "block" : "none";
-              this.textContent = isHidden ? "▼" : "▶";
-            });
-            toggle.hasListener = true;
+      function handleSpecialRole(msg) {
+        const lastMessageDiv = chatContainer.lastElementChild;
+        const lastMessageRole =
+          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+
+        if (msg.role === "tool") {
+          // parse the content as JSON
+          const toolData = JSON.parse(msg.content);
+          const specialMessageDiv = document.createElement("div");
+          specialMessageDiv.className = "message tool-message";
+          const formattedContent = `
+            <div class="tool-toggle">▶</div>
+            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+            <div class="tool-content">
+              <div class="tool-details">
+                <strong>Arguments:</strong>
+                <pre><code>${JSON.stringify(
+                  toolData.call.function.arguments,
+                  null,
+                  2
+                )}</code></pre>
+                <strong>Response:</strong>
+                <pre><code>${JSON.stringify(
+                  toolData.response,
+                  null,
+                  2
+                )}</code></pre>
+              </div>
+            </div>
+          `;
+          specialMessageDiv.innerHTML = formattedContent;
+          chatContainer.appendChild(specialMessageDiv);
+          initializeToolToggles(specialMessageDiv);
+        } else {
+          // system
+          if (lastMessageRole === "system") {
+            // append to last system
+            lastMessageDiv.innerHTML +=
+              '<div class="source-separator"></div>' + md.render(msg.content);
+          } else {
+            const systemDiv = document.createElement("div");
+            systemDiv.className = "message system-message";
+            systemDiv.innerHTML = md.render(msg.content);
+            chatContainer.appendChild(systemDiv);
           }
-        });
+        }
+      }
+
+      // Creates or updates the single assistant message block
+      function createOrUpdateAssistantMessage(visibleText, context = null) {
+        const lastMessageDiv = chatContainer.lastElementChild;
+        const lastMessageRole =
+          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+
+        let assistantBlock;
+        let assistantContent;
+
+        if (lastMessageRole === "assistant") {
+          // Reuse the existing assistant div
+          assistantBlock = lastMessageDiv;
+          assistantContent = assistantBlock.querySelector(
+            "div:not(.context-container):not(.thinking-process)"
+          );
+          if (!assistantContent) {
+            assistantContent = document.createElement("div");
+            assistantBlock.appendChild(assistantContent);
+          }
+        } else {
+          // Create a new assistant div
+          assistantBlock = document.createElement("div");
+          assistantBlock.className = "message assistant-message";
+          assistantContent = document.createElement("div");
+          assistantBlock.appendChild(assistantContent);
+          chatContainer.appendChild(assistantBlock);
+        }
+
+        // Insert context once
+        if (!contextSet && context?.length) {
+          const contextSection = createContextSection(context);
+          if (contextSection) {
+            const contextDiv = document.createElement("div");
+            contextDiv.innerHTML = contextSection;
+            assistantBlock.appendChild(contextDiv);
+          }
+          contextSet = true;
+        }
+
+        // Render entire partial text so far
+        assistantContent.innerHTML = md.render(visibleText || "");
+        chatContainer.scrollTop = chatContainer.scrollHeight;
       }
 
       function resizeTextarea() {
@@ -967,31 +917,43 @@
         const div = document.createElement("div");
         div.className = "thinking-process";
         div.innerHTML = `
-        <div class="thinking-animation"></div>
-        <div class="thinking-header" onclick="toggleThinking(this)">
-          <i class="fas fa-brain"></i>
-          Thinking Process
-          <i class="fas fa-chevron-down chevron"></i>
-        </div>
-        <!-- No inline style, so toggle is purely via CSS class -->
-        <div class="thinking-content"></div>
-      `;
+          <div class="thinking-animation"></div>
+          <div class="thinking-header" onclick="toggleThinking(this)">
+            <i class="fas fa-brain"></i>
+            Thinking Process
+            <i class="fas fa-chevron-down chevron"></i>
+          </div>
+          <div class="thinking-content"></div>
+        `;
         return div;
       }
 
-      // Appends partial chunk to the .thinking-content
       function appendThinkingChunk(text, contentDiv) {
         if (!contentDiv) return;
         contentDiv.textContent += text;
       }
 
-      // Toggle the "Thinking Process" section
       window.toggleThinking = function (header) {
         const content = header.nextElementSibling;
         const chevron = header.querySelector(".chevron");
         content.classList.toggle("visible");
         chevron.classList.toggle("rotated");
       };
+
+      function initializeToolToggles(container) {
+        container.querySelectorAll(".tool-toggle").forEach((toggle) => {
+          if (!toggle.hasListener) {
+            toggle.addEventListener("click", function () {
+              const content = this.parentElement.querySelector(".tool-content");
+              const isHidden =
+                content.style.display === "none" || !content.style.display;
+              content.style.display = isHidden ? "block" : "none";
+              this.textContent = isHidden ? "▼" : "▶";
+            });
+            toggle.hasListener = true;
+          }
+        });
+      }
     </script>
   </body>
 </html>
