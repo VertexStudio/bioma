@@ -27,7 +27,8 @@
             src: url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         }
 
-        html, body {
+        html,
+        body {
             background-color: var(--bg-main);
             color: var(--text-primary);
             font-family: var(--font-family);
@@ -193,7 +194,9 @@
             padding-top: 10px;
         }
 
-        .source, .uri, .chunk {
+        .source,
+        .uri,
+        .chunk {
             margin-bottom: 5px;
         }
 
@@ -255,7 +258,10 @@
             color: var(--text-primary);
         }
 
-        .message, .context-toggle, .tool-toggle, #query-input {
+        .message,
+        .context-toggle,
+        .tool-toggle,
+        #query-input {
             transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
         }
 
@@ -363,9 +369,11 @@
                 left: -100%;
                 opacity: 0;
             }
+
             50% {
                 opacity: 1;
             }
+
             100% {
                 left: 100%;
                 opacity: 0;
@@ -388,7 +396,8 @@
 
     <script>
         let isThinkingActive = false;
-        let thinkingBuffer = "";
+        let thinkingDiv = null;
+        let thinkingContentDiv = null;
         const md = window.markdownit();
         const chatContainer = document.getElementById('chat-container');
         const queryInput = document.getElementById('query-input');
@@ -632,12 +641,15 @@
             }
         }
 
+        /**
+         * Replaces the existing processJsonLine function with the new implementation
+         */
         function processJsonLine(json_line, messageDiv, contentDiv, accumulatedContent) {
             const data = JSON.parse(json_line);
             const lastMessageDiv = chatContainer.lastElementChild;
             const lastMessageRole = lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
-            // Early return if no content
+            // If there's no content, just handle the "done" signal
             if (!data.message?.content) {
                 if (data.done && accumulatedContent) {
                     messageHistory.push({
@@ -649,42 +661,63 @@
                 return accumulatedContent;
             }
 
-            // Parse chunk content for think tags
+            // This chunk's text
             let chunk = data.message.content;
+
+            // We'll separate out anything outside <think>...</think> as "visibleText"
             let visibleText = "";
             let idx = 0;
 
+            // We'll parse through the chunk, looking for <think> or </think> tags
             while (idx < chunk.length) {
                 if (!isThinkingActive) {
-                    const openTag = chunk.indexOf("<think>", idx);
-                    if (openTag === -1) {
+                    // We are NOT inside a <think> block, look for <think>
+                    const openPos = chunk.indexOf("<think>", idx);
+
+                    if (openPos === -1) {
+                        // No <think> found in the remainder
                         visibleText += chunk.substring(idx);
                         idx = chunk.length;
                     } else {
-                        visibleText += chunk.substring(idx, openTag);
+                        // Append everything up to <think> to visible text
+                        visibleText += chunk.substring(idx, openPos);
+
+                        // Switch on "thinking mode"
                         isThinkingActive = true;
-                        idx = openTag + 7;
+                        idx = openPos + 7; // skip past <think>
+
+                        // Create a new thinking-process container if you want one for each block
+                        thinkingDiv = createThinkingProcessContainer();
+                        // Insert it above or below, whichever you prefer
+                        chatContainer.insertBefore(thinkingDiv, lastMessageDiv?.nextSibling || null);
+                        thinkingContentDiv = thinkingDiv.querySelector('.thinking-content');
                     }
                 } else {
-                    const closeTag = chunk.indexOf("</think>", idx);
-                    if (closeTag === -1) {
-                        thinkingBuffer += chunk.substring(idx);
+                    // We ARE inside a <think> block, look for </think>
+                    const closePos = chunk.indexOf("</think>", idx);
+
+                    if (closePos === -1) {
+                        // No closing tag here; everything goes to the thinking container
+                        appendThinkingChunk(chunk.substring(idx), thinkingContentDiv);
                         idx = chunk.length;
                     } else {
-                        thinkingBuffer += chunk.substring(idx, closeTag);
-                        updateThinkingContent(thinkingBuffer);
-                        thinkingBuffer = "";
+                        // We found the closing tag
+                        appendThinkingChunk(chunk.substring(idx, closePos), thinkingContentDiv);
+
+                        // Switch off "thinking mode"
                         isThinkingActive = false;
-                        idx = closeTag + 8;
+                        idx = closePos + 8; // skip past </think>
                     }
                 }
             }
 
-            // Update message content to cleaned version
+            // Now that we've stripped out <think> sections, 
+            // "visibleText" is the cleaned text that belongs in the assistant message.
+
             data.message.content = visibleText;
 
-            // Handle system/tool messages
-            if (data.message?.role === 'system' || data.message?.role === 'tool') {
+            // ----------- Existing logic for system/tool messages -----------
+            if (data.message.role === 'system' || data.message.role === 'tool') {
                 if (lastMessageRole === data.message.role) {
                     if (data.message.role === 'tool') {
                         const toolData = JSON.parse(data.message.content);
@@ -707,7 +740,8 @@
                         lastMessageDiv.innerHTML += formattedContent;
                         initializeToolToggles(lastMessageDiv);
                     } else {
-                        lastMessageDiv.innerHTML += '<div class="source-separator"></div>' + md.render(data.message.content);
+                        lastMessageDiv.innerHTML +=
+                            '<div class="source-separator"></div>' + md.render(data.message.content);
                     }
                 } else {
                     const specialMessageDiv = document.createElement('div');
@@ -719,9 +753,6 @@
                             <div class="tool-toggle">▶</div>
                             <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
                             <div class="tool-content">
-                                <div class="tool-function">
-                                    <strong>Function:</strong> ${toolData.call.function.name}
-                                </div>
                                 <div class="tool-details">
                                     <strong>Arguments:</strong>
                                     <pre><code>${JSON.stringify(toolData.call.function.arguments, null, 2)}</code></pre>
@@ -745,8 +776,8 @@
                 return accumulatedContent;
             }
 
-            // Handle assistant messages
-            if (data.message?.role === 'assistant') {
+            // Assistant message
+            if (data.message.role === 'assistant') {
                 if (lastMessageRole === 'assistant' && !messageDiv) {
                     messageDiv = lastMessageDiv;
                     contentDiv = lastMessageDiv.querySelector('div:not(.context-container):not(.thinking-process)');
@@ -763,7 +794,7 @@
                 }
             }
 
-            // Handle context
+            // Attach context if present (only once)
             if (!contextSet && data.context?.length > 0 && messageDiv) {
                 const contextSection = createContextSection(data.context);
                 const existingContext = messageDiv.querySelector('.context-container');
@@ -776,8 +807,8 @@
                 contextSet = true;
             }
 
-            // Append content and images
-            if (messageDiv && contentDiv && (data.message?.content || data.message?.images)) {
+            // Append visible text/images to the assistant message
+            if (messageDiv && contentDiv && (data.message.content || data.message.images)) {
                 if (data.message.role !== 'system' && data.message.role !== 'tool') {
                     if (data.message.content) {
                         accumulatedContent = (accumulatedContent || '') + data.message.content;
@@ -794,7 +825,7 @@
                 }
             }
 
-            // Store completed messages
+            // If done, finalize
             if (data.done && accumulatedContent) {
                 messageHistory.push({
                     role: 'assistant',
@@ -867,23 +898,35 @@
             }
         }
 
-        // Creates the collapsible "thinking process" container
-        function createThinkingProcess(content) {
-            const thinkingDiv = document.createElement('div');
-            thinkingDiv.className = 'thinking-process';
-            thinkingDiv.innerHTML = `
+        /**
+         * Creates a fresh "thinking process" container
+         */
+        function createThinkingProcessContainer() {
+            const div = document.createElement('div');
+            div.className = 'thinking-process';
+            div.innerHTML = `
                 <div class="thinking-animation"></div>
                 <div class="thinking-header" onclick="toggleThinking(this)">
                     <i class="fas fa-brain"></i>
                     Thinking Process
                     <i class="fas fa-chevron-down chevron"></i>
                 </div>
-                <div class="thinking-content">${content}</div>
+                <div class="thinking-content" style="display: block; white-space: pre-wrap;"></div>
             `;
-            return thinkingDiv;
+            return div;
         }
 
-        // Toggles the "Thinking Process" section
+        /**
+         * Appends partial chunk to the .thinking-content
+         */
+        function appendThinkingChunk(text, contentDiv) {
+            if (!contentDiv) return;
+            contentDiv.textContent += text; // Just keep appending
+        }
+
+        /**
+         * Toggles the "Thinking Process" section
+         */
         window.toggleThinking = function(header) {
             const content = header.nextElementSibling;
             const chevron = header.querySelector('.chevron');
@@ -891,13 +934,15 @@
             chevron.classList.toggle('rotated');
         };
 
-        // Updates or creates the "Thinking Process" section with new info
+        /**
+         * Updates or creates the "Thinking Process" section with new info
+         */
         function updateThinkingContent(content) {
             const lastMessageDiv = chatContainer.lastElementChild;
             let thinkingProcess = lastMessageDiv.querySelector('.thinking-process');
 
             if (!thinkingProcess) {
-                thinkingProcess = createThinkingProcess(content);
+                thinkingProcess = createThinkingProcessContainer();
                 chatContainer.insertBefore(thinkingProcess, lastMessageDiv);
             } else {
                 const thinkingContent = thinkingProcess.querySelector('.thinking-content');
@@ -906,4 +951,5 @@
         }
     </script>
 </body>
+
 </html>
