@@ -1,11 +1,15 @@
 use actix_cors::Cors;
 use actix_multipart::form::MultipartForm;
-use actix_web::{middleware::Logger, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    middleware::Logger,
+    web::{self, Json},
+    App, HttpResponse, HttpServer, Responder,
+};
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use clap::Parser;
-use cognition::{ToolsHub, UserActor};
+use cognition::{ChatResponse, ToolsHub, UserActor};
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -34,6 +38,7 @@ struct AppState {
     embeddings: ActorId,
     rerank: ActorId,
     chat: ActorId,
+    think_chat: ActorId,
 }
 
 impl AppState {
@@ -424,7 +429,8 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 };
 
                 // Get available tools
-                let tools = data.tools.lock().await.list_tools(&user_actor).await;
+                let tools =
+                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
                 let tools = match tools {
                     Ok(tools) => tools,
                     Err(e) => {
@@ -481,6 +487,181 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e))
         }
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/think",
+    description = "Analyzes query and determines which tools to use and in what order.",
+    request_body = AskQueryRequestSchema,
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn think(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+    let user_actor = match data.user_actor().await {
+        Ok(actor) => actor,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    let query = body
+        .messages
+        .iter()
+        .filter(|message| message.role == MessageRole::User)
+        .map(|message| message.content.clone())
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    let retrieve_context = RetrieveContext {
+        query: RetrieveQuery::Text(query.clone()),
+        limit: 5,
+        threshold: 0.0,
+        source: body.source.clone(),
+    };
+
+    let retrieved = match user_actor
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await
+    {
+        Ok(context) => context,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e)),
+    };
+
+    let tools = match data.tools.lock().await.list_tools(&user_actor).await {
+        Ok(tools) => tools,
+        Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
+    };
+
+    let tools_str = if tools.is_empty() {
+        "No tools available".to_string()
+    } else {
+        tools
+            .iter()
+            .map(|t| {
+                let params = serde_json::to_string_pretty(t.parameters())
+                    .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                format!(
+                    "- {}: {}\n  Parameters:\n{}",
+                    t.name(),
+                    t.description(),
+                    params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+
+    let context_content = if retrieved.context.is_empty() {
+        "No additional context available".to_string()
+    } else {
+        retrieved.to_markdown()
+    };
+
+    let system_prompt = format!(
+        "{}\n\nADDITIONAL CONTEXT:\n{}",
+        data.config.think_prompt.replace("{tools_list}", &tools_str),
+        context_content
+    );
+    let mut context_message = ChatMessage::system(system_prompt);
+
+    if let Some(ctx) =
+        retrieved.context.iter().find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+    {
+        if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+            if let Metadata::Image(_) = metadata {
+                if let Ok(image_data) = tokio::fs::read(&source.uri).await {
+                    if let Ok(base64_data) = tokio::task::spawn_blocking(move || {
+                        base64::engine::general_purpose::STANDARD.encode(image_data)
+                    })
+                    .await
+                    {
+                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut conversation = body.messages.clone();
+    if !conversation.is_empty() {
+        conversation.insert(conversation.len() - 1, context_message.clone());
+    } else {
+        conversation.push(context_message.clone());
+    }
+
+    // Set up streaming channel
+    let (tx, rx) = tokio::sync::mpsc::channel(1000);
+
+    // Spawn task to handle chat processing
+    tokio::spawn(async move {
+        let chat_request = ChatMessages {
+            messages: conversation.clone(),
+            restart: true,
+            persist: false,
+            stream: true,
+            format: body.format.clone(),
+            tools: None,
+        };
+
+        // Use send() to get a stream instead of send_and_wait_reply()
+        let mut chat_response = match user_actor
+            .send::<Chat, ChatMessages>(
+                chat_request,
+                &data.think_chat,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
+            .await
+        {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = tx.send(Err(e.to_string())).await;
+                return;
+            }
+        };
+
+        // Stream the responses
+        let mut is_first_message = true;
+        while let Some(response) = chat_response.next().await {
+            match response {
+                Ok(message_response) => {
+                    // Create response with context only on first message
+                    let response = ChatResponse {
+                        response: message_response,
+                        context: if is_first_message { conversation.clone() } else { vec![] },
+                    };
+                    is_first_message = false;
+
+                    if tx.send(Ok(Json(response))).await.is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    // Stream responses as NDJSON
+    HttpResponse::Ok().content_type("application/x-ndjson").streaming::<_, Box<dyn StdError>>(
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
+            Ok(response) => {
+                let json = serde_json::to_string(&response).unwrap_or_default();
+                Ok(web::Bytes::from(format!("{}\n", json)))
+            }
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "error": e.to_string()
+                });
+                Ok(web::Bytes::from(format!("{}\n", error_json)))
+            }
+        }),
+    )
 }
 
 #[derive(Serialize)]
@@ -903,6 +1084,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(chat_handle);
 
+    // Think Chat setup
+    let think_chat_id = ActorId::of::<Chat>("/rag/think_chat");
+    let (mut think_chat_ctx, mut think_chat_actor) = Actor::spawn(
+        engine.clone(),
+        think_chat_id.clone(),
+        Chat::builder().model(config.think_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    let think_chat_handle = tokio::spawn(async move {
+        if let Err(e) = think_chat_actor.start(&mut think_chat_ctx).await {
+            error!("Think Chat actor error: {}", e);
+        }
+    });
+    actor_handles.push(think_chat_handle);
+
     // Tools setup
     let mut tools = ToolsHub::new();
     for tool_config in &config.tools {
@@ -919,6 +1117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         embeddings: embeddings_id,
         rerank: rerank_id,
         chat: chat_id,
+        think_chat: think_chat_id,
     });
 
     // Create and run server
@@ -943,6 +1142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/retrieve", web::post().to(retrieve))
             .route("/ask", web::post().to(ask))
             .route("/chat", web::post().to(chat))
+            .route("/think", web::post().to(think))
             .route("/upload", web::post().to(upload))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
