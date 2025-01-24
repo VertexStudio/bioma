@@ -168,8 +168,6 @@ impl Message<ChatMessages> for Chat {
         //     error!("Failed to write chat request debug file: {}", e);
         // }
 
-        println!("Chat message request: {:#?}", chat_message_request);
-
         if stream {
             // Get streaming response from Ollama
             let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
