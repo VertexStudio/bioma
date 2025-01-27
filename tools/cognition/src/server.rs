@@ -992,6 +992,36 @@ async fn dashboard() -> impl Responder {
     NamedFile::open_async("assets/dashboard.html").await
 }
 
+async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
+    // Get the base URL as a string, without trailing slash
+    let endpoint = data.config.rag_endpoint.as_str().trim_end_matches('/');
+
+    let js_content = format!(
+        r#"window.onload = function() {{
+  window.ui = SwaggerUIBundle({{
+    url: "{}/api-docs/openapi.json",
+    dom_id: '#swagger-ui',
+    deepLinking: true,
+    presets: [
+      SwaggerUIBundle.presets.apis,
+      SwaggerUIStandalonePreset
+    ],
+    plugins: [
+      SwaggerUIBundle.plugins.DownloadUrl
+    ],
+    layout: "StandaloneLayout",
+    syntaxHighlight: {{
+      activated: true,
+      theme: "monokai"
+    }}
+  }});
+}};"#,
+        endpoint
+    );
+
+    HttpResponse::Ok().content_type("application/javascript").body(js_content)
+}
+
 #[derive(OpenApi)]
 #[openapi(paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard))]
 struct ApiDoc;
@@ -1171,7 +1201,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/templates/rag_chat.html", web::get().to(chat_page))
             // Then serve static files
             .service(Files::new("/templates", "tools/cognition/templates"))
-            .service(Files::new("/docs", "tools/cognition/docs"))
+            // Add the dynamic swagger-initializer.js route before the static files
+            .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
+            // Then serve the rest of the static files
+            .service(Files::new("/docs", "tools/cognition/docs").prefer_utf8(true).use_last_modified(true))
             // Serve dashboard at root
             .route("/", web::get().to(dashboard))
             .route("/health", web::get().to(health))
