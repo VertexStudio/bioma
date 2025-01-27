@@ -7,11 +7,11 @@ use actix_web::{
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::markitdown::MarkitDown;
 use bioma_llm::prelude::*;
+use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
 use clap::Parser;
 use cognition::{
-    health_check::{check_markitdown, check_minio, check_ollama, Responses, Service},
+    health_check::{check_markitdown, check_minio, check_ollama, check_pdf_analyzer, Responses, Service},
     ChatResponse, ToolsHub, UserActor,
 };
 use config::{Args, Config};
@@ -82,8 +82,8 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     // Ollama health check
     services.insert(Service::Ollama, check_ollama(data.config.chat_endpoint.clone()).await.unwrap());
 
-    // // pdf-analyzer health check
-    // services.insert(Service::PdfAnalyzer, check_endpoint(PdfAnalyzer::default().pdf_analyzer_url).await);
+    // pdf-analyzer health check
+    services.insert(Service::PdfAnalyzer, check_pdf_analyzer(PdfAnalyzer::default().pdf_analyzer_url).await.unwrap());
 
     // Markitdown health check
     let markitdown_check = check_markitdown(MarkitDown::default().markitdown_url).await.unwrap();
