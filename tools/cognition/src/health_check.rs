@@ -5,12 +5,6 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct HealthStatus {
-    pub is_healthy: bool,
-    // timestamp: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Service {
     #[serde(rename = "surrealdb")]
     SurrealDB,
