@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+askama = { workspace = true }
+
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4.5", features = ["derive"] }
-askama = { version = "0.12" }
 askama_escape = { version = "0.10" }
 shlex = "1.3"
 color-backtrace = "0.6"
