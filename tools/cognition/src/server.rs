@@ -1,4 +1,5 @@
 use actix_cors::Cors;
+use actix_files::NamedFile;
 use actix_multipart::form::MultipartForm;
 use actix_web::{
     middleware::Logger,
@@ -977,9 +978,21 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    description = "Serves the dashboard UI.",
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn dashboard() -> impl Responder {
+    NamedFile::open_async("assets/dashboard.html").await
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank),
+    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard),
     servers(
         (url = "http://localhost:5766", description = "Localhost"),
     )
@@ -1135,6 +1148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
+            .route("/", web::get().to(dashboard))
             .route("/health", web::get().to(health))
             .route("/hello", web::get().to(hello))
             .route("/reset", web::post().to(reset))
