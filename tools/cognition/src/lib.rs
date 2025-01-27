@@ -5,16 +5,17 @@ use ollama_rs::generation::{
     chat::ChatMessageResponse,
     tools::{ToolCall, ToolInfo},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::sync::Mutex;
 pub use tool::ToolsHub;
 use tracing::{debug, error, info};
-use url::Url;
+
 pub use user::UserActor;
 
+pub mod health_check;
 pub mod tool;
 pub mod user;
 
@@ -186,54 +187,4 @@ async fn chat_tool_call(
     };
 
     Ok(response)
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct HealthStatus {
-    pub is_healthy: bool,
-    // timestamp: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
-pub enum Service {
-    #[serde(rename = "surrealdb")]
-    SurrealDB,
-    #[serde(rename = "ollama")]
-    Ollama,
-    #[serde(rename = "pdf_analyzer")]
-    PdfAnalyzer,
-    #[serde(rename = "markitdown")]
-    Markitdown,
-    #[serde(rename = "minio")]
-    Minio,
-}
-
-/// Check if posible to create a TCP connection to the provided endpoint
-pub async fn check_endpoint(endpoint: Url) -> HealthStatus {
-    info!("Checking {}", endpoint);
-
-    let host = match endpoint.host_str() {
-        Some(host) => host,
-        None => {
-            error!("Invalid host");
-            return HealthStatus { is_healthy: false };
-        }
-    };
-
-    let port = match endpoint.port() {
-        Some(port) => port,
-        None => {
-            error!("Invalid port");
-            return HealthStatus { is_healthy: false };
-        }
-    };
-
-    let endpoint = format!("{}:{}", host, port);
-
-    let is_healthy = match TcpStream::connect(&endpoint).await {
-        Ok(_) => true,
-        Err(_) => false,
-    };
-
-    HealthStatus { is_healthy }
 }
