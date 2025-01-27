@@ -1,4 +1,5 @@
 use actix_cors::Cors;
+use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
     middleware::Logger,
@@ -14,6 +15,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
+use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
@@ -977,9 +979,21 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    description = "Serves the dashboard UI.",
+    responses(
+        (status = 200, description = "Ok"),
+    )
+)]
+async fn dashboard() -> impl Responder {
+    NamedFile::open_async("assets/dashboard.html").await
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank),
+    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard),
     servers(
         (url = "http://localhost:5766", description = "Localhost"),
     )
@@ -1072,7 +1086,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.chat_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .messages_number_limit(config.messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.context_length))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -1089,7 +1108,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut think_chat_ctx, mut think_chat_actor) = Actor::spawn(
         engine.clone(),
         think_chat_id.clone(),
-        Chat::builder().model(config.think_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.think_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .messages_number_limit(config.messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.context_length))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -1135,6 +1159,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
+            // Serve static files
+            .service(Files::new("/templates", "tools/cognition/templates"))
+            .service(Files::new("/docs", "tools/cognition/docs"))
+            // Serve dashboard at root
+            .route("/", web::get().to(dashboard))
             .route("/health", web::get().to(health))
             .route("/hello", web::get().to(hello))
             .route("/reset", web::post().to(reset))
