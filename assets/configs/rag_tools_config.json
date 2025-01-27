@@ -8,7 +8,7 @@
         "local_store_dir": ".output/store",
         "hf_cache_dir": ".output/cache/huggingface/hub"
     },
-    "rag_endpoint": "http://0.0.0.0:5766",
+    "rag_endpoint": "http://0.0.0.0:8000",
     "chat_endpoint": "http://0.0.0.0:11434",
     "chat_model": "qwen2.5-coder:32b-instruct-q5_K_M",
     "think_model": "deepseek-r1:1.5b",
