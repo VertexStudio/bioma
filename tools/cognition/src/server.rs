@@ -1108,7 +1108,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut think_chat_ctx, mut think_chat_actor) = Actor::spawn(
         engine.clone(),
         think_chat_id.clone(),
-        Chat::builder().model(config.think_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.think_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .messages_number_limit(config.messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.context_length))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
