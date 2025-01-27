@@ -11,7 +11,7 @@ use bioma_llm::markitdown::MarkitDown;
 use bioma_llm::prelude::*;
 use clap::Parser;
 use cognition::{
-    health_check::{check_markitdown, check_ollama, Responses, Service},
+    health_check::{check_markitdown, check_minio, check_ollama, Responses, Service},
     ChatResponse, ToolsHub, UserActor,
 };
 use config::{Args, Config};
@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, error::Error as StdError};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
+use url::Url;
 use utoipa::OpenApi;
 
 mod config;
@@ -85,12 +86,12 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     // services.insert(Service::PdfAnalyzer, check_endpoint(PdfAnalyzer::default().pdf_analyzer_url).await);
 
     // Markitdown health check
-    let markitdown_check = check_markitdown(MarkitDown::default().markitdown_url).await;
+    let markitdown_check = check_markitdown(MarkitDown::default().markitdown_url).await.unwrap();
     services.insert(Service::Markitdown, markitdown_check);
 
-    // // Minio health check
-    // let minio_url = Url::parse("http://127.0.0.1:9000").unwrap();
-    // services.insert(Service::Minio, check_endpoint(minio_url).await);
+    // Minio health check
+    let minio_url = Url::parse("http://127.0.0.1:9000").unwrap();
+    services.insert(Service::Minio, check_minio(minio_url).await.unwrap());
 
     HttpResponse::Ok().json(services)
 }
