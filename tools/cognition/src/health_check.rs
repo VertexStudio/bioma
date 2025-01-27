@@ -1,6 +1,9 @@
+use std::time::Duration;
+
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
-use tracing::{error, info};
+use tracing::error;
 use url::Url;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -24,16 +27,19 @@ pub enum Service {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct OllamaHealth {
+    version: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Responses {
-    #[serde(rename = "markitdown")]
     Markitdown { is_healthy: bool },
+    Ollama { is_healthy: bool, health: Option<OllamaHealth> },
 }
 
 /// Check if posible to create a TCP connection to the provided endpoint
-pub async fn check_endpoint(endpoint: Url) -> HealthStatus {
-    info!("Checking {}", endpoint);
-
+pub async fn check_endpoint(endpoint: &Url) -> HealthStatus {
     let host = match endpoint.host_str() {
         Some(host) => host,
         None => {
@@ -60,11 +66,36 @@ pub async fn check_endpoint(endpoint: Url) -> HealthStatus {
     HealthStatus { is_healthy }
 }
 
-/// Check if posible to create a TCP connection to the provided endpoint
 pub async fn check_markitdown(endpoint: Url) -> Responses {
-    info!("Checking {}", endpoint);
-
-    let check_endpoint = check_endpoint(endpoint).await;
+    let check_endpoint = check_endpoint(&endpoint).await;
 
     Responses::Markitdown { is_healthy: check_endpoint.is_healthy }
+}
+
+pub async fn check_ollama(endpoint: Url) -> Result<Responses, reqwest::Error> {
+    let endpoint = endpoint.clone().join("api/version").unwrap();
+
+    let check_endpoint = check_endpoint(&endpoint).await;
+
+    // Create a reqwest client with a timeout
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10)) // Set the timeout duration
+        .build()?;
+
+    // Make the request using the client
+    let response = client.get(endpoint).send().await;
+
+    let health = match response {
+        Ok(response) => {
+            let health = response.json::<OllamaHealth>().await;
+
+            match health {
+                Ok(health) => Some(health),
+                Err(_) => None,
+            }
+        }
+        Err(_) => None,
+    };
+
+    Ok(Responses::Ollama { is_healthy: check_endpoint.is_healthy, health })
 }
