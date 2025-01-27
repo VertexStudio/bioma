@@ -143,6 +143,8 @@ impl Args {
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
         info!("├─ Think Prompt: {}...", config.think_prompt.chars().take(50).collect::<String>());
         info!("├─ Think Model: {}", config.think_model);
+        info!("├─ Messages Limit: {}", config.messages_limit);
+        info!("├─ Context Length: {}", config.context_length);
         info!("├─ Tool Servers: {} configured", config.tools.len());
         for (i, tool) in config.tools.iter().enumerate() {
             let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };
