@@ -6,6 +6,7 @@ use actix_web::{
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
 };
+use askama::Template;
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
@@ -1000,6 +1001,22 @@ async fn dashboard() -> impl Responder {
 )]
 struct ApiDoc;
 
+#[derive(Template)]
+#[template(path = "../templates/rag_chat.html")]
+struct ChatTemplate {
+    rag_endpoint: String,
+}
+
+async fn chat_template(data: web::Data<AppState>) -> impl Responder {
+    let endpoint = data.config.rag_endpoint.to_string();
+    let template = ChatTemplate { rag_endpoint: endpoint };
+
+    match template.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -1187,6 +1204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Compatibility
             .route("/api/chat", web::post().to(chat))
             .route("/api/embed", web::post().to(embed))
+            .route("/templates/rag_chat.html", web::get().to(chat_template))
     })
     .bind((rag_endpoint_host, rag_endpoint_port))?
     .run();
