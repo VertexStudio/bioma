@@ -276,6 +276,18 @@ impl FrameReply {
         Self { id: ReplyId::new_chunk(id, chunk_num), name, tx, rx, msg, err: Value::Null }
     }
 
+    /// Creates a new error reply frame for a chunk in a streaming response
+    pub fn new_chunk_error(
+        id: String,
+        chunk_num: u64,
+        name: Cow<'static, str>,
+        tx: surrealdb::RecordId,
+        rx: surrealdb::RecordId,
+        err: Value,
+    ) -> Self {
+        Self { id: ReplyId::new_chunk(id, chunk_num), name, tx, rx, msg: Value::Null, err }
+    }
+
     /// Creates a new reply frame for a final response
     pub fn new_final(id: String, name: Cow<'static, str>, tx: surrealdb::RecordId, rx: surrealdb::RecordId) -> Self {
         Self { id: ReplyId::new_final(id), name, tx, rx, msg: Value::Null, err: Value::Null }
@@ -1231,18 +1243,14 @@ impl<T: Actor> ActorContext<T> {
                         frame_clone.tx.clone(),
                         msg,
                     ),
-                    Err(err) => {
-                        let mut reply = FrameReply::new_chunk(
-                            frame_clone.id.key().to_string(),
-                            chunk,
-                            frame_clone.name.clone(),
-                            frame_clone.rx.clone(),
-                            frame_clone.tx.clone(),
-                            Value::Null,
-                        );
-                        reply.err = err;
-                        reply
-                    }
+                    Err(err) => FrameReply::new_chunk_error(
+                        frame_clone.id.key().to_string(),
+                        chunk,
+                        frame_clone.name.clone(),
+                        frame_clone.rx.clone(),
+                        frame_clone.tx.clone(),
+                        err,
+                    ),
                 };
 
                 // Get database ID for reply
