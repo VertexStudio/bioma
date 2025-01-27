@@ -15,6 +15,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
+use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
@@ -1085,7 +1086,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.chat_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .messages_number_limit(config.messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.context_length))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
