@@ -30,10 +30,15 @@ pub struct OllamaHealth {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct PdfAnalyzerHealth {
+    info: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Responses {
     Ollama { is_healthy: bool, health: Option<OllamaHealth> },
-    PdfAnalyzer { is_healty: bool },
+    PdfAnalyzer { is_healthy: bool, health: Option<PdfAnalyzerHealth> },
     Markitdown { is_healthy: bool },
     Minio { is_healthy: bool },
 }
@@ -102,4 +107,32 @@ pub async fn check_minio(endpoint: Url) -> Result<Responses, reqwest::Error> {
     };
 
     return Ok(Responses::Minio { is_healthy });
+}
+
+pub async fn check_pdf_analyzer(endpoint: Url) -> Result<Responses, reqwest::Error> {
+    let endpoint = endpoint.clone();
+
+    // Create a reqwest client with a timeout
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10)) // Set the timeout duration
+        .build()?;
+
+    // Make the request using the client
+    let response = client.get(endpoint).send().await;
+
+    let health = match response {
+        Ok(response) => {
+            let response = response.text().await;
+
+            let health = match response {
+                Ok(info) => Responses::PdfAnalyzer { is_healthy: true, health: Some(PdfAnalyzerHealth { info }) },
+                Err(_) => Responses::PdfAnalyzer { is_healthy: false, health: None },
+            };
+
+            health
+        }
+        Err(_) => Responses::PdfAnalyzer { is_healthy: false, health: None },
+    };
+
+    return Ok(health);
 }
