@@ -1089,8 +1089,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Chat::builder()
             .model(config.chat_model.clone())
             .endpoint(config.chat_endpoint.clone())
-            .messages_number_limit(config.messages_limit)
-            .generation_options(GenerationOptions::default().num_ctx(config.context_length))
+            .messages_number_limit(config.chat_messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.chat_context_length))
             .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
@@ -1111,8 +1111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Chat::builder()
             .model(config.think_model.clone())
             .endpoint(config.chat_endpoint.clone())
-            .messages_number_limit(config.messages_limit)
-            .generation_options(GenerationOptions::default().num_ctx(config.context_length))
+            .messages_number_limit(config.think_messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.think_context_length))
             .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
