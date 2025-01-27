@@ -27,7 +27,7 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
-use utoipa::OpenApi;
+use utoipa::{openapi::ServerBuilder, OpenApi};
 
 mod config;
 mod request_schemas;
@@ -993,12 +993,7 @@ async fn dashboard() -> impl Responder {
 }
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard),
-    servers(
-        (url = "http://localhost:5766", description = "Localhost"),
-    )
-)]
+#[openapi(paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard))]
 struct ApiDoc;
 
 #[derive(Template)]
@@ -1159,6 +1154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and run server
     let rag_endpoint_host = config.rag_endpoint.host_str().unwrap_or("0.0.0.0");
     let rag_endpoint_port = config.rag_endpoint.port().unwrap_or(5766);
+
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
@@ -1192,10 +1188,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/rerank", web::post().to(rerank))
             .route(
                 "/api-docs/openapi.json",
-                web::get().to(move || async {
-                    let openapi = ApiDoc::openapi();
-
-                    HttpResponse::Ok().json(openapi.clone())
+                web::get().to(|data: web::Data<AppState>| async move {
+                    let mut openapi = ApiDoc::openapi();
+                    openapi.servers.get_or_insert_with(Vec::new).push(
+                        ServerBuilder::new()
+                            .url(data.config.rag_endpoint.as_str())
+                            .description(Some("Rag Endpoint"))
+                            .build(),
+                    );
+                    HttpResponse::Ok().json(openapi)
                 }),
             )
             // Compatibility
