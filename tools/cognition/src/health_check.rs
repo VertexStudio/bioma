@@ -85,17 +85,17 @@ pub async fn check_ollama(endpoint: Url) -> Result<Responses, reqwest::Error> {
     // Make the request using the client
     let response = client.get(endpoint).send().await;
 
-    let health = match response {
+    match response {
         Ok(response) => {
             let health = response.json::<OllamaHealth>().await;
 
-            match health {
+            let health = match health {
                 Ok(health) => Some(health),
                 Err(_) => None,
-            }
-        }
-        Err(_) => None,
-    };
+            };
 
-    Ok(Responses::Ollama { is_healthy: check_endpoint.is_healthy, health })
+            return Ok(Responses::Ollama { is_healthy: check_endpoint.is_healthy, health });
+        }
+        Err(_) => return Ok(Responses::Ollama { is_healthy: check_endpoint.is_healthy, health: None }),
+    };
 }
