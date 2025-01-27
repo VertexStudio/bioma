@@ -631,7 +631,7 @@
         };
 
         try {
-          const response = await fetch(`http://localhost:5766${endpoint}`, {
+          const response = await fetch(`{{ rag_endpoint }}${endpoint}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(queryObject),
