@@ -1007,14 +1007,9 @@ struct ChatTemplate {
     rag_endpoint: String,
 }
 
-async fn chat_template(data: web::Data<AppState>) -> impl Responder {
-    let endpoint = data.config.rag_endpoint.to_string();
-    let template = ChatTemplate { rag_endpoint: endpoint };
-
-    match template.render() {
-        Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
-    }
+async fn chat_page(data: web::Data<AppState>) -> impl Responder {
+    let template = ChatTemplate { rag_endpoint: data.config.rag_endpoint.to_string() };
+    HttpResponse::Ok().content_type("text/html").body(template.render().unwrap())
 }
 
 #[tokio::main]
@@ -1176,7 +1171,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
-            // Serve static files
+            // Add the chat page route BEFORE the static files
+            .route("/templates/rag_chat.html", web::get().to(chat_page))
+            // Then serve static files
             .service(Files::new("/templates", "tools/cognition/templates"))
             .service(Files::new("/docs", "tools/cognition/docs"))
             // Serve dashboard at root
@@ -1204,7 +1201,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Compatibility
             .route("/api/chat", web::post().to(chat))
             .route("/api/embed", web::post().to(embed))
-            .route("/templates/rag_chat.html", web::get().to(chat_template))
     })
     .bind((rag_endpoint_host, rag_endpoint_port))?
     .run();
