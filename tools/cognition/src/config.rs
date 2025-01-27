@@ -24,6 +24,10 @@ pub struct Config {
     pub think_prompt: Cow<'static, str>,
     #[serde(default = "default_think_model")]
     pub think_model: Cow<'static, str>,
+    #[serde(default = "default_messages_limit")]
+    pub messages_limit: usize,
+    #[serde(default = "default_context_length")]
+    pub context_length: u32,
     pub tools: Vec<ClientConfig>,
 }
 
@@ -75,11 +79,19 @@ STRICT LIMITATIONS:
 
 RESPONSE FORMAT:
 For [specific task], I recommend using [Tool Name] (Name: [tool.name]) because its intent is [quote tool.description]"#
-    .into()
+        .into()
 }
 
 fn default_think_model() -> Cow<'static, str> {
     "deepseek-r1:1.5b".into()
+}
+
+fn default_messages_limit() -> usize {
+    10
+}
+
+fn default_context_length() -> u32 {
+    4096
 }
 
 impl Default for Config {
@@ -92,6 +104,8 @@ impl Default for Config {
             chat_prompt: default_chat_prompt(),
             think_prompt: default_think_prompt(),
             think_model: default_think_model(),
+            messages_limit: default_messages_limit(),
+            context_length: default_context_length(),
             tools: vec![],
         }
     }
