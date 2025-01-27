@@ -1,5 +1,5 @@
 use actix_cors::Cors;
-use actix_files::NamedFile;
+use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
     middleware::Logger,
@@ -1148,6 +1148,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
+            // Serve static files
+            .service(Files::new("/templates", "tools/cognition/templates"))
+            .service(Files::new("/docs", "tools/cognition/docs"))
+            // Serve dashboard at root
             .route("/", web::get().to(dashboard))
             .route("/health", web::get().to(health))
             .route("/hello", web::get().to(hello))
