@@ -951,7 +951,7 @@ pub struct ActorContext<T: Actor> {
     /// The actor's unique identifier
     id: ActorId,
     /// Channel for sending reply chunks during message processing
-    tx: Option<mpsc::UnboundedSender<Value>>,
+    tx: Option<mpsc::UnboundedSender<Result<Value, Value>>>,
     /// Handle to health update task
     health_task: Option<tokio::task::JoinHandle<()>>,
     /// Type marker for the actor
@@ -1203,9 +1203,7 @@ impl<T: Actor> ActorContext<T> {
         debug!("[{}] msg-process-start {} {}", self.id().record_id(), frame.name, frame.id);
 
         // Create an unbounded channel for streaming replies
-        // tx: sender that will be stored in actor context
-        // rx: receiver that will be used in spawned task
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Result<Value, Value>>();
 
         // Clone database and frame for use in spawned task
         let db = self.engine.db().clone();
@@ -1219,20 +1217,33 @@ impl<T: Actor> ActorContext<T> {
             // Counter for tracking reply chunks in stream
             let chunk_counter = AtomicU64::new(1);
 
-            // Process each reply value sent through channel
-            while let Some(value) = rx.recv().await {
+            while let Some(result) = rx.recv().await {
                 let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 debug!("[{}] msg-chunk {} {}-{}", frame_clone.rx, frame_clone.name, frame_clone.id.key(), chunk);
 
-                // Create reply frame for this chunk
-                let reply = FrameReply::new_chunk(
-                    frame_clone.id.key().to_string(),
-                    chunk,
-                    frame_clone.name.clone(),
-                    frame_clone.rx.clone(),
-                    frame_clone.tx.clone(),
-                    value,
-                );
+                // Create reply frame based on Ok/Err
+                let reply = match result {
+                    Ok(msg) => FrameReply::new_chunk(
+                        frame_clone.id.key().to_string(),
+                        chunk,
+                        frame_clone.name.clone(),
+                        frame_clone.rx.clone(),
+                        frame_clone.tx.clone(),
+                        msg,
+                    ),
+                    Err(err) => {
+                        let mut reply = FrameReply::new_chunk(
+                            frame_clone.id.key().to_string(),
+                            chunk,
+                            frame_clone.name.clone(),
+                            frame_clone.rx.clone(),
+                            frame_clone.tx.clone(),
+                            Value::Null,
+                        );
+                        reply.err = err;
+                        reply
+                    }
+                };
 
                 // Get database ID for reply
                 let reply_id = reply.id.to_record_id();
@@ -1671,7 +1682,17 @@ impl<T: Actor> ActorContext<T> {
     pub async fn reply<R: MessageType>(&self, response: R) -> Result<(), SystemActorError> {
         if let Some(tx) = &self.tx {
             let value = serde_json::to_value(&response)?;
-            tx.send(value).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
+            tx.send(Ok(value)).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
+            Ok(())
+        } else {
+            Err(SystemActorError::MessageReply("No active message processing".into()))
+        }
+    }
+
+    pub async fn error<E: MessageType>(&self, error: E) -> Result<(), SystemActorError> {
+        if let Some(tx) = &self.tx {
+            let value = serde_json::to_value(&error)?;
+            tx.send(Err(value)).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
             Ok(())
         } else {
             Err(SystemActorError::MessageReply("No active message processing".into()))
