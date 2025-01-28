@@ -426,7 +426,7 @@
 
     <script>
       // Remove any trailing slashes from the endpoint
-      const RAG_ENDPOINT = "{{ rag_endpoint }}".replace(/\/+$/, "");
+      const RAG_ENDPOINT = window.location.origin;
 
       let isThinkingActive = false;
       let thinkingDiv = null;

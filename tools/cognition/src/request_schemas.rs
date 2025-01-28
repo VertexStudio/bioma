@@ -180,6 +180,7 @@ pub struct ChatQueryRequestSchema {
     pub source: Option<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
+    #[serde(default)]
     pub use_tools: bool,
 }
 
