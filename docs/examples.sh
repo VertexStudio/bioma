@@ -15,17 +15,15 @@ curl -X POST http://localhost:5766/reset
 # Index files using glob patterns
 curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
-    -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_actor/**/*.rs"]}'
+    -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_actor/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 
 # Upload a single file
 curl -X POST http://localhost:5766/upload \
-    -X POST \
     -F 'file=@./path/to/file.md' \
     -F 'metadata={"path": "dest/path/file.md"};type=application/json'
 
 # Upload a zip archive
 curl -X POST http://localhost:5766/upload \
-    -X POST \
     -F 'file=@./archive.zip' \
     -F 'metadata={"path": "dest/path/archive.zip"};type=application/json'
 
