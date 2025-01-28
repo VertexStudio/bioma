@@ -171,7 +171,8 @@ pub struct AskQueryRequestSchema {
             "role": "user",
             "content": "Why is the sky blue?"
         }
-    ]
+    ],
+    "use_tools": false
 }))]
 
 pub struct ChatQueryRequestSchema {
