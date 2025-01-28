@@ -276,6 +276,18 @@ impl FrameReply {
         Self { id: ReplyId::new_chunk(id, chunk_num), name, tx, rx, msg, err: Value::Null }
     }
 
+    /// Creates a new error reply frame for a chunk in a streaming response
+    pub fn new_chunk_error(
+        id: String,
+        chunk_num: u64,
+        name: Cow<'static, str>,
+        tx: surrealdb::RecordId,
+        rx: surrealdb::RecordId,
+        err: Value,
+    ) -> Self {
+        Self { id: ReplyId::new_chunk(id, chunk_num), name, tx, rx, msg: Value::Null, err }
+    }
+
     /// Creates a new reply frame for a final response
     pub fn new_final(id: String, name: Cow<'static, str>, tx: surrealdb::RecordId, rx: surrealdb::RecordId) -> Self {
         Self { id: ReplyId::new_final(id), name, tx, rx, msg: Value::Null, err: Value::Null }
@@ -285,11 +297,13 @@ impl FrameReply {
 /// A stream of replies from an actor in response to a message.
 ///
 /// This type represents an asynchronous stream of responses that can be consumed
-/// one at a time. The stream will continue until either:
+/// one at a time. Each item in the stream is a Result where:
+/// - Ok(T) contains a successful response
+/// - Err(E) contains an error response
+/// The stream will continue until either:
 /// - A final reply is received (indicated by `chunk = None`)
-/// - An error occurs
 /// - The stream times out
-pub type ReplyStream<T> = Pin<Box<dyn Stream<Item = Result<T, SystemActorError>> + Send>>;
+pub type ReplyStream<T, E = String> = Pin<Box<dyn Stream<Item = Result<Result<T, E>, SystemActorError>> + Send>>;
 
 /// Type representing a stream of messages to an actor.
 ///
@@ -427,6 +441,11 @@ where
 
             // Process message and store result
             let result = self.handle(ctx, message).await;
+
+            // If error, send error to client
+            if let Err(e) = &result {
+                ctx.error(e).await?;
+            }
 
             // Ensure cleanup happens regardless of handle result
             let cleanup_result = {
@@ -951,7 +970,7 @@ pub struct ActorContext<T: Actor> {
     /// The actor's unique identifier
     id: ActorId,
     /// Channel for sending reply chunks during message processing
-    tx: Option<mpsc::UnboundedSender<Value>>,
+    tx: Option<mpsc::UnboundedSender<Result<Value, Value>>>,
     /// Handle to health update task
     health_task: Option<tokio::task::JoinHandle<()>>,
     /// Type marker for the actor
@@ -1203,9 +1222,7 @@ impl<T: Actor> ActorContext<T> {
         debug!("[{}] msg-process-start {} {}", self.id().record_id(), frame.name, frame.id);
 
         // Create an unbounded channel for streaming replies
-        // tx: sender that will be stored in actor context
-        // rx: receiver that will be used in spawned task
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Result<Value, Value>>();
 
         // Clone database and frame for use in spawned task
         let db = self.engine.db().clone();
@@ -1219,20 +1236,29 @@ impl<T: Actor> ActorContext<T> {
             // Counter for tracking reply chunks in stream
             let chunk_counter = AtomicU64::new(1);
 
-            // Process each reply value sent through channel
-            while let Some(value) = rx.recv().await {
+            while let Some(result) = rx.recv().await {
                 let chunk = chunk_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 debug!("[{}] msg-chunk {} {}-{}", frame_clone.rx, frame_clone.name, frame_clone.id.key(), chunk);
 
-                // Create reply frame for this chunk
-                let reply = FrameReply::new_chunk(
-                    frame_clone.id.key().to_string(),
-                    chunk,
-                    frame_clone.name.clone(),
-                    frame_clone.rx.clone(),
-                    frame_clone.tx.clone(),
-                    value,
-                );
+                // Create reply frame based on Ok/Err
+                let reply = match result {
+                    Ok(msg) => FrameReply::new_chunk(
+                        frame_clone.id.key().to_string(),
+                        chunk,
+                        frame_clone.name.clone(),
+                        frame_clone.rx.clone(),
+                        frame_clone.tx.clone(),
+                        msg,
+                    ),
+                    Err(err) => FrameReply::new_chunk_error(
+                        frame_clone.id.key().to_string(),
+                        chunk,
+                        frame_clone.name.clone(),
+                        frame_clone.rx.clone(),
+                        frame_clone.tx.clone(),
+                        err,
+                    ),
+                };
 
                 // Get database ID for reply
                 let reply_id = reply.id.to_record_id();
@@ -1416,7 +1442,7 @@ impl<T: Actor> ActorContext<T> {
     where
         MT: MessageType,
     {
-        let (_, _, _) = self.prepare_and_send_message(&message, to, None).await?;
+        let (_, _, _) = self.prepare_and_send_message::<MT>(&message, to, None).await?;
         Ok(())
     }
 
@@ -1671,7 +1697,17 @@ impl<T: Actor> ActorContext<T> {
     pub async fn reply<R: MessageType>(&self, response: R) -> Result<(), SystemActorError> {
         if let Some(tx) = &self.tx {
             let value = serde_json::to_value(&response)?;
-            tx.send(value).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
+            tx.send(Ok(value)).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
+            Ok(())
+        } else {
+            Err(SystemActorError::MessageReply("No active message processing".into()))
+        }
+    }
+
+    pub async fn error(&self, error: &impl ActorError) -> Result<(), SystemActorError> {
+        if let Some(tx) = &self.tx {
+            let value = serde_json::to_value(&error.to_string())?;
+            tx.send(Err(value)).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
             Ok(())
         } else {
             Err(SystemActorError::MessageReply("No active message processing".into()))
@@ -1687,6 +1723,7 @@ impl<T: Actor> ActorContext<T> {
     /// # Type Parameters
     ///
     /// * `RT` - The expected type of the reply messages.
+    /// * `E` - The type of the error message
     ///
     /// # Arguments
     ///
@@ -1735,11 +1772,11 @@ impl<T: Actor> ActorContext<T> {
     /// - Reply deserialization fails
     /// - Reply contains an error message
     /// - Stream timeout is reached while waiting for next reply
-    async fn wait_for_replies<RT: MessageType + 'static>(
+    async fn wait_for_replies<RT: MessageType + 'static, E: for<'de> Deserialize<'de> + Send + 'static>(
         &self,
         reply_id: &RecordId,
         options: SendOptions,
-    ) -> Result<ReplyStream<RT>, SystemActorError> {
+    ) -> Result<ReplyStream<RT, E>, SystemActorError> {
         // Debug print for starting to wait for replies
         debug!("[{}] reply-wait {} {}", self.id().record_id(), std::any::type_name::<RT>(), reply_id.key());
 
@@ -1768,7 +1805,7 @@ impl<T: Actor> ActorContext<T> {
                 })
             })
             // Process each reply
-            .map(move |reply| -> Result<RT, SystemActorError> {
+            .map(move |reply| -> Result<Result<RT, E>, SystemActorError> {
                 let reply = reply?;
                 debug!(
                     "[{}] reply-recv {} {} chunk={:?}",
@@ -1778,12 +1815,15 @@ impl<T: Actor> ActorContext<T> {
                     reply.id.chunk
                 );
 
+                // Handle error case
                 if !reply.err.is_null() {
-                    return Err(SystemActorError::MessageReply(reply.err.to_string().into()));
+                    let error: E = serde_json::from_value(reply.err)?;
+                    return Ok(Err(error));
                 }
 
+                // Handle success case
                 let response: RT = serde_json::from_value(reply.msg)?;
-                Ok(response)
+                Ok(Ok(response))
             });
 
         // Timeout stream that maps all items through a timeout
