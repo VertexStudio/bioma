@@ -1702,6 +1702,18 @@ impl<T: Actor> ActorContext<T> {
         }
     }
 
+    /// Sends an error response during message processing.
+    ///
+    /// The error will be propagated through the reply stream to the sender.
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The error to send, must implement ActorError
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the error was sent successfully
+    /// * `Err(SystemActorError)` if sending the error failed
     pub async fn error(&self, error: &impl ActorError) -> Result<(), SystemActorError> {
         if let Some(tx) = &self.tx {
             let value = serde_json::to_value(&error.to_string())?;
