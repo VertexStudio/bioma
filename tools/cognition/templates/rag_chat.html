@@ -398,6 +398,42 @@
           opacity: 1;
         }
       }
+
+      .action-button.active {
+        background: var(--surrealist-gradient) !important;
+        border-color: var(--primary) !important;
+      }
+
+      .action-button.active i {
+        color: var(--text-primary) !important;
+      }
+
+      .message a {
+        color: var(--primary);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+
+      .message a:hover {
+        color: var(--primary-hover);
+        text-decoration: underline;
+      }
+
+      .error-message {
+        background-color: rgba(255, 0, 0, 0.1);
+        border: 1px solid rgba(255, 0, 0, 0.3);
+        color: #ff6b6b;
+        align-self: flex-start;
+        padding: 12px;
+        border-radius: 12px;
+        max-width: 85%;
+        margin-bottom: 15px;
+      }
+
+      .error-message i {
+        margin-right: 8px;
+        color: #ff4444;
+      }
     </style>
   </head>
   <body>
@@ -426,7 +462,7 @@
 
     <script>
       // Remove any trailing slashes from the endpoint
-      const RAG_ENDPOINT = "{{ rag_endpoint }}".replace(/\/+$/, "");
+      const RAG_ENDPOINT = window.location.origin;
 
       let isThinkingActive = false;
       let thinkingDiv = null;
@@ -434,6 +470,8 @@
       let assistantTextBuffer = ""; // store user-visible assistant text
       let latestContext = null; // store context from the most recent chunk
       let contextSet = false; // track if we've appended the context yet
+      let toolsEnabled = false;
+      let thinkEnabled = false; // Add new state for think mode
 
       const md = window.markdownit();
       const chatContainer = document.getElementById("chat-container");
@@ -627,14 +665,14 @@
         resizeTextarea();
 
         const queryObject = {
-          messages: [...messageHistory, { role: "user", content: queryText }],
+          // Remove the duplicate user message - just use messageHistory
+          messages: messageHistory,
           model: "llama3.2",
           stream: true,
           use_tools: use_tools,
         };
 
         try {
-          console.log("RAG endpoint:", RAG_ENDPOINT);
           const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -671,9 +709,24 @@
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
+                const data = JSON.parse(line);
+
+                // Handle error responses
+                if (data.error) {
+                  const errorDiv = document.createElement("div");
+                  errorDiv.className = "message error-message";
+                  errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
+                    data.error
+                  )}`;
+                  chatContainer.appendChild(errorDiv);
+                  chatContainer.scrollTop = chatContainer.scrollHeight;
+                  return; // Exit early on error
+                }
+
                 processJsonLine(line);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
+                console.error("Raw line content:", line);
               }
             }
           }
@@ -694,10 +747,13 @@
           mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
         } catch (error) {
           console.error("Error:", error);
-          appendMessage(
-            "system",
-            "An error occurred while fetching the response."
-          );
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
+            error.toString()
+          )}`;
+          chatContainer.appendChild(errorDiv);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
         }
       }
 
@@ -712,13 +768,13 @@
         if (!data.message?.content) {
           // If there's no text, but we see done
           if (data.done && assistantTextBuffer) {
-            // finalize
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+            // Move history update here to ensure it's captured
             messageHistory.push({
               role: "assistant",
               content: assistantTextBuffer,
               images: data.message?.images,
             });
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
           return;
         }
@@ -813,13 +869,23 @@
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
 
-          // If this chunk signals done
+          // If this chunk signals done - ensure history is updated even if no content
           if (data.done) {
-            messageHistory.push({
-              role: "assistant",
-              content: assistantTextBuffer,
-              images: data.message?.images,
-            });
+            // Only push if we have content and it's not already added
+            if (
+              assistantTextBuffer &&
+              !messageHistory.some(
+                (msg) =>
+                  msg.role === "assistant" &&
+                  msg.content === assistantTextBuffer
+              )
+            ) {
+              messageHistory.push({
+                role: "assistant",
+                content: assistantTextBuffer,
+                images: data.message?.images,
+              });
+            }
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
             assistantTextBuffer = "";
           }
@@ -983,24 +1049,50 @@
             resizeTextarea();
             return;
           }
-          e.preventDefault();
+
           if (e.ctrlKey) {
-            await sendQuery("/chat", true);
-          } else if (e.altKey) {
-            await sendQuery("/think");
-          } else {
-            await sendQuery("/chat", false);
+            e.preventDefault();
+            toolsEnabled = !toolsEnabled;
+            updateToolButton();
+            return;
           }
+
+          if (e.altKey) {
+            e.preventDefault();
+            thinkEnabled = !thinkEnabled;
+            updateThinkButton();
+            return;
+          }
+
+          e.preventDefault();
+          const endpoint = thinkEnabled ? "/think" : "/chat";
+          await sendQuery(endpoint, toolsEnabled);
         }
       });
 
       document.getElementById("send-button").addEventListener("click", () => {
-        sendQuery("/chat", true);
+        toolsEnabled = !toolsEnabled;
+        updateToolButton();
       });
 
       document.getElementById("think-button").addEventListener("click", () => {
-        sendQuery("/think");
+        thinkEnabled = !thinkEnabled;
+        updateThinkButton();
       });
+
+      function updateToolButton() {
+        const toolButton = document.getElementById("send-button");
+        toolButton.classList.toggle("active", toolsEnabled);
+        toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
+      }
+
+      function updateThinkButton() {
+        const thinkButton = document.getElementById("think-button");
+        thinkButton.classList.toggle("active", thinkEnabled);
+        thinkButton.title = thinkEnabled
+          ? "Think mode enabled"
+          : "Think mode disabled";
+      }
     </script>
   </body>
 </html>
