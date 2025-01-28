@@ -100,15 +100,42 @@ pip install torch transformers flask
 python assets/scripts/rerank_server.py
 ```
 
-## RAG server example
+## Cognition server example
 
 [Agentic RAG Server](tools/rag_server/docs/rag_server.md)
 
 ### Launch the server:
 
 ```bash
-cargo run --release -p rag_server
+# Launch with default configuration
+cargo run --release -p cognition --bin cognition-server
+
+# Launch with custom tools configuration
+cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server.json
 ```
+
+### Swagger-ui documentation
+
+API documentation is provided in the dashboard. The `congition` server should be up to be able to visualize it.
+
+If you only want to visualize the documentation outside the dashboard, from the broswer, navigate to:
+
+```
+http://localhost:5766/docs/swagger-ui/dist/index.html
+```
+
+### Generate TypeScript API Client
+
+You can generate a TypeScript API client using the OpenAPI Generator CLI:
+
+```bash
+npx @openapitools/openapi-generator-cli generate \
+    -i http://localhost:5766/api-docs/openapi.json \
+    -g typescript-axios \
+    -o ./generated-api
+```
+
+This will generate a TypeScript client based on the OpenAPI specification, using Axios as the HTTP client.
 
 ### Reset the engine:
 
@@ -127,7 +154,7 @@ curl -X POST http://localhost:5766/upload \
 # Upload a zip archive
 curl -X POST http://localhost:5766/upload \
     -F 'file=@./archive.zip' \
-    -F 'metadata={"path": "archive.zip"};type=application/json'
+    -F 'metadata={"path": "dest/path/archive.zip"};type=application/json'
 ```
 
 ### Index files:
@@ -135,7 +162,7 @@ curl -X POST http://localhost:5766/upload \
 ```bash
 curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
-    -d '{"globs": ["./path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+    -d '{"globs": ["/path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
@@ -189,6 +216,22 @@ curl -X POST http://localhost:5766/rerank \
         "raw_scores": false
     }'
 ```
+
+### Think:
+
+```bash
+curl -X 'POST' \
+  'http://0.0.0.0:5766/think' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "messages": [
+            {
+            "role": "user",
+            "content": "Why is the sky blue?"
+            }
+        ]
+    }'
 
 ### Chat completion:
 
@@ -253,7 +296,7 @@ curl -X POST http://localhost:5766/ask \
 ```bash
 curl -X POST http://localhost:5766/delete_source \
     -H "Content-Type: application/json" \
-    -d '{"sources": ["path/to/source1", "path/to/source2"]}'
+    -d '{"source": "path/to/source1"}'
 ```
 
 ### Connect to examples DB:
