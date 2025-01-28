@@ -181,6 +181,26 @@ pub struct ChatQueryRequestSchema {
     pub source: Option<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
+    #[serde(default)]
+    pub use_tools: bool,
+}
+
+#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+#[schema(example = json!({
+    "messages": [
+        {
+            "role": "user",
+            "content": "Why is the sky blue?"
+        }
+    ]
+}))]
+pub struct ThinkQueryRequestSchema {
+    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    pub messages: Vec<ChatMessage>,
+    pub source: Option<String>,
+    #[schema(value_type = Schema::Object)]
+    pub format: Option<chat::Schema>,
+    #[serde(default)]
     pub use_tools: bool,
 }
 
