@@ -100,14 +100,18 @@ pip install torch transformers flask
 python assets/scripts/rerank_server.py
 ```
 
-## RAG server example
+## Cognition server example
 
 [Agentic RAG Server](tools/rag_server/docs/rag_server.md)
 
 ### Launch the server:
 
 ```bash
-cargo run --release -p rag_server
+# Launch with default configuration
+cargo run --release -p cognition --bin cognition-server
+
+# Launch with custom tools configuration
+cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server.json
 ```
 
 ### Reset the engine:
@@ -127,7 +131,7 @@ curl -X POST http://localhost:5766/upload \
 # Upload a zip archive
 curl -X POST http://localhost:5766/upload \
     -F 'file=@./archive.zip' \
-    -F 'metadata={"path": "archive.zip"};type=application/json'
+    -F 'metadata={"path": "dest/path/archive.zip"};type=application/json'
 ```
 
 ### Index files:
@@ -135,7 +139,7 @@ curl -X POST http://localhost:5766/upload \
 ```bash
 curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
-    -d '{"globs": ["./path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+    -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_actor/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
