@@ -9,8 +9,14 @@ use actix_web::{
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
 use clap::Parser;
-use cognition::{ChatResponse, ToolsHub, UserActor};
+use cognition::{
+    health_check::{
+        check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
+    },
+    ChatResponse, ToolsHub, UserActor,
+};
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -23,10 +29,11 @@ use request_schemas::{
 };
 use serde::Serialize;
 use serde_json::json;
-use std::error::Error as StdError;
 use std::sync::Arc;
+use std::{collections::HashMap, error::Error as StdError};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
+use url::Url;
 use utoipa::{openapi::ServerBuilder, OpenApi};
 
 mod config;
@@ -66,13 +73,32 @@ impl AppState {
 #[utoipa::path(
     get,
     path = "/health",
-    description = "Check server health.",
+    description = "Check health of the server and its services.",
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn health() -> impl Responder {
-    HttpResponse::Ok().body("OK")
+async fn health(data: web::Data<AppState>) -> impl Responder {
+    let mut services: HashMap<Service, Responses> = HashMap::new();
+
+    // SurrealDB health check
+    services.insert(Service::SurrealDB, check_surrealdb(data.config.engine.endpoint.to_string()).await);
+
+    // Ollama health check
+    services.insert(Service::Ollama, check_ollama(data.config.chat_endpoint.clone()).await);
+
+    // pdf-analyzer health check
+    services.insert(Service::PdfAnalyzer, check_pdf_analyzer(PdfAnalyzer::default().pdf_analyzer_url).await);
+
+    // Markitdown health check
+    let markitdown_check = check_markitdown(MarkitDown::default().markitdown_url).await;
+    services.insert(Service::Markitdown, markitdown_check);
+
+    // Minio health check
+    let minio_url = Url::parse("http://127.0.0.1:9000").unwrap();
+    services.insert(Service::Minio, check_minio(minio_url).await);
+
+    HttpResponse::Ok().json(services)
 }
 
 #[utoipa::path(

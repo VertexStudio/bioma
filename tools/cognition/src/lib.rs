@@ -12,8 +12,10 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 pub use tool::ToolsHub;
 use tracing::{debug, error, info};
+
 pub use user::UserActor;
 
+pub mod health_check;
 pub mod tool;
 pub mod user;
 
