@@ -1026,21 +1026,15 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
 }
 
 #[derive(OpenApi)]
-#[openapi(paths(
-    health,
-    hello,
-    reset,
-    index,
-    retrieve,
-    ask,
-    chat,
-    think,
-    upload,
-    delete_source,
-    embed,
-    rerank,
-    dashboard
-))]
+#[openapi(
+    paths(health, hello, reset, index, retrieve, ask, chat, think, upload, delete_source, embed, rerank, dashboard),
+    info(
+        title = "Cognition API",
+        version = "0.1.0",
+        description = "API for the Cognition RAG system",
+        license(name = "MIT", identifier = "MIT")
+    )
+)]
 struct ApiDoc;
 
 #[tokio::main]
