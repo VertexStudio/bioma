@@ -1,607 +1,524 @@
 {
-    "openapi": "3.1.0",
-    "info": {
-        "title": "cognition",
-        "description": "",
-        "license": {
-            "name": ""
-        },
-        "version": "0.1.0"
+  "openapi": "3.1.0",
+  "info": {
+    "title": "cognition",
+    "description": "",
+    "license": {
+      "name": "MIT"
     },
-    "servers": [
-        {
-            "url": "http://localhost:5766",
-            "description": "Localhost"
-        }
-    ],
-    "paths": {
-        "/ask": {
-            "post": {
-                "tags": [],
-                "description": "Generates a chat response. Specific response format can be specified.",
-                "operationId": "ask",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/AskQueryRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/chat": {
-            "post": {
-                "tags": [],
-                "description": "Generates a chat response.",
-                "operationId": "chat",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ChatQueryRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/delete_source": {
-            "post": {
-                "tags": [],
-                "description": "Delete indexed sources.",
-                "operationId": "delete_source",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DeleteSourceRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/embed": {
-            "post": {
-                "tags": [],
-                "description": "Generate embeddings for text or images.",
-                "operationId": "embed",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/EmbeddingsQueryRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/health": {
-            "get": {
-                "tags": [],
-                "description": "Check server health.",
-                "operationId": "health",
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/hello": {
-            "get": {
-                "tags": [],
-                "description": "Hello, world! from the server.",
-                "operationId": "hello",
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/index": {
-            "post": {
-                "tags": [],
-                "description": "Receives an array of path of files to index.",
-                "operationId": "index",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IndexGlobsRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/rerank": {
-            "post": {
-                "tags": [],
-                "description": "Rerank texts based on a query.",
-                "operationId": "rerank",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RankTextsRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/reset": {
-            "get": {
-                "tags": [],
-                "description": "Reset bioma engine.",
-                "operationId": "reset",
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/retrieve": {
-            "post": {
-                "tags": [],
-                "description": "Retrieve context in .md format.",
-                "operationId": "retrieve",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RetrieveContextRequest"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        },
-        "/upload": {
-            "post": {
-                "tags": [],
-                "description": "Upload files to the server.",
-                "operationId": "upload",
-                "requestBody": {
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/UploadRequestSchema"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "description": "Ok"
-                    }
-                }
-            }
-        }
-    },
-    "components": {
-        "schemas": {
-            "AskQueryRequestSchema": {
-                "type": "object",
-                "required": [
-                    "messages",
-                    "format"
-                ],
-                "properties": {
-                    "format": {
-                        "type": "object"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
-                        }
-                    },
-                    "source": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
-                    }
-                },
-                "example": {
-                    "model": "llama3.2",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "Tell me about Puerto Rico."
-                        }
-                    ],
-                    "format": {
-                        "title": "PuertoRicoInfo",
-                        "type": "object",
-                        "required": [
-                            "name",
-                            "capital",
-                            "languages"
-                        ],
-                        "properties": {
-                            "name": {
-                                "description": "Name of the territory",
-                                "type": "string"
-                            },
-                            "capital": {
-                                "description": "Capital city",
-                                "type": "string"
-                            },
-                            "languages": {
-                                "description": "Official languages spoken",
-                                "type": "array",
-                                "items": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "ChatMessageRequestSchema": {
-                "type": "object",
-                "required": [
-                    "role",
-                    "content"
-                ],
-                "properties": {
-                    "content": {
-                        "type": "string"
-                    },
-                    "images": {
-                        "type": [
-                            "array",
-                            "null"
-                        ],
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "role": {
-                        "$ref": "#/components/schemas/MessageRoleRequestSchema"
-                    }
-                }
-            },
-            "ChatQueryRequestSchema": {
-                "type": "object",
-                "required": [
-                    "messages",
-                    "format"
-                ],
-                "properties": {
-                    "format": {
-                        "type": "object"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ChatMessageRequestSchema"
-                        }
-                    },
-                    "source": {
-                        "type": [
-                            "string",
-                            "null"
-                        ]
-                    }
-                },
-                "example": {
-                    "model": "llama3.2",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "Why is the sky blue?"
-                        }
-                    ]
-                }
-            },
-            "ChunkCapacityRequestSchema": {
-                "type": "object",
-                "required": [
-                    "start",
-                    "end"
-                ],
-                "properties": {
-                    "end": {
-                        "type": "integer",
-                        "minimum": 0
-                    },
-                    "start": {
-                        "type": "integer",
-                        "minimum": 0
-                    }
-                }
-            },
-            "DeleteSourceRequestSchema": {
-                "type": "object",
-                "required": [
-                    "source"
-                ],
-                "properties": {
-                    "source": {
-                        "type": "string"
-                    }
-                },
-                "example": {
-                    "source": "path/to/source1"
-                }
-            },
-            "EmbeddingsQueryRequestSchema": {
-                "type": "object",
-                "required": [
-                    "model",
-                    "input"
-                ],
-                "properties": {
-                    "input": {},
-                    "model": {
-                        "$ref": "#/components/schemas/ModelEmbedRequestSchema"
-                    }
-                },
-                "example": {
-                    "model": "nomic-embed-vision",
-                    "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
-                }
-            },
-            "IndexGlobsRequestSchema": {
-                "type": "object",
-                "required": [
-                    "globs",
-                    "chunk_capacity"
-                ],
-                "properties": {
-                    "chunk_batch_size": {
-                        "type": [
-                            "integer",
-                            "null"
-                        ],
-                        "minimum": 0
-                    },
-                    "chunk_capacity": {
-                        "$ref": "#/components/schemas/ChunkCapacityRequestSchema"
-                    },
-                    "chunk_overlap": {
-                        "type": [
-                            "integer",
-                            "null"
-                        ],
-                        "minimum": 0
-                    },
-                    "globs": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "example": {
-                    "globs": [
-                        "./path/to/files/**/*.rs"
-                    ],
-                    "chunk_capacity": {
-                        "start": 500,
-                        "end": 2000
-                    },
-                    "chunk_overlap": 200
-                }
-            },
-            "MessageRoleRequestSchema": {
-                "type": "string",
-                "enum": [
-                    "user",
-                    "assistant",
-                    "system",
-                    "tool"
-                ]
-            },
-            "ModelEmbedRequestSchema": {
-                "type": "string",
-                "enum": [
-                    "nomic-embed-text",
-                    "nomic-embed-vision"
-                ]
-            },
-            "RankTextsRequestSchema": {
-                "type": "object",
-                "required": [
-                    "query",
-                    "texts",
-                    "truncation_direction"
-                ],
-                "properties": {
-                    "query": {
-                        "type": "string"
-                    },
-                    "raw_scores": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ]
-                    },
-                    "return_text": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ]
-                    },
-                    "texts": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "truncate": {
-                        "type": [
-                            "boolean",
-                            "null"
-                        ]
-                    },
-                    "truncation_direction": {
-                        "$ref": "#/components/schemas/TruncationDirectionRequestSchema"
-                    }
-                },
-                "example": {
-                    "query": "What is Deep Learning?",
-                    "texts": [
-                        "Deep Learning is learning under water",
-                        "Deep learning is a branch of machine learning"
-                    ],
-                    "raw_scores": false
-                }
-            },
-            "RetrieveContextRequest": {
-                "allOf": [
-                    {
-                        "$ref": "#/components/schemas/RetrieveQueryRequestSchema"
-                    },
-                    {
-                        "type": "object",
-                        "properties": {
-                            "limit": {
-                                "type": [
-                                    "integer",
-                                    "null"
-                                ],
-                                "minimum": 0
-                            },
-                            "source": {
-                                "type": [
-                                    "string",
-                                    "null"
-                                ]
-                            },
-                            "threshold": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ],
-                                "format": "float"
-                            }
-                        }
-                    }
-                ],
-                "example": {
-                    "type": "Text",
-                    "query": "What is Bioma?",
-                    "threshold": 0.0,
-                    "limit": 10,
-                    "source": ".*"
-                }
-            },
-            "RetrieveQueryRequestSchema": {
-                "oneOf": [
-                    {
-                        "type": "object",
-                        "required": [
-                            "query"
-                        ],
-                        "properties": {
-                            "query": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    {
-                        "type": "object",
-                        "required": [
-                            "Segundo"
-                        ],
-                        "properties": {
-                            "Segundo": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                ]
-            },
-            "TruncationDirectionRequestSchema": {
-                "type": "string",
-                "enum": [
-                    "left",
-                    "right"
-                ]
-            },
-            "UploadMetadata": {
-                "type": "object",
-                "required": [
-                    "path"
-                ],
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "format": "binary",
-                        "contentMediaType": "application/octet-stream"
-                    }
-                }
-            },
-            "UploadRequestSchema": {
-                "type": "object",
-                "required": [
-                    "file",
-                    "metadata"
-                ],
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "format": "binary",
-                        "contentMediaType": "application/octet-stream"
-                    },
-                    "metadata": {
-                        "$ref": "#/components/schemas/UploadMetadata"
-                    }
-                }
-            }
-        }
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5766",
+      "description": "Localhost"
     }
+  ],
+  "paths": {
+    "/ask": {
+      "post": {
+        "tags": [],
+        "description": "Generates a chat response. Specific response format can be specified.",
+        "operationId": "ask",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskQueryRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/chat": {
+      "post": {
+        "tags": [],
+        "description": "Generates a chat response.",
+        "operationId": "chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatQueryRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/delete_source": {
+      "post": {
+        "tags": [],
+        "description": "Delete indexed sources.",
+        "operationId": "delete_source",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteSourceRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/embed": {
+      "post": {
+        "tags": [],
+        "description": "Generate embeddings for text or images.",
+        "operationId": "embed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingsQueryRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [],
+        "description": "Check server health.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/hello": {
+      "get": {
+        "tags": [],
+        "description": "Hello, world! from the server.",
+        "operationId": "hello",
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/index": {
+      "post": {
+        "tags": [],
+        "description": "Receives an array of path of files to index.",
+        "operationId": "index",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexGlobsRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/rerank": {
+      "post": {
+        "tags": [],
+        "description": "Rerank texts based on a query.",
+        "operationId": "rerank",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RankTextsRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/reset": {
+      "get": {
+        "tags": [],
+        "description": "Reset bioma engine.",
+        "operationId": "reset",
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/retrieve": {
+      "post": {
+        "tags": [],
+        "description": "Retrieve context in .md format.",
+        "operationId": "retrieve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrieveContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    },
+    "/upload": {
+      "post": {
+        "tags": [],
+        "description": "Upload files to the server.",
+        "operationId": "upload",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ok"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AskQueryRequestSchema": {
+        "type": "object",
+        "required": ["messages", "format"],
+        "properties": {
+          "format": {
+            "type": "object"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageRequestSchema"
+            }
+          },
+          "source": {
+            "type": ["string", "null"]
+          }
+        },
+        "example": {
+          "model": "llama3.2",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Tell me about Puerto Rico."
+            }
+          ],
+          "format": {
+            "title": "PuertoRicoInfo",
+            "type": "object",
+            "required": ["name", "capital", "languages"],
+            "properties": {
+              "name": {
+                "description": "Name of the territory",
+                "type": "string"
+              },
+              "capital": {
+                "description": "Capital city",
+                "type": "string"
+              },
+              "languages": {
+                "description": "Official languages spoken",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ChatMessageRequestSchema": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "images": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string"
+            }
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRoleRequestSchema"
+          }
+        }
+      },
+      "ChatQueryRequestSchema": {
+        "type": "object",
+        "required": ["messages", "format"],
+        "properties": {
+          "format": {
+            "type": "object"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageRequestSchema"
+            }
+          },
+          "source": {
+            "type": ["string", "null"]
+          }
+        },
+        "example": {
+          "model": "llama3.2",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Why is the sky blue?"
+            }
+          ]
+        }
+      },
+      "ChunkCapacityRequestSchema": {
+        "type": "object",
+        "required": ["start", "end"],
+        "properties": {
+          "end": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "DeleteSourceRequestSchema": {
+        "type": "object",
+        "required": ["source"],
+        "properties": {
+          "source": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "source": "path/to/source1"
+        }
+      },
+      "EmbeddingsQueryRequestSchema": {
+        "type": "object",
+        "required": ["model", "input"],
+        "properties": {
+          "input": {},
+          "model": {
+            "$ref": "#/components/schemas/ModelEmbedRequestSchema"
+          }
+        },
+        "example": {
+          "model": "nomic-embed-vision",
+          "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
+        }
+      },
+      "IndexGlobsRequestSchema": {
+        "type": "object",
+        "required": ["globs", "chunk_capacity"],
+        "properties": {
+          "chunk_batch_size": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "chunk_capacity": {
+            "$ref": "#/components/schemas/ChunkCapacityRequestSchema"
+          },
+          "chunk_overlap": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "globs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "example": {
+          "globs": ["./path/to/files/**/*.rs"],
+          "chunk_capacity": {
+            "start": 500,
+            "end": 2000
+          },
+          "chunk_overlap": 200
+        }
+      },
+      "MessageRoleRequestSchema": {
+        "type": "string",
+        "enum": ["user", "assistant", "system", "tool"]
+      },
+      "ModelEmbedRequestSchema": {
+        "type": "string",
+        "enum": ["nomic-embed-text", "nomic-embed-vision"]
+      },
+      "RankTextsRequestSchema": {
+        "type": "object",
+        "required": ["query", "texts", "truncation_direction"],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "raw_scores": {
+            "type": ["boolean", "null"]
+          },
+          "return_text": {
+            "type": ["boolean", "null"]
+          },
+          "texts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncate": {
+            "type": ["boolean", "null"]
+          },
+          "truncation_direction": {
+            "$ref": "#/components/schemas/TruncationDirectionRequestSchema"
+          }
+        },
+        "example": {
+          "query": "What is Deep Learning?",
+          "texts": [
+            "Deep Learning is learning under water",
+            "Deep learning is a branch of machine learning"
+          ],
+          "raw_scores": false
+        }
+      },
+      "RetrieveContextRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RetrieveQueryRequestSchema"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              },
+              "source": {
+                "type": ["string", "null"]
+              },
+              "threshold": {
+                "type": ["number", "null"],
+                "format": "float"
+              }
+            }
+          }
+        ],
+        "example": {
+          "type": "Text",
+          "query": "What is Bioma?",
+          "threshold": 0.0,
+          "limit": 10,
+          "source": ".*"
+        }
+      },
+      "RetrieveQueryRequestSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["Segundo"],
+            "properties": {
+              "Segundo": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "TruncationDirectionRequestSchema": {
+        "type": "string",
+        "enum": ["left", "right"]
+      },
+      "UploadMetadata": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "application/octet-stream"
+          }
+        }
+      },
+      "UploadRequestSchema": {
+        "type": "object",
+        "required": ["file", "metadata"],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "application/octet-stream"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/UploadMetadata"
+          }
+        }
+      }
+    }
+  }
 }
