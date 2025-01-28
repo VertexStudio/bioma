@@ -82,21 +82,21 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     let mut services: HashMap<Service, Responses> = HashMap::new();
 
     // SurrealDB health check
-    services.insert(Service::SurrealDB, check_surrealdb(data.config.engine.endpoint.to_string()).await.unwrap());
+    services.insert(Service::SurrealDB, check_surrealdb(data.config.engine.endpoint.to_string()).await);
 
     // Ollama health check
-    services.insert(Service::Ollama, check_ollama(data.config.chat_endpoint.clone()).await.unwrap());
+    services.insert(Service::Ollama, check_ollama(data.config.chat_endpoint.clone()).await);
 
     // pdf-analyzer health check
-    services.insert(Service::PdfAnalyzer, check_pdf_analyzer(PdfAnalyzer::default().pdf_analyzer_url).await.unwrap());
+    services.insert(Service::PdfAnalyzer, check_pdf_analyzer(PdfAnalyzer::default().pdf_analyzer_url).await);
 
     // Markitdown health check
-    let markitdown_check = check_markitdown(MarkitDown::default().markitdown_url).await.unwrap();
+    let markitdown_check = check_markitdown(MarkitDown::default().markitdown_url).await;
     services.insert(Service::Markitdown, markitdown_check);
 
     // Minio health check
     let minio_url = Url::parse("http://127.0.0.1:9000").unwrap();
-    services.insert(Service::Minio, check_minio(minio_url).await.unwrap());
+    services.insert(Service::Minio, check_minio(minio_url).await);
 
     HttpResponse::Ok().json(services)
 }
