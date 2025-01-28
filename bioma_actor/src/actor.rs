@@ -297,11 +297,13 @@ impl FrameReply {
 /// A stream of replies from an actor in response to a message.
 ///
 /// This type represents an asynchronous stream of responses that can be consumed
-/// one at a time. The stream will continue until either:
+/// one at a time. Each item in the stream is a Result where:
+/// - Ok(T) contains a successful response
+/// - Err(E) contains an error response
+/// The stream will continue until either:
 /// - A final reply is received (indicated by `chunk = None`)
-/// - An error occurs
 /// - The stream times out
-pub type ReplyStream<T> = Pin<Box<dyn Stream<Item = Result<T, SystemActorError>> + Send>>;
+pub type ReplyStream<T, E = String> = Pin<Box<dyn Stream<Item = Result<Result<T, E>, SystemActorError>> + Send>>;
 
 /// Type representing a stream of messages to an actor.
 ///
@@ -439,6 +441,11 @@ where
 
             // Process message and store result
             let result = self.handle(ctx, message).await;
+
+            // If error, send error to client
+            if let Err(e) = &result {
+                ctx.error(e).await?;
+            }
 
             // Ensure cleanup happens regardless of handle result
             let cleanup_result = {
@@ -1435,7 +1442,7 @@ impl<T: Actor> ActorContext<T> {
     where
         MT: MessageType,
     {
-        let (_, _, _) = self.prepare_and_send_message(&message, to, None).await?;
+        let (_, _, _) = self.prepare_and_send_message::<MT>(&message, to, None).await?;
         Ok(())
     }
 
@@ -1697,9 +1704,9 @@ impl<T: Actor> ActorContext<T> {
         }
     }
 
-    pub async fn error<E: MessageType>(&self, error: E) -> Result<(), SystemActorError> {
+    pub async fn error(&self, error: &impl ActorError) -> Result<(), SystemActorError> {
         if let Some(tx) = &self.tx {
-            let value = serde_json::to_value(&error)?;
+            let value = serde_json::to_value(&error.to_string())?;
             tx.send(Err(value)).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
             Ok(())
         } else {
@@ -1716,6 +1723,7 @@ impl<T: Actor> ActorContext<T> {
     /// # Type Parameters
     ///
     /// * `RT` - The expected type of the reply messages.
+    /// * `E` - The type of the error message
     ///
     /// # Arguments
     ///
@@ -1764,11 +1772,11 @@ impl<T: Actor> ActorContext<T> {
     /// - Reply deserialization fails
     /// - Reply contains an error message
     /// - Stream timeout is reached while waiting for next reply
-    async fn wait_for_replies<RT: MessageType + 'static>(
+    async fn wait_for_replies<RT: MessageType + 'static, E: for<'de> Deserialize<'de> + Send + 'static>(
         &self,
         reply_id: &RecordId,
         options: SendOptions,
-    ) -> Result<ReplyStream<RT>, SystemActorError> {
+    ) -> Result<ReplyStream<RT, E>, SystemActorError> {
         // Debug print for starting to wait for replies
         debug!("[{}] reply-wait {} {}", self.id().record_id(), std::any::type_name::<RT>(), reply_id.key());
 
@@ -1797,7 +1805,7 @@ impl<T: Actor> ActorContext<T> {
                 })
             })
             // Process each reply
-            .map(move |reply| -> Result<RT, SystemActorError> {
+            .map(move |reply| -> Result<Result<RT, E>, SystemActorError> {
                 let reply = reply?;
                 debug!(
                     "[{}] reply-recv {} {} chunk={:?}",
@@ -1807,12 +1815,15 @@ impl<T: Actor> ActorContext<T> {
                     reply.id.chunk
                 );
 
+                // Handle error case
                 if !reply.err.is_null() {
-                    return Err(SystemActorError::MessageReply(reply.err.to_string().into()));
+                    let error: E = serde_json::from_value(reply.err)?;
+                    return Ok(Err(error));
                 }
 
+                // Handle success case
                 let response: RT = serde_json::from_value(reply.msg)?;
-                Ok(response)
+                Ok(Ok(response))
             });
 
         // Timeout stream that maps all items through a timeout
