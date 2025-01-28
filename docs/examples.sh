@@ -27,7 +27,7 @@ curl -X POST http://localhost:5766/upload \
 curl -X POST http://localhost:5766/upload \
     -X POST \
     -F 'file=@./archive.zip' \
-    -F 'metadata={"path": "archive.zip"};type=application/json'
+    -F 'metadata={"path": "dest/path/archive.zip"};type=application/json'
 
 # Search and Retrieval
 # ----------------
@@ -45,7 +45,15 @@ curl -X POST http://localhost:5766/retrieve \
 # Ask a question (RAG-enhanced)
 curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
-    -d '{"query": "What is Bioma?"}'
+    -d '{
+    "model": "llama3.2",
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is Bioma?"
+        }
+    ]
+}'
 
 # Embedding Operations
 # ----------------
@@ -76,13 +84,14 @@ curl -X POST http://localhost:5766/rerank \
 curl -X POST http://localhost:5766/chat \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "qwen2.5-coder:32b-instruct-q5_K_M",
+        "model": "llama3.2",
         "messages": [
             {
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
-        ]
+        ],
+        "use_tools": false
     }'
 
 # Structured ask with schema (compatible with Ollama)
