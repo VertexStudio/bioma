@@ -1027,7 +1027,7 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard),
+    paths(health, hello, reset, index, retrieve, ask, chat, think, upload, delete_source, embed, rerank, dashboard),
     info(
         title = "Cognition API",
         version = "0.1.0",
