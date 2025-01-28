@@ -139,7 +139,7 @@ curl -X POST http://localhost:5766/upload \
 ```bash
 curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
-    -d '{"globs": ["/Users/rozgo/BiomaAI/bioma/bioma_actor/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
+    -d '{"globs": ["/path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200}'
 ```
 
 ### Retrieve context:
