@@ -194,6 +194,22 @@ curl -X POST http://localhost:5766/rerank \
     }'
 ```
 
+### Think:
+
+```bash
+curl -X 'POST' \
+  'http://0.0.0.0:5766/think' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "messages": [
+            {
+            "role": "user",
+            "content": "Why is the sky blue?"
+            }
+        ]
+    }'
+
 ### Chat completion:
 
 ```bash
