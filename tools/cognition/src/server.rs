@@ -6,7 +6,6 @@ use actix_web::{
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
 };
-use askama::Template;
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
@@ -19,7 +18,8 @@ use indexer::Metadata;
 use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
+    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, ThinkQueryRequestSchema,
+    UploadRequestSchema,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -496,12 +496,12 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     post,
     path = "/think",
     description = "Analyzes query and determines which tools to use and in what order.",
-    request_body = AskQueryRequestSchema,
+    request_body = ThinkQueryRequestSchema,
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn think(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -564,11 +564,15 @@ async fn think(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>
         retrieved.to_markdown()
     };
 
-    let system_prompt = format!(
-        "{}\n\nADDITIONAL CONTEXT:\n{}",
-        data.config.think_prompt.replace("{tools_list}", &tools_str),
-        context_content
-    );
+    let system_prompt = if body.use_tools {
+        format!(
+            "{}\n\nADDITIONAL CONTEXT:\n{}",
+            data.config.tool_prompt.replace("{tools_list}", &tools_str),
+            context_content
+        )
+    } else {
+        format!("{}\n\nADDITIONAL CONTEXT:\n{}", data.config.chat_prompt, context_content)
+    };
     let mut context_message = ChatMessage::system(system_prompt);
 
     if let Some(ctx) =
@@ -1026,17 +1030,6 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
 #[openapi(paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard))]
 struct ApiDoc;
 
-#[derive(Template)]
-#[template(path = "../templates/rag_chat.html")]
-struct ChatTemplate {
-    rag_endpoint: String,
-}
-
-async fn chat_page(data: web::Data<AppState>) -> impl Responder {
-    let template = ChatTemplate { rag_endpoint: data.config.rag_endpoint.to_string() };
-    HttpResponse::Ok().content_type("text/html").body(template.render().unwrap())
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -1197,9 +1190,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
-            // Add the chat page route BEFORE the static files
-            .route("/templates/rag_chat.html", web::get().to(chat_page))
-            // Then serve static files
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
