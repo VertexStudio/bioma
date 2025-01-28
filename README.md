@@ -116,7 +116,7 @@ cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools
 
 ### Swagger-ui documentation
 
-Documentation is provided in the dashboard. The `congition` server should be up to be able to visualize it.
+API documentation is provided in the dashboard. The `congition` server should be up to be able to visualize it.
 
 If you only want to visualize the documentation outside the dashboard, from the broswer, navigate to:
 
