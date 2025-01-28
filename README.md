@@ -114,6 +114,16 @@ cargo run --release -p cognition --bin cognition-server
 cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server.json
 ```
 
+### Swagger-ui documentation
+
+Documentation is provided in the dashboard. The `congition` server should be up to be able to visualize it.
+
+If you only want to visualize the documentation outside the dashboard, from the broswer, navigate to:
+
+```
+http://localhost:5766/docs/swagger-ui/dist/index.html
+```
+
 ### Reset the engine:
 
 ```bash
