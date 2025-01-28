@@ -1,10 +1,12 @@
 use actix_cors::Cors;
+use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
     middleware::Logger,
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
 };
+use askama::Template;
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
@@ -18,6 +20,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
+use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, UploadRequestSchema,
@@ -29,7 +32,7 @@ use std::{collections::HashMap, error::Error as StdError};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 use url::Url;
-use utoipa::OpenApi;
+use utoipa::{openapi::ServerBuilder, OpenApi};
 
 mod config;
 mod request_schemas;
@@ -1001,14 +1004,62 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
     }
 }
 
-#[derive(OpenApi)]
-#[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank),
-    servers(
-        (url = "http://localhost:5766", description = "Localhost"),
+#[utoipa::path(
+    get,
+    path = "/",
+    description = "Serves the dashboard UI.",
+    responses(
+        (status = 200, description = "Ok"),
     )
 )]
+async fn dashboard() -> impl Responder {
+    NamedFile::open_async("assets/dashboard.html").await
+}
+
+async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
+    // Get the base URL as a string, without trailing slash
+    let endpoint = data.config.rag_endpoint.as_str().trim_end_matches('/');
+
+    let js_content = format!(
+        r#"window.onload = function() {{
+  window.ui = SwaggerUIBundle({{
+    url: "{}/api-docs/openapi.json",
+    dom_id: '#swagger-ui',
+    deepLinking: true,
+    presets: [
+      SwaggerUIBundle.presets.apis,
+      SwaggerUIStandalonePreset
+    ],
+    plugins: [
+      SwaggerUIBundle.plugins.DownloadUrl
+    ],
+    layout: "StandaloneLayout",
+    syntaxHighlight: {{
+      activated: true,
+      theme: "monokai"
+    }}
+  }});
+}};"#,
+        endpoint
+    );
+
+    HttpResponse::Ok().content_type("application/javascript").body(js_content)
+}
+
+#[derive(OpenApi)]
+#[openapi(paths(health, hello, reset, index, retrieve, ask, chat, upload, delete_source, embed, rerank, dashboard))]
 struct ApiDoc;
+
+#[derive(Template)]
+#[template(path = "../templates/rag_chat.html")]
+struct ChatTemplate {
+    rag_endpoint: String,
+}
+
+async fn chat_page(data: web::Data<AppState>) -> impl Responder {
+    let template = ChatTemplate { rag_endpoint: data.config.rag_endpoint.to_string() };
+    HttpResponse::Ok().content_type("text/html").body(template.render().unwrap())
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -1096,7 +1147,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.chat_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .messages_number_limit(config.chat_messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.chat_context_length))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -1113,7 +1169,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut think_chat_ctx, mut think_chat_actor) = Actor::spawn(
         engine.clone(),
         think_chat_id.clone(),
-        Chat::builder().model(config.think_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.think_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            .messages_number_limit(config.think_messages_limit)
+            .generation_options(GenerationOptions::default().num_ctx(config.think_context_length))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;
@@ -1147,6 +1208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create and run server
     let rag_endpoint_host = config.rag_endpoint.host_str().unwrap_or("0.0.0.0");
     let rag_endpoint_port = config.rag_endpoint.port().unwrap_or(5766);
+
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
@@ -1159,6 +1221,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(50 * 1024 * 1024)
                     .total_limit(100 * 1024 * 1024),
             )
+            // Add the chat page route BEFORE the static files
+            .route("/templates/rag_chat.html", web::get().to(chat_page))
+            // Then serve static files
+            .service(Files::new("/templates", "tools/cognition/templates"))
+            // Add the dynamic swagger-initializer.js route before the static files
+            .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
+            // Then serve the rest of the static files
+            .service(Files::new("/docs", "tools/cognition/docs").prefer_utf8(true).use_last_modified(true))
+            // Serve dashboard at root
+            .route("/", web::get().to(dashboard))
             .route("/health", web::get().to(health))
             .route("/hello", web::get().to(hello))
             .route("/reset", web::post().to(reset))
@@ -1173,10 +1245,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/rerank", web::post().to(rerank))
             .route(
                 "/api-docs/openapi.json",
-                web::get().to(move || async {
-                    let openapi = ApiDoc::openapi();
-
-                    HttpResponse::Ok().json(openapi.clone())
+                web::get().to(|data: web::Data<AppState>| async move {
+                    let mut openapi = ApiDoc::openapi();
+                    openapi.servers.get_or_insert_with(Vec::new).push(
+                        ServerBuilder::new()
+                            .url(data.config.rag_endpoint.as_str())
+                            .description(Some("Rag Endpoint"))
+                            .build(),
+                    );
+                    HttpResponse::Ok().json(openapi)
                 }),
             )
             // Compatibility
