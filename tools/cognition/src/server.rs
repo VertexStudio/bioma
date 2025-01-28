@@ -534,30 +534,6 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e)),
     };
 
-    let tools = match data.tools.lock().await.list_tools(&user_actor).await {
-        Ok(tools) => tools,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
-    };
-
-    let tools_str = if tools.is_empty() {
-        "No tools available".to_string()
-    } else {
-        tools
-            .iter()
-            .map(|t| {
-                let params = serde_json::to_string_pretty(t.parameters())
-                    .unwrap_or_else(|_| "Unable to parse parameters".to_string());
-                format!(
-                    "- {}: {}\n  Parameters:\n{}",
-                    t.name(),
-                    t.description(),
-                    params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
-
     let context_content = if retrieved.context.is_empty() {
         "No additional context available".to_string()
     } else {
@@ -565,6 +541,29 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     };
 
     let system_prompt = if body.use_tools {
+        let tools_str = match data.tools.lock().await.list_tools(&user_actor).await {
+            Ok(tools) => {
+                if tools.is_empty() {
+                    "No tools available".to_string()
+                } else {
+                    tools
+                        .iter()
+                        .map(|t| {
+                            let params = serde_json::to_string_pretty(t.parameters())
+                                .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                            format!(
+                                "- {}: {}\n  Parameters:\n{}",
+                                t.name(),
+                                t.description(),
+                                params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                }
+            }
+            Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
+        };
         format!(
             "{}\n\nADDITIONAL CONTEXT:\n{}",
             data.config.tool_prompt.replace("{tools_list}", &tools_str),
