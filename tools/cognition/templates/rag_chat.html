@@ -398,6 +398,22 @@
           opacity: 1;
         }
       }
+
+      .error-message {
+        background-color: rgba(255, 0, 0, 0.1);
+        border: 1px solid rgba(255, 0, 0, 0.3);
+        color: #ff6b6b;
+        align-self: flex-start;
+        padding: 12px;
+        border-radius: 12px;
+        max-width: 85%;
+        margin-bottom: 15px;
+      }
+
+      .error-message i {
+        margin-right: 8px;
+        color: #ff4444;
+      }
     </style>
   </head>
   <body>
@@ -634,14 +650,11 @@
         };
 
         try {
-          console.log("RAG endpoint:", RAG_ENDPOINT);
           const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(queryObject),
           });
-
-          console.log("response: {:#?}", response);
 
           if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -673,9 +686,25 @@
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
+                console.log("Processing JSON line:", line);
+                const data = JSON.parse(line);
+
+                // Handle error responses
+                if (data.error) {
+                  const errorDiv = document.createElement("div");
+                  errorDiv.className = "message error-message";
+                  errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
+                    data.error
+                  )}`;
+                  chatContainer.appendChild(errorDiv);
+                  chatContainer.scrollTop = chatContainer.scrollHeight;
+                  return; // Exit early on error
+                }
+
                 processJsonLine(line);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
+                console.error("Raw line content:", line);
               }
             }
           }
@@ -696,10 +725,13 @@
           mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
         } catch (error) {
           console.error("Error:", error);
-          appendMessage(
-            "system",
-            "An error occurred while fetching the response."
-          );
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
+            error.toString()
+          )}`;
+          chatContainer.appendChild(errorDiv);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
         }
       }
 
