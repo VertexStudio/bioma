@@ -399,6 +399,26 @@
         }
       }
 
+      .action-button.active {
+        background: var(--surrealist-gradient) !important;
+        border-color: var(--primary) !important;
+      }
+
+      .action-button.active i {
+        color: var(--text-primary) !important;
+      }
+
+      .message a {
+        color: var(--primary);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+
+      .message a:hover {
+        color: var(--primary-hover);
+        text-decoration: underline;
+      }
+
       .error-message {
         background-color: rgba(255, 0, 0, 0.1);
         border: 1px solid rgba(255, 0, 0, 0.3);
@@ -442,7 +462,7 @@
 
     <script>
       // Remove any trailing slashes from the endpoint
-      const RAG_ENDPOINT = "{{ rag_endpoint }}".replace(/\/+$/, "");
+      const RAG_ENDPOINT = window.location.origin;
 
       let isThinkingActive = false;
       let thinkingDiv = null;
@@ -450,6 +470,8 @@
       let assistantTextBuffer = ""; // store user-visible assistant text
       let latestContext = null; // store context from the most recent chunk
       let contextSet = false; // track if we've appended the context yet
+      let toolsEnabled = false;
+      let thinkEnabled = false; // Add new state for think mode
 
       const md = window.markdownit();
       const chatContainer = document.getElementById("chat-container");
@@ -1016,24 +1038,50 @@
             resizeTextarea();
             return;
           }
-          e.preventDefault();
+
           if (e.ctrlKey) {
-            await sendQuery("/chat", true);
-          } else if (e.altKey) {
-            await sendQuery("/think");
-          } else {
-            await sendQuery("/chat", false);
+            e.preventDefault();
+            toolsEnabled = !toolsEnabled;
+            updateToolButton();
+            return;
           }
+
+          if (e.altKey) {
+            e.preventDefault();
+            thinkEnabled = !thinkEnabled;
+            updateThinkButton();
+            return;
+          }
+
+          e.preventDefault();
+          const endpoint = thinkEnabled ? "/think" : "/chat";
+          await sendQuery(endpoint, toolsEnabled);
         }
       });
 
       document.getElementById("send-button").addEventListener("click", () => {
-        sendQuery("/chat", true);
+        toolsEnabled = !toolsEnabled;
+        updateToolButton();
       });
 
       document.getElementById("think-button").addEventListener("click", () => {
-        sendQuery("/think");
+        thinkEnabled = !thinkEnabled;
+        updateThinkButton();
       });
+
+      function updateToolButton() {
+        const toolButton = document.getElementById("send-button");
+        toolButton.classList.toggle("active", toolsEnabled);
+        toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
+      }
+
+      function updateThinkButton() {
+        const thinkButton = document.getElementById("think-button");
+        thinkButton.classList.toggle("active", thinkEnabled);
+        thinkButton.title = thinkEnabled
+          ? "Think mode enabled"
+          : "Think mode disabled";
+      }
     </script>
   </body>
 </html>

@@ -20,8 +20,8 @@ pub struct Config {
     pub chat_model: Cow<'static, str>,
     #[serde(default = "default_chat_prompt")]
     pub chat_prompt: Cow<'static, str>,
-    #[serde(default = "default_think_prompt")]
-    pub think_prompt: Cow<'static, str>,
+    #[serde(default = "default_tool_prompt")]
+    pub tool_prompt: Cow<'static, str>,
     #[serde(default = "default_think_model")]
     pub think_model: Cow<'static, str>,
     #[serde(default = "default_chat_messages_limit")]
@@ -60,7 +60,7 @@ answer the user's query:
     .into()
 }
 
-fn default_think_prompt() -> Cow<'static, str> {
+fn default_tool_prompt() -> Cow<'static, str> {
     r#"You're a selection tools assistant, created by Vertex Studio. Format responses in markdown.
 
 APPROVED TOOLS LIST:
@@ -114,7 +114,7 @@ impl Default for Config {
             chat_endpoint: default_chat_endpoint(),
             chat_model: default_chat_model(),
             chat_prompt: default_chat_prompt(),
-            think_prompt: default_think_prompt(),
+            tool_prompt: default_tool_prompt(),
             think_model: default_think_model(),
             chat_messages_limit: default_chat_messages_limit(),
             chat_context_length: default_chat_context_length(),
@@ -155,7 +155,7 @@ impl Args {
         info!("├─ Chat Endpoint: {}", config.chat_endpoint);
         info!("├─ Chat Model: {}", config.chat_model);
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
-        info!("├─ Think Prompt: {}...", config.think_prompt.chars().take(50).collect::<String>());
+        info!("├─ Tool Prompt: {}...", config.tool_prompt.chars().take(50).collect::<String>());
         info!("├─ Think Model: {}", config.think_model);
         info!("├─ Chat Messages Limit: {}", config.chat_messages_limit);
         info!("├─ Chat Context Length: {}", config.chat_context_length);
