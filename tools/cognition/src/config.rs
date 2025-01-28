@@ -24,6 +24,14 @@ pub struct Config {
     pub think_prompt: Cow<'static, str>,
     #[serde(default = "default_think_model")]
     pub think_model: Cow<'static, str>,
+    #[serde(default = "default_chat_messages_limit")]
+    pub chat_messages_limit: usize,
+    #[serde(default = "default_chat_context_length")]
+    pub chat_context_length: u32,
+    #[serde(default = "default_think_messages_limit")]
+    pub think_messages_limit: usize,
+    #[serde(default = "default_think_context_length")]
+    pub think_context_length: u32,
     pub tools: Vec<ClientConfig>,
 }
 
@@ -75,11 +83,27 @@ STRICT LIMITATIONS:
 
 RESPONSE FORMAT:
 For [specific task], I recommend using [Tool Name] (Name: [tool.name]) because its intent is [quote tool.description]"#
-    .into()
+        .into()
 }
 
 fn default_think_model() -> Cow<'static, str> {
     "deepseek-r1:1.5b".into()
+}
+
+fn default_chat_messages_limit() -> usize {
+    10
+}
+
+fn default_chat_context_length() -> u32 {
+    4096
+}
+
+fn default_think_messages_limit() -> usize {
+    10
+}
+
+fn default_think_context_length() -> u32 {
+    4096
 }
 
 impl Default for Config {
@@ -92,6 +116,10 @@ impl Default for Config {
             chat_prompt: default_chat_prompt(),
             think_prompt: default_think_prompt(),
             think_model: default_think_model(),
+            chat_messages_limit: default_chat_messages_limit(),
+            chat_context_length: default_chat_context_length(),
+            think_messages_limit: default_think_messages_limit(),
+            think_context_length: default_think_context_length(),
             tools: vec![],
         }
     }
@@ -129,6 +157,10 @@ impl Args {
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
         info!("├─ Think Prompt: {}...", config.think_prompt.chars().take(50).collect::<String>());
         info!("├─ Think Model: {}", config.think_model);
+        info!("├─ Chat Messages Limit: {}", config.chat_messages_limit);
+        info!("├─ Chat Context Length: {}", config.chat_context_length);
+        info!("├─ Think Messages Limit: {}", config.think_messages_limit);
+        info!("├─ Think Context Length: {}", config.think_context_length);
         info!("├─ Tool Servers: {} configured", config.tools.len());
         for (i, tool) in config.tools.iter().enumerate() {
             let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };

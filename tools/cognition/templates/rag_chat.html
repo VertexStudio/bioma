@@ -425,6 +425,9 @@
     </div>
 
     <script>
+      // Remove any trailing slashes from the endpoint
+      const RAG_ENDPOINT = "{{ rag_endpoint }}".replace(/\/+$/, "");
+
       let isThinkingActive = false;
       let thinkingDiv = null;
       let thinkingContentDiv = null;
@@ -631,7 +634,8 @@
         };
 
         try {
-          const response = await fetch(`http://localhost:5766${endpoint}`, {
+          console.log("RAG endpoint:", RAG_ENDPOINT);
+          const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(queryObject),

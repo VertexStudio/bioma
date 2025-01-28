@@ -78,7 +78,7 @@ pub async fn chat_with_tools(
         .send::<Chat, ChatMessages>(
             chat_request,
             &chat_actor,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(2000)).build(),
         )
         .await
     {
