@@ -1,10 +1,17 @@
-use std::time::Duration;
-
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use url::Url;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(thiserror::Error, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum HealthCheckError {
+    #[error("Reqwest error: {0}")]
+    ReqwestError(String),
+    #[error("ParseError: {0}")]
+    ParseError(String),
+}
+
+#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Service {
     #[serde(rename = "surrealdb")]
     SurrealDB,
@@ -18,14 +25,47 @@ pub enum Service {
     Minio,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct Status {
+    pub is_healthy: bool,
+    pub error: Option<HealthCheckError>,
+}
+
+impl Status {
+    fn healthy() -> Self {
+        Status { is_healthy: true, error: None }
+    }
+
+    fn unhealthy(error: HealthCheckError) -> Self {
+        Status { is_healthy: false, error: Some(error) }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Responses {
-    SurrealDb { is_healthy: bool },
-    Ollama { is_healthy: bool, health: Option<OllamaHealth> },
-    PdfAnalyzer { is_healthy: bool, health: Option<PdfAnalyzerHealth> },
-    Markitdown { is_healthy: bool },
-    Minio { is_healthy: bool },
+    SurrealDb {
+        #[serde(flatten)]
+        status: Status,
+    },
+    Ollama {
+        #[serde(flatten)]
+        status: Status,
+        health: Option<OllamaHealth>,
+    },
+    PdfAnalyzer {
+        #[serde(flatten)]
+        status: Status,
+        health: Option<PdfAnalyzerHealth>,
+    },
+    Markitdown {
+        #[serde(flatten)]
+        status: Status,
+    },
+    Minio {
+        #[serde(flatten)]
+        status: Status,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -38,121 +78,152 @@ pub struct PdfAnalyzerHealth {
     info: String,
 }
 
-pub async fn check_markitdown(endpoint: Url) -> Result<Responses, reqwest::Error> {
+pub async fn check_markitdown(endpoint: Url) -> Responses {
     let endpoint = endpoint.clone().join("health").unwrap();
 
     // Create a reqwest client with a timeout
     let client = Client::builder()
         .timeout(Duration::from_secs(10)) // Set the timeout duration
-        .build()?;
+        .build()
+        .map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    // Make the request using the client
-    let response = client.get(endpoint).send().await;
-
-    let is_healthy = match response {
-        Ok(_) => true,
-        Err(_) => false,
+    let client = match client {
+        Ok(client) => client,
+        Err(e) => return Responses::Markitdown { status: Status::unhealthy(e) },
     };
 
-    Ok(Responses::Markitdown { is_healthy })
+    // Make the request using the client
+    let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
+
+    match response {
+        Ok(_) => return Responses::Markitdown { status: Status::healthy() },
+        Err(e) => return Responses::Markitdown { status: Status::unhealthy(e) },
+    }
 }
 
-pub async fn check_ollama(endpoint: Url) -> Result<Responses, reqwest::Error> {
+pub async fn check_ollama(endpoint: Url) -> Responses {
     let endpoint = endpoint.clone().join("api/version").unwrap();
 
-    // Create a reqwest client with a timeout
     let client = Client::builder()
         .timeout(Duration::from_secs(10)) // Set the timeout duration
-        .build()?;
+        .build()
+        .map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    // Make the request using the client
-    let response = client.get(endpoint).send().await;
+    let client = match client {
+        Ok(client) => client,
+        Err(e) => return Responses::Ollama { status: Status::unhealthy(e), health: None },
+    };
+
+    let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
     let health = match response {
         Ok(response) => {
             let response = response.json::<OllamaHealth>().await;
 
             let health = match response {
-                Ok(health) => Responses::Ollama { is_healthy: true, health: Some(health) },
-                Err(_) => Responses::Ollama { is_healthy: false, health: None },
+                Ok(health) => Responses::Ollama { status: Status::healthy(), health: Some(health) },
+                Err(e) => Responses::Ollama {
+                    status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())),
+                    health: None,
+                },
             };
 
             health
         }
-        Err(_) => Responses::Ollama { is_healthy: false, health: None },
+        Err(e) => Responses::Ollama { status: Status::unhealthy(e), health: None },
     };
 
-    Ok(health)
+    health
 }
 
-pub async fn check_minio(endpoint: Url) -> Result<Responses, reqwest::Error> {
+pub async fn check_minio(endpoint: Url) -> Responses {
     let endpoint = endpoint.clone().join("minio/health/live").unwrap();
 
     // Create a reqwest client with a timeout
     let client = Client::builder()
         .timeout(Duration::from_secs(10)) // Set the timeout duration
-        .build()?;
+        .build()
+        .map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    // Make the request using the client
-    let response = client.get(endpoint).send().await;
-
-    let is_healthy = match response {
-        Ok(_) => true,
-        Err(_) => false,
+    let client = match client {
+        Ok(client) => client,
+        Err(e) => return Responses::Ollama { status: Status::unhealthy(e), health: None },
     };
 
-    return Ok(Responses::Minio { is_healthy });
+    // Make the request using the client
+    let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
+
+    match response {
+        Ok(_) => return Responses::Minio { status: Status::healthy() },
+        Err(e) => Responses::Minio { status: Status::unhealthy(e) },
+    }
 }
 
-pub async fn check_pdf_analyzer(endpoint: Url) -> Result<Responses, reqwest::Error> {
+pub async fn check_pdf_analyzer(endpoint: Url) -> Responses {
     let endpoint = endpoint.clone();
 
     // Create a reqwest client with a timeout
     let client = Client::builder()
         .timeout(Duration::from_secs(10)) // Set the timeout duration
-        .build()?;
+        .build()
+        .map_err(|e| HealthCheckError::ReqwestError(e.to_string()))
+        .map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
+
+    let client = match client {
+        Ok(client) => client,
+        Err(e) => return Responses::PdfAnalyzer { status: Status::unhealthy(e), health: None },
+    };
 
     // Make the request using the client
-    let response = client.get(endpoint).send().await;
+    let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
     let health = match response {
         Ok(response) => {
             let response = response.text().await;
 
             let health = match response {
-                Ok(info) => Responses::PdfAnalyzer { is_healthy: true, health: Some(PdfAnalyzerHealth { info }) },
-                Err(_) => Responses::PdfAnalyzer { is_healthy: false, health: None },
+                Ok(info) => {
+                    Responses::PdfAnalyzer { status: Status::healthy(), health: Some(PdfAnalyzerHealth { info }) }
+                }
+                Err(e) => Responses::PdfAnalyzer {
+                    status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())),
+                    health: None,
+                },
             };
 
             health
         }
-        Err(_) => Responses::PdfAnalyzer { is_healthy: false, health: None },
+        Err(e) => Responses::PdfAnalyzer { status: Status::unhealthy(e), health: None },
     };
 
-    return Ok(health);
+    health
 }
 
-pub async fn check_surrealdb(endpoint: String) -> Result<Responses, reqwest::Error> {
+pub async fn check_surrealdb(endpoint: String) -> Responses {
     let endpoint = endpoint.replace("ws", "http");
     let endpoint = Url::parse(&endpoint).and_then(|url| url.join("health"));
 
     let endpoint = match endpoint {
         Ok(endpoint) => endpoint,
-        Err(_) => return Ok(Responses::SurrealDb { is_healthy: false }),
+        Err(e) => {
+            return Responses::SurrealDb { status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())) }
+        }
     };
 
-    // Create a reqwest client with a timeout
     let client = Client::builder()
-        .timeout(Duration::from_secs(10)) // Set the timeout duration
-        .build()?;
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    // Make the request using the client
-    let response = client.get(endpoint).send().await;
-
-    let is_healthy = match response {
-        Ok(_) => true,
-        Err(_) => false,
+    let client = match client {
+        Ok(client) => client,
+        Err(e) => return Responses::SurrealDb { status: Status::unhealthy(e) },
     };
 
-    return Ok(Responses::SurrealDb { is_healthy });
+    let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
+
+    match response {
+        Ok(_) => return Responses::SurrealDb { status: Status::healthy() },
+        Err(e) => return Responses::SurrealDb { status: Status::unhealthy(e) },
+    };
 }
