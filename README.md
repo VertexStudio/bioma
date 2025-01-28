@@ -124,6 +124,19 @@ If you only want to visualize the documentation outside the dashboard, from the 
 http://localhost:5766/docs/swagger-ui/dist/index.html
 ```
 
+### Generate TypeScript API Client
+
+You can generate a TypeScript API client using the OpenAPI Generator CLI:
+
+```bash
+npx @openapitools/openapi-generator-cli generate \
+    -i http://localhost:5766/api-docs/openapi.json \
+    -g typescript-axios \
+    -o ./generated-api
+```
+
+This will generate a TypeScript client based on the OpenAPI specification, using Axios as the HTTP client.
+
 ### Reset the engine:
 
 ```bash
