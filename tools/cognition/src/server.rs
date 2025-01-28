@@ -515,6 +515,8 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         .collect::<Vec<String>>()
         .join("\n");
 
+    println!("query: {}", query);
+
     let retrieve_context = RetrieveContext {
         query: RetrieveQuery::Text(query.clone()),
         limit: 5,
