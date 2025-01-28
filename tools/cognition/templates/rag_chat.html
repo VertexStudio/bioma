@@ -649,7 +649,8 @@
         resizeTextarea();
 
         const queryObject = {
-          messages: [...messageHistory, { role: "user", content: queryText }],
+          // Remove the duplicate user message - just use messageHistory
+          messages: messageHistory,
           model: "llama3.2",
           stream: true,
           use_tools: use_tools,
@@ -734,13 +735,13 @@
         if (!data.message?.content) {
           // If there's no text, but we see done
           if (data.done && assistantTextBuffer) {
-            // finalize
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+            // Move history update here to ensure it's captured
             messageHistory.push({
               role: "assistant",
               content: assistantTextBuffer,
               images: data.message?.images,
             });
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
           return;
         }
@@ -835,13 +836,23 @@
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
 
-          // If this chunk signals done
+          // If this chunk signals done - ensure history is updated even if no content
           if (data.done) {
-            messageHistory.push({
-              role: "assistant",
-              content: assistantTextBuffer,
-              images: data.message?.images,
-            });
+            // Only push if we have content and it's not already added
+            if (
+              assistantTextBuffer &&
+              !messageHistory.some(
+                (msg) =>
+                  msg.role === "assistant" &&
+                  msg.content === assistantTextBuffer
+              )
+            ) {
+              messageHistory.push({
+                role: "assistant",
+                content: assistantTextBuffer,
+                images: data.message?.images,
+              });
+            }
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
             assistantTextBuffer = "";
           }

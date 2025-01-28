@@ -132,6 +132,8 @@ impl Message<ChatMessages> for Chat {
             }
         }
 
+        println!("history: {:?}", self.history);
+
         // Prepare chat request
         let mut chat_message_request = ChatMessageRequest::new(self.model.to_string(), self.history.clone());
 
