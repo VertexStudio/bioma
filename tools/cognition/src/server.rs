@@ -13,7 +13,9 @@ use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
 use clap::Parser;
 use cognition::{
-    health_check::{check_markitdown, check_minio, check_ollama, check_pdf_analyzer, Responses, Service},
+    health_check::{
+        check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
+    },
     ChatResponse, ToolsHub, UserActor,
 };
 use config::{Args, Config};
@@ -79,8 +81,8 @@ impl AppState {
 async fn health(data: web::Data<AppState>) -> impl Responder {
     let mut services: HashMap<Service, Responses> = HashMap::new();
 
-    // // SurrealDB health check
-    // services.insert(Service::SurrealDB, HealthStatus { is_healthy: data.engine.health().await });
+    // SurrealDB health check
+    services.insert(Service::SurrealDB, check_surrealdb(data.config.engine.endpoint.to_string()).await.unwrap());
 
     // Ollama health check
     services.insert(Service::Ollama, check_ollama(data.config.chat_endpoint.clone()).await.unwrap());
