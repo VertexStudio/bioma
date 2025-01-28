@@ -39,7 +39,7 @@ pub struct ChatResponse {
     pub context: Vec<ChatMessage>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub struct ToolResponse {
     pub server: String,
     pub tool: String,
@@ -113,7 +113,7 @@ pub async fn chat_with_tools(
                         if let Ok(tool_response) = tool_response {
                             messages.push(ChatMessage::tool(serde_json::to_string(&tool_response).unwrap_or_default()));
                         } else {
-                            return Err(ChatToolError::ToolNotFound(tool_call.function.name.clone()));
+                            return Err(tool_response.unwrap_err());
                         }
                     }
                     Box::pin(chat_with_tools(
