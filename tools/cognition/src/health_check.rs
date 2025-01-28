@@ -19,6 +19,16 @@ pub enum Service {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Responses {
+    SurrealDb { is_healthy: bool },
+    Ollama { is_healthy: bool, health: Option<OllamaHealth> },
+    PdfAnalyzer { is_healthy: bool, health: Option<PdfAnalyzerHealth> },
+    Markitdown { is_healthy: bool },
+    Minio { is_healthy: bool },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct OllamaHealth {
     version: String,
 }
@@ -26,15 +36,6 @@ pub struct OllamaHealth {
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct PdfAnalyzerHealth {
     info: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum Responses {
-    Ollama { is_healthy: bool, health: Option<OllamaHealth> },
-    PdfAnalyzer { is_healthy: bool, health: Option<PdfAnalyzerHealth> },
-    Markitdown { is_healthy: bool },
-    Minio { is_healthy: bool },
 }
 
 pub async fn check_markitdown(endpoint: Url) -> Result<Responses, reqwest::Error> {
@@ -129,4 +130,29 @@ pub async fn check_pdf_analyzer(endpoint: Url) -> Result<Responses, reqwest::Err
     };
 
     return Ok(health);
+}
+
+pub async fn check_surrealdb(endpoint: String) -> Result<Responses, reqwest::Error> {
+    let endpoint = endpoint.replace("ws", "http");
+    let endpoint = Url::parse(&endpoint).and_then(|url| url.join("health"));
+
+    let endpoint = match endpoint {
+        Ok(endpoint) => endpoint,
+        Err(_) => return Ok(Responses::SurrealDb { is_healthy: false }),
+    };
+
+    // Create a reqwest client with a timeout
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10)) // Set the timeout duration
+        .build()?;
+
+    // Make the request using the client
+    let response = client.get(endpoint).send().await;
+
+    let is_healthy = match response {
+        Ok(_) => true,
+        Err(_) => false,
+    };
+
+    return Ok(Responses::SurrealDb { is_healthy });
 }
