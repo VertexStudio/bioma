@@ -11,7 +11,7 @@ pub enum HealthCheckError {
     ReqwestError(String),
     #[error("ParseError: {0}")]
     ParseError(String),
-    #[error("{0}")]
+    #[error("OllamaError: {0}")]
     OllamaError(String),
 }
 
