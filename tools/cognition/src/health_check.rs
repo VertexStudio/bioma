@@ -1,14 +1,18 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tracing::error;
 use url::Url;
 
 #[derive(thiserror::Error, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum HealthCheckError {
     #[error("Reqwest error: {0}")]
     ReqwestError(String),
     #[error("ParseError: {0}")]
     ParseError(String),
+    #[error("{0}")]
+    OllamaError(String),
 }
 
 #[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -69,8 +73,14 @@ pub enum Responses {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+struct OllamaRunningModel {
+    size_vram: u32,
+    model: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct OllamaHealth {
-    version: String,
+    models: Vec<OllamaRunningModel>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -102,7 +112,7 @@ pub async fn check_markitdown(endpoint: Url) -> Responses {
 }
 
 pub async fn check_ollama(endpoint: Url) -> Responses {
-    let endpoint = endpoint.clone().join("api/version").unwrap();
+    let endpoint = endpoint.clone().join("api/ps").unwrap();
 
     let client = Client::builder()
         .timeout(Duration::from_secs(10)) // Set the timeout duration
@@ -120,15 +130,34 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
         Ok(response) => {
             let response = response.json::<OllamaHealth>().await;
 
-            let health = match response {
-                Ok(health) => Responses::Ollama { status: Status::healthy(), health: Some(health) },
-                Err(e) => Responses::Ollama {
-                    status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())),
-                    health: None,
-                },
-            };
+            match response {
+                Ok(health) => {
+                    if health.models.is_empty() {
+                        return Responses::Ollama {
+                            status: Status::unhealthy(HealthCheckError::OllamaError("No models running".to_string())),
+                            health: None,
+                        };
+                    }
 
-            health
+                    if health.models.iter().any(|model| model.size_vram == 0) {
+                        return Responses::Ollama {
+                            status: Status::unhealthy(HealthCheckError::OllamaError(
+                                "Ollama is running on CPU".to_string(),
+                            )),
+                            health: None,
+                        };
+                    }
+
+                    return Responses::Ollama { status: Status::healthy(), health: Some(health) };
+                }
+                Err(e) => {
+                    error!("Error parsing response: {}", e);
+                    return Responses::Ollama {
+                        status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())),
+                        health: None,
+                    };
+                }
+            };
         }
         Err(e) => Responses::Ollama { status: Status::unhealthy(e), health: None },
     };
