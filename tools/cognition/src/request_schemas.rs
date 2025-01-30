@@ -83,16 +83,16 @@ pub enum RetrieveQueryRequestSchema {
 }
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-pub enum Format {
+pub enum RetrieveOutputFormat {
     #[serde(rename = "markdown")]
     Markdown,
     #[serde(rename = "json")]
     Json,
 }
 
-impl Default for Format {
+impl Default for RetrieveOutputFormat {
     fn default() -> Self {
-        Format::Markdown
+        RetrieveOutputFormat::Markdown
     }
 }
 
@@ -114,7 +114,7 @@ pub struct RetrieveContextRequest {
     pub text: Option<String>,
     pub source: Option<String>,
     #[serde(default)]
-    pub format: Format,
+    pub format: RetrieveOutputFormat,
 }
 
 impl Into<RetrieveContext> for RetrieveContextRequest {
