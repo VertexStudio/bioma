@@ -21,7 +21,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
+use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
@@ -460,29 +460,9 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
-                // Get tools - either from request or from list_tools()
-                let tools = if body.use_tools {
-                    if let Some(tools) = body.tools {
-                        // Convert provided tools to ToolInfo
-                        Ok(tools
-                            .into_iter()
-                            .map(|t| ToolInfo {
-                                tool_type: ToolType::Function,
-                                function: ToolFunctionInfo {
-                                    name: t.function.name.into(),
-                                    description: t.function.description.into(),
-                                    parameters: t.function.parameters,
-                                },
-                            })
-                            .collect())
-                    } else {
-                        // Fall back to list_tools() if no tools provided
-                        data.tools.lock().await.list_tools(&user_actor).await
-                    }
-                } else {
-                    Ok(vec![])
-                };
-
+                // Get available tools
+                let tools =
+                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
                 println!("Tools: {:#?}", tools);
                 let tools = match tools {
                     Ok(tools) => tools,
@@ -493,7 +473,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     }
                 };
                 for tool_info in &tools {
-                    info!("Tool: {}", tool_info.function.name);
+                    info!("Tool: {}", tool_info.name());
                 }
 
                 let chat_with_tools_tx = tx.clone();
