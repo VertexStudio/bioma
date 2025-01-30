@@ -656,7 +656,7 @@
           : "Show Context ◀";
       };
 
-      async function sendQuery(endpoint = "/chat", use_tools = false) {
+      async function sendQuery(endpoint = "/chat", fetch_tools = false) {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
 
@@ -669,7 +669,7 @@
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
-          use_tools: use_tools,
+          fetch_tools: fetch_tools,
         };
 
         try {
