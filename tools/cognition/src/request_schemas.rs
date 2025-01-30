@@ -350,15 +350,12 @@ pub struct ToolInfoSchema {
     pub function: ToolFunctionInfoSchema,
 }
 
-impl From<ToolInfo> for ToolInfoSchema {
-    fn from(tool: ToolInfo) -> Self {
-        ToolInfoSchema {
-            tool_type: ToolTypeSchema::Function,
-            function: ToolFunctionInfoSchema {
-                name: tool.name().to_string(),
-                description: tool.description().to_string(),
-                parameters: tool.parameters().clone(),
-            },
-        }
+impl From<ToolInfoSchema> for ToolInfo {
+    fn from(schema: ToolInfoSchema) -> Self {
+        ToolInfo::from_schema(
+            schema.function.name.into(),
+            schema.function.description.into(),
+            schema.function.parameters,
+        )
     }
 }
