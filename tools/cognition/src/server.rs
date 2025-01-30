@@ -1026,7 +1026,7 @@ async fn dashboard() -> impl Responder {
 
 async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     // Get the base URL as a string, without trailing slash
-    let endpoint = data.config.rag_endpoint.as_str().trim_end_matches('/');
+    let endpoint = data.config.openapi_endpoint.as_str().trim_end_matches('/');
 
     let js_content = format!(
         r#"window.onload = function() {{

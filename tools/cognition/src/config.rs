@@ -16,6 +16,8 @@ pub struct Config {
     pub rag_endpoint: Url,
     #[serde(default = "default_chat_endpoint")]
     pub chat_endpoint: Url,
+    #[serde(default = "default_openapi_endpoint")]
+    pub openapi_endpoint: Url,
     #[serde(default = "default_chat_model")]
     pub chat_model: Cow<'static, str>,
     #[serde(default = "default_chat_prompt")]
@@ -45,6 +47,10 @@ fn default_rag_endpoint() -> Url {
 
 fn default_chat_endpoint() -> Url {
     Url::parse("http://0.0.0.0:11434").unwrap()
+}
+
+fn default_openapi_endpoint() -> Url {
+    Url::parse("http://0.0.0.0:5766").unwrap()
 }
 
 fn default_chat_model() -> Cow<'static, str> {
@@ -112,6 +118,7 @@ impl Default for Config {
             engine: default_engine(),
             rag_endpoint: default_rag_endpoint(),
             chat_endpoint: default_chat_endpoint(),
+            openapi_endpoint: default_openapi_endpoint(),
             chat_model: default_chat_model(),
             chat_prompt: default_chat_prompt(),
             tool_prompt: default_tool_prompt(),
@@ -153,6 +160,7 @@ impl Args {
         info!("│  └─ HuggingFace Cache Directory: {}", config.engine.hf_cache_dir.display());
         info!("├─ RAG Endpoint: {}", config.rag_endpoint);
         info!("├─ Chat Endpoint: {}", config.chat_endpoint);
+        info!("├─ OpenAPI Endpoint: {}", config.openapi_endpoint);
         info!("├─ Chat Model: {}", config.chat_model);
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
         info!("├─ Tool Prompt: {}...", config.tool_prompt.chars().take(50).collect::<String>());
