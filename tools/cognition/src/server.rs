@@ -21,7 +21,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::options::GenerationOptions;
+use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
@@ -461,17 +461,25 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 };
 
                 // Get available tools
-                let tools =
-                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
-                println!("Tools: {:#?}", tools);
-                let tools = match tools {
-                    Ok(tools) => tools,
-                    Err(e) => {
-                        error!("Error fetching tools: {:?}", e);
-                        let _ = tx.send(Err(e.to_string())).await;
-                        return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                let tools = match &body.tools {
+                    Some(tools) => tools.iter().map(|t| t.clone().into()).collect::<Vec<ToolInfo>>(),
+                    None => {
+                        if body.use_tools {
+                            match data.tools.lock().await.list_tools(&user_actor).await {
+                                Ok(tools) => tools,
+                                Err(e) => {
+                                    error!("Error fetching tools: {:?}", e);
+                                    let _ = tx.send(Err(e.to_string())).await;
+                                    return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                                }
+                            }
+                        } else {
+                            vec![]
+                        }
                     }
                 };
+                println!("Tools: {:#?}", tools);
+
                 for tool_info in &tools {
                     info!("Tool: {}", tool_info.name());
                 }
