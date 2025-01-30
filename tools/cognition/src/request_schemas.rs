@@ -222,6 +222,8 @@ pub struct ThinkQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub use_tools: bool,
+    #[serde(default)]
+    pub tools: Vec<ToolInfoSchema>,
 }
 
 // /delete_resource Endpoint Schemas

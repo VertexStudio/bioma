@@ -603,28 +603,51 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     };
 
     let system_prompt = if body.use_tools {
-        let tools_str = match data.tools.lock().await.list_tools(&user_actor).await {
-            Ok(tools) => {
-                if tools.is_empty() {
-                    "No tools available".to_string()
-                } else {
-                    tools
-                        .iter()
-                        .map(|t| {
-                            let params = serde_json::to_string_pretty(t.parameters())
-                                .unwrap_or_else(|_| "Unable to parse parameters".to_string());
-                            format!(
-                                "- {}: {}\n  Parameters:\n{}",
-                                t.name(),
-                                t.description(),
-                                params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n\n")
+        let tools_str = if !body.tools.is_empty() {
+            // Use provided tools
+            body.tools
+                .iter()
+                .map(|t| {
+                    let params = serde_json::to_string_pretty(&t.function.parameters)
+                        .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                    format!(
+                        "- {}: {}\n  Parameters:\n{}",
+                        t.function.name,
+                        t.function.description,
+                        params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        } else {
+            // Fall back to listing available tools
+            match data.tools.lock().await.list_tools(&user_actor).await {
+                Ok(tools) => {
+                    if tools.is_empty() {
+                        "No tools available".to_string()
+                    } else {
+                        tools
+                            .iter()
+                            .map(|t| {
+                                let params = serde_json::to_string_pretty(t.parameters())
+                                    .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                                format!(
+                                    "- {}: {}\n  Parameters:\n{}",
+                                    t.name(),
+                                    t.description(),
+                                    params
+                                        .split('\n')
+                                        .map(|line| format!("    {}", line))
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n\n")
+                    }
                 }
+                Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
             }
-            Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
         };
         format!(
             "{}\n\nADDITIONAL CONTEXT:\n{}",
