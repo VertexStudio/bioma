@@ -202,7 +202,7 @@ pub struct ChatQueryRequestSchema {
     #[serde(default)]
     pub use_tools: bool,
     #[serde(default)]
-    pub tools: Option<Vec<ToolInfoSchema>>,
+    pub tools: Vec<ToolInfoSchema>,
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]

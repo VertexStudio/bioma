@@ -21,7 +21,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
+use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
@@ -460,26 +460,50 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
-                // Get available tools
-                let tools = match &body.tools {
-                    Some(tools) => tools.iter().map(|t| t.clone().into()).collect::<Vec<ToolInfo>>(),
-                    None => {
-                        if body.use_tools {
-                            match data.tools.lock().await.list_tools(&user_actor).await {
-                                Ok(tools) => tools,
-                                Err(e) => {
-                                    error!("Error fetching tools: {:?}", e);
-                                    let _ = tx.send(Err(e.to_string())).await;
-                                    return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
-                                }
-                            }
-                        } else {
-                            vec![]
+                // If client provided tools, generate tool calling
+                let client_tools = body.tools.clone();
+
+                if !client_tools.is_empty() {
+                    let chat_response = user_actor
+                        .send_and_wait_reply::<Chat, ChatMessages>(
+                            ChatMessages {
+                                messages: conversation.clone(),
+                                restart: true,
+                                persist: false,
+                                stream: false,
+                                format: body.format.clone(),
+                                tools: Some(client_tools.into_iter().map(Into::into).collect()),
+                            },
+                            &data.chat,
+                            SendOptions::default(),
+                        )
+                        .await;
+
+                    match chat_response {
+                        Ok(response) => {
+                            let response = ChatResponse { response, context: conversation.clone() };
+                            let _ = tx.send(Ok(Json(response))).await;
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            error!("Error during chat with tools: {:?}", e);
+                            let _ = tx.send(Err(e.to_string())).await;
+                            return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
                         }
                     }
-                };
-                println!("Tools: {:#?}", tools);
+                }
 
+                // Get available tools
+                let tools =
+                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+                let tools = match tools {
+                    Ok(tools) => tools,
+                    Err(e) => {
+                        error!("Error fetching tools: {:?}", e);
+                        let _ = tx.send(Err(e.to_string())).await;
+                        return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                    }
+                };
                 for tool_info in &tools {
                     info!("Tool: {}", tool_info.name());
                 }
@@ -602,7 +626,6 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             }
             Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
         };
-        println!("Tools: {:#?}", tools_str);
         format!(
             "{}\n\nADDITIONAL CONTEXT:\n{}",
             data.config.tool_prompt.replace("{tools_list}", &tools_str),
