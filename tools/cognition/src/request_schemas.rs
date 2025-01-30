@@ -200,8 +200,12 @@ pub struct ChatQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub use_tools: bool,
-    #[serde(default)]
+    #[serde(default = "default_chat_stream")]
     pub stream: bool,
+}
+
+fn default_chat_stream() -> bool {
+    true
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]

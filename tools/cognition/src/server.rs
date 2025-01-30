@@ -484,6 +484,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     data.tools.clone(),
                     chat_with_tools_tx,
                     body.format.clone(),
+                    body.stream,
                 )
                 .await;
 
@@ -637,7 +638,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             messages: conversation.clone(),
             restart: true,
             persist: false,
-            stream: body.stream,
+            stream: true,
             format: body.format.clone(),
             tools: None,
         };
