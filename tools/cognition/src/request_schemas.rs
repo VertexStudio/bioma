@@ -111,7 +111,6 @@ pub struct RetrieveContextRequest {
     pub query: RetrieveQueryRequestSchema,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
-    pub text: Option<String>,
     pub source: Option<String>,
     #[serde(default)]
     pub format: RetrieveOutputFormat,
