@@ -200,6 +200,8 @@ pub struct ChatQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub use_tools: bool,
+    #[serde(default)]
+    pub stream: bool,
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
@@ -219,6 +221,12 @@ pub struct ThinkQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub use_tools: bool,
+    #[serde(default = "default_think_stream")]
+    pub stream: bool,
+}
+
+fn default_think_stream() -> bool {
+    true
 }
 
 // /delete_resource Endpoint Schemas

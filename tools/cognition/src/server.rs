@@ -637,7 +637,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             messages: conversation.clone(),
             restart: true,
             persist: false,
-            stream: true,
+            stream: body.stream,
             format: body.format.clone(),
             tools: None,
         };
