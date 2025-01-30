@@ -24,8 +24,8 @@ use indexer::Metadata;
 use ollama_rs::generation::options::GenerationOptions;
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, ThinkQueryRequestSchema,
-    UploadRequestSchema,
+    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
+    ThinkQueryRequestSchema, UploadRequestSchema,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -334,7 +334,10 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     match response {
         Ok(context) => {
             info!("Context fetched: {:#?}", context);
-            let context_content = context.to_markdown();
+            let context_content = match body.format {
+                RetrieveOutputFormat::Markdown => context.to_markdown(),
+                RetrieveOutputFormat::Json => context.to_json(),
+            };
             HttpResponse::Ok().json(context_content)
         }
         Err(e) => {
