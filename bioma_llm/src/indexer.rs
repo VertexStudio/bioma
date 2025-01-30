@@ -131,7 +131,7 @@ enum IndexResult {
 }
 
 /// The source of the embeddings
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentSource {
     pub source: String,
     pub uri: String,
