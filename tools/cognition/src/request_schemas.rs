@@ -83,12 +83,27 @@ pub enum RetrieveQueryRequestSchema {
 }
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+pub enum Format {
+    #[serde(rename = "markdown")]
+    Markdown,
+    #[serde(rename = "json")]
+    Json,
+}
+
+impl Default for Format {
+    fn default() -> Self {
+        Format::Markdown
+    }
+}
+
+#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
 #[schema(example = json!({
     "type": "Text",
     "query": "What is Bioma?",
     "threshold": 0.0,
     "limit": 10,
-    "source": ".*"
+    "source": ".*",
+    "format": "markdown"
 }))]
 pub struct RetrieveContextRequest {
     #[schema(value_type = RetrieveQueryRequestSchema)]
@@ -96,7 +111,10 @@ pub struct RetrieveContextRequest {
     pub query: RetrieveQueryRequestSchema,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
+    pub text: Option<String>,
     pub source: Option<String>,
+    #[serde(default)]
+    pub format: Format,
 }
 
 impl Into<RetrieveContext> for RetrieveContextRequest {
