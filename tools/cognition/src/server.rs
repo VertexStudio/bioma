@@ -459,7 +459,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
                 // Get available tools
                 let tools =
-                    if body.fetch_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+                    if body.tools_actor { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
                 let tools = match tools {
                     Ok(tools) => tools,
                     Err(e) => {
@@ -566,7 +566,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         retrieved.to_markdown()
     };
 
-    let system_prompt = if body.fetch_tools {
+    let system_prompt = if body.tools_actor {
         let tools_str = match data.tools.lock().await.list_tools(&user_actor).await {
             Ok(tools) => {
                 if tools.is_empty() {

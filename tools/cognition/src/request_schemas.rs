@@ -172,7 +172,7 @@ pub struct AskQueryRequestSchema {
             "content": "Why is the sky blue?"
         }
     ],
-    "fetch_tools": false
+    "tools_actor": false
 }))]
 
 pub struct ChatQueryRequestSchema {
@@ -182,7 +182,7 @@ pub struct ChatQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub fetch_tools: bool,
+    pub tools_actor: bool,
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
@@ -201,7 +201,7 @@ pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub fetch_tools: bool,
+    pub tools_actor: bool,
 }
 
 // /delete_resource Endpoint Schemas

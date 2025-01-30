@@ -89,7 +89,7 @@ curl -X POST http://localhost:5766/chat \
                 "content": "Why is the sky blue?"
             }
         ],
-        "fetch_tools": false
+        "tools_actor": false
     }'
 
 # Structured ask with schema (compatible with Ollama)
