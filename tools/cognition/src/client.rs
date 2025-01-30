@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::connect(config.engine.clone()).await?;
 
     // Tools setup
-    let tools_user = UserActor::new(&engine, "/rag/client/tool/".into()).await?;
+    let tools_user = UserActor::new(&engine, args.tools_actor).await?;
     let mut tools_hub = ToolsHub::new();
     for tool in &config.tools {
         tools_hub.add_tool(&engine, tool.clone(), "/rag".into()).await?;

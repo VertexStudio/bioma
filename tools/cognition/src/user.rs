@@ -13,9 +13,19 @@ impl Actor for UserActor {
 }
 
 impl UserActor {
-    pub async fn new(engine: &Engine, prefix: String) -> Result<ActorContext<UserActor>, SystemActorError> {
-        let ulid = ulid::Ulid::new();
-        let actor_id = ActorId::of::<UserActor>(format!("{}{}", prefix, ulid.to_string()));
+    pub async fn new(
+        engine: &Engine,
+        tools_actor_id: Option<String>,
+    ) -> Result<ActorContext<UserActor>, SystemActorError> {
+        let tools_actor_id = match tools_actor_id {
+            Some(id) => id,
+            None => {
+                let ulid = ulid::Ulid::new();
+                format!("/rag/client/tool/{}", ulid.to_string())
+            }
+        };
+
+        let actor_id = ActorId::of::<UserActor>(tools_actor_id);
         let user_actor = UserActor {};
         let (ctx, _) = Actor::spawn(
             engine.clone(),
@@ -27,3 +37,10 @@ impl UserActor {
         Ok(ctx)
     }
 }
+
+
+// impl Message<ListTools> for UserActor {
+
+//     type Response = Vec<ToolInfo>;
+
+// }

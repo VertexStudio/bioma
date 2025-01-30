@@ -68,6 +68,23 @@ impl AppState {
         .await?;
         Ok(ctx)
     }
+
+    // async fn user_actor_chat(&self, tools_actor_id: String) -> Result<ActorContext<UserActor>, SystemActorError> {
+    //     // For now, we use a random actor id to identify the user.
+    //     // In the future, we will use cookies or other methods to identify the user.
+    //     // let ulid = ulid::Ulid::new();
+    //     // let prefix_id = "/rag/user/";
+    //     let actor_id = ActorId::of::<UserActor>(tools_actor_id);
+    //     let user_actor = UserActor {};
+    //     let (ctx, _) = Actor::spawn(
+    //         self.engine.clone(),
+    //         actor_id,
+    //         user_actor,
+    //         SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
+    //     )
+    //     .await?;
+    //     Ok(ctx)
+    // }
 }
 
 #[utoipa::path(

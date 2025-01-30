@@ -125,9 +125,15 @@ impl Default for Config {
     }
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 pub struct Args {
+    /// Path to the configuration file
+    #[arg(short, long)]
     pub config: Option<PathBuf>,
+
+    /// Name of the tools actor
+    #[arg(long)]
+    pub tools_actor: Option<String>,
 }
 
 impl Args {
