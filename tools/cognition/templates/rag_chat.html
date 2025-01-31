@@ -999,13 +999,6 @@
             assistantBlock.appendChild(assistantContent);
           }
         } else {
-          // Remove any existing assistant message with typing indicator
-          const existingAssistant =
-            chatContainer.querySelector(".assistant-message");
-          if (existingAssistant) {
-            existingAssistant.remove();
-          }
-
           // Create new assistant block
           assistantBlock = document.createElement("div");
           assistantBlock.className = "message assistant-message";
@@ -1014,17 +1007,23 @@
           chatContainer.appendChild(assistantBlock);
         }
 
-        // Split the markdown rendering to preserve whitespace
-        const renderedParts = visibleText
-          .split(" ")
-          .map((word) => md.render(word + " "));
-        const renderedText = renderedParts.join("");
+        // Create a wrapper div for the content and typing indicator
+        const contentWrapper = document.createElement("div");
+        contentWrapper.style.display = "inline"; // Keep everything inline
 
-        // Insert the text and indicator without any wrapping elements
-        assistantContent.innerHTML =
-          renderedText + '<span class="typing-indicator"></span>';
+        // Render markdown and add it to wrapper
+        contentWrapper.innerHTML = md.render(visibleText || "");
 
-        // Handle context separately
+        // Add typing indicator
+        const typingIndicator = document.createElement("span");
+        typingIndicator.className = "typing-indicator";
+        contentWrapper.appendChild(typingIndicator);
+
+        // Clear and update content
+        assistantContent.innerHTML = "";
+        assistantContent.appendChild(contentWrapper);
+
+        // Handle context if needed
         if (!contextSet && context?.length) {
           const contextSection = createContextSection(context);
           if (contextSection) {
