@@ -350,14 +350,13 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 #[utoipa::path(
     post,
     path = "/chat",
-    request_body = ChatQueryRequestSchema,
     request_body(content = ChatQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}],
             "use_tools": false
         }))),
-        ("with_tools" = (summary = "Using the echo tool as en example.", value = json!({
+        ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
                 {
                     "role": "user",
@@ -584,7 +583,38 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     post,
     path = "/think",
     description = "Analyzes query and determines which tools to use and in what order.",
-    request_body = ThinkQueryRequestSchema,
+    request_body(content = ThinkQueryRequestSchema, examples(
+        ("Message only" = (summary = "Basic query", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ]
+        }))),
+        ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "stream": false,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                }
+            ],
+            "use_tools": true
+        })))
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
@@ -718,7 +748,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             messages: conversation.clone(),
             restart: true,
             persist: false,
-            stream: true,
+            stream: body.stream.clone(),
             format: body.format.clone(),
             tools: None,
         };
