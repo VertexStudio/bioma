@@ -989,7 +989,6 @@
         let assistantContent;
 
         if (lastMessageRole === "assistant") {
-          // Reuse the existing assistant div
           assistantBlock = lastMessageDiv;
           assistantContent = assistantBlock.querySelector(
             "div:not(.context-container):not(.thinking-process)"
@@ -999,7 +998,6 @@
             assistantBlock.appendChild(assistantContent);
           }
         } else {
-          // Create new assistant block
           assistantBlock = document.createElement("div");
           assistantBlock.className = "message assistant-message";
           assistantContent = document.createElement("div");
@@ -1007,21 +1005,24 @@
           chatContainer.appendChild(assistantBlock);
         }
 
-        // Create a wrapper div for the content and typing indicator
-        const contentWrapper = document.createElement("div");
-        contentWrapper.style.display = "inline"; // Keep everything inline
-
-        // Render markdown and add it to wrapper
-        contentWrapper.innerHTML = md.render(visibleText || "");
-
-        // Add typing indicator
+        assistantContent.innerHTML = md.render(visibleText || "");
         const typingIndicator = document.createElement("span");
         typingIndicator.className = "typing-indicator";
-        contentWrapper.appendChild(typingIndicator);
 
-        // Clear and update content
-        assistantContent.innerHTML = "";
-        assistantContent.appendChild(contentWrapper);
+        // Find the last text node to append indicator
+        let lastNode = assistantContent.lastChild;
+        while (lastNode && lastNode.nodeType !== Node.TEXT_NODE) {
+          lastNode = lastNode.lastChild;
+        }
+
+        if (lastNode) {
+          lastNode.parentNode.insertBefore(
+            typingIndicator,
+            lastNode.nextSibling
+          );
+        } else {
+          assistantContent.appendChild(typingIndicator);
+        }
 
         // Handle context if needed
         if (!contextSet && context?.length) {
