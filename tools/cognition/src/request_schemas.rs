@@ -182,7 +182,7 @@ pub struct ChatQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub tools_actor: bool,
+    pub tools_actor: Option<String>,
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]

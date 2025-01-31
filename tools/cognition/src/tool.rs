@@ -133,6 +133,7 @@ impl ToolsHub {
                 }
             } else {
                 // Use cached tools
+                info!("Clien tools empty.");
                 if client.health(user).await? {
                     all_tools.extend(client.tools.clone());
                 } else {

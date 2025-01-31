@@ -21,7 +21,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::options::GenerationOptions;
+use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, ThinkQueryRequestSchema,
@@ -41,7 +41,7 @@ mod request_schemas;
 
 struct AppState {
     config: Config,
-    tools: Arc<Mutex<ToolsHub>>,
+    // tools: Arc<Mutex<ToolsHub>>,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -474,17 +474,24 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
-                // Get available tools
-                let tools =
-                    if body.tools_actor { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
-                let tools = match tools {
-                    Ok(tools) => tools,
-                    Err(e) => {
-                        error!("Error fetching tools: {:?}", e);
-                        let _ = tx.send(Err(e.to_string())).await;
-                        return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
-                    }
+                // // Get available tools
+                // let tools =
+                //     if body.tools_actor { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+
+                let tools: Vec<ToolInfo> = match body.tools_actor {
+                    Some(_tools) => {vec![]},
+                    None => {vec![]},
                 };
+
+                // let tools = match tools {
+                //     Ok(tools) => tools,
+                //     Err(e) => {
+                //         error!("Error fetching tools: {:?}", e);
+                //         let _ = tx.send(Err(e.to_string())).await;
+                //         return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                //     }
+                // };
+
                 for tool_info in &tools {
                     info!("Tool: {}", tool_info.name());
                 }
@@ -495,7 +502,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     &data.chat,
                     &conversation,
                     &tools,
-                    data.tools.clone(),
+                    // data.tools.clone(),
                     chat_with_tools_tx,
                     body.format.clone(),
                 )
@@ -1206,15 +1213,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     actor_handles.push(think_chat_handle);
 
     // Tools setup
-    let mut tools = ToolsHub::new();
-    for tool_config in &config.tools {
-        tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
-    }
+    // let mut tools = ToolsHub::new();
+    // for tool_config in &config.tools {
+    //     tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
+    // }
 
     // Create app state
     let data = web::Data::new(AppState {
         config: config.clone(),
-        tools: Arc::new(Mutex::new(tools)),
+        // tools: Arc::new(Mutex::new(tools)),
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,

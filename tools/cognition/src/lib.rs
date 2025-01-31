@@ -54,7 +54,7 @@ pub async fn chat_with_tools(
     chat_actor: &ActorId,
     messages: &Vec<ChatMessage>,
     tools: &Vec<ToolInfo>,
-    tools_hub: Arc<Mutex<ToolsHub>>,
+    // tools_hub: Arc<Mutex<ToolsHub>>,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
 ) -> Result<(), ChatToolError> {
@@ -145,7 +145,7 @@ pub async fn chat_with_tools(
 async fn chat_tool_call(
     user_actor: &ActorContext<UserActor>,
     tool_call: &ToolCall,
-    tools_hub: Arc<Mutex<ToolsHub>>,
+    // tools_hub: Arc<Mutex<ToolsHub>>,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
 ) -> Result<ToolResponse, ChatToolError> {
     let response = if let Some((_tool_info, tool_client)) = tools_hub.lock().await.get_tool(&tool_call.function.name) {
