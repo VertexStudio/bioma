@@ -460,6 +460,39 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
+                // If client provided tools, generate tool calling
+                let client_tools = body.tools.clone();
+
+                if !client_tools.is_empty() {
+                    let chat_response = user_actor
+                        .send_and_wait_reply::<Chat, ChatMessages>(
+                            ChatMessages {
+                                messages: conversation.clone(),
+                                restart: true,
+                                persist: false,
+                                stream: false,
+                                format: body.format.clone(),
+                                tools: Some(client_tools.into_iter().map(Into::into).collect()),
+                            },
+                            &data.chat,
+                            SendOptions::default(),
+                        )
+                        .await;
+
+                    match chat_response {
+                        Ok(response) => {
+                            let response = ChatResponse { response, context: conversation.clone() };
+                            let _ = tx.send(Ok(Json(response))).await;
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            error!("Error during chat with tools: {:?}", e);
+                            let _ = tx.send(Err(e.to_string())).await;
+                            return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                        }
+                    }
+                }
+
                 // Get available tools
                 let tools =
                     if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
@@ -484,6 +517,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     data.tools.clone(),
                     chat_with_tools_tx,
                     body.format.clone(),
+                    body.stream,
                 )
                 .await;
 
@@ -569,7 +603,29 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         retrieved.to_markdown()
     };
 
-    let system_prompt = if body.use_tools {
+    let system_prompt = if !body.tools.is_empty() {
+        // If tools are provided in the request, use those directly
+        let tools_str = body.tools
+            .iter()
+            .map(|t| {
+                let params = serde_json::to_string_pretty(&t.function.parameters)
+                    .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                format!(
+                    "- {}: {}\n  Parameters:\n{}",
+                    t.function.name,
+                    t.function.description,
+                    params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        format!(
+            "{}\n\nADDITIONAL CONTEXT:\n{}",
+            data.config.tool_prompt.replace("{tools_list}", &tools_str),
+            context_content
+        )
+    } else if body.use_tools {
+        // Original logic for use_tools when no tools are explicitly provided
         let tools_str = match data.tools.lock().await.list_tools(&user_actor).await {
             Ok(tools) => {
                 if tools.is_empty() {
