@@ -12,7 +12,7 @@ use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
 use clap::Parser;
 use cognition::{
-    health_check::{
+    chat_with_actor_tools, health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
     }, tool, ChatResponse, ToolsHub, UserActor
 };
@@ -20,7 +20,7 @@ use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::options::GenerationOptions;
+use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
@@ -395,6 +395,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     ))
 )]
 async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+    // Get the user actor.
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -402,18 +403,11 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
     let body = body.clone();
 
-    // Combine all user messages into a single query string for the retrieval system.
-    // This helps find relevant context across all parts of the user's conversation.
+    // Combine user messages (only those with role User) into one query string.
     let query = {
-        // Extract only the user messages, ignoring system/assistant messages
-        let user_messages: Vec<_> = body.messages.iter().filter(|message| message.role == MessageRole::User).collect();
-
-        // Pre-allocate string capacity to avoid reallocations
-        // Size = sum of all message lengths + newlines between messages
+        let user_messages: Vec<_> = body.messages.iter().filter(|msg| msg.role == MessageRole::User).collect();
         let total_len: usize = user_messages.iter().map(|msg| msg.content.len()).sum();
         let mut result = String::with_capacity(total_len + user_messages.len());
-
-        // Join all user messages with newlines to create a single search query
         for (i, message) in user_messages.iter().enumerate() {
             if i > 0 {
                 result.push('\n');
@@ -423,7 +417,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         result
     };
 
-    // Retrieve relevant context based on the user's query
+    // Retrieve context based on the user's query.
     let retrieve_context = RetrieveContext {
         query: RetrieveQuery::Text(query.clone()),
         limit: 5,
@@ -447,17 +441,18 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
-            let mut context_message = ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
+            let mut context_message =
+                ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
 
-            // Add image handling here
-            if let Some(ctx) = context
-                .context
-                .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
-            {
+            // Handle images if available.
+            if let Some(ctx) = context.context.iter().find(|ctx| {
+                ctx.metadata
+                    .as_ref()
+                    .map_or(false, |m| matches!(m, Metadata::Image(_)))
+            }) {
                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
-                    match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
+                    if let Metadata::Image(_img_meta) = metadata {
+                        match tokio::fs::read(&source.uri).await {
                             Ok(image_data) => {
                                 match tokio::task::spawn_blocking(move || {
                                     base64::engine::general_purpose::STANDARD.encode(image_data)
@@ -465,7 +460,8 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                                 .await
                                 {
                                     Ok(base64_data) => {
-                                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                                        context_message.images =
+                                            Some(vec![Image::from_base64(&base64_data)]);
                                     }
                                     Err(e) => {
                                         error!("Error encoding image: {:?}", e);
@@ -475,17 +471,16 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                             Err(e) => {
                                 error!("Error reading image file: {:?}", e);
                             }
-                        },
-                        _ => {}
+                        }
                     }
                 }
             }
 
-            // Set up streaming channel with sufficient buffer for chat responses
+            // Set up a streaming channel for chat responses.
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
-            // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
+                // Build conversation history.
                 let conversation = {
                     let mut conv = Vec::with_capacity(body.messages.len() + 1);
                     if !body.messages.is_empty() {
@@ -498,10 +493,9 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
-                // If client provided tools, generate tool calling
-                let client_tools = body.tools.clone();
-
-                if !client_tools.is_empty() {
+                // Branch according to the provided tools.
+                if !body.tools.is_empty() {
+                    // Client provided explicit tools.
                     let chat_response = user_actor
                         .send_and_wait_reply::<Chat, ChatMessages>(
                             ChatMessages {
@@ -510,7 +504,12 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                                 persist: false,
                                 stream: false,
                                 format: body.format.clone(),
-                                tools: Some(client_tools.into_iter().map(Into::into).collect()),
+                                tools: Some(
+                                    body.tools
+                                        .into_iter()
+                                        .map(Into::into)
+                                        .collect::<Vec<ToolInfo>>(),
+                                ),
                             },
                             &data.chat,
                             SendOptions::default(),
@@ -519,8 +518,11 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
                     match chat_response {
                         Ok(response) => {
-                            let response = ChatResponse { response, context: conversation.clone() };
-                            let _ = tx.send(Ok(Json(response))).await;
+                            let response = ChatResponse {
+                                response,
+                                context: conversation.clone(),
+                            };
+                            let _ = tx.send(Ok(web::Json(response))).await;
                             return Ok(());
                         }
                         Err(e) => {
@@ -529,61 +531,89 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                             return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
                         }
                     }
-                }
-
-                // Get available tools
-                let tools =
-                    if body.use_tools { tool::list_tools(&user_actor, &data.chat).await } else { Ok(vec![]) };
-                let tools = match tools {
-                    Ok(tools) => tools,
-                    Err(e) => {
-                        error!("Error fetching tools: {:?}", e);
-                        let _ = tx.send(Err(e.to_string())).await;
-                        return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                } else if !body.tool_actors.is_empty() {
+                    // Client provided actor IDs to fetch tools from.
+                    let mut actor_tools: Vec<(ToolInfo, ActorId)> = Vec::new();
+                    for actor_str in &body.tool_actors {
+                        // Convert the string into an ActorId.
+                        let actor_id = ActorId::of::<ToolsHubActor>(actor_str.clone());
+                        match tool::list_tools(&user_actor, &actor_id).await {
+                            Ok(mut tools) => {
+                                for t in tools.drain(..) {
+                                    actor_tools.push((t, actor_id.clone()));
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to fetch tools from actor {}: {}", actor_str, e);
+                            }
+                        }
                     }
-                };
-                for tool_info in &tools {
-                    info!("Tool: {}", tool_info.name());
-                }
+                    let result = chat_with_actor_tools(
+                        &user_actor,
+                        &data.chat,
+                        &conversation,
+                        &actor_tools,
+                        tx.clone(),
+                        body.format.clone(),
+                        body.stream,
+                    )
+                    .await;
+                    if let Err(e) = result {
+                        error!("Error during chat with actor tools: {:?}", e);
+                        let _ = tx.send(Err(e.to_string())).await;
+                    }
+                } else {
+                    // No tools specified; just send the chat without any tools.
+                    let chat_response = user_actor
+                        .send_and_wait_reply::<Chat, ChatMessages>(
+                            ChatMessages {
+                                messages: conversation.clone(),
+                                restart: true,
+                                persist: false,
+                                stream: body.stream,
+                                format: body.format.clone(),
+                                tools: None,
+                            },
+                            &data.chat,
+                            SendOptions::default(),
+                        )
+                        .await;
 
-                let chat_with_tools_tx = tx.clone();
-                let tool_call_tree = cognition::chat_with_tools(
-                    &user_actor,
-                    &data.chat,
-                    &conversation,
-                    &tools,
-                    chat_with_tools_tx,
-                    body.format.clone(),
-                    body.stream,
-                )
-                .await;
-
-                if let Err(e) = tool_call_tree {
-                    if tools.len() > 0 {
-                        error!("Error during chat with tools: {:?}", e);
-                    } else {
-                        error!("Error during chat: {:?}", e);
+                    match chat_response {
+                        Ok(response) => {
+                            let response = ChatResponse {
+                                response,
+                                context: conversation.clone(),
+                            };
+                            let _ = tx.send(Ok(web::Json(response))).await;
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            error!("Error during chat: {:?}", e);
+                            let _ = tx.send(Err(e.to_string())).await;
+                            return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                        }
                     }
                 }
 
                 Ok(())
             });
 
-            // Stream responses as NDJSON
-            HttpResponse::Ok().content_type("application/x-ndjson").streaming::<_, Box<dyn StdError>>(
-                tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
-                    Ok(response) => {
-                        let json = serde_json::to_string(&response).unwrap_or_default();
-                        Ok(web::Bytes::from(format!("{}\n", json)))
+            // Stream NDJSON responses.
+            HttpResponse::Ok()
+                .content_type("application/x-ndjson")
+                .streaming(tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| {
+                    match result {
+                        Ok(response) => {
+                            let json = serde_json::to_string(&response).unwrap_or_default();
+                            Ok(web::Bytes::from(format!("{}\n", json)))
+                        }
+                        Err(e) => {
+                            let error_json = json!({ "error": e.to_string() });
+                            Ok(web::Bytes::from(format!("{}\n", error_json)))
+                        }
                     }
-                    Err(e) => {
-                        let error_json = serde_json::json!({
-                            "error": e.to_string()
-                        });
-                        Ok(web::Bytes::from(format!("{}\n", error_json)))
-                    }
-                }),
-            )
+                }))
         }
         Err(e) => {
             error!("Error fetching context: {:?}", e);
