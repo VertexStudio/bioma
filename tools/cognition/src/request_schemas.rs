@@ -175,7 +175,6 @@ fn default_think_stream() -> bool {
 // /delete_resource Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({"source": "path/to/source1"}))]
 pub struct DeleteSourceRequestSchema {
     pub source: String,
 }
