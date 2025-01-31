@@ -203,6 +203,12 @@ pub struct ChatQueryRequestSchema {
     pub use_tools: bool,
     #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
+    #[serde(default = "default_chat_stream")]
+    pub stream: bool,
+}
+
+fn default_chat_stream() -> bool {
+    true
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
@@ -224,6 +230,12 @@ pub struct ThinkQueryRequestSchema {
     pub use_tools: bool,
     #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
+    #[serde(default = "default_think_stream")]
+    pub stream: bool,
+}
+
+fn default_think_stream() -> bool {
+    true
 }
 
 // /delete_resource Endpoint Schemas
