@@ -1005,23 +1005,50 @@
           chatContainer.appendChild(assistantBlock);
         }
 
+        // Remove any existing typing indicators
+        const existingIndicators =
+          assistantContent.querySelectorAll(".typing-indicator");
+        existingIndicators.forEach((indicator) => indicator.remove());
+
         assistantContent.innerHTML = md.render(visibleText || "");
         const typingIndicator = document.createElement("span");
         typingIndicator.className = "typing-indicator";
 
-        // Find the last text node to append indicator
-        let lastNode = assistantContent.lastChild;
-        while (lastNode && lastNode.nodeType !== Node.TEXT_NODE) {
-          lastNode = lastNode.lastChild;
+        // Find the last actual content element
+        let lastContentElement = assistantContent;
+        const walker = document.createTreeWalker(
+          assistantContent,
+          NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function (node) {
+              // Skip empty text nodes and typing indicators
+              if (
+                node.nodeType === Node.TEXT_NODE &&
+                !node.textContent.trim()
+              ) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (node.classList?.contains("typing-indicator")) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            },
+          }
+        );
+
+        while (walker.nextNode()) {
+          lastContentElement = walker.currentNode;
         }
 
-        if (lastNode) {
-          lastNode.parentNode.insertBefore(
-            typingIndicator,
-            lastNode.nextSibling
-          );
+        // If the last element is a block element (like a list), append to it
+        // Otherwise append to its parent
+        if (
+          lastContentElement.nodeType === Node.TEXT_NODE ||
+          getComputedStyle(lastContentElement).display === "inline"
+        ) {
+          lastContentElement.parentNode.appendChild(typingIndicator);
         } else {
-          assistantContent.appendChild(typingIndicator);
+          lastContentElement.appendChild(typingIndicator);
         }
 
         // Handle context if needed
