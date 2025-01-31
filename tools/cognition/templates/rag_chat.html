@@ -626,48 +626,12 @@
         context.forEach((msg) => {
           if (msg.role === "system") {
             const roleClass = msg.role + "-message";
-            let processedContent = "";
-            const lines = msg.content.split("\n");
-            let inJsonBlock = false;
-            let jsonContent = "";
-
-            lines.forEach((line) => {
-              const trimmedLine = line.trim();
-              if (
-                trimmedLine === "Parameters:" &&
-                lines[lines.indexOf(line) + 1]?.trim().startsWith("{")
-              ) {
-                inJsonBlock = true;
-                jsonContent = "";
-                processedContent += "Parameters:\n```json\n";
-              } else if (inJsonBlock) {
-                jsonContent += line + "\n";
-                if (trimmedLine === "}") {
-                  try {
-                    const formattedJson = JSON.stringify(
-                      JSON.parse(jsonContent),
-                      null,
-                      2
-                    );
-                    processedContent += formattedJson + "\n```\n\n";
-                    inJsonBlock = false;
-                  } catch (e) {
-                    processedContent += line + "\n";
-                  }
-                } else {
-                  processedContent += line + "\n";
-                }
-              } else {
-                processedContent += line + "\n";
-              }
-            });
-
             systemMessage += `
         <div class="message ${roleClass}">
           <strong>${
             msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
           }:</strong>
-          <div class="chunk">${md.render(processedContent)}</div>
+          <div class="chunk">${md.render(msg.content)}</div>
         </div>
       `;
           }
