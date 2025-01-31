@@ -780,6 +780,10 @@
             }
           }
 
+          // 1) Remove typing indicator when done
+          const indicators = document.querySelectorAll(".typing-indicator");
+          indicators.forEach((indicator) => indicator.remove());
+
           mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
         } catch (error) {
           console.error("Error:", error);
