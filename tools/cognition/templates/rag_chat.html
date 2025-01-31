@@ -465,6 +465,28 @@
         margin: 0;
         padding: 0;
       }
+
+      .message pre code {
+        display: block;
+        padding: 1em;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        overflow-x: auto;
+        font-size: 0.9em;
+        line-height: 1.4;
+        tab-size: 2;
+      }
+
+      .message .chunk > p {
+        margin: 0.5em 0;
+      }
+
+      .message .chunk > ul,
+      .message .chunk > ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+      }
     </style>
   </head>
   <body>
@@ -524,7 +546,13 @@
 
       // Create HTML for context
       function createContextSection(context) {
-        if (!context?.length) return "";
+        console.log("Context:", context);
+        console.log("Creating context section with:", context);
+        if (!context?.length) {
+          console.log("No context provided, returning empty string");
+          return "";
+        }
+
         let regularMessages = "";
         let systemMessage = "";
         let lastUserMessage = "";
@@ -533,11 +561,19 @@
         const lastUserIndex = [...context]
           .reverse()
           .findIndex((msg) => msg.role === "user");
+        console.log("Last user message index (reversed):", lastUserIndex);
         const lastMessageIndex =
           lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+        console.log("Last message index in original array:", lastMessageIndex);
 
         // process normal messages
         context.forEach((msg, index) => {
+          console.log(`Processing message ${index}:`, {
+            role: msg.role,
+            isLastMessage: index === lastMessageIndex,
+            content: msg.content?.substring(0, 100) + "...", // Log first 100 chars
+          });
+
           if (msg.role !== "system" && index !== lastMessageIndex) {
             const roleClass = msg.role + "-message";
             const images = msg.images || [];
@@ -548,19 +584,33 @@
             let processedContent = "";
 
             const lines = content.split("\n");
-            lines.forEach((line) => {
+            console.log(
+              `Processing ${lines.length} lines for message ${index}`
+            );
+
+            lines.forEach((line, lineIndex) => {
               const trimmedLine = line.trim();
+              console.log(
+                `Line ${lineIndex}: ${trimmedLine.substring(0, 50)}...`
+              );
+
               if (trimmedLine.startsWith("[URI:")) {
                 uri = trimmedLine.slice(5, -1);
+                console.log("Found URI:", uri);
               } else if (trimmedLine.startsWith("Source:")) {
                 source = trimmedLine.slice(7).trim();
+                console.log("Found Source:", source);
               } else if (trimmedLine.startsWith("[IMAGE:")) {
                 if (imageIndex < images.length) {
+                  console.log(
+                    `Processing image ${imageIndex} of ${images.length}`
+                  );
                   const imageUrl = processBase64Image(images[imageIndex]);
                   processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
                   imageIndex++;
                 }
               } else if (trimmedLine) {
+                console.log("Processing markdown line");
                 processedContent += md.render(trimmedLine);
               }
             });
@@ -576,33 +626,65 @@
         });
 
         // system messages
-        context.forEach((msg) => {
+        console.log("Processing system messages");
+        context.forEach((msg, index) => {
           if (msg.role === "system") {
+            console.log(`Processing system message ${index}`);
             const roleClass = msg.role + "-message";
             const images = msg.images || [];
             let imageIndex = 0;
             let processedContent = "";
-            const contentLines = msg.content ? msg.content.split("\n") : [];
-            contentLines.forEach((line) => {
-              const trimmedLine = line.trim();
-              processedContent += md.render(trimmedLine);
+            let inJsonBlock = false;
+            let jsonContent = "";
 
+            const lines = msg.content.split("\n");
+
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+
+              // Start of a JSON block (Parameters: followed by '{')
               if (
-                trimmedLine.startsWith("[IMAGE:") &&
-                imageIndex < images.length
+                line === "Parameters:" &&
+                lines[i + 1]?.trim().startsWith("{")
               ) {
-                const imageUrl = processBase64Image(images[imageIndex]);
-                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-                imageIndex++;
+                inJsonBlock = true;
+                jsonContent = "";
+                processedContent += "Parameters:\n```json\n";
+                continue;
               }
-            });
+
+              if (inJsonBlock) {
+                jsonContent += line + "\n";
+
+                // Check if this is the end of the JSON block
+                if (line === "}") {
+                  try {
+                    // Try to format the collected JSON
+                    const formattedJson = JSON.stringify(
+                      JSON.parse(jsonContent),
+                      null,
+                      2
+                    );
+                    processedContent += formattedJson + "\n```\n\n";
+                    inJsonBlock = false;
+                  } catch (e) {
+                    // If JSON parsing fails, just add the line as-is
+                    processedContent += line + "\n";
+                  }
+                } else {
+                  processedContent += line + "\n";
+                }
+              } else {
+                processedContent += line + "\n";
+              }
+            }
 
             systemMessage += `
               <div class="message ${roleClass}">
                 <strong>${
                   msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
                 }:</strong>
-                <div class="chunk">${processedContent}</div>
+                <div class="chunk">${md.render(processedContent)}</div>
               </div>
             `;
           }
@@ -610,6 +692,10 @@
 
         // the last user message
         if (lastMessageIndex !== -1) {
+          console.log(
+            "Processing last user message at index:",
+            lastMessageIndex
+          );
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
           lastUserMessage = `
@@ -621,6 +707,12 @@
             </div>
           `;
         }
+
+        console.log("Final context sections:", {
+          hasRegularMessages: !!regularMessages,
+          hasSystemMessage: !!systemMessage,
+          hasLastUserMessage: !!lastUserMessage,
+        });
 
         return `
           <div class="context-container">
