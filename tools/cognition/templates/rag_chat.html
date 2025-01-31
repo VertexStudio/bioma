@@ -695,10 +695,25 @@
         queryInput.value = "";
         resizeTextarea();
 
-        // For chat endpoint, start with empty assistant message with just the indicator
-        if (endpoint === "/chat") {
+        // Start thinking animation immediately for /think endpoint
+        if (endpoint === "/think") {
+          thinkingDiv = createThinkingProcessContainer();
+          chatContainer.appendChild(thinkingDiv);
+          thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
+          thinkingStartTime = Date.now();
+          const thinkingText = thinkingDiv.querySelector(".thinking-text");
+          if (thinkingText) {
+            thinkingText.classList.remove("static");
+          }
+          isThinkingActive = true;
+        } else if (endpoint === "/chat") {
           createOrUpdateAssistantMessage("");
         }
+
+        // Reset state variables
+        assistantTextBuffer = "";
+        contextSet = false;
+        latestContext = null;
 
         const queryObject = {
           // Remove the duplicate user message - just use messageHistory
@@ -723,14 +738,6 @@
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
-
-          // reset for new answer
-          isThinkingActive = false;
-          thinkingDiv = null;
-          thinkingContentDiv = null;
-          assistantTextBuffer = "";
-          contextSet = false;
-          latestContext = null;
 
           while (true) {
             const { value, done } = await reader.read();
@@ -839,8 +846,11 @@
                 assistantTextBuffer += visiblePart;
                 idx = chunk.length;
               } else {
-                // Found <think>
-                assistantTextBuffer += chunk.substring(idx, openPos);
+                // Found <think> - only add text before it
+                const visiblePart = chunk.substring(idx, openPos);
+                if (visiblePart.trim()) {
+                  assistantTextBuffer += visiblePart;
+                }
                 idx = openPos + 7; // move past <think>
 
                 if (!thinkingDiv) {
@@ -848,9 +858,7 @@
                   chatContainer.appendChild(thinkingDiv);
                   thinkingContentDiv =
                     thinkingDiv.querySelector(".thinking-content");
-                  // Start timer when we first see <think>
                   thinkingStartTime = Date.now();
-                  // Start animation
                   const thinkingText =
                     thinkingDiv.querySelector(".thinking-text");
                   if (thinkingText) {
@@ -868,15 +876,15 @@
                 appendThinkingChunk(thoughtChunk, thinkingContentDiv);
                 idx = chunk.length;
               } else {
-                // found </think>
+                // found </think> - only add content before it
                 const thoughtChunk = chunk.substring(idx, closePos);
-                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                if (thoughtChunk.trim()) {
+                  appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                }
                 idx = closePos + 8; // move past </think>
                 isThinkingActive = false;
 
-                // We just exited the think block,
-                // if we have any user-visible text accumulated,
-                // show it w/ context now
+                // Show accumulated user-visible text with context
                 if (assistantTextBuffer.trim().length > 0) {
                   createOrUpdateAssistantMessage(
                     assistantTextBuffer,
@@ -1093,7 +1101,9 @@
 
       function appendThinkingChunk(text, contentDiv) {
         if (!contentDiv) return;
-        contentDiv.textContent += text;
+        // Filter out any <think> or </think> tags before displaying
+        const cleanedText = text.replace(/<\/?think>/g, "");
+        contentDiv.textContent += cleanedText;
       }
 
       window.toggleThinking = function (header) {
