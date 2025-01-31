@@ -369,7 +369,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}],
-            "use_tools": false
+            "tools_actor": false
         }))),
         ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
@@ -391,7 +391,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     "type": "function"
                 }
             ],
-            "use_tools": true
+            "tools_actor": true
         })))
     ))
 )]
@@ -534,7 +534,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
                 // Get available tools
                 let tools =
-                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+                    if body.tools_actor { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
                 let tools = match tools {
                     Ok(tools) => tools,
                     Err(e) => {
@@ -627,7 +627,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     "type": "function"
                 }
             ],
-            "use_tools": true
+            "tools_actor": true
         })))
     )), 
     responses(
@@ -694,8 +694,8 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             data.config.tool_prompt.replace("{tools_list}", &tools_str),
             context_content
         )
-    } else if body.use_tools {
-        // Original logic for use_tools when no tools are explicitly provided
+    } else if body.tools_actor {
+        // Original logic for tools_actor when no tools are explicitly provided
         let tools_str = match data.tools.lock().await.list_tools(&user_actor).await {
             Ok(tools) => {
                 if tools.is_empty() {
