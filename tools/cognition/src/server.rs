@@ -995,7 +995,9 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     post,
     path = "/delete_source",
     description = "Delete indexed sources.",
-    request_body = DeleteSourceRequestSchema,
+    request_body(content = DeleteSourceRequestSchema, examples(
+        ("Basic" = (summary = "Basic", value = json!({"source": "path/to/source1"}))),
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
