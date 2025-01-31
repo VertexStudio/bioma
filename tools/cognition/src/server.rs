@@ -535,6 +535,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 // Get available tools
                 let tools =
                     if body.tools_actor { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+
                 let tools = match tools {
                     Ok(tools) => tools,
                     Err(e) => {

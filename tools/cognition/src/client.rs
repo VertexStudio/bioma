@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bioma_actor::prelude::*;
 use clap::Parser;
-use config::{Args as McpServerArgs, Config};
+use config::{Args as ConfigArgs, Config};
 use tool::ToolsHub;
 use tracing::info;
 use user::UserActor;
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = match args.config {
         Some(path) => {
-            let config = McpServerArgs { config: Some(path) };
+            let config = ConfigArgs { config: Some(path) };
 
             config.load_config()?
         }
