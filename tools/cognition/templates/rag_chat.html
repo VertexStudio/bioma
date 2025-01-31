@@ -434,6 +434,60 @@
         margin-right: 8px;
         color: #ff4444;
       }
+
+      .typing-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: var(--primary);
+        border-radius: 50%;
+        margin-left: 2px;
+        margin-right: 2px;
+        vertical-align: middle;
+        animation: pulse 1s infinite;
+        white-space: pre;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0.4;
+        }
+      }
+
+      .assistant-message p {
+        display: inline;
+        margin: 0;
+        padding: 0;
+      }
+
+      .message pre code {
+        display: block;
+        padding: 1em;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        overflow-x: auto;
+        font-size: 0.9em;
+        line-height: 1.4;
+        tab-size: 2;
+      }
+
+      .message .chunk > p {
+        margin: 0.5em 0;
+        display: block;
+      }
+
+      .message .chunk > ul,
+      .message .chunk > ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+      }
     </style>
   </head>
   <body>
@@ -470,10 +524,10 @@
       let assistantTextBuffer = ""; // store user-visible assistant text
       let latestContext = null; // store context from the most recent chunk
       let contextSet = false; // track if we've appended the context yet
-      let toolsEnabled = false;
-      let thinkEnabled = false; // Add new state for think mode
+      let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
+      let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
 
-      const md = window.markdownit();
+      const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
       const queryInput = document.getElementById("query-input");
       let messageHistory = [];
@@ -491,81 +545,137 @@
         return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
       };
 
-      // Create HTML for context
+      // Updated helper to process a base64 image
+      function processBase64Image(base64String, type = "jpeg") {
+        base64String = base64String.trim();
+        if (base64String.startsWith("data:image")) {
+          return base64String;
+        }
+        try {
+          atob(base64String); // verify Base64
+          return `data:image/${type};base64,${base64String}`;
+        } catch (e) {
+          console.error("Invalid base64 string:", e);
+          return null;
+        }
+      }
+
+      // New helper: process message content (for both system and non-system messages)
+      function processMessageContent(content, images = []) {
+        let processedContent = "";
+        let normalLines = [];
+        let imageIndex = 0;
+
+        // Flush accumulated normal text
+        function flushNormalLines() {
+          if (normalLines.length) {
+            const joined = normalLines.join("\n").trim();
+            if (joined) {
+              try {
+                // Try to detect JSON and pretty-print it
+                const jsonObj = JSON.parse(joined);
+                processedContent += `<pre><code>${JSON.stringify(
+                  jsonObj,
+                  null,
+                  2
+                )}</code></pre>`;
+                console.log("Detected JSON content and formatted as code.");
+              } catch (e) {
+                // Not valid JSON; render as Markdown
+                processedContent += md.render(joined);
+              }
+            }
+            normalLines = [];
+          }
+        }
+
+        // Process each line for markers
+        const lines = content.split("\n");
+        lines.forEach((line) => {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith("[URI:")) {
+            flushNormalLines();
+            let uri = trimmedLine.slice(5, -1).trim();
+            processedContent += `<div class="uri">URI: ${uri}</div>`;
+          } else if (trimmedLine.startsWith("Source:")) {
+            flushNormalLines();
+            let source = trimmedLine.slice(7).trim();
+            processedContent += `<div class="source">Source: ${source}</div>`;
+          } else if (trimmedLine.startsWith("[IMAGE:")) {
+            flushNormalLines();
+            let imageType = trimmedLine.slice(7, -1).trim();
+            if (images && imageIndex < images.length) {
+              let imageUrl = processBase64Image(images[imageIndex], imageType);
+              if (imageUrl) {
+                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+              }
+              imageIndex++;
+            }
+          } else {
+            normalLines.push(line);
+          }
+        });
+        flushNormalLines();
+        return processedContent;
+      }
+
+      // Replace the existing createContextSection with this updated version
       function createContextSection(context) {
-        if (!context?.length) return "";
+        console.group("createContextSection");
+        console.log("Input context:", context);
+
+        if (!context?.length) {
+          console.log("No context provided, returning empty string");
+          console.groupEnd();
+          return "";
+        }
+
         let regularMessages = "";
         let systemMessage = "";
         let lastUserMessage = "";
 
-        // find the last user message index
+        // Find the index of the last user message
         const lastUserIndex = [...context]
           .reverse()
           .findIndex((msg) => msg.role === "user");
         const lastMessageIndex =
           lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+        console.log("Last user message index:", lastMessageIndex);
 
-        // process normal messages
+        // Process non-system messages (except the last user message)
+        console.group("Processing regular messages");
         context.forEach((msg, index) => {
           if (msg.role !== "system" && index !== lastMessageIndex) {
+            console.group(`Message ${index} (${msg.role})`);
             const roleClass = msg.role + "-message";
-            const images = msg.images || [];
-            let imageIndex = 0;
-            let content = msg.content || "";
-            let source = "";
-            let uri = "";
-            let processedContent = "";
-
-            const lines = content.split("\n");
-            lines.forEach((line) => {
-              const trimmedLine = line.trim();
-              if (trimmedLine.startsWith("[URI:")) {
-                uri = trimmedLine.slice(5, -1);
-              } else if (trimmedLine.startsWith("Source:")) {
-                source = trimmedLine.slice(7).trim();
-              } else if (trimmedLine.startsWith("[IMAGE:")) {
-                if (imageIndex < images.length) {
-                  const imageUrl = processBase64Image(images[imageIndex]);
-                  processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-                  imageIndex++;
-                }
-              } else if (trimmedLine) {
-                processedContent += md.render(trimmedLine);
-              }
-            });
-
+            const processedContent = processMessageContent(
+              msg.content || "",
+              msg.images || []
+            );
             regularMessages += `
               <div class="message ${roleClass}">
-                ${source ? `<div class="source">Source: ${source}</div>` : ""}
-                ${uri ? `<div class="uri">URI: ${uri}</div>` : ""}
                 <div class="chunk">${processedContent}</div>
               </div>
             `;
+            console.groupEnd();
           }
         });
+        console.groupEnd();
 
-        // system messages
-        context.forEach((msg) => {
+        // Process system messages
+        console.group("Processing system messages");
+        context.forEach((msg, index) => {
           if (msg.role === "system") {
+            console.group(`System message ${index}`);
             const roleClass = msg.role + "-message";
-            const images = msg.images || [];
-            let imageIndex = 0;
-            let processedContent = "";
-            const contentLines = msg.content ? msg.content.split("\n") : [];
-            contentLines.forEach((line) => {
-              const trimmedLine = line.trim();
-              processedContent += md.render(trimmedLine);
-
-              if (
-                trimmedLine.startsWith("[IMAGE:") &&
-                imageIndex < images.length
-              ) {
-                const imageUrl = processBase64Image(images[imageIndex]);
-                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-                imageIndex++;
-              }
-            });
-
+            let systemContent = msg.content.replace(
+              /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
+              "ADDITIONAL CONTEXT:"
+            );
+            const processedContent = processMessageContent(
+              systemContent,
+              msg.images || []
+            );
             systemMessage += `
               <div class="message ${roleClass}">
                 <strong>${
@@ -574,24 +684,32 @@
                 <div class="chunk">${processedContent}</div>
               </div>
             `;
+            console.groupEnd();
           }
         });
+        console.groupEnd();
 
-        // the last user message
+        // Process the last user message separately
+        console.group("Processing last user message");
         if (lastMessageIndex !== -1) {
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
+          const processedContent = processMessageContent(
+            lastMsg.content || "",
+            lastMsg.images || []
+          );
           lastUserMessage = `
             <div class="message ${roleClass}">
               <strong>${
                 lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
               }:</strong>
-              <div class="chunk">${md.render(lastMsg.content || "")}</div>
+              <div class="chunk">${processedContent}</div>
             </div>
           `;
         }
+        console.groupEnd();
 
-        return `
+        const result = `
           <div class="context-container">
             <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
             <div class="context-content">
@@ -611,6 +729,10 @@
             </div>
           </div>
         `;
+
+        console.log("Final HTML length:", result.length);
+        console.groupEnd();
+        return result;
       }
 
       function appendMessage(sender, content, context = null) {
@@ -664,6 +786,26 @@
         queryInput.value = "";
         resizeTextarea();
 
+        // Start thinking animation immediately for /think endpoint
+        if (endpoint === "/think") {
+          thinkingDiv = createThinkingProcessContainer();
+          chatContainer.appendChild(thinkingDiv);
+          thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
+          thinkingStartTime = Date.now();
+          const thinkingText = thinkingDiv.querySelector(".thinking-text");
+          if (thinkingText) {
+            thinkingText.classList.remove("static");
+          }
+          isThinkingActive = true;
+        } else if (endpoint === "/chat") {
+          createOrUpdateAssistantMessage("");
+        }
+
+        // Reset state variables
+        assistantTextBuffer = "";
+        contextSet = false;
+        latestContext = null;
+
         const queryObject = {
           // Remove the duplicate user message - just use messageHistory
           messages: messageHistory,
@@ -687,14 +829,6 @@
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
-
-          // reset for new answer
-          isThinkingActive = false;
-          thinkingDiv = null;
-          thinkingContentDiv = null;
-          assistantTextBuffer = "";
-          contextSet = false;
-          latestContext = null;
 
           while (true) {
             const { value, done } = await reader.read();
@@ -743,6 +877,10 @@
               thinkingText.classList.add("static");
             }
           }
+
+          // 1) Remove typing indicator when done
+          const indicators = document.querySelectorAll(".typing-indicator");
+          indicators.forEach((indicator) => indicator.remove());
 
           mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
         } catch (error) {
@@ -799,8 +937,11 @@
                 assistantTextBuffer += visiblePart;
                 idx = chunk.length;
               } else {
-                // Found <think>
-                assistantTextBuffer += chunk.substring(idx, openPos);
+                // Found <think> - only add text before it
+                const visiblePart = chunk.substring(idx, openPos);
+                if (visiblePart.trim()) {
+                  assistantTextBuffer += visiblePart;
+                }
                 idx = openPos + 7; // move past <think>
 
                 if (!thinkingDiv) {
@@ -808,9 +949,7 @@
                   chatContainer.appendChild(thinkingDiv);
                   thinkingContentDiv =
                     thinkingDiv.querySelector(".thinking-content");
-                  // Start timer when we first see <think>
                   thinkingStartTime = Date.now();
-                  // Start animation
                   const thinkingText =
                     thinkingDiv.querySelector(".thinking-text");
                   if (thinkingText) {
@@ -828,15 +967,15 @@
                 appendThinkingChunk(thoughtChunk, thinkingContentDiv);
                 idx = chunk.length;
               } else {
-                // found </think>
+                // found </think> - only add content before it
                 const thoughtChunk = chunk.substring(idx, closePos);
-                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                if (thoughtChunk.trim()) {
+                  appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                }
                 idx = closePos + 8; // move past </think>
                 isThinkingActive = false;
 
-                // We just exited the think block,
-                // if we have any user-visible text accumulated,
-                // show it w/ context now
+                // Show accumulated user-visible text with context
                 if (assistantTextBuffer.trim().length > 0) {
                   createOrUpdateAssistantMessage(
                     assistantTextBuffer,
@@ -871,6 +1010,10 @@
 
           // If this chunk signals done - ensure history is updated even if no content
           if (data.done) {
+            // Remove the typing indicator on completion
+            const indicators = document.querySelectorAll(".typing-indicator");
+            indicators.forEach((indicator) => indicator.remove());
+
             // Only push if we have content and it's not already added
             if (
               assistantTextBuffer &&
@@ -898,6 +1041,16 @@
           lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
         if (msg.role === "tool") {
+          // If the last message is an empty assistant message with typing indicator, remove it
+          if (lastMessageRole === "assistant") {
+            const assistantContent = lastMessageDiv.querySelector(
+              "div:not(.context-container):not(.thinking-process)"
+            );
+            if (assistantContent && !assistantContent.textContent.trim()) {
+              lastMessageDiv.remove();
+            }
+          }
+
           // parse the content as JSON
           const toolData = JSON.parse(msg.content);
           const specialMessageDiv = document.createElement("div");
@@ -949,7 +1102,6 @@
         let assistantContent;
 
         if (lastMessageRole === "assistant") {
-          // Reuse the existing assistant div
           assistantBlock = lastMessageDiv;
           assistantContent = assistantBlock.querySelector(
             "div:not(.context-container):not(.thinking-process)"
@@ -959,7 +1111,6 @@
             assistantBlock.appendChild(assistantContent);
           }
         } else {
-          // Create a new assistant div
           assistantBlock = document.createElement("div");
           assistantBlock.className = "message assistant-message";
           assistantContent = document.createElement("div");
@@ -967,10 +1118,53 @@
           chatContainer.appendChild(assistantBlock);
         }
 
-        // Render the user-visible text
-        assistantContent.innerHTML = md.render(visibleText || "");
+        // Remove any existing typing indicators
+        const existingIndicators =
+          assistantContent.querySelectorAll(".typing-indicator");
+        existingIndicators.forEach((indicator) => indicator.remove());
 
-        // If we haven't shown context yet, but we have some context
+        assistantContent.innerHTML = md.render(visibleText || "");
+        const typingIndicator = document.createElement("span");
+        typingIndicator.className = "typing-indicator";
+
+        // Find the last actual content element
+        let lastContentElement = assistantContent;
+        const walker = document.createTreeWalker(
+          assistantContent,
+          NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function (node) {
+              // Skip empty text nodes and typing indicators
+              if (
+                node.nodeType === Node.TEXT_NODE &&
+                !node.textContent.trim()
+              ) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (node.classList?.contains("typing-indicator")) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            },
+          }
+        );
+
+        while (walker.nextNode()) {
+          lastContentElement = walker.currentNode;
+        }
+
+        // If the last element is a block element (like a list), append to it
+        // Otherwise append to its parent
+        if (
+          lastContentElement.nodeType === Node.TEXT_NODE ||
+          getComputedStyle(lastContentElement).display === "inline"
+        ) {
+          lastContentElement.parentNode.appendChild(typingIndicator);
+        } else {
+          lastContentElement.appendChild(typingIndicator);
+        }
+
+        // Handle context if needed
         if (!contextSet && context?.length) {
           const contextSection = createContextSection(context);
           if (contextSection) {
@@ -998,7 +1192,9 @@
 
       function appendThinkingChunk(text, contentDiv) {
         if (!contentDiv) return;
-        contentDiv.textContent += text;
+        // Filter out any <think> or </think> tags before displaying
+        const cleanedText = text.replace(/<\/?think>/g, "");
+        contentDiv.textContent += cleanedText;
       }
 
       window.toggleThinking = function (header) {
@@ -1019,20 +1215,6 @@
             toggle.hasListener = true;
           }
         });
-      }
-
-      function processBase64Image(base64String) {
-        base64String = base64String.trim();
-        if (base64String.startsWith("data:image")) {
-          return base64String;
-        }
-        try {
-          atob(base64String); // verify Base64
-          return `data:image/jpeg;base64,${base64String}`;
-        } catch (e) {
-          console.error("Invalid base64 string:", e);
-          return null;
-        }
       }
 
       function resizeTextarea() {
@@ -1084,6 +1266,7 @@
         const toolButton = document.getElementById("send-button");
         toolButton.classList.toggle("active", toolsEnabled);
         toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
+        localStorage.setItem("toolsEnabled", toolsEnabled);
       }
 
       function updateThinkButton() {
@@ -1092,7 +1275,14 @@
         thinkButton.title = thinkEnabled
           ? "Think mode enabled"
           : "Think mode disabled";
+        localStorage.setItem("thinkEnabled", thinkEnabled);
       }
+
+      // Update the button states on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        updateToolButton();
+        updateThinkButton();
+      });
     </script>
   </body>
 </html>
