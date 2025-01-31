@@ -202,14 +202,6 @@ fn default_chat_stream() -> bool {
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({
-    "messages": [
-        {
-            "role": "user",
-            "content": "Why is the sky blue?"
-        }
-    ]
-}))]
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
