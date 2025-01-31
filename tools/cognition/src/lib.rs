@@ -57,13 +57,14 @@ pub async fn chat_with_tools(
     tools_hub: Arc<Mutex<ToolsHub>>,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
+    stream: bool,
 ) -> Result<(), ChatToolError> {
     // Make chat request with current messages and tools
     let chat_request = ChatMessages {
         messages: messages.clone(),
         restart: true,
         persist: false,
-        stream: true,
+        stream: stream,
         format: format.clone(),
         tools: if tools.is_empty() { None } else { Some(tools.clone()) },
     };
@@ -128,6 +129,7 @@ pub async fn chat_with_tools(
                         tools_hub.clone(),
                         tx.clone(),
                         format.clone(),
+                        stream,
                     ))
                     .await?
                 }

@@ -517,6 +517,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     data.tools.clone(),
                     chat_with_tools_tx,
                     body.format.clone(),
+                    body.stream,
                 )
                 .await;
 
