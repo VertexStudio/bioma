@@ -182,16 +182,6 @@ pub struct AskQueryRequestSchema {
 // /chat Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({
-    "model": "llama3.2",
-    "messages": [
-        {
-            "role": "user",
-            "content": "Why is the sky blue?"
-        }
-    ],
-    "use_tools": false
-}))]
 
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]

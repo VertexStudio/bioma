@@ -350,11 +350,36 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 #[utoipa::path(
     post,
     path = "/chat",
-    description = "Generates a chat response.",
     request_body = ChatQueryRequestSchema,
-    responses(
-        (status = 200, description = "Ok"),
-    )
+    request_body(content = ChatQueryRequestSchema, examples(
+        ("Message only" = (summary = "Basic query", value = json!({
+            "model": "llama3.2",
+            "messages": [{"role": "user", "content": "Why is the sky blue?"}],
+            "use_tools": false
+        }))),
+        ("with_tools" = (summary = "Using the echo tool as en example.", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "stream": true,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                }
+            ],
+            "use_tools": true
+        })))
+    ))
 )]
 async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
