@@ -1147,7 +1147,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
     post,
     path = "/rerank",
     description = "Rerank texts based on a query.",
-    request_body(content = EmbeddingsQueryRequestSchema, examples(
+    request_body(content = RankTextsRequestSchema, examples(
         ("Basic" = (summary = "Basic", value = json!({
             "query": "What is Deep Learning?",
             "texts": [
