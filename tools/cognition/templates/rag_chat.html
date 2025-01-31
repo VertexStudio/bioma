@@ -942,6 +942,16 @@
           lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
         if (msg.role === "tool") {
+          // If the last message is an empty assistant message with typing indicator, remove it
+          if (lastMessageRole === "assistant") {
+            const assistantContent = lastMessageDiv.querySelector(
+              "div:not(.context-container):not(.thinking-process)"
+            );
+            if (assistantContent && !assistantContent.textContent.trim()) {
+              lastMessageDiv.remove();
+            }
+          }
+
           // parse the content as JSON
           const toolData = JSON.parse(msg.content);
           const specialMessageDiv = document.createElement("div");
