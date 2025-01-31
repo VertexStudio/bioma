@@ -545,9 +545,88 @@
         return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
       };
 
-      // Create HTML for context
+      // Updated helper to process a base64 image
+      function processBase64Image(base64String, type = "jpeg") {
+        base64String = base64String.trim();
+        if (base64String.startsWith("data:image")) {
+          return base64String;
+        }
+        try {
+          atob(base64String); // verify Base64
+          return `data:image/${type};base64,${base64String}`;
+        } catch (e) {
+          console.error("Invalid base64 string:", e);
+          return null;
+        }
+      }
+
+      // New helper: process message content (for both system and non-system messages)
+      function processMessageContent(content, images = []) {
+        let processedContent = "";
+        let normalLines = [];
+        let imageIndex = 0;
+
+        // Flush accumulated normal text
+        function flushNormalLines() {
+          if (normalLines.length) {
+            const joined = normalLines.join("\n").trim();
+            if (joined) {
+              try {
+                // Try to detect JSON and pretty-print it
+                const jsonObj = JSON.parse(joined);
+                processedContent += `<pre><code>${JSON.stringify(
+                  jsonObj,
+                  null,
+                  2
+                )}</code></pre>`;
+                console.log("Detected JSON content and formatted as code.");
+              } catch (e) {
+                // Not valid JSON; render as Markdown
+                processedContent += md.render(joined);
+              }
+            }
+            normalLines = [];
+          }
+        }
+
+        // Process each line for markers
+        const lines = content.split("\n");
+        lines.forEach((line) => {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith("[URI:")) {
+            flushNormalLines();
+            let uri = trimmedLine.slice(5, -1).trim();
+            processedContent += `<div class="uri">URI: ${uri}</div>`;
+          } else if (trimmedLine.startsWith("Source:")) {
+            flushNormalLines();
+            let source = trimmedLine.slice(7).trim();
+            processedContent += `<div class="source">Source: ${source}</div>`;
+          } else if (trimmedLine.startsWith("[IMAGE:")) {
+            flushNormalLines();
+            let imageType = trimmedLine.slice(7, -1).trim();
+            if (images && imageIndex < images.length) {
+              let imageUrl = processBase64Image(images[imageIndex], imageType);
+              if (imageUrl) {
+                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+              }
+              imageIndex++;
+            }
+          } else {
+            normalLines.push(line);
+          }
+        });
+        flushNormalLines();
+        return processedContent;
+      }
+
+      // Replace the existing createContextSection with this updated version
       function createContextSection(context) {
+        console.group("createContextSection");
+        console.log("Input context:", context);
+
         if (!context?.length) {
+          console.log("No context provided, returning empty string");
+          console.groupEnd();
           return "";
         }
 
@@ -561,116 +640,99 @@
           .findIndex((msg) => msg.role === "user");
         const lastMessageIndex =
           lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+        console.log("Last user message index:", lastMessageIndex);
 
-        // Process all non-system messages (except the last user one)
+        // Process non-system messages (except the last user message)
+        console.group("Processing regular messages");
         context.forEach((msg, index) => {
           if (msg.role !== "system" && index !== lastMessageIndex) {
+            console.group(`Message ${index} (${msg.role})`);
             const roleClass = msg.role + "-message";
-            const images = msg.images || [];
-            let imageIndex = 0;
-            let content = msg.content || "";
-            let source = "";
-            let uri = "";
-            let processedContent = "";
-
-            // Split content into lines to detect special markers
-            const lines = content.split("\n");
-            let normalLines = [];
-
-            lines.forEach((line) => {
-              const trimmedLine = line.trim();
-              // If the line contains a special marker, flush the normal lines first.
-              if (trimmedLine.startsWith("[URI:")) {
-                if (normalLines.length) {
-                  processedContent += md.render(normalLines.join("\n"));
-                  normalLines = [];
-                }
-                uri = trimmedLine.slice(5, -1);
-              } else if (trimmedLine.startsWith("Source:")) {
-                if (normalLines.length) {
-                  processedContent += md.render(normalLines.join("\n"));
-                  normalLines = [];
-                }
-                source = trimmedLine.slice(7).trim();
-              } else if (trimmedLine.startsWith("[IMAGE:")) {
-                if (normalLines.length) {
-                  processedContent += md.render(normalLines.join("\n"));
-                  normalLines = [];
-                }
-                if (imageIndex < images.length) {
-                  const imageUrl = processBase64Image(images[imageIndex]);
-                  processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-                  imageIndex++;
-                }
-              } else {
-                // Otherwise, collect the line for normal text
-                normalLines.push(line);
-              }
-            });
-            // Flush any remaining normal text
-            if (normalLines.length) {
-              processedContent += md.render(normalLines.join("\n"));
-            }
-
+            const processedContent = processMessageContent(
+              msg.content || "",
+              msg.images || []
+            );
             regularMessages += `
-        <div class="message ${roleClass}">
-          ${source ? `<div class="source">Source: ${source}</div>` : ""}
-          ${uri ? `<div class="uri">URI: ${uri}</div>` : ""}
-          <div class="chunk">${processedContent}</div>
-        </div>
-      `;
+              <div class="message ${roleClass}">
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
+            console.groupEnd();
           }
         });
+        console.groupEnd();
 
         // Process system messages
-        context.forEach((msg) => {
+        console.group("Processing system messages");
+        context.forEach((msg, index) => {
           if (msg.role === "system") {
+            console.group(`System message ${index}`);
             const roleClass = msg.role + "-message";
+            let systemContent = msg.content.replace(
+              /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
+              "ADDITIONAL CONTEXT:"
+            );
+            const processedContent = processMessageContent(
+              systemContent,
+              msg.images || []
+            );
             systemMessage += `
-        <div class="message ${roleClass}">
-          <strong>${
-            msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-          }:</strong>
-          <div class="chunk">${md.render(msg.content)}</div>
-        </div>
-      `;
+              <div class="message ${roleClass}">
+                <strong>${
+                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                }:</strong>
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
+            console.groupEnd();
           }
         });
+        console.groupEnd();
 
         // Process the last user message separately
+        console.group("Processing last user message");
         if (lastMessageIndex !== -1) {
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
+          const processedContent = processMessageContent(
+            lastMsg.content || "",
+            lastMsg.images || []
+          );
           lastUserMessage = `
-      <div class="message ${roleClass}">
-        <strong>${
-          lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
-        }:</strong>
-        <div class="chunk">${md.render(lastMsg.content || "")}</div>
-      </div>
-    `;
+            <div class="message ${roleClass}">
+              <strong>${
+                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
+              }:</strong>
+              <div class="chunk">${processedContent}</div>
+            </div>
+          `;
         }
+        console.groupEnd();
 
-        return `
-    <div class="context-container">
-      <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
-      <div class="context-content">
-        ${regularMessages}
-        ${
-          regularMessages && systemMessage
-            ? '<div class="source-separator"></div>'
-            : ""
-        }
-        ${systemMessage}
-        ${
-          (regularMessages || systemMessage) && lastUserMessage
-            ? '<div class="source-separator"></div>'
-            : ""
-        }
-        ${lastUserMessage}
-      </div>
-    </div>
-  `;
+        const result = `
+          <div class="context-container">
+            <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+            <div class="context-content">
+              ${regularMessages}
+              ${
+                regularMessages && systemMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
+              ${systemMessage}
+              ${
+                (regularMessages || systemMessage) && lastUserMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
+              ${lastUserMessage}
+            </div>
+          </div>
+        `;
+
+        console.log("Final HTML length:", result.length);
+        console.groupEnd();
+        return result;
       }
 
       function appendMessage(sender, content, context = null) {
@@ -1153,20 +1215,6 @@
             toggle.hasListener = true;
           }
         });
-      }
-
-      function processBase64Image(base64String) {
-        base64String = base64String.trim();
-        if (base64String.startsWith("data:image")) {
-          return base64String;
-        }
-        try {
-          atob(base64String); // verify Base64
-          return `data:image/jpeg;base64,${base64String}`;
-        } catch (e) {
-          console.error("Invalid base64 string:", e);
-          return null;
-        }
       }
 
       function resizeTextarea() {
