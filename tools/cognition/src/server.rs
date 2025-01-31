@@ -283,7 +283,13 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     post,
     path = "/index",
     description = "Receives an array of path of files to index.",
-    request_body = IndexGlobsRequestSchema,
+    request_body(content = ChatQueryRequestSchema, examples(
+        ("basic" = (summary = "Basic", value = json!({
+            "globs": ["./path/to/files/**/*.rs"], 
+            "chunk_capacity": {"start": 500, "end": 2000},
+            "chunk_overlap": 200
+        })))
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
