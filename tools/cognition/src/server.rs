@@ -283,7 +283,7 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     post,
     path = "/index",
     description = "Receives an array of path of files to index.",
-    request_body(content = ChatQueryRequestSchema, examples(
+    request_body(content = IndexGlobsRequestSchema, examples(
         ("basic" = (summary = "Basic", value = json!({
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
@@ -315,7 +315,16 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     post,
     path = "/retrieve",
     description = "Retrieve context in .md format.",
-    request_body = RetrieveContextRequest,
+    request_body(content = RetrieveContextRequest, examples(
+        ("basic" = (summary = "Basic", value = json!({
+            "type": "Text",
+            "query": "What is Bioma?",
+            "threshold": 0.0,
+            "limit": 10,
+            "source": ".*",
+            "format": "markdown"
+        })))
+    )),
     responses(
         (status = 200, description = "Ok"),
     )

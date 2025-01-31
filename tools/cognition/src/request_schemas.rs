@@ -93,14 +93,6 @@ impl Default for RetrieveOutputFormat {
 }
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-#[schema(example = json!({
-    "type": "Text",
-    "query": "What is Bioma?",
-    "threshold": 0.0,
-    "limit": 10,
-    "source": ".*",
-    "format": "markdown"
-}))]
 pub struct RetrieveContextRequest {
     #[schema(value_type = RetrieveQueryRequestSchema)]
     #[serde(flatten)]
