@@ -501,8 +501,8 @@
       let assistantTextBuffer = ""; // store user-visible assistant text
       let latestContext = null; // store context from the most recent chunk
       let contextSet = false; // track if we've appended the context yet
-      let toolsEnabled = false;
-      let thinkEnabled = false; // Add new state for think mode
+      let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
+      let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
 
       const md = window.markdownit();
       const chatContainer = document.getElementById("chat-container");
@@ -1179,6 +1179,7 @@
         const toolButton = document.getElementById("send-button");
         toolButton.classList.toggle("active", toolsEnabled);
         toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
+        localStorage.setItem("toolsEnabled", toolsEnabled);
       }
 
       function updateThinkButton() {
@@ -1187,7 +1188,14 @@
         thinkButton.title = thinkEnabled
           ? "Think mode enabled"
           : "Think mode disabled";
+        localStorage.setItem("thinkEnabled", thinkEnabled);
       }
+
+      // Update the button states on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        updateToolButton();
+        updateThinkButton();
+      });
     </script>
   </body>
 </html>
