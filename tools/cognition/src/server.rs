@@ -283,7 +283,13 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     post,
     path = "/index",
     description = "Receives an array of path of files to index.",
-    request_body = IndexGlobsRequestSchema,
+    request_body(content = IndexGlobsRequestSchema, examples(
+        ("basic" = (summary = "Basic", value = json!({
+            "globs": ["./path/to/files/**/*.rs"], 
+            "chunk_capacity": {"start": 500, "end": 2000},
+            "chunk_overlap": 200
+        })))
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -309,7 +315,16 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     post,
     path = "/retrieve",
     description = "Retrieve context in .md format.",
-    request_body = RetrieveContextRequest,
+    request_body(content = RetrieveContextRequest, examples(
+        ("basic" = (summary = "Basic", value = json!({
+            "type": "Text",
+            "query": "What is Bioma?",
+            "threshold": 0.0,
+            "limit": 10,
+            "source": ".*",
+            "format": "markdown"
+        })))
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -350,11 +365,35 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 #[utoipa::path(
     post,
     path = "/chat",
-    description = "Generates a chat response.",
-    request_body = ChatQueryRequestSchema,
-    responses(
-        (status = 200, description = "Ok"),
-    )
+    request_body(content = ChatQueryRequestSchema, examples(
+        ("Message only" = (summary = "Basic query", value = json!({
+            "model": "llama3.2",
+            "messages": [{"role": "user", "content": "Why is the sky blue?"}],
+            "use_tools": false
+        }))),
+        ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "stream": true,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                }
+            ],
+            "use_tools": true
+        })))
+    ))
 )]
 async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
@@ -559,7 +598,38 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     post,
     path = "/think",
     description = "Analyzes query and determines which tools to use and in what order.",
-    request_body = ThinkQueryRequestSchema,
+    request_body(content = ThinkQueryRequestSchema, examples(
+        ("Message only" = (summary = "Basic query", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ]
+        }))),
+        ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "stream": false,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                }
+            ],
+            "use_tools": true
+        })))
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
@@ -693,7 +763,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             messages: conversation.clone(),
             restart: true,
             persist: false,
-            stream: true,
+            stream: body.stream.clone(),
             format: body.format.clone(),
             tools: None,
         };
@@ -767,7 +837,43 @@ struct AskResponse {
     post,
     path = "/ask",
     description = "Generates a chat response. Specific response format can be specified.",
-    request_body = AskQueryRequestSchema,
+    request_body(content = AskQueryRequestSchema, examples(
+        ("Basic" = (summary = "Basic", value = json!({
+            "model": "llama3.2",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Tell me about Puerto Rico."
+                }
+            ],
+            "format": {
+                "title": "PuertoRicoInfo",
+                "type": "object",
+                "required": [
+                    "name",
+                    "capital",
+                    "languages"
+                ],
+                "properties": {
+                    "name": {
+                        "description": "Name of the territory",
+                        "type": "string"
+                    },
+                    "capital": {
+                        "description": "Capital city",
+                        "type": "string"
+                    },
+                    "languages": {
+                        "description": "Official languages spoken",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }))),
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
@@ -889,7 +995,9 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     post,
     path = "/delete_source",
     description = "Delete indexed sources.",
-    request_body = DeleteSourceRequestSchema,
+    request_body(content = DeleteSourceRequestSchema, examples(
+        ("Basic" = (summary = "Basic", value = json!({"source": "path/to/source1"}))),
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
@@ -930,7 +1038,16 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
     post,
     path = "/embed",
     description = "Generate embeddings for text or images.",
-    request_body = EmbeddingsQueryRequestSchema,
+    request_body(content = EmbeddingsQueryRequestSchema, examples(
+        ("Basic" = (summary = "Text", value = json!({
+            "input": "This text will generate embeddings",
+            "model": "nomic-embed-text"
+        }))),
+        ("Image" = (summary = "Image", value = json!({
+            "model": "nomic-embed-vision",
+            "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
+        }))),
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
@@ -1030,7 +1147,16 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
     post,
     path = "/rerank",
     description = "Rerank texts based on a query.",
-    request_body = RankTextsRequestSchema,
+    request_body(content = RankTextsRequestSchema, examples(
+        ("Basic" = (summary = "Basic", value = json!({
+            "query": "What is Deep Learning?",
+            "texts": [
+                "Deep Learning is learning under water",
+                "Deep learning is a branch of machine learning"
+            ],
+            "raw_scores": false
+        })))
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
