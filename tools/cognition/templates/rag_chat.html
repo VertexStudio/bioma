@@ -1,1080 +1,1288 @@
 <!DOCTYPE html>
 <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG Server Chat</title>
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RAG Server Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+    />
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-
-  <style>
-    :root {
-      --primary: #ff00a0;
-      --primary-hover: #e4008e;
-      --text-primary: #ffffff;
-      --text-secondary: #e5e7eb;
-      --text-muted: #a0a0a0;
-      --bg-main: #121214;
-      --bg-secondary: #1c1c1f;
-      --border-color: #2a2a2d;
-      --font-family: "JetBrains Mono", monospace;
-      --surrealist-gradient: linear-gradient(135deg,
+    <style>
+      :root {
+        --primary: #ff00a0;
+        --primary-hover: #e4008e;
+        --text-primary: #ffffff;
+        --text-secondary: #e5e7eb;
+        --text-muted: #a0a0a0;
+        --bg-main: #121214;
+        --bg-secondary: #1c1c1f;
+        --border-color: #2a2a2d;
+        --font-family: "JetBrains Mono", monospace;
+        --surrealist-gradient: linear-gradient(
+          135deg,
           var(--primary) 0%,
-          #9600ff 100%);
-    }
+          #9600ff 100%
+        );
+      }
 
-    @font-face {
-      font-family: "JetBrains Mono";
-      src: url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap");
-    }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap");
+      }
 
-    html,
-    body {
-      background-color: var(--bg-main);
-      color: var(--text-primary);
-      font-family: var(--font-family);
-      margin: 0;
-      padding: 0;
-    }
+      html,
+      body {
+        background-color: var(--bg-main);
+        color: var(--text-primary);
+        font-family: var(--font-family);
+        margin: 0;
+        padding: 0;
+      }
 
-    body {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      padding-bottom: 80px;
-    }
+      body {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        padding-bottom: 80px;
+      }
 
-    #chat-container {
-      margin-bottom: 10px;
-      display: flex;
-      flex-direction: column;
-    }
+      #chat-container {
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+      }
 
-    #input-container {
-      position: fixed;
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 20px;
-      background-color: var(--bg-main);
-      box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-      width: 100%;
-      max-width: 800px;
-      box-sizing: border-box;
-      border-radius: 10px 10px 0 0;
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-    }
+      #input-container {
+        position: fixed;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 20px;
+        background-color: var(--bg-main);
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        max-width: 800px;
+        box-sizing: border-box;
+        border-radius: 10px 10px 0 0;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
 
-    #query-input {
-      flex: 1;
-      margin-right: 10px;
-      padding: 10px;
-      box-sizing: border-box;
-      border-radius: 5px;
-      background-color: var(--bg-main);
-      color: var(--text-primary);
-      border: 1px solid var(--border-color);
-      resize: none;
-      min-height: 40px;
-      max-height: 200px;
-      overflow-y: auto;
-      font-family: var(--font-family);
-    }
+      #query-input {
+        flex: 1;
+        margin-right: 10px;
+        padding: 10px;
+        box-sizing: border-box;
+        border-radius: 5px;
+        background-color: var(--bg-main);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        resize: none;
+        min-height: 40px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: var(--font-family);
+      }
 
-    .message {
-      margin-bottom: 15px;
-      padding: 12px;
-      border-radius: 12px;
-      max-width: 85%;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
+      .message {
+        margin-bottom: 15px;
+        padding: 12px;
+        border-radius: 12px;
+        max-width: 85%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
 
-    .user-message {
-      background: var(--surrealist-gradient);
-      align-self: flex-end;
-      margin-left: auto;
-      color: var(--text-primary);
-    }
+      .user-message {
+        background: var(--surrealist-gradient);
+        align-self: flex-end;
+        margin-left: auto;
+        color: var(--text-primary);
+      }
 
-    .assistant-message {
-      background-color: var(--bg-secondary);
-      align-self: flex-start;
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-    }
+      .assistant-message {
+        background-color: var(--bg-secondary);
+        align-self: flex-start;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+      }
 
-    .system-message {
-      background-color: #2a2a2d;
-      align-self: flex-start;
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-    }
+      .system-message {
+        background-color: #2a2a2d;
+        align-self: flex-start;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
 
-    .tool-message {
-      background-color: #1a1a1d;
-      align-self: flex-start;
-      font-family: var(--font-family);
-      position: relative;
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-    }
+      .tool-message {
+        background-color: #1a1a1d;
+        align-self: flex-start;
+        font-family: var(--font-family);
+        position: relative;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
 
-    .context-toggle {
-      font-size: 0.8em;
-      color: var(--text-muted);
-      cursor: pointer;
-      margin-top: 10px;
-      padding: 5px 10px;
-      background-color: var(--bg-secondary);
-      border-radius: 4px;
-      display: inline-block;
-      user-select: none;
-      transition: background-color 0.2s, color 0.2s;
-      border: 1px solid var(--border-color);
-    }
+      .context-toggle {
+        font-size: 0.8em;
+        color: var(--text-muted);
+        cursor: pointer;
+        margin-top: 10px;
+        padding: 5px 10px;
+        background-color: var(--bg-secondary);
+        border-radius: 4px;
+        display: inline-block;
+        user-select: none;
+        transition: background-color 0.2s, color 0.2s;
+        border: 1px solid var(--border-color);
+      }
 
-    .context-toggle:hover {
-      background: var(--surrealist-gradient);
-      color: var(--text-primary);
-    }
+      .context-toggle:hover {
+        background: var(--surrealist-gradient);
+        color: var(--text-primary);
+      }
 
-    .context-content {
-      display: none;
-      margin-top: 10px;
-      padding: 12px;
-      background-color: var(--bg-secondary);
-      border-radius: 8px;
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-    }
+      .context-content {
+        display: none;
+        margin-top: 10px;
+        padding: 12px;
+        background-color: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
 
-    .context-content .message {
-      margin: 8px 0;
-      padding: 10px;
-      font-size: 0.9em;
-      max-width: 100%;
-      background-color: var(--bg-main);
-    }
+      .context-content .message {
+        margin: 8px 0;
+        padding: 10px;
+        font-size: 0.9em;
+        max-width: 100%;
+        background-color: var(--bg-main);
+      }
 
-    .context-content .user-message {
-      background: linear-gradient(135deg,
+      .context-content .user-message {
+        background: linear-gradient(
+          135deg,
           rgba(255, 0, 160, 0.15) 0%,
-          rgba(150, 0, 255, 0.15) 100%);
-      border: 1px solid rgba(255, 0, 160, 0.2);
-      color: var(--text-primary);
-    }
+          rgba(150, 0, 255, 0.15) 100%
+        );
+        border: 1px solid rgba(255, 0, 160, 0.2);
+        color: var(--text-primary);
+      }
 
-    .context-content .assistant-message {
-      background-color: var(--bg-main);
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-    }
+      .context-content .assistant-message {
+        background-color: var(--bg-main);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
 
-    .context-content .system-message {
-      background-color: rgba(42, 42, 45, 0.5);
-      border: 1px solid var(--border-color);
-      color: var(--text-muted);
-    }
+      .context-content .system-message {
+        background-color: rgba(42, 42, 45, 0.5);
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+      }
 
-    .context-content .tool-message {
-      background-color: rgba(26, 26, 29, 0.8);
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-    }
+      .context-content .tool-message {
+        background-color: rgba(26, 26, 29, 0.8);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
 
-    .context-content .message strong {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--text-muted);
-    }
+      .context-content .message strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text-muted);
+      }
 
-    .source-separator {
-      border-top: 1px solid var(--border-color);
-      margin-top: 10px;
-      padding-top: 10px;
-    }
+      .source-separator {
+        border-top: 1px solid var(--border-color);
+        margin-top: 10px;
+        padding-top: 10px;
+      }
 
-    .source,
-    .uri,
-    .chunk {
-      margin-bottom: 5px;
-    }
+      .source,
+      .uri,
+      .chunk {
+        margin-bottom: 5px;
+      }
 
-    .tool-toggle {
-      color: var(--text-muted);
-      position: absolute;
-      top: 16px;
-      left: 8px;
-      cursor: pointer;
-      width: 16px;
-      height: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-      user-select: none;
-      transition: background-color 0.2s, color 0.2s;
-    }
+      .tool-toggle {
+        color: var(--text-muted);
+        position: absolute;
+        top: 16px;
+        left: 8px;
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        user-select: none;
+        transition: background-color 0.2s, color 0.2s;
+      }
 
-    .tool-content {
-      margin-left: 28px;
-      display: none;
-    }
+      .tool-content {
+        margin-left: 28px;
+        display: none;
+      }
 
-    .tool-header {
-      margin-left: 28px;
-      padding: 4px 0;
-      color: var(--text-muted);
-    }
+      .tool-header {
+        margin-left: 28px;
+        padding: 4px 0;
+        color: var(--text-muted);
+      }
 
-    .tool-function {
-      margin-bottom: 8px;
-      color: var(--text-secondary);
-    }
+      .tool-function {
+        margin-bottom: 8px;
+        color: var(--text-secondary);
+      }
 
-    .tool-details pre {
-      background-color: rgba(255, 255, 255, 0.05);
-      padding: 10px;
-      border-radius: 6px;
-      margin: 6px 0 14px 0;
-      overflow-x: auto;
-      border: 1px solid var(--border-color);
-    }
+      .tool-details pre {
+        background-color: rgba(255, 255, 255, 0.05);
+        padding: 10px;
+        border-radius: 6px;
+        margin: 6px 0 14px 0;
+        overflow-x: auto;
+        border: 1px solid var(--border-color);
+      }
 
-    .tool-details code {
-      font-size: 0.9em;
-      color: #ff80cc;
-    }
+      .tool-details code {
+        font-size: 0.9em;
+        color: #ff80cc;
+      }
 
-    #query-input:focus {
-      border-color: var(--primary);
-      outline: none;
-      box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
-    }
+      #query-input:focus {
+        border-color: var(--primary);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
+      }
 
-    .tool-toggle:hover {
-      background: var(--surrealist-gradient);
-      color: var(--text-primary);
-    }
+      .tool-toggle:hover {
+        background: var(--surrealist-gradient);
+        color: var(--text-primary);
+      }
 
-    .message,
-    .context-toggle,
-    .tool-toggle,
-    #query-input {
-      transition: background-color 0.2s, color 0.2s, border-color 0.2s,
-        box-shadow 0.2s;
-    }
+      .message,
+      .context-toggle,
+      .tool-toggle,
+      #query-input {
+        transition: background-color 0.2s, color 0.2s, border-color 0.2s,
+          box-shadow 0.2s;
+      }
 
-    /* Scrollbar styling */
-    ::-webkit-scrollbar {
-      width: 8px;
-    }
+      /* Scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--primary);
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--primary-hover);
+      }
 
-    ::-webkit-scrollbar-track {
-      background: var(--bg-secondary);
-    }
+      .action-button {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 10px 15px;
+        border-radius: 5px;
+        cursor: pointer;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+      }
 
-    ::-webkit-scrollbar-thumb {
-      background: var(--primary);
-      border-radius: 4px;
-    }
+      .action-button:hover {
+        background: var(--surrealist-gradient);
+        border-color: var(--primary);
+      }
 
-    ::-webkit-scrollbar-thumb:hover {
-      background: var(--primary-hover);
-    }
+      .action-button i {
+        font-size: 1.2em;
+      }
 
-    .action-button {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      padding: 10px 15px;
-      border-radius: 5px;
-      cursor: pointer;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-    }
+      /* Thinking process styles - simplified */
+      .thinking-process {
+        margin-bottom: 15px;
+        position: relative;
+        max-width: 85%;
+        align-self: flex-start;
+      }
+      .thinking-header {
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        width: 100%;
+      }
 
-    .action-button:hover {
-      background: var(--surrealist-gradient);
-      border-color: var(--primary);
-    }
-
-    .action-button i {
-      font-size: 1.2em;
-    }
-
-    /* Thinking process styles - simplified */
-    .thinking-process {
-      margin-bottom: 15px;
-      position: relative;
-      max-width: 85%;
-      align-self: flex-start;
-    }
-
-    .thinking-header {
-      display: inline-flex;
-      align-items: center;
-      cursor: pointer;
-      user-select: none;
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      width: 100%;
-    }
-
-    .thinking-header i,
-    .thinking-header .thinking-text {
-      background: linear-gradient(to right,
+      .thinking-header i,
+      .thinking-header .thinking-text {
+        background: linear-gradient(
+          to right,
           var(--text-muted) 25%,
           var(--primary) 50%,
-          var(--text-muted) 75%);
-      background-size: 200% 100%;
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      animation: sweepingHighlight 2s infinite linear;
-      transition: all 0.2s ease;
-    }
-
-    .thinking-text.static {
-      background: none;
-      -webkit-text-fill-color: var(--text-muted);
-      color: var(--text-muted);
-    }
-
-    @keyframes sweepingHighlight {
-      0% {
-        background-position: 200% 0;
+          var(--text-muted) 75%
+        );
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: sweepingHighlight 2s infinite linear;
+        transition: all 0.2s ease;
       }
 
-      100% {
-        background-position: -200% 0;
-      }
-    }
-
-    .thinking-content {
-      margin-top: 8px;
-      padding: 12px;
-      display: none;
-      white-space: pre-wrap;
-      font-family: var(--font-family);
-      font-size: 0.9em;
-      color: var(--text-muted);
-      background: linear-gradient(135deg,
-          rgba(255, 0, 160, 0.05) 0%,
-          rgba(150, 0, 255, 0.05) 100%);
-      border: 1px solid rgba(255, 0, 160, 0.2);
-      border-radius: 8px;
-      line-height: 1.5;
-      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
-      max-width: 100%;
-      overflow-wrap: break-word;
-    }
-
-    .thinking-content.visible {
-      display: block;
-      animation: fadeIn 0.2s ease-in-out;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
+      .thinking-text.static {
+        background: none;
+        -webkit-text-fill-color: var(--text-muted);
+        color: var(--text-muted);
       }
 
-      to {
-        opacity: 1;
-      }
-    }
-
-    .action-button.active {
-      background: var(--surrealist-gradient) !important;
-      border-color: var(--primary) !important;
-    }
-
-    .action-button.active i {
-      color: var(--text-primary) !important;
-    }
-
-    .message a {
-      color: var(--primary);
-      text-decoration: none;
-      transition: color 0.2s;
-    }
-
-    .message a:hover {
-      color: var(--primary-hover);
-      text-decoration: underline;
-    }
-
-    .error-message {
-      background-color: rgba(255, 0, 0, 0.1);
-      border: 1px solid rgba(255, 0, 0, 0.3);
-      color: #ff6b6b;
-      align-self: flex-start;
-      padding: 12px;
-      border-radius: 12px;
-      max-width: 85%;
-      margin-bottom: 15px;
-    }
-
-    .error-message i {
-      margin-right: 8px;
-      color: #ff4444;
-    }
-  </style>
-</head>
-
-<body>
-  <div id="chat-container"></div>
-  <div id="input-container">
-    <textarea id="query-input" placeholder="Enter your question here" rows="1"></textarea>
-    <button id="send-button" class="action-button" title="Chat with tools (Ctrl+Enter)">
-      <i class="fas fa-comments fa-wrench"></i>
-    </button>
-    <button id="think-button" class="action-button" title="Think deeply (Alt+Enter)">
-      <i class="fas fa-brain"></i>
-    </button>
-  </div>
-
-  <script>
-    // Remove any trailing slashes from the endpoint
-    const RAG_ENDPOINT = window.location.origin;
-
-    let isThinkingActive = false;
-    let thinkingDiv = null;
-    let thinkingContentDiv = null;
-    let assistantTextBuffer = ""; // store user-visible assistant text
-    let latestContext = null; // store context from the most recent chunk
-    let contextSet = false; // track if we've appended the context yet
-    let toolsEnabled = false;
-    let thinkEnabled = false; // Add new state for think mode
-
-    const md = window.markdownit();
-    const chatContainer = document.getElementById("chat-container");
-    const queryInput = document.getElementById("query-input");
-    let messageHistory = [];
-    let thinkingStartTime = null;
-
-    mermaid.initialize({ startOnLoad: true });
-
-    // Custom renderer for code fences (handles mermaid code blocks)
-    md.renderer.rules.fence = function (tokens, idx) {
-      const token = tokens[idx];
-      const code = token.content.trim();
-      if (token.info.trim() === "mermaid") {
-        return '<div class="mermaid">' + code + "</div>";
-      }
-      return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
-    };
-
-    // Create HTML for context
-    function createContextSection(context) {
-      if (!context?.length) return "";
-      let regularMessages = "";
-      let systemMessage = "";
-      let lastUserMessage = "";
-
-      // find the last user message index
-      const lastUserIndex = [...context]
-        .reverse()
-        .findIndex((msg) => msg.role === "user");
-      const lastMessageIndex =
-        lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
-
-      // process normal messages
-      context.forEach((msg, index) => {
-        if (msg.role !== "system" && index !== lastMessageIndex) {
-          const roleClass = msg.role + "-message";
-          const images = msg.images || [];
-          let imageIndex = 0;
-          let content = msg.content || "";
-          let source = "";
-          let uri = "";
-          let processedContent = "";
-
-          const lines = content.split("\n");
-          lines.forEach((line) => {
-            const trimmedLine = line.trim();
-            if (trimmedLine.startsWith("[URI:")) {
-              uri = trimmedLine.slice(5, -1);
-            } else if (trimmedLine.startsWith("Source:")) {
-              source = trimmedLine.slice(7).trim();
-            } else if (trimmedLine.startsWith("[IMAGE:")) {
-              if (imageIndex < images.length) {
-                const imageUrl = processBase64Image(images[imageIndex]);
-                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-                imageIndex++;
-              }
-            } else if (trimmedLine) {
-              processedContent += md.render(trimmedLine);
-            }
-          });
-
-          regularMessages += `
-              <div class="message ${roleClass}">
-                ${source ? `<div class="source">Source: ${source}</div>` : ""}
-                ${uri ? `<div class="uri">URI: ${uri}</div>` : ""}
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
+      @keyframes sweepingHighlight {
+        0% {
+          background-position: 200% 0;
         }
-      });
+        100% {
+          background-position: -200% 0;
+        }
+      }
 
-      // system messages
-      context.forEach((msg) => {
-        if (msg.role === "system") {
-          const roleClass = msg.role + "-message";
-          const images = msg.images || [];
-          let imageIndex = 0;
-          let processedContent = "";
-          const contentLines = msg.content ? msg.content.split("\n") : [];
-          contentLines.forEach((line) => {
-            const trimmedLine = line.trim();
-            processedContent += md.render(trimmedLine);
+      .thinking-content {
+        margin-top: 8px;
+        padding: 12px;
+        display: none;
+        white-space: pre-wrap;
+        font-family: var(--font-family);
+        font-size: 0.9em;
+        color: var(--text-muted);
+        background: linear-gradient(
+          135deg,
+          rgba(255, 0, 160, 0.05) 0%,
+          rgba(150, 0, 255, 0.05) 100%
+        );
+        border: 1px solid rgba(255, 0, 160, 0.2);
+        border-radius: 8px;
+        line-height: 1.5;
+        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+        max-width: 100%;
+        overflow-wrap: break-word;
+      }
 
-            if (
-              trimmedLine.startsWith("[IMAGE:") &&
-              imageIndex < images.length
-            ) {
-              const imageUrl = processBase64Image(images[imageIndex]);
-              processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+      .thinking-content.visible {
+        display: block;
+        animation: fadeIn 0.2s ease-in-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .action-button.active {
+        background: var(--surrealist-gradient) !important;
+        border-color: var(--primary) !important;
+      }
+
+      .action-button.active i {
+        color: var(--text-primary) !important;
+      }
+
+      .message a {
+        color: var(--primary);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+
+      .message a:hover {
+        color: var(--primary-hover);
+        text-decoration: underline;
+      }
+
+      .error-message {
+        background-color: rgba(255, 0, 0, 0.1);
+        border: 1px solid rgba(255, 0, 0, 0.3);
+        color: #ff6b6b;
+        align-self: flex-start;
+        padding: 12px;
+        border-radius: 12px;
+        max-width: 85%;
+        margin-bottom: 15px;
+      }
+
+      .error-message i {
+        margin-right: 8px;
+        color: #ff4444;
+      }
+
+      .typing-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background: var(--primary);
+        border-radius: 50%;
+        margin-left: 2px;
+        margin-right: 2px;
+        vertical-align: middle;
+        animation: pulse 1s infinite;
+        white-space: pre;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0.4;
+        }
+      }
+
+      .assistant-message p {
+        display: inline;
+        margin: 0;
+        padding: 0;
+      }
+
+      .message pre code {
+        display: block;
+        padding: 1em;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        overflow-x: auto;
+        font-size: 0.9em;
+        line-height: 1.4;
+        tab-size: 2;
+      }
+
+      .message .chunk > p {
+        margin: 0.5em 0;
+        display: block;
+      }
+
+      .message .chunk > ul,
+      .message .chunk > ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="chat-container"></div>
+    <div id="input-container">
+      <textarea
+        id="query-input"
+        placeholder="Enter your question here"
+        rows="1"
+      ></textarea>
+      <button
+        id="send-button"
+        class="action-button"
+        title="Chat with tools (Ctrl+Enter)"
+      >
+        <i class="fas fa-comments fa-wrench"></i>
+      </button>
+      <button
+        id="think-button"
+        class="action-button"
+        title="Think deeply (Alt+Enter)"
+      >
+        <i class="fas fa-brain"></i>
+      </button>
+    </div>
+
+    <script>
+      // Remove any trailing slashes from the endpoint
+      const RAG_ENDPOINT = window.location.origin;
+
+      let isThinkingActive = false;
+      let thinkingDiv = null;
+      let thinkingContentDiv = null;
+      let assistantTextBuffer = ""; // store user-visible assistant text
+      let latestContext = null; // store context from the most recent chunk
+      let contextSet = false; // track if we've appended the context yet
+      let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
+      let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
+
+      const md = window.markdownit({ breaks: true });
+      const chatContainer = document.getElementById("chat-container");
+      const queryInput = document.getElementById("query-input");
+      let messageHistory = [];
+      let thinkingStartTime = null;
+
+      mermaid.initialize({ startOnLoad: true });
+
+      // Custom renderer for code fences (handles mermaid code blocks)
+      md.renderer.rules.fence = function (tokens, idx) {
+        const token = tokens[idx];
+        const code = token.content.trim();
+        if (token.info.trim() === "mermaid") {
+          return '<div class="mermaid">' + code + "</div>";
+        }
+        return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
+      };
+
+      // Updated helper to process a base64 image
+      function processBase64Image(base64String, type = "jpeg") {
+        base64String = base64String.trim();
+        if (base64String.startsWith("data:image")) {
+          return base64String;
+        }
+        try {
+          atob(base64String); // verify Base64
+          return `data:image/${type};base64,${base64String}`;
+        } catch (e) {
+          console.error("Invalid base64 string:", e);
+          return null;
+        }
+      }
+
+      // New helper: process message content (for both system and non-system messages)
+      function processMessageContent(content, images = []) {
+        let processedContent = "";
+        let normalLines = [];
+        let imageIndex = 0;
+
+        // Flush accumulated normal text
+        function flushNormalLines() {
+          if (normalLines.length) {
+            const joined = normalLines.join("\n").trim();
+            if (joined) {
+              try {
+                // Try to detect JSON and pretty-print it
+                const jsonObj = JSON.parse(joined);
+                processedContent += `<pre><code>${JSON.stringify(
+                  jsonObj,
+                  null,
+                  2
+                )}</code></pre>`;
+                console.log("Detected JSON content and formatted as code.");
+              } catch (e) {
+                // Not valid JSON; render as Markdown
+                processedContent += md.render(joined);
+              }
+            }
+            normalLines = [];
+          }
+        }
+
+        // Process each line for markers
+        const lines = content.split("\n");
+        lines.forEach((line) => {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith("[URI:")) {
+            flushNormalLines();
+            let uri = trimmedLine.slice(5, -1).trim();
+            processedContent += `<div class="uri">URI: ${uri}</div>`;
+          } else if (trimmedLine.startsWith("Source:")) {
+            flushNormalLines();
+            let source = trimmedLine.slice(7).trim();
+            processedContent += `<div class="source">Source: ${source}</div>`;
+          } else if (trimmedLine.startsWith("[IMAGE:")) {
+            flushNormalLines();
+            let imageType = trimmedLine.slice(7, -1).trim();
+            if (images && imageIndex < images.length) {
+              let imageUrl = processBase64Image(images[imageIndex], imageType);
+              if (imageUrl) {
+                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
+              }
               imageIndex++;
             }
-          });
+          } else {
+            normalLines.push(line);
+          }
+        });
+        flushNormalLines();
+        return processedContent;
+      }
 
-          systemMessage += `
+      // Replace the existing createContextSection with this updated version
+      function createContextSection(context) {
+        console.group("createContextSection");
+        console.log("Input context:", context);
+
+        if (!context?.length) {
+          console.log("No context provided, returning empty string");
+          console.groupEnd();
+          return "";
+        }
+
+        let regularMessages = "";
+        let systemMessage = "";
+        let lastUserMessage = "";
+
+        // Find the index of the last user message
+        const lastUserIndex = [...context]
+          .reverse()
+          .findIndex((msg) => msg.role === "user");
+        const lastMessageIndex =
+          lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+        console.log("Last user message index:", lastMessageIndex);
+
+        // Process non-system messages (except the last user message)
+        console.group("Processing regular messages");
+        context.forEach((msg, index) => {
+          if (msg.role !== "system" && index !== lastMessageIndex) {
+            console.group(`Message ${index} (${msg.role})`);
+            const roleClass = msg.role + "-message";
+            const processedContent = processMessageContent(
+              msg.content || "",
+              msg.images || []
+            );
+            regularMessages += `
               <div class="message ${roleClass}">
-                <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-            }:</strong>
                 <div class="chunk">${processedContent}</div>
               </div>
             `;
-        }
-      });
+            console.groupEnd();
+          }
+        });
+        console.groupEnd();
 
-      // the last user message
-      if (lastMessageIndex !== -1) {
-        const lastMsg = context[lastMessageIndex];
-        const roleClass = lastMsg.role + "-message";
-        lastUserMessage = `
+        // Process system messages
+        console.group("Processing system messages");
+        context.forEach((msg, index) => {
+          if (msg.role === "system") {
+            console.group(`System message ${index}`);
+            const roleClass = msg.role + "-message";
+            let systemContent = msg.content.replace(
+              /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
+              "ADDITIONAL CONTEXT:"
+            );
+            const processedContent = processMessageContent(
+              systemContent,
+              msg.images || []
+            );
+            systemMessage += `
+              <div class="message ${roleClass}">
+                <strong>${
+                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                }:</strong>
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
+            console.groupEnd();
+          }
+        });
+        console.groupEnd();
+
+        // Process the last user message separately
+        console.group("Processing last user message");
+        if (lastMessageIndex !== -1) {
+          const lastMsg = context[lastMessageIndex];
+          const roleClass = lastMsg.role + "-message";
+          const processedContent = processMessageContent(
+            lastMsg.content || "",
+            lastMsg.images || []
+          );
+          lastUserMessage = `
             <div class="message ${roleClass}">
-              <strong>${lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
-          }:</strong>
-              <div class="chunk">${md.render(lastMsg.content || "")}</div>
+              <strong>${
+                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
+              }:</strong>
+              <div class="chunk">${processedContent}</div>
             </div>
           `;
-      }
+        }
+        console.groupEnd();
 
-      return `
+        const result = `
           <div class="context-container">
             <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
             <div class="context-content">
               ${regularMessages}
-              ${regularMessages && systemMessage
-          ? '<div class="source-separator"></div>'
-          : ""
-        }
+              ${
+                regularMessages && systemMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
               ${systemMessage}
-              ${(regularMessages || systemMessage) && lastUserMessage
-          ? '<div class="source-separator"></div>'
-          : ""
-        }
+              ${
+                (regularMessages || systemMessage) && lastUserMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
               ${lastUserMessage}
             </div>
           </div>
         `;
-    }
 
-    function appendMessage(sender, content, context = null) {
-      const role =
-        sender.toLowerCase() === "user"
-          ? "user"
-          : sender.toLowerCase() === "system"
+        console.log("Final HTML length:", result.length);
+        console.groupEnd();
+        return result;
+      }
+
+      function appendMessage(sender, content, context = null) {
+        const role =
+          sender.toLowerCase() === "user"
+            ? "user"
+            : sender.toLowerCase() === "system"
             ? "system"
             : sender.toLowerCase() === "tool"
-              ? "tool"
-              : "assistant";
+            ? "tool"
+            : "assistant";
 
-      messageHistory.push({ role: role, content: content });
+        messageHistory.push({ role: role, content: content });
 
-      const messageDiv = document.createElement("div");
-      messageDiv.className = `message ${role}-message`;
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${role}-message`;
 
-      const mainContent =
-        sender === "User" ? md.utils.escapeHtml(content) : content;
-      const rendered = md.render(mainContent);
-      const contextSection =
-        role === "assistant" ? createContextSection(context) : "";
+        const mainContent =
+          sender === "User" ? md.utils.escapeHtml(content) : content;
+        const rendered = md.render(mainContent);
+        const contextSection =
+          role === "assistant" ? createContextSection(context) : "";
 
-      messageDiv.innerHTML = rendered + contextSection;
-      chatContainer.appendChild(messageDiv);
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-      window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: "smooth",
-      });
-
-      mermaid.init(undefined, document.querySelectorAll(".mermaid"));
-    }
-
-    window.toggleContext = function (toggleElement) {
-      const contextContent = toggleElement.nextElementSibling;
-      const isHidden =
-        contextContent.style.display === "none" ||
-        !contextContent.style.display;
-      contextContent.style.display = isHidden ? "block" : "none";
-      toggleElement.textContent = isHidden
-        ? "Hide Context ▼"
-        : "Show Context ◀";
-    };
-
-    async function sendQuery(endpoint = "/chat", tools_actor = false) {
-      const queryText = queryInput.value.trim();
-      if (!queryText) return;
-
-      appendMessage("User", queryText);
-      queryInput.value = "";
-      resizeTextarea();
-
-      const queryObject = {
-        // Remove the duplicate user message - just use messageHistory
-        messages: messageHistory,
-        model: "llama3.2",
-        stream: true,
-        tools_actor: tools_actor,
-      };
-
-      try {
-        const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(queryObject),
+        messageDiv.innerHTML = rendered + contextSection;
+        chatContainer.appendChild(messageDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: "smooth",
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+        mermaid.init(undefined, document.querySelectorAll(".mermaid"));
+      }
+
+      window.toggleContext = function (toggleElement) {
+        const contextContent = toggleElement.nextElementSibling;
+        const isHidden =
+          contextContent.style.display === "none" ||
+          !contextContent.style.display;
+        contextContent.style.display = isHidden ? "block" : "none";
+        toggleElement.textContent = isHidden
+          ? "Hide Context ▼"
+          : "Show Context ◀";
+      };
+
+      async function sendQuery(endpoint = "/chat", use_tools = false) {
+        const queryText = queryInput.value.trim();
+        if (!queryText) return;
+
+        appendMessage("User", queryText);
+        queryInput.value = "";
+        resizeTextarea();
+
+        // Start thinking animation immediately for /think endpoint
+        if (endpoint === "/think") {
+          thinkingDiv = createThinkingProcessContainer();
+          chatContainer.appendChild(thinkingDiv);
+          thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
+          thinkingStartTime = Date.now();
+          const thinkingText = thinkingDiv.querySelector(".thinking-text");
+          if (thinkingText) {
+            thinkingText.classList.remove("static");
+          }
+          isThinkingActive = true;
+        } else if (endpoint === "/chat") {
+          createOrUpdateAssistantMessage("");
         }
 
-        // We'll collect everything in a stream and process it
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        // reset for new answer
-        isThinkingActive = false;
-        thinkingDiv = null;
-        thinkingContentDiv = null;
+        // Reset state variables
         assistantTextBuffer = "";
         contextSet = false;
         latestContext = null;
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
+        const queryObject = {
+          // Remove the duplicate user message - just use messageHistory
+          messages: messageHistory,
+          model: "llama3.2",
+          stream: true,
+          use_tools: use_tools,
+        };
 
-          const chunk = decoder.decode(value);
-          buffer += chunk;
-
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const data = JSON.parse(line);
-
-              // Handle error responses
-              if (data.error) {
-                const errorDiv = document.createElement("div");
-                errorDiv.className = "message error-message";
-                errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
-                  data.error
-                )}`;
-                chatContainer.appendChild(errorDiv);
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-                return; // Exit early on error
-              }
-
-              processJsonLine(line);
-            } catch (e) {
-              console.error("Error processing JSON line:", e);
-              console.error("Raw line content:", line);
-            }
-          }
-        }
-
-        // leftover text after streaming
-        if (assistantTextBuffer) {
-          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-        }
-
-        // Stop the thinking animation if active
-        if (thinkingDiv) {
-          const thinkingText = thinkingDiv.querySelector(".thinking-text");
-          if (thinkingText) {
-            thinkingText.classList.add("static");
-          }
-        }
-
-        mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
-      } catch (error) {
-        console.error("Error:", error);
-        const errorDiv = document.createElement("div");
-        errorDiv.className = "message error-message";
-        errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
-          error.toString()
-        )}`;
-        chatContainer.appendChild(errorDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      }
-    }
-
-    function processJsonLine(json_line) {
-      const data = JSON.parse(json_line);
-
-      // If this chunk includes context, store it
-      if (data.context) {
-        latestContext = data.context;
-      }
-
-      if (!data.message?.content) {
-        // If there's no text, but we see done
-        if (data.done && assistantTextBuffer) {
-          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          // Move history update here to ensure it's captured
-          messageHistory.push({
-            role: "assistant",
-            content: assistantTextBuffer,
-            images: data.message?.images,
+        try {
+          const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(queryObject),
           });
-        }
-        return;
-      }
 
-      if (data.message.role === "system" || data.message.role === "tool") {
-        handleSpecialRole(data.message);
-        return;
-      }
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
 
-      // If it's an assistant chunk
-      if (data.message.role === "assistant") {
-        let chunk = data.message.content;
-        let idx = 0;
+          // We'll collect everything in a stream and process it
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-        while (idx < chunk.length) {
-          if (!isThinkingActive) {
-            // Look for <think> start
-            const openPos = chunk.indexOf("<think>", idx);
-            if (openPos === -1) {
-              // No <think>
-              const visiblePart = chunk.substring(idx);
-              assistantTextBuffer += visiblePart;
-              idx = chunk.length;
-            } else {
-              // Found <think>
-              assistantTextBuffer += chunk.substring(idx, openPos);
-              idx = openPos + 7; // move past <think>
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
 
-              if (!thinkingDiv) {
-                thinkingDiv = createThinkingProcessContainer();
-                chatContainer.appendChild(thinkingDiv);
-                thinkingContentDiv =
-                  thinkingDiv.querySelector(".thinking-content");
-                // Start timer when we first see <think>
-                thinkingStartTime = Date.now();
-                // Start animation
-                const thinkingText =
-                  thinkingDiv.querySelector(".thinking-text");
-                if (thinkingText) {
-                  thinkingText.classList.remove("static");
+            const chunk = decoder.decode(value);
+            buffer += chunk;
+
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const data = JSON.parse(line);
+
+                // Handle error responses
+                if (data.error) {
+                  const errorDiv = document.createElement("div");
+                  errorDiv.className = "message error-message";
+                  errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
+                    data.error
+                  )}`;
+                  chatContainer.appendChild(errorDiv);
+                  chatContainer.scrollTop = chatContainer.scrollHeight;
+                  return; // Exit early on error
                 }
-              }
-              isThinkingActive = true;
-            }
-          } else {
-            // We're inside <think>
-            const closePos = chunk.indexOf("</think>", idx);
-            if (closePos === -1) {
-              // no closing yet
-              const thoughtChunk = chunk.substring(idx);
-              appendThinkingChunk(thoughtChunk, thinkingContentDiv);
-              idx = chunk.length;
-            } else {
-              // found </think>
-              const thoughtChunk = chunk.substring(idx, closePos);
-              appendThinkingChunk(thoughtChunk, thinkingContentDiv);
-              idx = closePos + 8; // move past </think>
-              isThinkingActive = false;
 
-              // We just exited the think block,
-              // if we have any user-visible text accumulated,
-              // show it w/ context now
-              if (assistantTextBuffer.trim().length > 0) {
-                createOrUpdateAssistantMessage(
-                  assistantTextBuffer,
-                  latestContext
-                );
-              }
-
-              // Calculate thinking duration and finalize "Thinking..."
-              if (thinkingDiv && thinkingStartTime) {
-                const duration = (
-                  (Date.now() - thinkingStartTime) /
-                  1000
-                ).toFixed(1);
-                const thinkingText =
-                  thinkingDiv.querySelector(".thinking-text");
-                if (thinkingText) {
-                  thinkingText.textContent = `Thought for ${duration}s`;
-                  thinkingText.classList.add("static");
-                }
-                thinkingStartTime = null;
+                processJsonLine(line);
+              } catch (e) {
+                console.error("Error processing JSON line:", e);
+                console.error("Raw line content:", line);
               }
             }
           }
+
+          // leftover text after streaming
+          if (assistantTextBuffer) {
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+          }
+
+          // Stop the thinking animation if active
+          if (thinkingDiv) {
+            const thinkingText = thinkingDiv.querySelector(".thinking-text");
+            if (thinkingText) {
+              thinkingText.classList.add("static");
+            }
+          }
+
+          // 1) Remove typing indicator when done
+          const indicators = document.querySelectorAll(".typing-indicator");
+          indicators.forEach((indicator) => indicator.remove());
+
+          mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
+        } catch (error) {
+          console.error("Error:", error);
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
+            error.toString()
+          )}`;
+          chatContainer.appendChild(errorDiv);
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+      }
+
+      function processJsonLine(json_line) {
+        const data = JSON.parse(json_line);
+
+        // If this chunk includes context, store it
+        if (data.context) {
+          latestContext = data.context;
         }
 
-        // If we finished parsing the chunk
-        // and we're not in <think> mode,
-        // let's update partial user-facing text
-        if (!isThinkingActive && assistantTextBuffer.length > 0) {
-          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-        }
-
-        // If this chunk signals done - ensure history is updated even if no content
-        if (data.done) {
-          // Only push if we have content and it's not already added
-          if (
-            assistantTextBuffer &&
-            !messageHistory.some(
-              (msg) =>
-                msg.role === "assistant" &&
-                msg.content === assistantTextBuffer
-            )
-          ) {
+        if (!data.message?.content) {
+          // If there's no text, but we see done
+          if (data.done && assistantTextBuffer) {
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+            // Move history update here to ensure it's captured
             messageHistory.push({
               role: "assistant",
               content: assistantTextBuffer,
               images: data.message?.images,
             });
           }
-          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          assistantTextBuffer = "";
+          return;
+        }
+
+        if (data.message.role === "system" || data.message.role === "tool") {
+          handleSpecialRole(data.message);
+          return;
+        }
+
+        // If it's an assistant chunk
+        if (data.message.role === "assistant") {
+          let chunk = data.message.content;
+          let idx = 0;
+
+          while (idx < chunk.length) {
+            if (!isThinkingActive) {
+              // Look for <think> start
+              const openPos = chunk.indexOf("<think>", idx);
+              if (openPos === -1) {
+                // No <think>
+                const visiblePart = chunk.substring(idx);
+                assistantTextBuffer += visiblePart;
+                idx = chunk.length;
+              } else {
+                // Found <think> - only add text before it
+                const visiblePart = chunk.substring(idx, openPos);
+                if (visiblePart.trim()) {
+                  assistantTextBuffer += visiblePart;
+                }
+                idx = openPos + 7; // move past <think>
+
+                if (!thinkingDiv) {
+                  thinkingDiv = createThinkingProcessContainer();
+                  chatContainer.appendChild(thinkingDiv);
+                  thinkingContentDiv =
+                    thinkingDiv.querySelector(".thinking-content");
+                  thinkingStartTime = Date.now();
+                  const thinkingText =
+                    thinkingDiv.querySelector(".thinking-text");
+                  if (thinkingText) {
+                    thinkingText.classList.remove("static");
+                  }
+                }
+                isThinkingActive = true;
+              }
+            } else {
+              // We're inside <think>
+              const closePos = chunk.indexOf("</think>", idx);
+              if (closePos === -1) {
+                // no closing yet
+                const thoughtChunk = chunk.substring(idx);
+                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                idx = chunk.length;
+              } else {
+                // found </think> - only add content before it
+                const thoughtChunk = chunk.substring(idx, closePos);
+                if (thoughtChunk.trim()) {
+                  appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+                }
+                idx = closePos + 8; // move past </think>
+                isThinkingActive = false;
+
+                // Show accumulated user-visible text with context
+                if (assistantTextBuffer.trim().length > 0) {
+                  createOrUpdateAssistantMessage(
+                    assistantTextBuffer,
+                    latestContext
+                  );
+                }
+
+                // Calculate thinking duration and finalize "Thinking..."
+                if (thinkingDiv && thinkingStartTime) {
+                  const duration = (
+                    (Date.now() - thinkingStartTime) /
+                    1000
+                  ).toFixed(1);
+                  const thinkingText =
+                    thinkingDiv.querySelector(".thinking-text");
+                  if (thinkingText) {
+                    thinkingText.textContent = `Thought for ${duration}s`;
+                    thinkingText.classList.add("static");
+                  }
+                  thinkingStartTime = null;
+                }
+              }
+            }
+          }
+
+          // If we finished parsing the chunk
+          // and we're not in <think> mode,
+          // let's update partial user-facing text
+          if (!isThinkingActive && assistantTextBuffer.length > 0) {
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+          }
+
+          // If this chunk signals done - ensure history is updated even if no content
+          if (data.done) {
+            // Remove the typing indicator on completion
+            const indicators = document.querySelectorAll(".typing-indicator");
+            indicators.forEach((indicator) => indicator.remove());
+
+            // Only push if we have content and it's not already added
+            if (
+              assistantTextBuffer &&
+              !messageHistory.some(
+                (msg) =>
+                  msg.role === "assistant" &&
+                  msg.content === assistantTextBuffer
+              )
+            ) {
+              messageHistory.push({
+                role: "assistant",
+                content: assistantTextBuffer,
+                images: data.message?.images,
+              });
+            }
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+            assistantTextBuffer = "";
+          }
         }
       }
-    }
 
-    function handleSpecialRole(msg) {
-      const lastMessageDiv = chatContainer.lastElementChild;
-      const lastMessageRole =
-        lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+      function handleSpecialRole(msg) {
+        const lastMessageDiv = chatContainer.lastElementChild;
+        const lastMessageRole =
+          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
-      if (msg.role === "tool") {
-        // parse the content as JSON
-        const toolData = JSON.parse(msg.content);
-        const specialMessageDiv = document.createElement("div");
-        specialMessageDiv.className = "message tool-message";
-        const formattedContent = `
+        if (msg.role === "tool") {
+          // If the last message is an empty assistant message with typing indicator, remove it
+          if (lastMessageRole === "assistant") {
+            const assistantContent = lastMessageDiv.querySelector(
+              "div:not(.context-container):not(.thinking-process)"
+            );
+            if (assistantContent && !assistantContent.textContent.trim()) {
+              lastMessageDiv.remove();
+            }
+          }
+
+          // parse the content as JSON
+          const toolData = JSON.parse(msg.content);
+          const specialMessageDiv = document.createElement("div");
+          specialMessageDiv.className = "message tool-message";
+          const formattedContent = `
             <div class="tool-toggle">▶</div>
             <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
             <div class="tool-content">
               <div class="tool-details">
                 <strong>Arguments:</strong>
                 <pre><code>${JSON.stringify(
-          toolData.call.function.arguments,
-          null,
-          2
-        )}</code></pre>
+                  toolData.call.function.arguments,
+                  null,
+                  2
+                )}</code></pre>
                 <strong>Response:</strong>
                 <pre><code>${JSON.stringify(
-          toolData.response,
-          null,
-          2
-        )}</code></pre>
+                  toolData.response,
+                  null,
+                  2
+                )}</code></pre>
               </div>
             </div>
           `;
-        specialMessageDiv.innerHTML = formattedContent;
-        chatContainer.appendChild(specialMessageDiv);
-        initializeToolToggles(specialMessageDiv);
-      } else {
-        // system
-        if (lastMessageRole === "system") {
-          // append to last system
-          lastMessageDiv.innerHTML +=
-            '<div class="source-separator"></div>' + md.render(msg.content);
+          specialMessageDiv.innerHTML = formattedContent;
+          chatContainer.appendChild(specialMessageDiv);
+          initializeToolToggles(specialMessageDiv);
         } else {
-          const systemDiv = document.createElement("div");
-          systemDiv.className = "message system-message";
-          systemDiv.innerHTML = md.render(msg.content);
-          chatContainer.appendChild(systemDiv);
+          // system
+          if (lastMessageRole === "system") {
+            // append to last system
+            lastMessageDiv.innerHTML +=
+              '<div class="source-separator"></div>' + md.render(msg.content);
+          } else {
+            const systemDiv = document.createElement("div");
+            systemDiv.className = "message system-message";
+            systemDiv.innerHTML = md.render(msg.content);
+            chatContainer.appendChild(systemDiv);
+          }
         }
       }
-    }
 
-    function createOrUpdateAssistantMessage(visibleText, context = null) {
-      const lastMessageDiv = chatContainer.lastElementChild;
-      const lastMessageRole =
-        lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+      function createOrUpdateAssistantMessage(visibleText, context = null) {
+        const lastMessageDiv = chatContainer.lastElementChild;
+        const lastMessageRole =
+          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
-      let assistantBlock;
-      let assistantContent;
+        let assistantBlock;
+        let assistantContent;
 
-      if (lastMessageRole === "assistant") {
-        // Reuse the existing assistant div
-        assistantBlock = lastMessageDiv;
-        assistantContent = assistantBlock.querySelector(
-          "div:not(.context-container):not(.thinking-process)"
-        );
-        if (!assistantContent) {
+        if (lastMessageRole === "assistant") {
+          assistantBlock = lastMessageDiv;
+          assistantContent = assistantBlock.querySelector(
+            "div:not(.context-container):not(.thinking-process)"
+          );
+          if (!assistantContent) {
+            assistantContent = document.createElement("div");
+            assistantBlock.appendChild(assistantContent);
+          }
+        } else {
+          assistantBlock = document.createElement("div");
+          assistantBlock.className = "message assistant-message";
           assistantContent = document.createElement("div");
           assistantBlock.appendChild(assistantContent);
+          chatContainer.appendChild(assistantBlock);
         }
-      } else {
-        // Create a new assistant div
-        assistantBlock = document.createElement("div");
-        assistantBlock.className = "message assistant-message";
-        assistantContent = document.createElement("div");
-        assistantBlock.appendChild(assistantContent);
-        chatContainer.appendChild(assistantBlock);
+
+        // Remove any existing typing indicators
+        const existingIndicators =
+          assistantContent.querySelectorAll(".typing-indicator");
+        existingIndicators.forEach((indicator) => indicator.remove());
+
+        assistantContent.innerHTML = md.render(visibleText || "");
+        const typingIndicator = document.createElement("span");
+        typingIndicator.className = "typing-indicator";
+
+        // Find the last actual content element
+        let lastContentElement = assistantContent;
+        const walker = document.createTreeWalker(
+          assistantContent,
+          NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function (node) {
+              // Skip empty text nodes and typing indicators
+              if (
+                node.nodeType === Node.TEXT_NODE &&
+                !node.textContent.trim()
+              ) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              if (node.classList?.contains("typing-indicator")) {
+                return NodeFilter.FILTER_SKIP;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            },
+          }
+        );
+
+        while (walker.nextNode()) {
+          lastContentElement = walker.currentNode;
+        }
+
+        // If the last element is a block element (like a list), append to it
+        // Otherwise append to its parent
+        if (
+          lastContentElement.nodeType === Node.TEXT_NODE ||
+          getComputedStyle(lastContentElement).display === "inline"
+        ) {
+          lastContentElement.parentNode.appendChild(typingIndicator);
+        } else {
+          lastContentElement.appendChild(typingIndicator);
+        }
+
+        // Handle context if needed
+        if (!contextSet && context?.length) {
+          const contextSection = createContextSection(context);
+          if (contextSection) {
+            const contextDiv = document.createElement("div");
+            contextDiv.innerHTML = contextSection;
+            assistantBlock.appendChild(contextDiv);
+          }
+          contextSet = true;
+        }
+
+        chatContainer.scrollTop = chatContainer.scrollHeight;
       }
 
-      // Render the user-visible text
-      assistantContent.innerHTML = md.render(visibleText || "");
-
-      // If we haven't shown context yet, but we have some context
-      if (!contextSet && context?.length) {
-        const contextSection = createContextSection(context);
-        if (contextSection) {
-          const contextDiv = document.createElement("div");
-          contextDiv.innerHTML = contextSection;
-          assistantBlock.appendChild(contextDiv);
-        }
-        contextSet = true;
-      }
-
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-
-    function createThinkingProcessContainer() {
-      const div = document.createElement("div");
-      div.className = "thinking-process";
-      div.innerHTML = `
+      function createThinkingProcessContainer() {
+        const div = document.createElement("div");
+        div.className = "thinking-process";
+        div.innerHTML = `
           <div class="thinking-header" onclick="toggleThinking(this)">
             <span class="thinking-text">Thinking...</span>
           </div>
           <div class="thinking-content"></div>
         `;
-      return div;
-    }
+        return div;
+      }
 
-    function appendThinkingChunk(text, contentDiv) {
-      if (!contentDiv) return;
-      contentDiv.textContent += text;
-    }
+      function appendThinkingChunk(text, contentDiv) {
+        if (!contentDiv) return;
+        // Filter out any <think> or </think> tags before displaying
+        const cleanedText = text.replace(/<\/?think>/g, "");
+        contentDiv.textContent += cleanedText;
+      }
 
-    window.toggleThinking = function (header) {
-      const content = header.nextElementSibling;
-      content.classList.toggle("visible");
-    };
+      window.toggleThinking = function (header) {
+        const content = header.nextElementSibling;
+        content.classList.toggle("visible");
+      };
 
-    function initializeToolToggles(container) {
-      container.querySelectorAll(".tool-toggle").forEach((toggle) => {
-        if (!toggle.hasListener) {
-          toggle.addEventListener("click", function () {
-            const content = this.parentElement.querySelector(".tool-content");
-            const isHidden =
-              content.style.display === "none" || !content.style.display;
-            content.style.display = isHidden ? "block" : "none";
-            this.textContent = isHidden ? "▼" : "▶";
-          });
-          toggle.hasListener = true;
+      function initializeToolToggles(container) {
+        container.querySelectorAll(".tool-toggle").forEach((toggle) => {
+          if (!toggle.hasListener) {
+            toggle.addEventListener("click", function () {
+              const content = this.parentElement.querySelector(".tool-content");
+              const isHidden =
+                content.style.display === "none" || !content.style.display;
+              content.style.display = isHidden ? "block" : "none";
+              this.textContent = isHidden ? "▼" : "▶";
+            });
+            toggle.hasListener = true;
+          }
+        });
+      }
+
+      function resizeTextarea() {
+        queryInput.style.height = "auto";
+        queryInput.style.height = queryInput.scrollHeight + "px";
+      }
+
+      queryInput.addEventListener("input", resizeTextarea);
+
+      // Keyboard shortcuts
+      queryInput.addEventListener("keydown", async (e) => {
+        if (e.key === "Enter") {
+          if (e.shiftKey) {
+            resizeTextarea();
+            return;
+          }
+
+          if (e.ctrlKey) {
+            e.preventDefault();
+            toolsEnabled = !toolsEnabled;
+            updateToolButton();
+            return;
+          }
+
+          if (e.altKey) {
+            e.preventDefault();
+            thinkEnabled = !thinkEnabled;
+            updateThinkButton();
+            return;
+          }
+
+          e.preventDefault();
+          const endpoint = thinkEnabled ? "/think" : "/chat";
+          await sendQuery(endpoint, toolsEnabled);
         }
       });
-    }
 
-    function processBase64Image(base64String) {
-      base64String = base64String.trim();
-      if (base64String.startsWith("data:image")) {
-        return base64String;
+      document.getElementById("send-button").addEventListener("click", () => {
+        toolsEnabled = !toolsEnabled;
+        updateToolButton();
+      });
+
+      document.getElementById("think-button").addEventListener("click", () => {
+        thinkEnabled = !thinkEnabled;
+        updateThinkButton();
+      });
+
+      function updateToolButton() {
+        const toolButton = document.getElementById("send-button");
+        toolButton.classList.toggle("active", toolsEnabled);
+        toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
+        localStorage.setItem("toolsEnabled", toolsEnabled);
       }
-      try {
-        atob(base64String); // verify Base64
-        return `data:image/jpeg;base64,${base64String}`;
-      } catch (e) {
-        console.error("Invalid base64 string:", e);
-        return null;
+
+      function updateThinkButton() {
+        const thinkButton = document.getElementById("think-button");
+        thinkButton.classList.toggle("active", thinkEnabled);
+        thinkButton.title = thinkEnabled
+          ? "Think mode enabled"
+          : "Think mode disabled";
+        localStorage.setItem("thinkEnabled", thinkEnabled);
       }
-    }
 
-    function resizeTextarea() {
-      queryInput.style.height = "auto";
-      queryInput.style.height = queryInput.scrollHeight + "px";
-    }
-
-    queryInput.addEventListener("input", resizeTextarea);
-
-    // Keyboard shortcuts
-    queryInput.addEventListener("keydown", async (e) => {
-      if (e.key === "Enter") {
-        if (e.shiftKey) {
-          resizeTextarea();
-          return;
-        }
-
-        if (e.ctrlKey) {
-          e.preventDefault();
-          toolsEnabled = !toolsEnabled;
-          updateToolButton();
-          return;
-        }
-
-        if (e.altKey) {
-          e.preventDefault();
-          thinkEnabled = !thinkEnabled;
-          updateThinkButton();
-          return;
-        }
-
-        e.preventDefault();
-        const endpoint = thinkEnabled ? "/think" : "/chat";
-        await sendQuery(endpoint, toolsEnabled);
-      }
-    });
-
-    document.getElementById("send-button").addEventListener("click", () => {
-      toolsEnabled = !toolsEnabled;
-      updateToolButton();
-    });
-
-    document.getElementById("think-button").addEventListener("click", () => {
-      thinkEnabled = !thinkEnabled;
-      updateThinkButton();
-    });
-
-    function updateToolButton() {
-      const toolButton = document.getElementById("send-button");
-      toolButton.classList.toggle("active", toolsEnabled);
-      toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
-    }
-
-    function updateThinkButton() {
-      const thinkButton = document.getElementById("think-button");
-      thinkButton.classList.toggle("active", thinkEnabled);
-      thinkButton.title = thinkEnabled
-        ? "Think mode enabled"
-        : "Think mode disabled";
-    }
-  </script>
-</body>
-
+      // Update the button states on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        updateToolButton();
+        updateThinkButton();
+      });
+    </script>
+  </body>
 </html>
