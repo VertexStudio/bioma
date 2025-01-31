@@ -16,7 +16,9 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
-pub struct ToolClient {
+/// A simple connection container for a spawned ModelContextProtocol client actor.
+/// No methods are attached; use the free functions below instead.
+pub struct ToolConnection {
     pub hosting: bool,
     pub server: ServerConfig,
     pub client_id: ActorId,
@@ -24,61 +26,65 @@ pub struct ToolClient {
     pub tools: Vec<ToolInfo>,
 }
 
-impl ToolClient {
-    pub async fn call(&self, user: &ActorContext<UserActor>, tool_call: &ToolCall) -> Result<CallToolResult> {
-        let args: BTreeMap<String, Value> = tool_call
-            .function
-            .arguments
-            .as_object()
-            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default();
-        let request = CallToolRequestParams { name: tool_call.function.name.clone(), arguments: Some(args) };
-        let response = user
-            .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
-                CallTool(request),
-                &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
-            )
-            .await?;
-        Ok(response)
-    }
-
-    pub async fn list_tools(&self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
-        let list_tools: ListToolsResult = user
-            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
-                ListTools(None),
-                &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
-            )
-            .await?;
-        info!("Tools from {} ({})", self.server.name, list_tools.tools.len());
-        for tool in &list_tools.tools {
-            info!("├─ {}", tool.name);
-        }
-        Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
-    }
-
-    pub async fn health(&self, user: &ActorContext<UserActor>) -> Result<bool> {
-        let health = user.check_actor_health(&self.client_id).await?;
-        Ok(health)
-    }
+/// Free function to call a tool using the provided actor client_id.
+pub async fn call(user: &ActorContext<UserActor>, client_id: &ActorId, tool_call: &ToolCall) -> Result<CallToolResult> {
+    let args: BTreeMap<String, Value> = tool_call
+        .function
+        .arguments
+        .as_object()
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    let request = CallToolRequestParams { name: tool_call.function.name.clone(), arguments: Some(args) };
+    let response = user
+        .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
+            CallTool(request),
+            client_id,
+            SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
+        )
+        .await?;
+    Ok(response)
 }
 
+/// Free function to list tools via the provided actor client_id.
+/// The server config is used here just for logging.
+pub async fn list_tools(user: &ActorContext<UserActor>, client_id: &ActorId) -> Result<Vec<ToolInfo>> {
+    let list_tools: ListToolsResult = user
+        .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+            ListTools(None),
+            client_id,
+            SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
+        )
+        .await?;
+    info!("Tools ({})", list_tools.tools.len());
+    for tool in &list_tools.tools {
+        info!("├─ {}", tool.name);
+    }
+    Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+}
+
+/// Free function to check the health of the actor identified by client_id.
+pub async fn health(user: &ActorContext<UserActor>, client_id: &ActorId) -> Result<bool> {
+    user.check_actor_health(client_id).await.map_err(|_| anyhow::anyhow!("Actor health check failed"))
+}
+
+/// Hub for managing multiple tool connections.
+/// This now stores ToolConnection instances and uses the free functions above.
 pub struct ToolsHub {
-    pub clients: Vec<ToolClient>,
+    pub connections: Vec<ToolConnection>,
 }
 
 impl ToolsHub {
     pub fn new() -> Self {
-        Self { clients: vec![] }
+        Self { connections: vec![] }
     }
 
+    /// Initialize/spawn a ModelContextProtocol client actor and add its connection.
     pub async fn add_tool(&mut self, engine: &Engine, config: ClientConfig, prefix: String) -> Result<()> {
         let hosting = config.host;
         let server = config.server;
         let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
-        // If hosting, spawn client, which will spawn and host a ModelContextProtocol server
-        let client_handle = if config.host {
+        // If hosting, spawn the client actor which will in turn spawn and host a ModelContextProtocol server.
+        let client_handle = if hosting {
             debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
             let (mut client_ctx, mut client_actor) = Actor::spawn(
                 engine.clone(),
@@ -86,9 +92,7 @@ impl ToolsHub {
                 ModelContextProtocolClientActor::new(server.clone()),
                 SpawnOptions::builder()
                     .exists(SpawnExistsOptions::Reset)
-                    .health_config(
-                        HealthConfig::builder().update_interval(std::time::Duration::from_secs(1).into()).build(),
-                    )
+                    .health_config(HealthConfig::builder().update_interval(Duration::from_secs(1).into()).build())
                     .build(),
             )
             .await?;
@@ -101,29 +105,37 @@ impl ToolsHub {
         } else {
             None
         };
-        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
+        self.connections.push(ToolConnection {
+            hosting,
+            server,
+            client_id,
+            _client_handle: client_handle,
+            tools: vec![],
+        });
         Ok(())
     }
 
-    pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
-        for client in &self.clients {
-            for tool in &client.tools {
+    /// Get a cached tool by name from one of the connections.
+    pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolConnection)> {
+        for conn in &self.connections {
+            for tool in &conn.tools {
                 if tool.name() == tool_name {
-                    return Some((tool.clone(), client));
+                    return Some((tool.clone(), conn));
                 }
             }
         }
         None
     }
 
+    /// Retrieve tools from all connections, using a cache if available.
     pub async fn list_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
         let mut all_tools = Vec::new();
-        for client in &mut self.clients {
-            // Fetch tools if not cached
-            if client.tools.is_empty() {
-                match client.list_tools(user).await {
+        for conn in &mut self.connections {
+            // Fetch tools if not cached.
+            if conn.tools.is_empty() {
+                match list_tools(user, &conn.client_id).await {
                     Ok(tools) => {
-                        client.tools = tools.clone();
+                        conn.tools = tools.clone();
                         all_tools.extend(tools);
                     }
                     Err(e) => {
@@ -132,24 +144,24 @@ impl ToolsHub {
                     }
                 }
             } else {
-                // Use cached tools
-                if client.health(user).await? {
-                    all_tools.extend(client.tools.clone());
+                // Use cached tools if the connection is healthy.
+                if health(user, &conn.client_id).await? {
+                    all_tools.extend(conn.tools.clone());
                 } else {
-                    error!("Client {} is unhealthy, skipping tools", client.client_id);
+                    error!("Client {} is unhealthy, skipping tools", conn.client_id);
                 }
             }
         }
         Ok(all_tools)
     }
 
-    // Force refresh the cache if needed
+    /// Force a refresh of all tools, updating the cache.
     pub async fn refresh_tools(&mut self, user: &ActorContext<UserActor>) -> Result<Vec<ToolInfo>> {
         let mut all_tools = Vec::new();
-        for client in &mut self.clients {
-            match client.list_tools(user).await {
+        for conn in &mut self.connections {
+            match list_tools(user, &conn.client_id).await {
                 Ok(tools) => {
-                    client.tools = tools.clone();
+                    conn.tools = tools.clone();
                     all_tools.extend(tools);
                 }
                 Err(e) => error!("Failed to fetch tools: {}", e),
@@ -175,9 +187,9 @@ fn convert_to_root_schema(input: ToolInputSchema) -> Result<RootSchema> {
 
 fn convert_schema_object(input: ToolInputSchema) -> Result<SchemaObject> {
     let mut schema_obj = SchemaObject::default();
-    // Set instance type as object
+    // Set instance type as object.
     schema_obj.instance_type = Some(InstanceType::Object.into());
-    // Convert properties
+    // Convert properties.
     if let Some(props) = input.properties {
         let converted_props = convert_properties(props)?;
         schema_obj.object = Some(Box::new(ObjectValidation {
@@ -293,11 +305,11 @@ fn convert_nested_properties(props: Map<String, Value>) -> Result<Map<String, Sc
 
     for (key, value) in props {
         if let Value::Object(prop_obj) = value {
-            // Convert the full property object, not just the type
+            // Convert the full property object, not just the type.
             let prop_map: BTreeMap<String, Value> = prop_obj.into_iter().collect();
             converted.insert(key, Schema::Object(convert_property(prop_map)?));
         } else {
-            // Handle case where value might be a direct type specification
+            // Handle case where value might be a direct type specification.
             let prop_map: BTreeMap<String, Value> = BTreeMap::from_iter([("type".to_string(), value)]);
             converted.insert(key, Schema::Object(convert_property(prop_map)?));
         }

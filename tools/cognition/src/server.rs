@@ -14,8 +14,7 @@ use clap::Parser;
 use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
-    },
-    ChatResponse, ToolsHub, UserActor,
+    }, tool, ChatResponse, ToolsHub, UserActor
 };
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
@@ -534,7 +533,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
                 // Get available tools
                 let tools =
-                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+                    if body.use_tools { tool::list_tools(&user_actor, &data.chat).await } else { Ok(vec![]) };
                 let tools = match tools {
                     Ok(tools) => tools,
                     Err(e) => {
@@ -553,7 +552,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     &data.chat,
                     &conversation,
                     &tools,
-                    data.tools.clone(),
                     chat_with_tools_tx,
                     body.format.clone(),
                     body.stream,

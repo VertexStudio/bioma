@@ -147,10 +147,16 @@ pub struct ChatQueryRequestSchema {
     pub tools: Vec<ToolInfoSchema>,
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
+    #[serde(default = "default_tool_actors")]
+    pub tool_actors: Vec<String>,
 }
 
 fn default_chat_stream() -> bool {
     true
+}
+
+fn default_tool_actors() -> Vec<String> {
+    vec!["rag/bioma-tool".to_string()]
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
