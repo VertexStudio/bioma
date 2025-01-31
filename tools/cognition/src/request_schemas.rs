@@ -123,41 +123,6 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 // /ask Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({
-    "model": "llama3.2",
-    "messages": [
-        {
-            "role": "user",
-            "content": "Tell me about Puerto Rico."
-        }
-    ],
-    "format": {
-        "title": "PuertoRicoInfo",
-        "type": "object",
-        "required": [
-            "name",
-            "capital",
-            "languages"
-        ],
-        "properties": {
-            "name": {
-                "description": "Name of the territory",
-                "type": "string"
-            },
-            "capital": {
-                "description": "Capital city",
-                "type": "string"
-            },
-            "languages": {
-                "description": "Official languages spoken",
-                "type": "array",
-                "items": {
-                    "type": "string"
-                }
-            }
-        }
-    }
-}))]
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,

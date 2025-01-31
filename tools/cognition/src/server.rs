@@ -837,7 +837,43 @@ struct AskResponse {
     post,
     path = "/ask",
     description = "Generates a chat response. Specific response format can be specified.",
-    request_body = AskQueryRequestSchema,
+    request_body(content = AskQueryRequestSchema, examples(
+        ("Basic" = (summary = "Basic", value = json!({
+            "model": "llama3.2",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Tell me about Puerto Rico."
+                }
+            ],
+            "format": {
+                "title": "PuertoRicoInfo",
+                "type": "object",
+                "required": [
+                    "name",
+                    "capital",
+                    "languages"
+                ],
+                "properties": {
+                    "name": {
+                        "description": "Name of the territory",
+                        "type": "string"
+                    },
+                    "capital": {
+                        "description": "Capital city",
+                        "type": "string"
+                    },
+                    "languages": {
+                        "description": "Official languages spoken",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }))),
+    )), 
     responses(
         (status = 200, description = "Ok"),
     )
