@@ -212,14 +212,6 @@ pub enum TruncationDirectionRequestSchema {
     Right,
 }
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-#[schema(example = json!({
-    "query": "What is Deep Learning?",
-    "texts": [
-        "Deep Learning is learning under water",
-        "Deep learning is a branch of machine learning"
-    ],
-    "raw_scores": false
-}))]
 pub struct RankTextsRequestSchema {
     pub query: String,
     pub raw_scores: Option<bool>,
