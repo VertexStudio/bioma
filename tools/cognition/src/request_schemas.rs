@@ -4,6 +4,7 @@ use bioma_llm::{
     prelude::{ChatMessage, DeleteSource, IndexGlobs, RetrieveContext, RetrieveQuery},
     rerank::{RankTexts, TruncationDirection},
 };
+use ollama_rs::generation::tools::ToolInfo;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -200,6 +201,8 @@ pub struct ChatQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub use_tools: bool,
+    #[serde(default)]
+    pub tools: Vec<ToolInfoSchema>,
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
@@ -219,6 +222,8 @@ pub struct ThinkQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub use_tools: bool,
+    #[serde(default)]
+    pub tools: Vec<ToolInfoSchema>,
 }
 
 // /delete_resource Endpoint Schemas
@@ -323,4 +328,36 @@ pub struct UploadRequestSchema {
     #[multipart(rename = "metadata")]
     #[schema(value_type = UploadMetadata)]
     pub metadata: MpJson<UploadMetadata>,
+}
+
+// Add these new type definitions that implement ToSchema
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub enum ToolTypeSchema {
+    #[serde(rename = "function")]
+    Function,
+}
+
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub struct ToolFunctionInfoSchema {
+    pub name: String,
+    pub description: String,
+    #[schema(value_type = Schema::Object)]
+    pub parameters: schemars::schema::RootSchema,
+}
+
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub struct ToolInfoSchema {
+    #[serde(rename = "type")]
+    pub tool_type: ToolTypeSchema,
+    pub function: ToolFunctionInfoSchema,
+}
+
+impl From<ToolInfoSchema> for ToolInfo {
+    fn from(schema: ToolInfoSchema) -> Self {
+        ToolInfo::from_schema(
+            schema.function.name.into(),
+            schema.function.description.into(),
+            schema.function.parameters,
+        )
+    }
 }
