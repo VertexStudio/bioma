@@ -1,16 +1,18 @@
 use actix_web::web::Json;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use bioma_tool::client::ModelContextProtocolClientActor;
 use ollama_rs::generation::{
     chat::ChatMessageResponse,
     tools::{ToolCall, ToolInfo},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::Mutex;
 pub use tool::ToolsHub;
+use tool::{parse_tool_info, ToolClient};
 use tracing::{debug, error, info};
 
 pub use user::UserActor;
@@ -192,4 +194,74 @@ async fn chat_tool_call(
     };
 
     Ok(response)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CognitionClientActor {
+    pub tools_clients: Vec<ToolClient>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListTools;
+
+impl Message<ListTools> for CognitionClientActor {
+    type Response = Vec<ToolInfo>;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &ListTools) -> Result<(), Self::Error> {
+        info!("{} Received message: {:?}", ctx.id(), msg);
+        let mut all_tools = Vec::new();
+        for client in &mut self.tools_clients {
+            // Fetch tools if not cached
+            if client.tools.is_empty() {
+                match ctx
+                    .send_and_wait_reply::<ModelContextProtocolClientActor, bioma_tool::client::ListTools>(
+                        bioma_tool::client::ListTools(None),
+                        &client.client_id,
+                        SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
+                    )
+                    .await
+                {
+                    Ok(tools) => {
+                        let tools: Vec<ToolInfo> = tools.tools.into_iter().map(parse_tool_info).collect();
+                        client.tools = tools.clone();
+                        all_tools.extend(tools);
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch tools: {}", e);
+                        continue;
+                    }
+                }
+            } else {
+                // Use cached tools
+                if ctx.check_actor_health(&client.client_id).await? {
+                    all_tools.extend(client.tools.clone());
+                } else {
+                    error!("Client {} is unhealthy, skipping tools", client.client_id);
+                }
+            }
+        }
+        ctx.reply(all_tools).await?;
+        Ok(())
+    }
+}
+
+impl Actor for CognitionClientActor {
+    type Error = SystemActorError;
+
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
+        info!("{} Waiting for messages of type {}", ctx.id(), std::any::type_name::<ToolClient>());
+
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(tool_client) = frame.is::<ListTools>() {
+                let response = self.reply(ctx, &tool_client, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+        info!("{} Finished", ctx.id());
+        Ok(())
+    }
 }

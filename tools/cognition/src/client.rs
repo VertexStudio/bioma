@@ -3,10 +3,8 @@ use std::path::PathBuf;
 use bioma_actor::prelude::*;
 use bioma_tool::client::ModelContextProtocolClientActor;
 use clap::Parser;
-use cognition::tool::ToolClient;
+use cognition::{tool::ToolClient, CognitionClientActor};
 use config::{Args as ConfigArgs, Config};
-use ollama_rs::generation::tools::ToolInfo;
-use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 pub mod config;
@@ -20,45 +18,6 @@ pub struct Args {
 
     /// Path to the config file
     pub config: Option<PathBuf>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CognitionClientActor {
-    tools_clients: Vec<ToolClient>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ListTools;
-
-impl Message<ListTools> for CognitionClientActor {
-    type Response = Vec<ToolInfo>;
-
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &ListTools) -> Result<(), Self::Error> {
-        info!("{} Received message: {:?}", ctx.id(), msg);
-        // ctx.reply(self.tools_clients.clone()).await?;
-        Ok(())
-    }
-}
-
-impl Actor for CognitionClientActor {
-    type Error = SystemActorError;
-
-    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
-        info!("{} Started", ctx.id());
-        info!("{} Waiting for messages of type {}", ctx.id(), std::any::type_name::<ToolClient>());
-
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(tool_client) = frame.is::<ListTools>() {
-                let response = self.reply(ctx, &tool_client, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            }
-        }
-        info!("{} Finished", ctx.id());
-        Ok(())
-    }
 }
 
 #[tokio::main]
@@ -103,7 +62,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .build(),
             )
             .await?;
+
             let client_id_spawn = client_id.clone();
+
             Some(tokio::spawn(async move {
                 if let Err(e) = client_actor.start(&mut client_ctx).await {
                     error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
@@ -114,7 +75,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
     }
-    // tools_hub.list_tools(&tools_user).await?; // TODO
+
+    // Create the CognitionClient actor
+
+    let cognition_client_id = ActorId::of::<CognitionClientActor>(args.tools_actor);
+    let (mut cognition_client_ctx, mut cognition_client_actor) = Actor::spawn(
+        engine.clone(),
+        cognition_client_id.clone(),
+        CognitionClientActor { tools_clients: clients },
+        SpawnOptions::builder()
+            .exists(SpawnExistsOptions::Reset)
+            .health_config(HealthConfig::builder().update_interval(std::time::Duration::from_secs(1).into()).build())
+            .build(),
+    )
+    .await?;
+
+    let cognition_client_handle = tokio::spawn(async move {
+        if let Err(e) = cognition_client_actor.start(&mut cognition_client_ctx).await {
+            error!("CognitionClient actor error: {}", e);
+        }
+    });
+
+    // Wait for the CognitionClient actor to finish
+    let _ = cognition_client_handle.await;
 
     // Wait for interrupt signal
     tokio::signal::ctrl_c().await?;
