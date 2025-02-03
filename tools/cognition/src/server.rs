@@ -10,12 +10,12 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
+use bioma_tool::client::ListTools;
 use clap::Parser;
 use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
-    },
-    ChatResponse, ToolsHub, UserActor,
+    }, user, ChatResponse, ToolsHub, UserActor
 };
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
@@ -533,8 +533,13 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 }
 
                 // Get available tools
-                let tools =
-                    if body.use_tools { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+                let tools = user_actor
+                    .send_and_wait_reply::<ToolsHub, ListTools>(
+                        ListTools(None),
+                        &data.tools,
+                        SendOptions::default(),
+                    )
+                    .await?;
                 let tools = match tools {
                     Ok(tools) => tools,
                     Err(e) => {

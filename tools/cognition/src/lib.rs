@@ -1,6 +1,7 @@
 use actix_web::web::Json;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use bioma_tool::client::CallTool;
 use ollama_rs::generation::{
     chat::ChatMessageResponse,
     tools::{ToolCall, ToolInfo},
@@ -112,7 +113,13 @@ pub async fn chat_with_tools(
                     info!("Tool calls: {:#?}", message_response.message.tool_calls);
                     for tool_call in message_response.message.tool_calls.iter() {
                         // Call the tool
-                        let tool_response = chat_tool_call(user_actor, &tool_call, tools_hub.clone(), tx.clone()).await;
+                        let tool_response = user_actor
+                            .send_and_wait_reply::<ToolsHub, CallTool>(
+                                CallTool(tool_call.clone()),
+                                &tool_call.function.name,
+                                SendOptions::default(),
+                            )
+                            .await?;
                         match tool_response {
                             Ok(tool_response) => {
                                 messages
