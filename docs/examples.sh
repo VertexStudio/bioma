@@ -170,5 +170,15 @@ curl http://127.0.0.1:11434/v1/chat/completions \
         ]
     }'
 
+curl http://localhost:11434/api/chat -d '{
+  "model": "llama3.2",
+  "messages": [
+    {
+      "role": "user",
+      "content": "why is the sky blue?"
+    }
+  ]
+}'
+
 # MCP Server Inspector
 npx @modelcontextprotocol/inspector /Users/rozgo/BiomaAI/bioma/target/release/examples/mcp_server --log-file /Users/rozgo/BiomaAI/bioma/.output/mcp_server-inspector.log
