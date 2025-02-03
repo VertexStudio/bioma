@@ -15,13 +15,14 @@ use clap::Parser;
 use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
-    }, user, ChatResponse, ToolsHub, UserActor
+    },
+    ChatResponse, ToolsHub, UserActor,
 };
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::options::GenerationOptions;
+use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
@@ -41,7 +42,7 @@ mod request_schemas;
 
 struct AppState {
     config: Config,
-    tools: Arc<Mutex<ToolsHub>>,
+    // tools: Arc<Mutex<ToolsHub>>,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -532,22 +533,22 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     }
                 }
 
-                // Get available tools
-                let tools = user_actor
-                    .send_and_wait_reply::<ToolsHub, ListTools>(
-                        ListTools(None),
-                        &data.tools,
-                        SendOptions::default(),
-                    )
-                    .await?;
-                let tools = match tools {
-                    Ok(tools) => tools,
-                    Err(e) => {
-                        error!("Error fetching tools: {:?}", e);
-                        let _ = tx.send(Err(e.to_string())).await;
-                        return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                let mut tools: Vec<ToolInfo> = vec![];
+
+                for actor_id in &body.tools_actors {
+                    let tool_info = user_actor
+                        .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
+                        .await;
+                    match tool_info {
+                        Ok(tool_info) => tools.extend(tool_info),
+                        Err(e) => {
+                            error!("Error fetching tools: {:?}", e);
+                            let _ = tx.send(Err(e.to_string())).await;
+                            return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                        }
                     }
-                };
+                }
+
                 for tool_info in &tools {
                     info!("Tool: {}", tool_info.name());
                 }
@@ -558,7 +559,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     &data.chat,
                     &conversation,
                     &tools,
-                    data.tools.clone(),
+                    &data.tools,
                     chat_with_tools_tx,
                     body.format.clone(),
                     body.stream,
@@ -702,7 +703,14 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         )
     } else if body.use_tools {
         // Original logic for use_tools when no tools are explicitly provided
-        let tools_str = match data.tools.lock().await.list_tools(&user_actor).await {
+        let tools_str = match user_actor
+            .send_and_wait_reply::<ToolsHub, ListTools>(
+                ListTools(None),
+                &data.tools,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            )
+            .await
+        {
             Ok(tools) => {
                 if tools.is_empty() {
                     "No tools available".to_string()
@@ -1380,15 +1388,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     actor_handles.push(think_chat_handle);
 
     // Tools setup
-    let mut tools = ToolsHub::new();
-    for tool_config in &config.tools {
-        tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
-    }
+    // let mut tools = ToolsHub::new();
+    // for tool_config in &config.tools {
+    //     tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
+    // }
 
     // Create app state
     let data = web::Data::new(AppState {
         config: config.clone(),
-        tools: Arc::new(Mutex::new(tools)),
+        // tools: Arc::new(Mutex::new(tools)),
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,

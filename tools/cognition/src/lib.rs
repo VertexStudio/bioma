@@ -1,16 +1,13 @@
 use actix_web::web::Json;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
-use bioma_tool::client::CallTool;
 use ollama_rs::generation::{
     chat::ChatMessageResponse,
     tools::{ToolCall, ToolInfo},
 };
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
 pub use tool::ToolsHub;
 use tracing::{debug, error, info};
 
@@ -55,7 +52,7 @@ pub async fn chat_with_tools(
     chat_actor: &ActorId,
     messages: &Vec<ChatMessage>,
     tools: &Vec<ToolInfo>,
-    tools_hub: Arc<Mutex<ToolsHub>>,
+    tools_hub: &ActorId,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
     stream: bool,
@@ -113,13 +110,7 @@ pub async fn chat_with_tools(
                     info!("Tool calls: {:#?}", message_response.message.tool_calls);
                     for tool_call in message_response.message.tool_calls.iter() {
                         // Call the tool
-                        let tool_response = user_actor
-                            .send_and_wait_reply::<ToolsHub, ToolCall>(
-                                tool_call.clone(),
-                                &chat_actor,
-                                SendOptions::default(),
-                            )
-                            .await?;
+                        let tool_response = chat_tool_call(user_actor, &tool_call, tools_hub, tx.clone()).await;
                         match tool_response {
                             Ok(tool_response) => {
                                 messages
@@ -133,7 +124,7 @@ pub async fn chat_with_tools(
                         chat_actor,
                         &messages,
                         tools,
-                        tools_hub.clone(),
+                        tools_hub,
                         tx.clone(),
                         format.clone(),
                         stream,
@@ -154,48 +145,48 @@ pub async fn chat_with_tools(
 async fn chat_tool_call(
     user_actor: &ActorContext<UserActor>,
     tool_call: &ToolCall,
-    tools_hub: Arc<Mutex<ToolsHub>>,
+    tools_hub: &ActorId,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
 ) -> Result<ToolResponse, ChatToolError> {
-    let response = if let Some((_tool_info, tool_client)) = tools_hub.lock().await.get_tool(&tool_call.function.name) {
-        // Execute the tool call
-        let execution_result = tool_client.call(&user_actor, tool_call).await;
+    let execution_result = user_actor
+        .send_and_wait_reply::<ToolsHub, ToolCall>(
+            tool_call.clone(),
+            tools_hub,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).check_health(true).build(),
+        )
+        .await
+        .map_err(|e| ChatToolError::StreamResponseError(e.to_string()))?;
 
-        // Process the result
-        let result_json = match execution_result {
-            Ok(output) => serde_json::to_value(output.content).unwrap_or_default(),
-            Err(e) => serde_json::json!({
-                "error": format!("Error calling tool: {:?}", e)
-            }),
-        };
-
-        // Format tool response
-        let formatted_tool_response = ToolResponse {
-            server: tool_client.server.name.clone(),
-            tool: tool_call.function.name.clone(),
-            call: tool_call.clone(),
-            response: result_json,
-        };
-
-        // Stream tool response
-        let response = ChatMessageResponse {
-            model: "TODO".to_string(),
-            created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
-            message: ChatMessage::tool(serde_json::to_string(&formatted_tool_response).unwrap_or_default()),
-            done: false,
-            final_data: None,
-        };
-
-        let chat_stream_response = ChatResponse { response: response.clone(), context: vec![] };
-
-        if tx.send(Ok(Json(chat_stream_response))).await.is_err() {
-            return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
-        }
-
-        formatted_tool_response
-    } else {
-        return Err(ChatToolError::ToolNotFound(tool_call.function.name.clone()));
+    // Process the result
+    let result_json = match execution_result.is_error {
+        Some(true) => serde_json::json!({
+            "error": format!("Error calling tool: {:?}", execution_result.content)
+        }),
+        _ => serde_json::to_value(execution_result.content).unwrap_or_default(),
     };
 
-    Ok(response)
+    // Format tool response
+    let tool_response = ToolResponse {
+        server: "unknown".to_string(), // We don't have server info anymore
+        tool: tool_call.function.name.clone(),
+        call: tool_call.clone(),
+        response: result_json,
+    };
+
+    // Stream tool response
+    let message_response = ChatMessageResponse {
+        model: "TODO".to_string(),
+        created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+        message: ChatMessage::tool(serde_json::to_string(&tool_response).unwrap_or_default()),
+        done: false,
+        final_data: None,
+    };
+
+    let chat_stream_response = ChatResponse { response: message_response, context: vec![] };
+
+    if tx.send(Ok(Json(chat_stream_response))).await.is_err() {
+        return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));
+    }
+
+    Ok(tool_response)
 }

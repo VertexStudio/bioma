@@ -99,44 +99,41 @@ pub struct ToolsHub {
 }
 
 impl ToolsHub {
-    pub fn new() -> Self {
-        Self { clients: vec![] }
-    }
+    pub async fn new(engine: &Engine, configs: Vec<ClientConfig>, base_id: String) -> Result<Self, ToolsHubError> {
+        let mut hub = Self { clients: vec![] };
 
-    /// Adds a tool client to the hub.
-    pub async fn add_tool(
-        &mut self,
-        engine: &Engine,
-        config: ClientConfig,
-        prefix: String,
-    ) -> Result<(), ToolsHubError> {
-        let hosting = config.host;
-        let server = config.server;
-        let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
-        // If hosting, spawn the ModelContextProtocolClient actor.
-        let client_handle = if config.host {
-            debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
-            let (mut client_ctx, mut client_actor) = Actor::spawn(
-                engine.clone(),
-                client_id.clone(),
-                ModelContextProtocolClientActor::new(server.clone()),
-                SpawnOptions::builder()
-                    .exists(SpawnExistsOptions::Reset)
-                    .health_config(HealthConfig::builder().update_interval(Duration::from_secs(1).into()).build())
-                    .build(),
-            )
-            .await?;
-            let client_id_spawn = client_id.clone();
-            Some(tokio::spawn(async move {
-                if let Err(e) = client_actor.start(&mut client_ctx).await {
-                    error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
-                }
-            }))
-        } else {
-            None
-        };
-        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
-        Ok(())
+        for config in configs {
+            let hosting = config.host;
+            let server = config.server;
+            let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", base_id, server.name));
+
+            let client_handle = if config.host {
+                debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
+                let (mut client_ctx, mut client_actor) = Actor::spawn(
+                    engine.clone(),
+                    client_id.clone(),
+                    ModelContextProtocolClientActor::new(server.clone()),
+                    SpawnOptions::builder()
+                        .exists(SpawnExistsOptions::Reset)
+                        .health_config(HealthConfig::builder().update_interval(Duration::from_secs(1).into()).build())
+                        .build(),
+                )
+                .await?;
+
+                let client_id_spawn = client_id.clone();
+                Some(tokio::spawn(async move {
+                    if let Err(e) = client_actor.start(&mut client_ctx).await {
+                        error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
+                    }
+                }))
+            } else {
+                None
+            };
+
+            hub.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
+        }
+
+        Ok(hub)
     }
 
     /// Returns the first tool that matches the given name.
@@ -322,9 +319,9 @@ impl ToolsHub {
         ctx: &mut ActorContext<Self>,
         frame: &FrameMessage,
     ) -> Result<(), ToolsHubError> {
-        if let Some(input) = frame.is::<List>() {
+        if let Some(input) = frame.is::<ListTools>() {
             self.reply(ctx, &input, frame).await?;
-        } else if let Some(input) = frame.is::<Call>() {
+        } else if let Some(input) = frame.is::<ToolCall>() {
             self.reply(ctx, &input, frame).await?;
         }
         Ok(())
@@ -348,17 +345,14 @@ impl Actor for ToolsHub {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct List(ActorId);
-
-impl Message<List> for ToolsHub {
+impl Message<ListTools> for ToolsHub {
     type Response = Vec<ToolInfo>;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &List) -> Result<(), ToolsHubError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListTools) -> Result<(), ToolsHubError> {
         let mut all_tools = Vec::new();
         for client in &mut self.clients {
             if client.tools.is_empty() {
-                match client.list_tools(ctx, &message.0).await {
+                match client.list_tools(ctx, &client.client_id).await {
                     Ok(tools) => {
                         client.tools = tools.clone();
                         all_tools.extend(tools);
@@ -381,24 +375,18 @@ impl Message<List> for ToolsHub {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Call {
-    pub tool_call: ToolCall,
-    pub tools_actor: ActorId,
-}
-
-impl Message<Call> for ToolsHub {
+impl Message<ToolCall> for ToolsHub {
     type Response = CallToolResult;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &Call) -> Result<(), ToolsHubError> {
-        if let Some((_tool_info, client)) = self.get_tool(&message.tool_call.function.name) {
-            let result = client.call(ctx, &message.tool_call).await?;
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &ToolCall) -> Result<(), ToolsHubError> {
+        if let Some((_tool_info, client)) = self.get_tool(&message.function.name) {
+            let result = client.call(ctx, &message).await?;
             ctx.reply(result).await?;
         } else {
             ctx.reply(CallToolResult {
                 meta: None,
                 content: vec![serde_json::json!({
-                    "error": format!("Tool {} not found", message.tool_call.function.name)
+                    "error": format!("Tool {} not found", message.function.name)
                 })],
                 is_error: Some(true),
             })

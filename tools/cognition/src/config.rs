@@ -128,6 +128,8 @@ impl Default for Config {
 #[derive(Parser)]
 pub struct Args {
     pub config: Option<PathBuf>,
+    #[clap(long, default_value = "/rag/tools_hub")]
+    pub tools_hub_id: String,
 }
 
 impl Args {
