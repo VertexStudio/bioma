@@ -629,7 +629,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             ],
             "use_tools": true
         })))
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -675,7 +675,8 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
 
     let system_prompt = if !body.tools.is_empty() {
         // If tools are provided in the request, use those directly
-        let tools_str = body.tools
+        let tools_str = body
+            .tools
             .iter()
             .map(|t| {
                 let params = serde_json::to_string_pretty(&t.function.parameters)
@@ -873,7 +874,7 @@ struct AskResponse {
                 }
             }
         }))),
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -997,7 +998,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     description = "Delete indexed sources.",
     request_body(content = DeleteSourceRequestSchema, examples(
         ("Basic" = (summary = "Basic", value = json!({"source": "path/to/source1"}))),
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -1047,7 +1048,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
             "model": "nomic-embed-vision",
             "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
         }))),
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -1156,7 +1157,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
             ],
             "raw_scores": false
         })))
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
