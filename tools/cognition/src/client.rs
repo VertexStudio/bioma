@@ -5,6 +5,8 @@ use bioma_tool::client::ModelContextProtocolClientActor;
 use clap::Parser;
 use cognition::tool::ToolClient;
 use config::{Args as ConfigArgs, Config};
+use ollama_rs::generation::tools::ToolInfo;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
 pub mod config;
@@ -18,6 +20,45 @@ pub struct Args {
 
     /// Path to the config file
     pub config: Option<PathBuf>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CognitionClientActor {
+    tools_clients: Vec<ToolClient>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ListTools;
+
+impl Message<ListTools> for CognitionClientActor {
+    type Response = Vec<ToolInfo>;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &ListTools) -> Result<(), Self::Error> {
+        info!("{} Received message: {:?}", ctx.id(), msg);
+        // ctx.reply(self.tools_clients.clone()).await?;
+        Ok(())
+    }
+}
+
+impl Actor for CognitionClientActor {
+    type Error = SystemActorError;
+
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        info!("{} Started", ctx.id());
+        info!("{} Waiting for messages of type {}", ctx.id(), std::any::type_name::<ToolClient>());
+
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(tool_client) = frame.is::<ListTools>() {
+                let response = self.reply(ctx, &tool_client, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+        info!("{} Finished", ctx.id());
+        Ok(())
+    }
 }
 
 #[tokio::main]

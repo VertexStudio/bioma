@@ -10,16 +10,19 @@ use schemars::{
     },
     Map,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ToolClient {
     pub hosting: bool,
     pub server: ServerConfig,
     pub client_id: ActorId,
+    #[serde(skip)]
     pub _client_handle: Option<JoinHandle<()>>,
     pub tools: Vec<ToolInfo>,
 }
