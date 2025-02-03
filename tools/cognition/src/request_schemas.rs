@@ -35,11 +35,6 @@ pub struct ChatMessageRequestSchema {
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
-#[schema(example = json!({
-    "globs": ["./path/to/files/**/*.rs"], 
-    "chunk_capacity": {"start": 500, "end": 2000},
-    "chunk_overlap": 200
-}))]
 pub struct IndexGlobsRequestSchema {
     pub globs: Vec<String>,
     #[schema(value_type = ChunkCapacityRequestSchema)]
@@ -98,14 +93,6 @@ impl Default for RetrieveOutputFormat {
 }
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-#[schema(example = json!({
-    "type": "Text",
-    "query": "What is Bioma?",
-    "threshold": 0.0,
-    "limit": 10,
-    "source": ".*",
-    "format": "markdown"
-}))]
 pub struct RetrieveContextRequest {
     #[schema(value_type = RetrieveQueryRequestSchema)]
     #[serde(flatten)]
@@ -136,41 +123,6 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 // /ask Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({
-    "model": "llama3.2",
-    "messages": [
-        {
-            "role": "user",
-            "content": "Tell me about Puerto Rico."
-        }
-    ],
-    "format": {
-        "title": "PuertoRicoInfo",
-        "type": "object",
-        "required": [
-            "name",
-            "capital",
-            "languages"
-        ],
-        "properties": {
-            "name": {
-                "description": "Name of the territory",
-                "type": "string"
-            },
-            "capital": {
-                "description": "Capital city",
-                "type": "string"
-            },
-            "languages": {
-                "description": "Official languages spoken",
-                "type": "array",
-                "items": {
-                    "type": "string"
-                }
-            }
-        }
-    }
-}))]
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
@@ -182,16 +134,6 @@ pub struct AskQueryRequestSchema {
 // /chat Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({
-    "model": "llama3.2",
-    "messages": [
-        {
-            "role": "user",
-            "content": "Why is the sky blue?"
-        }
-    ],
-    "use_tools": false
-}))]
 
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
@@ -212,14 +154,6 @@ fn default_chat_stream() -> bool {
 }
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({
-    "messages": [
-        {
-            "role": "user",
-            "content": "Why is the sky blue?"
-        }
-    ]
-}))]
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
@@ -241,7 +175,6 @@ fn default_think_stream() -> bool {
 // /delete_resource Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-#[schema(example = json!({"source": "path/to/source1"}))]
 pub struct DeleteSourceRequestSchema {
     pub source: String,
 }
@@ -263,14 +196,6 @@ pub enum ModelEmbedRequestSchema {
 }
 
 #[derive(ToSchema, Deserialize)]
-#[schema(example = json!({
-    "input": "This text will generate embeddings",
-    "model": "nomic-embed-text"
-  }))]
-#[schema(example = json!({
-    "model": "nomic-embed-vision",
-    "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
-}))]
 pub struct EmbeddingsQueryRequestSchema {
     #[schema(value_type = ModelEmbedRequestSchema)]
     pub model: String,
@@ -287,14 +212,6 @@ pub enum TruncationDirectionRequestSchema {
     Right,
 }
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-#[schema(example = json!({
-    "query": "What is Deep Learning?",
-    "texts": [
-        "Deep Learning is learning under water",
-        "Deep learning is a branch of machine learning"
-    ],
-    "raw_scores": false
-}))]
 pub struct RankTextsRequestSchema {
     pub query: String,
     pub raw_scores: Option<bool>,
