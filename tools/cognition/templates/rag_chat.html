@@ -946,36 +946,49 @@
       }
 
       // Function to handle editing a user message.
-      // The edit interface now expands horizontally and shows two buttons (Cancel and Save)
+      // The edit interface now expands fully to the left with a taller textarea
+      // and shows Cancel and Save buttons at the bottom-right.
       function editUserMessage(messageDiv) {
         const originalContent =
           messageDiv.dataset.originalContent || messageDiv.innerText;
-        // Clear the current message content.
+
+        // Get the container and message dimensions before clearing content
+        const containerRect = chatContainer.getBoundingClientRect();
+        const messageRect = messageDiv.getBoundingClientRect();
+        const rightOffset = containerRect.right - messageRect.right;
+
+        // Clear the current message content
         messageDiv.innerHTML = "";
 
-        // Create a container for the textarea and the buttons.
+        // Reset alignment and set explicit dimensions
+        messageDiv.style.marginRight = rightOffset + "px";
+        messageDiv.style.width = containerRect.width - rightOffset + "px";
+
+        // Create edit container and components
         const editContainer = document.createElement("div");
-        editContainer.style.display = "flex";
-        editContainer.style.alignItems = "center";
-        editContainer.style.gap = "10px";
+        editContainer.style.position = "relative";
         editContainer.style.width = "100%";
+        editContainer.style.display = "block";
+        editContainer.style.minHeight = "150px";
 
         const textarea = document.createElement("textarea");
         textarea.value = originalContent;
-        textarea.style.flex = "1";
-        textarea.style.minWidth = "200px";
-        textarea.style.minHeight = "40px";
+        textarea.style.width = "100%";
+        textarea.style.height = "150px";
         textarea.style.boxSizing = "border-box";
-        // (Optional) You could add similar styling to the textarea as the query input:
         textarea.style.padding = "10px";
         textarea.style.border = "1px solid var(--border-color)";
         textarea.style.borderRadius = "5px";
         textarea.style.backgroundColor = "var(--bg-main)";
         textarea.style.color = "var(--text-primary)";
+        textarea.style.marginBottom = "60px";
 
         editContainer.appendChild(textarea);
 
         const buttonContainer = document.createElement("div");
+        buttonContainer.style.position = "absolute";
+        buttonContainer.style.bottom = "10px";
+        buttonContainer.style.right = "10px";
         buttonContainer.style.display = "flex";
         buttonContainer.style.gap = "5px";
 
@@ -985,7 +998,7 @@
         cancelButton.style.margin = "0";
 
         const saveButton = document.createElement("button");
-        saveButton.textContent = "Save";
+        saveButton.textContent = "Send";
         saveButton.className = "action-button";
         saveButton.style.margin = "0";
 
@@ -1001,6 +1014,9 @@
             md.utils.escapeHtml(originalContent)
           );
           messageDiv.dataset.originalContent = originalContent;
+          // Restore original style: remove inline marginRight and width
+          messageDiv.style.marginRight = "";
+          messageDiv.style.width = "";
           // Re-add the edit icon.
           const editButton = document.createElement("div");
           editButton.className = "edit-icon";
@@ -1029,6 +1045,9 @@
 
           // Render the updated message.
           messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
+          // Restore original style: remove inline marginRight and width
+          messageDiv.style.marginRight = "";
+          messageDiv.style.width = "";
           // Update the stored original content.
           messageDiv.dataset.originalContent = newContent;
           // Re-add the edit icon so the user may edit again if desired.
