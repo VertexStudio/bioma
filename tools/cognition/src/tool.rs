@@ -4,7 +4,7 @@ use bioma_tool::client::{
     CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ModelContextProtocolClientError, ServerConfig,
 };
 use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
-use ollama_rs::generation::tools::{ToolCall, ToolCallFunction, ToolInfo};
+use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use schemars::{
     schema::{
         ArrayValidation, InstanceType, Metadata, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec,
@@ -312,7 +312,7 @@ impl ToolsHub {
     ) -> Result<(), ToolsHubError> {
         if let Some(input) = frame.is::<ListTools>() {
             self.reply(ctx, &input, frame).await?;
-        } else if let Some(input) = frame.is::<CallTool>() {
+        } else if let Some(input) = frame.is::<ToolCall>() {
             self.reply(ctx, &input, frame).await?;
         }
         Ok(())
@@ -366,28 +366,18 @@ impl Message<ListTools> for ToolsHub {
     }
 }
 
-impl Message<CallTool> for ToolsHub {
+impl Message<ToolCall> for ToolsHub {
     type Response = CallToolResult;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &CallTool) -> Result<(), ToolsHubError> {
-        let params = &message.0;
-        let tool_call = ToolCall {
-            function: ToolCallFunction {
-                name: params.name.clone(),
-                arguments: serde_json::Value::Object(
-                    params.arguments.clone().unwrap_or_default().into_iter().collect(),
-                ),
-            },
-        };
-
-        if let Some((_tool_info, client)) = self.get_tool(&params.name) {
-            let result = client.call(ctx, &tool_call).await?;
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &ToolCall) -> Result<(), ToolsHubError> {
+        if let Some((_tool_info, client)) = self.get_tool(&message.function.name) {
+            let result = client.call(ctx, &message).await?;
             ctx.reply(result).await?;
         } else {
             ctx.reply(CallToolResult {
                 meta: None,
                 content: vec![serde_json::json!({
-                    "error": format!("Tool {} not found", params.name)
+                    "error": format!("Tool {} not found", message.function.name)
                 })],
                 is_error: Some(true),
             })
