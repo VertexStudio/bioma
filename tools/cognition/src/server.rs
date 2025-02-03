@@ -11,15 +11,12 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
-use bioma_tool::client::{ListTools, ModelContextProtocolClientActor};
+use bioma_tool::client::ModelContextProtocolClientActor;
 use clap::Parser;
 use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
-    },
-    tool::parse_tool_info,
-    tools_hub::ToolsHubActor,
-    ChatResponse, ToolsHub, UserActor,
+    }, tools_hub::ToolsHubActor, ChatResponse, CognitionClientActor, ListTools, ToolsHub, UserActor
 };
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
@@ -422,7 +419,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         ("No tools in payload" = (summary = "No tools in payload", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Echo this message: Why is the sky blue?"}],
-            "tools_actor": "/rag/client/bioma-tool"
+            "tools_actor": "/rag/client/cognition"
         }))),
     ))
 )]
@@ -573,15 +570,15 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     Some(tools_actor) => {
                         let client_id = ActorId::of::<ModelContextProtocolClientActor>(tools_actor);
                         let list_tools = tools_hub_actor
-                            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
-                                ListTools(None),
+                            .send_and_wait_reply::<CognitionClientActor, ListTools>(
+                                ListTools,
                                 &client_id,
                                 SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
                             )
                             .await
-                            .unwrap();
+                            .unwrap(); //TODO handle error
 
-                        Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+                        Ok(list_tools)
                     }
                     None => Ok(vec![]),
                 };
@@ -647,6 +644,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         }
     }
 }
+
 
 #[utoipa::path(
     post,
