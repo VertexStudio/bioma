@@ -91,7 +91,6 @@ impl AppState {
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/health",
@@ -124,7 +123,6 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(services)
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/hello",
@@ -138,7 +136,6 @@ async fn hello() -> impl Responder {
     HttpResponse::Ok().json("Hello world!")
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/reset",
@@ -171,7 +168,6 @@ struct Uploaded {
     size: usize,
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/upload",
@@ -308,7 +304,6 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/index",
@@ -342,7 +337,6 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/retrieve",
@@ -395,7 +389,6 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/chat",
@@ -655,7 +648,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/think",
@@ -897,7 +889,6 @@ struct AskResponse {
     context: Vec<ChatMessage>,
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/ask",
@@ -938,7 +929,7 @@ struct AskResponse {
                 }
             }
         }))),
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
@@ -1057,7 +1048,6 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/delete_source",
@@ -1102,7 +1092,6 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/embed",
@@ -1213,7 +1202,6 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
     HttpResponse::Ok().json(generated_embeddings)
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/rerank",
@@ -1266,7 +1254,6 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
     }
 }
 
-#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/",
@@ -1280,7 +1267,6 @@ async fn dashboard() -> impl Responder {
     NamedFile::open_async("assets/dashboard.html").await
 }
 
-#[rustfmt::skip]
 async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     // Get the base URL as a string, without trailing slash
     let endpoint = data.config.rag_endpoint.as_str().trim_end_matches('/');
@@ -1311,7 +1297,6 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().content_type("application/javascript").body(js_content)
 }
 
-#[rustfmt::skip]
 #[derive(OpenApi)]
 #[openapi(
     paths(health, hello, reset, index, retrieve, ask, chat, think, upload, delete_source, embed, rerank, dashboard),
