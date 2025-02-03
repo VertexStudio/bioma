@@ -17,6 +17,7 @@ pub use user::UserActor;
 
 pub mod health_check;
 pub mod tool;
+pub mod tools_hub;
 pub mod user;
 
 #[derive(Error, Debug)]
