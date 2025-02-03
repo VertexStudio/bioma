@@ -97,6 +97,7 @@
         border-radius: 12px;
         max-width: 85%;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        position: relative;
       }
 
       .user-message {
@@ -104,6 +105,18 @@
         align-self: flex-end;
         margin-left: auto;
         color: var(--text-primary);
+        position: relative; /* Required for absolutely positioning the edit icon & pseudo-element */
+      }
+
+      /* Extend the clickable/hover area to the left without visually shifting content */
+      .user-message::before {
+        content: "";
+        position: absolute;
+        left: -35px;
+        top: 0;
+        bottom: 0;
+        width: 35px;
+        pointer-events: auto;
       }
 
       .assistant-message {
@@ -127,6 +140,28 @@
         position: relative;
         border: 1px solid var(--border-color);
         color: var(--text-secondary);
+      }
+
+      /* Updated CSS for the edit icon: positioned to the left */
+      .edit-icon {
+        position: absolute;
+        top: 50%;
+        left: -35px;
+        transform: translateY(-50%);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        padding: 5px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: none;
+        font-size: 1em;
+        z-index: 100;
+      }
+
+      /* Show the edit icon when hovering over the user message or the icon itself */
+      .user-message:hover .edit-icon,
+      .edit-icon:hover {
+        display: block;
       }
 
       .context-toggle {
@@ -735,6 +770,7 @@
         return result;
       }
 
+      // Modified appendMessage to add an edit icon for user messages
       function appendMessage(sender, content, context = null) {
         const role =
           sender.toLowerCase() === "user"
@@ -750,6 +786,12 @@
         const messageDiv = document.createElement("div");
         messageDiv.className = `message ${role}-message`;
 
+        // For user messages, store the original content and history index.
+        if (role === "user") {
+          messageDiv.dataset.originalContent = content;
+          messageDiv.dataset.msgIndex = messageHistory.length - 1;
+        }
+
         const mainContent =
           sender === "User" ? md.utils.escapeHtml(content) : content;
         const rendered = md.render(mainContent);
@@ -757,6 +799,19 @@
           role === "assistant" ? createContextSection(context) : "";
 
         messageDiv.innerHTML = rendered + contextSection;
+
+        // If this is a user message, append an edit icon.
+        if (role === "user") {
+          const editButton = document.createElement("div");
+          editButton.className = "edit-icon";
+          editButton.innerHTML = '<i class="fas fa-edit"></i>';
+          editButton.addEventListener("click", function (e) {
+            e.stopPropagation();
+            editUserMessage(messageDiv);
+          });
+          messageDiv.appendChild(editButton);
+        }
+
         chatContainer.appendChild(messageDiv);
         chatContainer.scrollTop = chatContainer.scrollHeight;
         window.scrollTo({
@@ -767,22 +822,17 @@
         mermaid.init(undefined, document.querySelectorAll(".mermaid"));
       }
 
-      window.toggleContext = function (toggleElement) {
-        const contextContent = toggleElement.nextElementSibling;
-        const isHidden =
-          contextContent.style.display === "none" ||
-          !contextContent.style.display;
-        contextContent.style.display = isHidden ? "block" : "none";
-        toggleElement.textContent = isHidden
-          ? "Hide Context ▼"
-          : "Show Context ◀";
-      };
-
-      async function sendQuery(endpoint = "/chat", use_tools = false) {
+      // Modified sendQuery to optionally skip appending a new user message
+      async function sendQuery(
+        endpoint = "/chat",
+        use_tools = false,
+        skipUserAppend = false
+      ) {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
-
-        appendMessage("User", queryText);
+        if (!skipUserAppend) {
+          appendMessage("User", queryText);
+        }
         queryInput.value = "";
         resizeTextarea();
 
@@ -893,6 +943,127 @@
           chatContainer.appendChild(errorDiv);
           chatContainer.scrollTop = chatContainer.scrollHeight;
         }
+      }
+
+      // Function to handle editing a user message.
+      // The edit interface now expands fully to the left with a taller textarea
+      // and shows Cancel and Save buttons at the bottom-right.
+      function editUserMessage(messageDiv) {
+        const originalContent =
+          messageDiv.dataset.originalContent || messageDiv.innerText;
+
+        // Get the container and message dimensions before clearing content
+        const containerRect = chatContainer.getBoundingClientRect();
+        const messageRect = messageDiv.getBoundingClientRect();
+        const rightOffset = containerRect.right - messageRect.right;
+
+        // Clear the current message content
+        messageDiv.innerHTML = "";
+
+        // Reset alignment and set explicit dimensions
+        messageDiv.style.marginRight = rightOffset + "px";
+        messageDiv.style.width = containerRect.width - rightOffset + "px";
+
+        // Create edit container and components
+        const editContainer = document.createElement("div");
+        editContainer.style.position = "relative";
+        editContainer.style.width = "100%";
+        editContainer.style.display = "block";
+        editContainer.style.minHeight = "150px";
+
+        const textarea = document.createElement("textarea");
+        textarea.value = originalContent;
+        textarea.style.width = "100%";
+        textarea.style.height = "150px";
+        textarea.style.boxSizing = "border-box";
+        textarea.style.padding = "10px";
+        textarea.style.border = "1px solid var(--border-color)";
+        textarea.style.borderRadius = "5px";
+        textarea.style.backgroundColor = "var(--bg-main)";
+        textarea.style.color = "var(--text-primary)";
+        textarea.style.marginBottom = "60px";
+
+        editContainer.appendChild(textarea);
+
+        const buttonContainer = document.createElement("div");
+        buttonContainer.style.position = "absolute";
+        buttonContainer.style.bottom = "10px";
+        buttonContainer.style.right = "10px";
+        buttonContainer.style.display = "flex";
+        buttonContainer.style.gap = "5px";
+
+        const cancelButton = document.createElement("button");
+        cancelButton.textContent = "Cancel";
+        cancelButton.className = "action-button";
+        cancelButton.style.margin = "0";
+
+        const saveButton = document.createElement("button");
+        saveButton.textContent = "Send";
+        saveButton.className = "action-button";
+        saveButton.style.margin = "0";
+
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(saveButton);
+        editContainer.appendChild(buttonContainer);
+
+        messageDiv.appendChild(editContainer);
+
+        cancelButton.addEventListener("click", function () {
+          // Revert to original rendered message.
+          messageDiv.innerHTML = md.render(
+            md.utils.escapeHtml(originalContent)
+          );
+          messageDiv.dataset.originalContent = originalContent;
+          // Restore original style: remove inline marginRight and width
+          messageDiv.style.marginRight = "";
+          messageDiv.style.width = "";
+          // Re-add the edit icon.
+          const editButton = document.createElement("div");
+          editButton.className = "edit-icon";
+          editButton.innerHTML = '<i class="fas fa-edit"></i>';
+          editButton.addEventListener("click", function (e) {
+            e.stopPropagation();
+            editUserMessage(messageDiv);
+          });
+          messageDiv.appendChild(editButton);
+        });
+
+        saveButton.addEventListener("click", function () {
+          const newContent = textarea.value.trim();
+          if (!newContent) return;
+          // Remove all messages after this one in the chat.
+          const indexInChat = Array.from(chatContainer.children).indexOf(
+            messageDiv
+          );
+          while (chatContainer.children.length > indexInChat + 1) {
+            chatContainer.removeChild(chatContainer.lastChild);
+          }
+          // Update messageHistory to keep only messages up to this one.
+          const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
+          messageHistory = messageHistory.slice(0, msgIndex + 1);
+          messageHistory[msgIndex].content = newContent;
+
+          // Render the updated message.
+          messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
+          // Restore original style: remove inline marginRight and width
+          messageDiv.style.marginRight = "";
+          messageDiv.style.width = "";
+          // Update the stored original content.
+          messageDiv.dataset.originalContent = newContent;
+          // Re-add the edit icon so the user may edit again if desired.
+          const editButton = document.createElement("div");
+          editButton.className = "edit-icon";
+          editButton.innerHTML = '<i class="fas fa-edit"></i>';
+          editButton.addEventListener("click", function (e) {
+            e.stopPropagation();
+            editUserMessage(messageDiv);
+          });
+          messageDiv.appendChild(editButton);
+
+          // Restart the conversation by sending the edited message as a new query.
+          queryInput.value = newContent;
+          sendQuery(thinkEnabled ? "/think" : "/chat", toolsEnabled, true);
+        });
       }
 
       function processJsonLine(json_line) {
@@ -1196,6 +1367,17 @@
         const cleanedText = text.replace(/<\/?think>/g, "");
         contentDiv.textContent += cleanedText;
       }
+
+      window.toggleContext = function (toggleElement) {
+        const contextContent = toggleElement.nextElementSibling;
+        const isHidden =
+          contextContent.style.display === "none" ||
+          !contextContent.style.display;
+        contextContent.style.display = isHidden ? "block" : "none";
+        toggleElement.textContent = isHidden
+          ? "Hide Context ▼"
+          : "Show Context ◀";
+      };
 
       window.toggleThinking = function (header) {
         const content = header.nextElementSibling;
