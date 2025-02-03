@@ -74,7 +74,7 @@ pub enum Responses {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 struct OllamaRunningModel {
-    size_vram: u32,
+    size_vram: u64,
     model: String,
 }
 
@@ -125,6 +125,8 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
     };
 
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
+
+    println!("response: {:?}", response);
 
     let health = match response {
         Ok(response) => {
