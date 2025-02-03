@@ -114,9 +114,9 @@ pub async fn chat_with_tools(
                     for tool_call in message_response.message.tool_calls.iter() {
                         // Call the tool
                         let tool_response = user_actor
-                            .send_and_wait_reply::<ToolsHub, CallTool>(
-                                CallTool(tool_call.clone()),
-                                &tool_call.function.name,
+                            .send_and_wait_reply::<ToolsHub, ToolCall>(
+                                tool_call.clone(),
+                                &chat_actor,
                                 SendOptions::default(),
                             )
                             .await?;

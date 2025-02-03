@@ -147,6 +147,8 @@ pub struct ChatQueryRequestSchema {
     pub tools: Vec<ToolInfoSchema>,
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
+    #[serde(default)]
+    pub tools_actors: Vec<ActorId>,
 }
 
 fn default_chat_stream() -> bool {

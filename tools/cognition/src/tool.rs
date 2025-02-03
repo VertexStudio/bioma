@@ -64,11 +64,15 @@ impl ToolClient {
         Ok(response)
     }
 
-    pub async fn list_tools<T: Actor>(&self, ctx: &ActorContext<T>) -> Result<Vec<ToolInfo>, ToolsHubError> {
+    pub async fn list_tools<T: Actor>(
+        &self,
+        ctx: &ActorContext<T>,
+        tools_actor: &ActorId,
+    ) -> Result<Vec<ToolInfo>, ToolsHubError> {
         let list_tools: ListToolsResult = ctx
             .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
                 ListTools(None),
-                &self.client_id,
+                tools_actor,
                 SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
             )
             .await?;
@@ -147,10 +151,15 @@ impl ToolsHub {
         None
     }
 
-    pub async fn refresh_tools<T: Actor>(&mut self, ctx: &ActorContext<T>) -> Result<Vec<ToolInfo>, ToolsHubError> {
+    /// Refreshes the tools from all clients.
+    pub async fn refresh_tools<T: Actor>(
+        &mut self,
+        ctx: &ActorContext<T>,
+        tools_actor: &ActorId,
+    ) -> Result<Vec<ToolInfo>, ToolsHubError> {
         let mut all_tools = Vec::new();
         for client in &mut self.clients {
-            match client.list_tools(ctx).await {
+            match client.list_tools(ctx, tools_actor).await {
                 Ok(tools) => {
                     client.tools = tools.clone();
                     all_tools.extend(tools);
@@ -161,14 +170,13 @@ impl ToolsHub {
         Ok(all_tools)
     }
 
-    // ---------------------------------------------------------
-    // Conversion helper methods (integrated as associated functions)
-    // ---------------------------------------------------------
+    /// Parses a tool info from a tool schema.
     fn parse_tool_info(tool: schema::Tool) -> ToolInfo {
         let root_schema = Self::convert_to_root_schema(tool.input_schema.clone()).unwrap();
         ToolInfo::from_schema(tool.name.into(), tool.description.unwrap_or_default().into(), root_schema)
     }
 
+    /// Converts a tool input schema to a root schema.
     fn convert_to_root_schema(input: ToolInputSchema) -> Result<RootSchema, anyhow::Error> {
         let schema_obj = Self::convert_schema_object(input)?;
         Ok(RootSchema {
@@ -178,6 +186,7 @@ impl ToolsHub {
         })
     }
 
+    /// Converts a tool input schema to a schema object.
     fn convert_schema_object(input: ToolInputSchema) -> Result<SchemaObject, anyhow::Error> {
         let mut schema_obj = SchemaObject::default();
         schema_obj.instance_type = Some(InstanceType::Object.into());
@@ -192,6 +201,7 @@ impl ToolsHub {
         Ok(schema_obj)
     }
 
+    /// Converts a tool input schema to a schema object.
     fn convert_properties(
         props: BTreeMap<String, BTreeMap<String, Value>>,
     ) -> Result<Map<String, Schema>, anyhow::Error> {
@@ -202,6 +212,7 @@ impl ToolsHub {
         Ok(converted_props)
     }
 
+    /// Converts a tool input schema to a schema object.
     fn convert_property(prop: BTreeMap<String, Value>) -> Result<SchemaObject, anyhow::Error> {
         let mut schema_obj = SchemaObject::default();
         let mut metadata = Metadata::default();
@@ -257,6 +268,7 @@ impl ToolsHub {
         Ok(schema_obj)
     }
 
+    /// Converts a tool input schema to a schema object.
     fn convert_type(type_value: Value) -> Result<SingleOrVec<InstanceType>, anyhow::Error> {
         match type_value {
             Value::String(type_str) => Ok(SingleOrVec::Single(Box::new(Self::convert_single_type(&type_str)?))),
@@ -275,6 +287,7 @@ impl ToolsHub {
         }
     }
 
+    /// Converts a tool input schema to a schema object.
     fn convert_single_type(type_str: &str) -> Result<InstanceType, anyhow::Error> {
         match type_str {
             "string" => Ok(InstanceType::String),
@@ -288,6 +301,7 @@ impl ToolsHub {
         }
     }
 
+    /// Converts a tool input schema to a schema object.
     fn convert_nested_properties(props: Map<String, Value>) -> Result<Map<String, Schema>, anyhow::Error> {
         let mut converted = Map::new();
         for (key, value) in props {
@@ -302,17 +316,15 @@ impl ToolsHub {
         Ok(converted)
     }
 
-    // -------------------------------------------------------------------------
-    // Process a received message following the embeddings pattern.
-    // -------------------------------------------------------------------------
+    /// Processes a received message.
     async fn process_message(
         &mut self,
         ctx: &mut ActorContext<Self>,
         frame: &FrameMessage,
     ) -> Result<(), ToolsHubError> {
-        if let Some(input) = frame.is::<ListTools>() {
+        if let Some(input) = frame.is::<List>() {
             self.reply(ctx, &input, frame).await?;
-        } else if let Some(input) = frame.is::<ToolCall>() {
+        } else if let Some(input) = frame.is::<Call>() {
             self.reply(ctx, &input, frame).await?;
         }
         Ok(())
@@ -336,14 +348,17 @@ impl Actor for ToolsHub {
     }
 }
 
-impl Message<ListTools> for ToolsHub {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct List(ActorId);
+
+impl Message<List> for ToolsHub {
     type Response = Vec<ToolInfo>;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListTools) -> Result<(), ToolsHubError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &List) -> Result<(), ToolsHubError> {
         let mut all_tools = Vec::new();
         for client in &mut self.clients {
             if client.tools.is_empty() {
-                match client.list_tools(ctx).await {
+                match client.list_tools(ctx, &message.0).await {
                     Ok(tools) => {
                         client.tools = tools.clone();
                         all_tools.extend(tools);
@@ -366,18 +381,24 @@ impl Message<ListTools> for ToolsHub {
     }
 }
 
-impl Message<ToolCall> for ToolsHub {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Call {
+    pub tool_call: ToolCall,
+    pub tools_actor: ActorId,
+}
+
+impl Message<Call> for ToolsHub {
     type Response = CallToolResult;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &ToolCall) -> Result<(), ToolsHubError> {
-        if let Some((_tool_info, client)) = self.get_tool(&message.function.name) {
-            let result = client.call(ctx, &message).await?;
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &Call) -> Result<(), ToolsHubError> {
+        if let Some((_tool_info, client)) = self.get_tool(&message.tool_call.function.name) {
+            let result = client.call(ctx, &message.tool_call).await?;
             ctx.reply(result).await?;
         } else {
             ctx.reply(CallToolResult {
                 meta: None,
                 content: vec![serde_json::json!({
-                    "error": format!("Tool {} not found", message.function.name)
+                    "error": format!("Tool {} not found", message.tool_call.function.name)
                 })],
                 is_error: Some(true),
             })
