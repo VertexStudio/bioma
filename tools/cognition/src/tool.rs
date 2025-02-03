@@ -364,7 +364,7 @@ impl Actor for ToolsHub {
 }
 
 impl Message<ListTools> for ToolsHub {
-    type Response = ListToolsResult;
+    type Response = Result<Vec<ToolInfo>>;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListTools) -> Result<(), ToolsHubError> {
         let tools = self.list_tools(ctx).await?;
