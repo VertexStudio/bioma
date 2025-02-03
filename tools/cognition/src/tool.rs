@@ -23,8 +23,6 @@ use tracing::{debug, error, info};
 pub enum ToolsHubError {
     #[error("System error: {0}")]
     System(#[from] SystemActorError),
-    #[error("Error: {0}")]
-    Any(#[from] anyhow::Error),
     #[error("Client error: {0}")]
     Client(#[from] ModelContextProtocolClientError),
 }
@@ -147,31 +145,6 @@ impl ToolsHub {
             }
         }
         None
-    }
-
-    pub async fn list_tools<T: Actor>(&mut self, ctx: &ActorContext<T>) -> Result<Vec<ToolInfo>, ToolsHubError> {
-        let mut all_tools = Vec::new();
-        for client in &mut self.clients {
-            if client.tools.is_empty() {
-                match client.list_tools(ctx).await {
-                    Ok(tools) => {
-                        client.tools = tools.clone();
-                        all_tools.extend(tools);
-                    }
-                    Err(e) => {
-                        error!("Failed to fetch tools: {}", e);
-                        continue;
-                    }
-                }
-            } else {
-                if client.health(ctx).await? {
-                    all_tools.extend(client.tools.clone());
-                } else {
-                    error!("Client {} is unhealthy, skipping tools", client.client_id);
-                }
-            }
-        }
-        Ok(all_tools)
     }
 
     pub async fn refresh_tools<T: Actor>(&mut self, ctx: &ActorContext<T>) -> Result<Vec<ToolInfo>, ToolsHubError> {
@@ -367,8 +340,28 @@ impl Message<ListTools> for ToolsHub {
     type Response = Vec<ToolInfo>;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListTools) -> Result<(), ToolsHubError> {
-        let tools = self.list_tools(ctx).await?;
-        ctx.reply(tools).await?;
+        let mut all_tools = Vec::new();
+        for client in &mut self.clients {
+            if client.tools.is_empty() {
+                match client.list_tools(ctx).await {
+                    Ok(tools) => {
+                        client.tools = tools.clone();
+                        all_tools.extend(tools);
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch tools: {}", e);
+                        continue;
+                    }
+                }
+            } else {
+                if client.health(ctx).await? {
+                    all_tools.extend(client.tools.clone());
+                } else {
+                    error!("Client {} is unhealthy, skipping tools", client.client_id);
+                }
+            }
+        }
+        ctx.reply(all_tools).await?;
         Ok(())
     }
 }
