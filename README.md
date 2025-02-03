@@ -114,6 +114,16 @@ cargo run --release -p cognition --bin cognition-server
 cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server.json
 ```
 
+### Launch cognition-client
+
+```bash
+# Launch with default configuration. First argument is requiered and is the prefix for the tools actors.
+cargo run --release -p cognition --bin cognition-client /rag/client
+
+# Launch with custom configuration
+cargo run -p cognition --bin cognition-client /rag/client assets/configs/rag_tools_config_server.json
+```
+
 ### Swagger-ui documentation
 
 API documentation is provided in the dashboard. The `congition` server should be up to be able to visualize it.
