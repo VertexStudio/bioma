@@ -364,27 +364,11 @@ impl Actor for ToolsHub {
 }
 
 impl Message<ListTools> for ToolsHub {
-    type Response = Result<Vec<ToolInfo>>;
+    type Response = Vec<ToolInfo>;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListTools) -> Result<(), ToolsHubError> {
         let tools = self.list_tools(ctx).await?;
-        let result = ListToolsResult {
-            meta: None,
-            next_cursor: None,
-            tools: tools
-                .into_iter()
-                .map(|t| schema::Tool {
-                    name: t.name().to_string(),
-                    description: Some(t.description().to_string()),
-                    input_schema: ToolInputSchema {
-                        properties: Some(BTreeMap::new()), // Convert from t.parameters()
-                        required: Some(vec![]),            // Extract from t.parameters()
-                        type_: "object".to_string(),
-                    },
-                })
-                .collect(),
-        };
-        ctx.reply(result).await?;
+        ctx.reply(tools).await?;
         Ok(())
     }
 }
