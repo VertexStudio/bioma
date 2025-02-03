@@ -1,11 +1,10 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use bioma_actor::prelude::*;
 use bioma_tool::client::{
     CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ModelContextProtocolClientError, ServerConfig,
 };
 use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
-use ollama_rs::generation::tools::{ToolCall, ToolInfo};
+use ollama_rs::generation::tools::{ToolCall, ToolCallFunction, ToolInfo};
 use schemars::{
     schema::{
         ArrayValidation, InstanceType, Metadata, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec,
@@ -102,6 +101,7 @@ impl ToolsHub {
         Self { clients: vec![] }
     }
 
+    /// Adds a tool client to the hub.
     pub async fn add_tool(
         &mut self,
         engine: &Engine,
@@ -137,6 +137,7 @@ impl ToolsHub {
         Ok(())
     }
 
+    /// Returns the first tool that matches the given name.
     pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
         for client in &self.clients {
             for tool in &client.tools {
@@ -188,9 +189,8 @@ impl ToolsHub {
     }
 
     // ---------------------------------------------------------
-    // Conversion helper methods (now integrated as associated functions)
+    // Conversion helper methods (integrated as associated functions)
     // ---------------------------------------------------------
-
     fn parse_tool_info(tool: schema::Tool) -> ToolInfo {
         let root_schema = Self::convert_to_root_schema(tool.input_schema.clone()).unwrap();
         ToolInfo::from_schema(tool.name.into(), tool.description.unwrap_or_default().into(), root_schema)
@@ -328,53 +328,94 @@ impl ToolsHub {
         }
         Ok(converted)
     }
+
+    // -------------------------------------------------------------------------
+    // Process a received message following the embeddings pattern.
+    // -------------------------------------------------------------------------
+    async fn process_message(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        frame: &FrameMessage,
+    ) -> Result<(), ToolsHubError> {
+        if let Some(input) = frame.is::<ListTools>() {
+            self.reply(ctx, &input, frame).await?;
+        } else if let Some(input) = frame.is::<CallTool>() {
+            self.reply(ctx, &input, frame).await?;
+        }
+        Ok(())
+    }
 }
 
-#[async_trait]
 impl Actor for ToolsHub {
     type Error = ToolsHubError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
         info!("ToolsHub actor started: {}", ctx.id());
+
         let mut stream = ctx.recv().await?;
-        while let Some(frame) = stream.next().await {
-            if let Some(_list_msg) = frame.is::<ListTools>() {
-                match self.list_tools(ctx).await {
-                    Ok(tools) => {
-                        let res = ListToolsResult { tools, meta: None, next_cursor: None };
-                        ctx.reply(res).await?;
-                    }
-                    Err(e) => {
-                        error!("Error listing tools: {}", e);
-                        ctx.reply(serde_json::json!({"error": e.to_string()})).await?;
-                    }
-                }
-            } else if let Some(call_msg) = frame.is::<CallTool>() {
-                let params = &call_msg.0;
-                // Convert the CallToolRequestParams into a ToolCall.
-                let tool_call = ToolCall {
-                    function: FunctionCall {
-                        name: params.name.clone(),
-                        arguments: serde_json::Value::Object(params.arguments.clone().unwrap_or_default()),
-                    },
-                };
-                if let Some((_tool_info, client)) = self.get_tool(&params.name) {
-                    match client.call(ctx, &tool_call).await {
-                        Ok(result) => {
-                            ctx.reply(result).await?;
-                        }
-                        Err(e) => {
-                            error!("Error calling tool {}: {}", params.name, e);
-                            ctx.reply(serde_json::json!({"error": e.to_string()})).await?;
-                        }
-                    }
-                } else {
-                    error!("Tool {} not found", params.name);
-                    ctx.reply(serde_json::json!({"error": format!("Tool {} not found", params.name)})).await?;
-                }
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Err(err) = self.process_message(ctx, &frame).await {
+                error!("{} {:?}", ctx.id(), err);
             }
         }
-        info!("ToolsHub actor finished: {}", ctx.id());
+        info!("{} Finished", ctx.id());
+        Ok(())
+    }
+}
+
+impl Message<ListTools> for ToolsHub {
+    type Response = ListToolsResult;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListTools) -> Result<(), ToolsHubError> {
+        let tools = self.list_tools(ctx).await?;
+        let result = ListToolsResult {
+            meta: None,
+            next_cursor: None,
+            tools: tools
+                .into_iter()
+                .map(|t| schema::Tool {
+                    name: t.name().to_string(),
+                    description: Some(t.description().to_string()),
+                    input_schema: ToolInputSchema {
+                        properties: Some(BTreeMap::new()), // Convert from t.parameters()
+                        required: Some(vec![]),            // Extract from t.parameters()
+                        type_: "object".to_string(),
+                    },
+                })
+                .collect(),
+        };
+        ctx.reply(result).await?;
+        Ok(())
+    }
+}
+
+impl Message<CallTool> for ToolsHub {
+    type Response = CallToolResult;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &CallTool) -> Result<(), ToolsHubError> {
+        let params = &message.0;
+        let tool_call = ToolCall {
+            function: ToolCallFunction {
+                name: params.name.clone(),
+                arguments: serde_json::Value::Object(
+                    params.arguments.clone().unwrap_or_default().into_iter().collect(),
+                ),
+            },
+        };
+
+        if let Some((_tool_info, client)) = self.get_tool(&params.name) {
+            let result = client.call(ctx, &tool_call).await?;
+            ctx.reply(result).await?;
+        } else {
+            ctx.reply(CallToolResult {
+                meta: None,
+                content: vec![serde_json::json!({
+                    "error": format!("Tool {} not found", params.name)
+                })],
+                is_error: Some(true),
+            })
+            .await?;
+        }
         Ok(())
     }
 }

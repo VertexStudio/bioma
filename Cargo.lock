@@ -1493,7 +1493,6 @@ dependencies = [
  "actix-web",
  "anyhow",
  "askama",
- "async-trait",
  "base64 0.22.1",
  "bioma_actor",
  "bioma_llm",
