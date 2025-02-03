@@ -1,7 +1,7 @@
 use crate::user::UserActor;
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_tool::client::{CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ServerConfig};
+use bioma_tool::client::{CallTool, ListTools, ModelContextProtocolClientActor, ServerConfig};
 use bioma_tool::schema::{self, CallToolRequestParams, CallToolResult, ListToolsResult, ToolInputSchema};
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use schemars::{
@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub struct ToolClient {
     pub hosting: bool,
@@ -73,38 +73,6 @@ impl ToolsHub {
         Self { clients: vec![] }
     }
 
-    pub async fn add_tool(&mut self, engine: &Engine, config: ClientConfig, prefix: String) -> Result<()> {
-        let hosting = config.host;
-        let server = config.server;
-        let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", prefix, server.name));
-        // If hosting, spawn client, which will spawn and host a ModelContextProtocol server
-        let client_handle = if config.host {
-            debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
-            let (mut client_ctx, mut client_actor) = Actor::spawn(
-                engine.clone(),
-                client_id.clone(),
-                ModelContextProtocolClientActor::new(server.clone()),
-                SpawnOptions::builder()
-                    .exists(SpawnExistsOptions::Reset)
-                    .health_config(
-                        HealthConfig::builder().update_interval(std::time::Duration::from_secs(1).into()).build(),
-                    )
-                    .build(),
-            )
-            .await?;
-            let client_id_spawn = client_id.clone();
-            Some(tokio::spawn(async move {
-                if let Err(e) = client_actor.start(&mut client_ctx).await {
-                    error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
-                }
-            }))
-        } else {
-            None
-        };
-        self.clients.push(ToolClient { hosting, server, client_id, _client_handle: client_handle, tools: vec![] });
-        Ok(())
-    }
-
     pub fn get_tool(&self, tool_name: &str) -> Option<(ToolInfo, &ToolClient)> {
         for client in &self.clients {
             for tool in &client.tools {
@@ -159,7 +127,7 @@ impl ToolsHub {
     }
 }
 
-fn parse_tool_info(tool: schema::Tool) -> ToolInfo {
+pub fn parse_tool_info(tool: schema::Tool) -> ToolInfo {
     let root_schema = convert_to_root_schema(tool.input_schema.clone()).unwrap();
     ToolInfo::from_schema(tool.name.clone().into(), tool.description.clone().unwrap_or_default().into(), root_schema)
 }

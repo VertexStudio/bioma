@@ -6,22 +6,26 @@ use actix_web::{
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
 };
+use anyhow::Result;
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
+use bioma_tool::client::{ListTools, ModelContextProtocolClientActor};
 use clap::Parser;
 use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
     },
+    tool::parse_tool_info,
+    tools_hub::ToolsHubActor,
     ChatResponse, ToolsHub, UserActor,
 };
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
-use ollama_rs::generation::options::GenerationOptions;
+use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use request_schemas::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
     IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
@@ -29,8 +33,8 @@ use request_schemas::{
 };
 use serde::Serialize;
 use serde_json::json;
-use std::sync::Arc;
 use std::{collections::HashMap, error::Error as StdError};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 use url::Url;
@@ -68,8 +72,26 @@ impl AppState {
         .await?;
         Ok(ctx)
     }
+
+    async fn tools_hub_actor(&self) -> Result<ActorContext<ToolsHubActor>, SystemActorError> {
+        // For now, we use a random actor id to identify the user.
+        // In the future, we will use cookies or other methods to identify the user.
+        let ulid = ulid::Ulid::new();
+        let prefix_id = "/rag/tools_hub/";
+        let actor_id = ActorId::of::<ToolsHubActor>(format!("{}{}", prefix_id, ulid.to_string()));
+        let user_actor = ToolsHubActor {};
+        let (ctx, _) = Actor::spawn(
+            self.engine.clone(),
+            actor_id,
+            user_actor,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
+        )
+        .await?;
+        Ok(ctx)
+    }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/health",
@@ -78,6 +100,7 @@ impl AppState {
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn health(data: web::Data<AppState>) -> impl Responder {
     let mut services: HashMap<Service, Responses> = HashMap::new();
 
@@ -101,6 +124,7 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(services)
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/hello",
@@ -109,10 +133,12 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn hello() -> impl Responder {
     HttpResponse::Ok().json("Hello world!")
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/reset",
@@ -121,6 +147,7 @@ async fn hello() -> impl Responder {
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn reset(data: web::Data<AppState>) -> HttpResponse {
     info!("Resetting the engine");
     let engine = data.engine.clone();
@@ -144,6 +171,7 @@ struct Uploaded {
     size: usize,
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/upload",
@@ -153,6 +181,7 @@ struct Uploaded {
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
     let target_dir = form.metadata.path.clone();
@@ -279,6 +308,7 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/index",
@@ -294,6 +324,7 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -311,6 +342,7 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/retrieve",
@@ -329,6 +361,7 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -362,6 +395,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/chat",
@@ -371,7 +405,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
             "messages": [{"role": "user", "content": "Why is the sky blue?"}],
             "tools_actor": false
         }))),
-        ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
+        ("with_tools_in_payload" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
                 {
                     "role": "user",
@@ -391,12 +425,22 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     "type": "function"
                 }
             ],
-            "tools_actor": true
-        })))
+        }))),
+        ("No tools in payload" = (summary = "No tools in payload", value = json!({
+            "model": "llama3.2",
+            "messages": [{"role": "user", "content": "Echo this message: Why is the sky blue?"}],
+            "tools_actor": "/rag/client/bioma-tool"
+        }))),
     ))
 )]
+
 async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
+        Ok(actor) => actor,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    let tools_hub_actor = match data.tools_hub_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
@@ -532,9 +576,25 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     }
                 }
 
-                // Get available tools
-                let tools =
-                    if body.tools_actor { data.tools.lock().await.list_tools(&user_actor).await } else { Ok(vec![]) };
+                let tools: Result<Vec<ToolInfo>> = match body.tools_actor {
+                    Some(tools_actor) => {
+                        let client_id = ActorId::of::<ModelContextProtocolClientActor>(tools_actor);
+                        let list_tools = tools_hub_actor
+                            .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
+                                ListTools(None),
+                                &client_id,
+                                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
+                            )
+                            .await
+                            .unwrap();
+
+                        Ok(list_tools.tools.into_iter().map(parse_tool_info).collect())
+                    }
+                    None => Ok(vec![]),
+                };
+
+                dbg!("Available tools from actor: {#?}", &tools);
+                info!("HOla");
 
                 let tools = match tools {
                     Ok(tools) => tools,
@@ -595,6 +655,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/think",
@@ -630,11 +691,12 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             ],
             "tools_actor": true
         })))
-    )), 
+    )),
     responses(
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -676,7 +738,8 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
 
     let system_prompt = if !body.tools.is_empty() {
         // If tools are provided in the request, use those directly
-        let tools_str = body.tools
+        let tools_str = body
+            .tools
             .iter()
             .map(|t| {
                 let params = serde_json::to_string_pretty(&t.function.parameters)
@@ -834,6 +897,7 @@ struct AskResponse {
     context: Vec<ChatMessage>,
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/ask",
@@ -879,6 +943,7 @@ struct AskResponse {
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -992,6 +1057,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/delete_source",
@@ -1003,6 +1069,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -1035,6 +1102,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/embed",
@@ -1053,6 +1121,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -1144,6 +1213,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
     HttpResponse::Ok().json(generated_embeddings)
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     post,
     path = "/rerank",
@@ -1162,6 +1232,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
@@ -1195,6 +1266,7 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
     }
 }
 
+#[rustfmt::skip]
 #[utoipa::path(
     get,
     path = "/",
@@ -1203,10 +1275,12 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
         (status = 200, description = "Ok"),
     )
 )]
+
 async fn dashboard() -> impl Responder {
     NamedFile::open_async("assets/dashboard.html").await
 }
 
+#[rustfmt::skip]
 async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     // Get the base URL as a string, without trailing slash
     let endpoint = data.config.rag_endpoint.as_str().trim_end_matches('/');
@@ -1237,6 +1311,7 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().content_type("application/javascript").body(js_content)
 }
 
+#[rustfmt::skip]
 #[derive(OpenApi)]
 #[openapi(
     paths(health, hello, reset, index, retrieve, ask, chat, think, upload, delete_source, embed, rerank, dashboard),
@@ -1374,16 +1449,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(think_chat_handle);
 
-    // Tools setup
+    // Tools setup TODO eliminar
     let mut tools = ToolsHub::new();
-    for tool_config in &config.tools {
-        tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
-    }
+    // for tool_config in &config.tools {
+    //     // tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
+    // }
 
     // Create app state
     let data = web::Data::new(AppState {
         config: config.clone(),
-        tools: Arc::new(Mutex::new(tools)),
+        tools: Arc::new(Mutex::new(tools)), //TODO eliminar
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,
