@@ -97,6 +97,7 @@
         border-radius: 12px;
         max-width: 85%;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        position: relative;
       }
 
       .user-message {
@@ -104,7 +105,18 @@
         align-self: flex-end;
         margin-left: auto;
         color: var(--text-primary);
-        position: relative; /* so we can absolutely position the edit icon */
+        position: relative; /* Required for absolutely positioning the edit icon & pseudo-element */
+      }
+
+      /* Extend the clickable/hover area to the left without visually shifting content */
+      .user-message::before {
+        content: "";
+        position: absolute;
+        left: -35px;
+        top: 0;
+        bottom: 0;
+        width: 35px;
+        pointer-events: auto;
       }
 
       .assistant-message {
@@ -130,11 +142,12 @@
         color: var(--text-secondary);
       }
 
-      /* New CSS for the edit icon */
+      /* Updated CSS for the edit icon: positioned to the left */
       .edit-icon {
         position: absolute;
-        bottom: -25px;
-        right: 10px;
+        top: 50%;
+        left: -35px;
+        transform: translateY(-50%);
         background: var(--bg-secondary);
         color: var(--text-primary);
         padding: 5px;
@@ -142,10 +155,12 @@
         cursor: pointer;
         display: none;
         font-size: 1em;
+        z-index: 100;
       }
 
-      /* Show the edit icon when hovering over a user message */
-      .user-message:hover .edit-icon {
+      /* Show the edit icon when hovering over the user message or the icon itself */
+      .user-message:hover .edit-icon,
+      .edit-icon:hover {
         display: block;
       }
 
@@ -931,29 +946,73 @@
       }
 
       // Function to handle editing a user message.
-      // When the user clicks the edit icon, we replace the message with a textarea
-      // and a confirm button. Once confirmed, we remove all messages after this one,
-      // update the stored history, and restart the conversation by re-sending the edited message.
+      // The edit interface now expands horizontally and shows two buttons (Cancel and Save)
       function editUserMessage(messageDiv) {
         const originalContent =
           messageDiv.dataset.originalContent || messageDiv.innerText;
-        // Create a textarea for editing.
+        // Clear the current message content.
+        messageDiv.innerHTML = "";
+
+        // Create a container for the textarea and the buttons.
+        const editContainer = document.createElement("div");
+        editContainer.style.display = "flex";
+        editContainer.style.alignItems = "center";
+        editContainer.style.gap = "10px";
+        editContainer.style.width = "100%";
+
         const textarea = document.createElement("textarea");
         textarea.value = originalContent;
-        textarea.style.width = "100%";
+        textarea.style.flex = "1";
+        textarea.style.minWidth = "200px";
+        textarea.style.minHeight = "40px";
         textarea.style.boxSizing = "border-box";
-        // Clear the current message and add the textarea.
-        messageDiv.innerHTML = "";
-        messageDiv.appendChild(textarea);
+        // (Optional) You could add similar styling to the textarea as the query input:
+        textarea.style.padding = "10px";
+        textarea.style.border = "1px solid var(--border-color)";
+        textarea.style.borderRadius = "5px";
+        textarea.style.backgroundColor = "var(--bg-main)";
+        textarea.style.color = "var(--text-primary)";
 
-        // Add a confirm (Save) button.
-        const confirmButton = document.createElement("button");
-        confirmButton.textContent = "Save";
-        confirmButton.className = "action-button";
-        confirmButton.style.marginTop = "5px";
-        messageDiv.appendChild(confirmButton);
+        editContainer.appendChild(textarea);
 
-        confirmButton.addEventListener("click", function () {
+        const buttonContainer = document.createElement("div");
+        buttonContainer.style.display = "flex";
+        buttonContainer.style.gap = "5px";
+
+        const cancelButton = document.createElement("button");
+        cancelButton.textContent = "Cancel";
+        cancelButton.className = "action-button";
+        cancelButton.style.margin = "0";
+
+        const saveButton = document.createElement("button");
+        saveButton.textContent = "Save";
+        saveButton.className = "action-button";
+        saveButton.style.margin = "0";
+
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(saveButton);
+        editContainer.appendChild(buttonContainer);
+
+        messageDiv.appendChild(editContainer);
+
+        cancelButton.addEventListener("click", function () {
+          // Revert to original rendered message.
+          messageDiv.innerHTML = md.render(
+            md.utils.escapeHtml(originalContent)
+          );
+          messageDiv.dataset.originalContent = originalContent;
+          // Re-add the edit icon.
+          const editButton = document.createElement("div");
+          editButton.className = "edit-icon";
+          editButton.innerHTML = '<i class="fas fa-edit"></i>';
+          editButton.addEventListener("click", function (e) {
+            e.stopPropagation();
+            editUserMessage(messageDiv);
+          });
+          messageDiv.appendChild(editButton);
+        });
+
+        saveButton.addEventListener("click", function () {
           const newContent = textarea.value.trim();
           if (!newContent) return;
           // Remove all messages after this one in the chat.
@@ -987,10 +1046,6 @@
           sendQuery(thinkEnabled ? "/think" : "/chat", toolsEnabled, true);
         });
       }
-
-      // (The remainder of your functions—processJsonLine, handleSpecialRole, createOrUpdateAssistantMessage,
-      // createThinkingProcessContainer, appendThinkingChunk, toggleContext, toggleThinking, initializeToolToggles,
-      // resizeTextarea, and the keyboard shortcut and button event listeners—remain unchanged.)
 
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
