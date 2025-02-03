@@ -96,12 +96,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Wait for the CognitionClient actor to finish
-    let _ = cognition_client_handle.await;
-
     // Wait for interrupt signal
     tokio::signal::ctrl_c().await?;
     info!("Received shutdown signal, cleaning up...");
+
+    // Wait for the CognitionClient actor to finish
+    cognition_client_handle.abort();
 
     Ok(())
 }
