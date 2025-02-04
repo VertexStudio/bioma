@@ -23,6 +23,7 @@
         --bg-secondary: #1c1c1f;
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
+        --sidebar-width: 250px;
         --surrealist-gradient: linear-gradient(
           135deg,
           var(--primary) 0%,
@@ -44,17 +45,62 @@
         padding: 0;
       }
 
-      body {
+      /* Wrap main content to avoid overlapping the sidebar */
+      #main-content {
         max-width: 800px;
-        margin: 0 auto;
+        margin: 20px auto;
         padding: 20px;
         padding-bottom: 80px;
+        transition: all 0.3s ease;
+        position: relative;
+        left: 0;
       }
 
-      #chat-container {
-        margin-bottom: 10px;
-        display: flex;
-        flex-direction: column;
+      #main-content.sidebar-visible {
+        margin-right: calc(var(--sidebar-width) + 20px);
+      }
+
+      /* Sidebar styling */
+      #sidebar {
+        position: fixed;
+        top: 0;
+        right: calc(-1 * (var(--sidebar-width) + 20px));
+        width: var(--sidebar-width);
+        height: 100vh;
+        background-color: var(--bg-secondary);
+        color: var(--text-primary);
+        border-left: 1px solid var(--border-color);
+        padding: 20px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        transition: right 0.3s ease;
+        z-index: 1000;
+        visibility: hidden;
+        opacity: 0;
+      }
+
+      #sidebar.visible {
+        right: 0;
+        visibility: visible;
+        opacity: 1;
+      }
+
+      #sidebar-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1001;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      #sidebar-toggle:hover {
+        background: var(--surrealist-gradient);
       }
 
       #input-container {
@@ -73,6 +119,45 @@
         display: flex;
         gap: 10px;
         align-items: flex-start;
+        transition: all 0.3s ease;
+      }
+
+      #input-container.sidebar-visible {
+        max-width: calc(800px - var(--sidebar-width));
+        transform: translateX(calc(-50% - var(--sidebar-width) / 2));
+      }
+
+      #sidebar h2 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 1.2em;
+        color: var(--text-primary);
+      }
+
+      #sidebar .section {
+        margin-bottom: 20px;
+      }
+
+      #sidebar label {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text-secondary);
+      }
+
+      #sidebar input {
+        width: 100%;
+        padding: 8px;
+        box-sizing: border-box;
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
+        background-color: var(--bg-main);
+        color: var(--text-primary);
+      }
+
+      #chat-container {
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
       }
 
       #query-input {
@@ -105,10 +190,9 @@
         align-self: flex-end;
         margin-left: auto;
         color: var(--text-primary);
-        position: relative; /* Required for absolutely positioning the edit icon & pseudo-element */
+        position: relative; /* For positioning the edit icon */
       }
 
-      /* Extend the clickable/hover area to the left without visually shifting content */
       .user-message::before {
         content: "";
         position: absolute;
@@ -142,7 +226,6 @@
         color: var(--text-secondary);
       }
 
-      /* Updated CSS for the edit icon: positioned to the left */
       .edit-icon {
         position: absolute;
         top: 50%;
@@ -158,7 +241,6 @@
         z-index: 100;
       }
 
-      /* Show the edit icon when hovering over the user message or the icon itself */
       .user-message:hover .edit-icon,
       .edit-icon:hover {
         display: block;
@@ -526,27 +608,52 @@
     </style>
   </head>
   <body>
-    <div id="chat-container"></div>
-    <div id="input-container">
-      <textarea
-        id="query-input"
-        placeholder="Enter your question here"
-        rows="1"
-      ></textarea>
-      <button
-        id="send-button"
-        class="action-button"
-        title="Chat with tools (Ctrl+Enter)"
-      >
-        <i class="fas fa-comments fa-wrench"></i>
-      </button>
-      <button
-        id="think-button"
-        class="action-button"
-        title="Think deeply (Alt+Enter)"
-      >
-        <i class="fas fa-brain"></i>
-      </button>
+    <!-- Sidebar toggle button -->
+    <button id="sidebar-toggle">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- Sidebar with helper Tools section -->
+    <div id="sidebar">
+      <h2>Add-Ons</h2>
+      <div class="section">
+        <h3>Tools</h3>
+        <label for="tools-actors-input"
+          >Tools Actor(s) (comma separated):</label
+        >
+        <input
+          type="text"
+          id="tools-actors-input"
+          placeholder="e.g. actor1, actor2"
+        />
+      </div>
+      <!-- You can add more helper sections here if needed -->
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content">
+      <div id="chat-container"></div>
+      <div id="input-container">
+        <textarea
+          id="query-input"
+          placeholder="Enter your question here"
+          rows="1"
+        ></textarea>
+        <button
+          id="send-button"
+          class="action-button"
+          title="Chat with tools (Ctrl+Enter)"
+        >
+          <i class="fas fa-comments fa-wrench"></i>
+        </button>
+        <button
+          id="think-button"
+          class="action-button"
+          title="Think deeply (Alt+Enter)"
+        >
+          <i class="fas fa-brain"></i>
+        </button>
+      </div>
     </div>
 
     <script>
@@ -561,6 +668,7 @@
       let contextSet = false; // track if we've appended the context yet
       let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
       let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
+      let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
 
       const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
@@ -822,12 +930,8 @@
         mermaid.init(undefined, document.querySelectorAll(".mermaid"));
       }
 
-      // Modified sendQuery to optionally skip appending a new user message
-      async function sendQuery(
-        endpoint = "/chat",
-        use_tools = false,
-        skipUserAppend = false
-      ) {
+      // Modified sendQuery to optionally skip appending a new user message.
+      async function sendQuery(endpoint = "/chat", skipUserAppend = false) {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
         if (!skipUserAppend) {
@@ -856,12 +960,24 @@
         contextSet = false;
         latestContext = null;
 
+        // Get tools actors list from sidebar input
+        const toolsActorsInput = document.getElementById("tools-actors-input");
+        const toolsActorsList = toolsActorsInput.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s !== "");
+        if (toolsEnabled && toolsActorsList.length === 0) {
+          alert("Please provide at least one tools actor.");
+          toolsEnabled = false;
+          updateToolButton();
+          return;
+        }
+
         const queryObject = {
-          // Remove the duplicate user message - just use messageHistory
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
-          use_tools: use_tools,
+          tools_actors: toolsEnabled ? toolsActorsList : [],
         };
 
         try {
@@ -928,7 +1044,7 @@
             }
           }
 
-          // 1) Remove typing indicator when done
+          // Remove typing indicator when done
           const indicators = document.querySelectorAll(".typing-indicator");
           indicators.forEach((indicator) => indicator.remove());
 
@@ -946,25 +1062,21 @@
       }
 
       // Function to handle editing a user message.
-      // The edit interface now expands fully to the left with a taller textarea
-      // and shows Cancel and Save buttons at the bottom-right.
       function editUserMessage(messageDiv) {
         const originalContent =
           messageDiv.dataset.originalContent || messageDiv.innerText;
 
-        // Get the container and message dimensions before clearing content
+        // Get container and message dimensions before clearing content
         const containerRect = chatContainer.getBoundingClientRect();
         const messageRect = messageDiv.getBoundingClientRect();
         const rightOffset = containerRect.right - messageRect.right;
 
-        // Clear the current message content
+        // Clear current message content
         messageDiv.innerHTML = "";
-
-        // Reset alignment and set explicit dimensions
         messageDiv.style.marginRight = rightOffset + "px";
         messageDiv.style.width = containerRect.width - rightOffset + "px";
 
-        // Create edit container and components
+        // Create edit container
         const editContainer = document.createElement("div");
         editContainer.style.position = "relative";
         editContainer.style.width = "100%";
@@ -1009,15 +1121,12 @@
         messageDiv.appendChild(editContainer);
 
         cancelButton.addEventListener("click", function () {
-          // Revert to original rendered message.
           messageDiv.innerHTML = md.render(
             md.utils.escapeHtml(originalContent)
           );
           messageDiv.dataset.originalContent = originalContent;
-          // Restore original style: remove inline marginRight and width
           messageDiv.style.marginRight = "";
           messageDiv.style.width = "";
-          // Re-add the edit icon.
           const editButton = document.createElement("div");
           editButton.className = "edit-icon";
           editButton.innerHTML = '<i class="fas fa-edit"></i>';
@@ -1031,26 +1140,19 @@
         saveButton.addEventListener("click", function () {
           const newContent = textarea.value.trim();
           if (!newContent) return;
-          // Remove all messages after this one in the chat.
           const indexInChat = Array.from(chatContainer.children).indexOf(
             messageDiv
           );
           while (chatContainer.children.length > indexInChat + 1) {
             chatContainer.removeChild(chatContainer.lastChild);
           }
-          // Update messageHistory to keep only messages up to this one.
           const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
           messageHistory = messageHistory.slice(0, msgIndex + 1);
           messageHistory[msgIndex].content = newContent;
-
-          // Render the updated message.
           messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
-          // Restore original style: remove inline marginRight and width
           messageDiv.style.marginRight = "";
           messageDiv.style.width = "";
-          // Update the stored original content.
           messageDiv.dataset.originalContent = newContent;
-          // Re-add the edit icon so the user may edit again if desired.
           const editButton = document.createElement("div");
           editButton.className = "edit-icon";
           editButton.innerHTML = '<i class="fas fa-edit"></i>';
@@ -1059,26 +1161,21 @@
             editUserMessage(messageDiv);
           });
           messageDiv.appendChild(editButton);
-
-          // Restart the conversation by sending the edited message as a new query.
           queryInput.value = newContent;
-          sendQuery(thinkEnabled ? "/think" : "/chat", toolsEnabled, true);
+          sendQuery(thinkEnabled ? "/think" : "/chat", true);
         });
       }
 
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
 
-        // If this chunk includes context, store it
         if (data.context) {
           latestContext = data.context;
         }
 
         if (!data.message?.content) {
-          // If there's no text, but we see done
           if (data.done && assistantTextBuffer) {
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-            // Move history update here to ensure it's captured
             messageHistory.push({
               role: "assistant",
               content: assistantTextBuffer,
@@ -1093,28 +1190,23 @@
           return;
         }
 
-        // If it's an assistant chunk
         if (data.message.role === "assistant") {
           let chunk = data.message.content;
           let idx = 0;
 
           while (idx < chunk.length) {
             if (!isThinkingActive) {
-              // Look for <think> start
               const openPos = chunk.indexOf("<think>", idx);
               if (openPos === -1) {
-                // No <think>
                 const visiblePart = chunk.substring(idx);
                 assistantTextBuffer += visiblePart;
                 idx = chunk.length;
               } else {
-                // Found <think> - only add text before it
                 const visiblePart = chunk.substring(idx, openPos);
                 if (visiblePart.trim()) {
                   assistantTextBuffer += visiblePart;
                 }
-                idx = openPos + 7; // move past <think>
-
+                idx = openPos + 7;
                 if (!thinkingDiv) {
                   thinkingDiv = createThinkingProcessContainer();
                   chatContainer.appendChild(thinkingDiv);
@@ -1130,31 +1222,24 @@
                 isThinkingActive = true;
               }
             } else {
-              // We're inside <think>
               const closePos = chunk.indexOf("</think>", idx);
               if (closePos === -1) {
-                // no closing yet
                 const thoughtChunk = chunk.substring(idx);
                 appendThinkingChunk(thoughtChunk, thinkingContentDiv);
                 idx = chunk.length;
               } else {
-                // found </think> - only add content before it
                 const thoughtChunk = chunk.substring(idx, closePos);
                 if (thoughtChunk.trim()) {
                   appendThinkingChunk(thoughtChunk, thinkingContentDiv);
                 }
-                idx = closePos + 8; // move past </think>
+                idx = closePos + 8;
                 isThinkingActive = false;
-
-                // Show accumulated user-visible text with context
                 if (assistantTextBuffer.trim().length > 0) {
                   createOrUpdateAssistantMessage(
                     assistantTextBuffer,
                     latestContext
                   );
                 }
-
-                // Calculate thinking duration and finalize "Thinking..."
                 if (thinkingDiv && thinkingStartTime) {
                   const duration = (
                     (Date.now() - thinkingStartTime) /
@@ -1172,20 +1257,13 @@
             }
           }
 
-          // If we finished parsing the chunk
-          // and we're not in <think> mode,
-          // let's update partial user-facing text
           if (!isThinkingActive && assistantTextBuffer.length > 0) {
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
 
-          // If this chunk signals done - ensure history is updated even if no content
           if (data.done) {
-            // Remove the typing indicator on completion
             const indicators = document.querySelectorAll(".typing-indicator");
             indicators.forEach((indicator) => indicator.remove());
-
-            // Only push if we have content and it's not already added
             if (
               assistantTextBuffer &&
               !messageHistory.some(
@@ -1212,7 +1290,6 @@
           lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
         if (msg.role === "tool") {
-          // If the last message is an empty assistant message with typing indicator, remove it
           if (lastMessageRole === "assistant") {
             const assistantContent = lastMessageDiv.querySelector(
               "div:not(.context-container):not(.thinking-process)"
@@ -1221,8 +1298,6 @@
               lastMessageDiv.remove();
             }
           }
-
-          // parse the content as JSON
           const toolData = JSON.parse(msg.content);
           const specialMessageDiv = document.createElement("div");
           specialMessageDiv.className = "message tool-message";
@@ -1250,9 +1325,7 @@
           chatContainer.appendChild(specialMessageDiv);
           initializeToolToggles(specialMessageDiv);
         } else {
-          // system
-          if (lastMessageRole === "system") {
-            // append to last system
+          if (lastMessageDiv && lastMessageRole === "system") {
             lastMessageDiv.innerHTML +=
               '<div class="source-separator"></div>' + md.render(msg.content);
           } else {
@@ -1289,7 +1362,6 @@
           chatContainer.appendChild(assistantBlock);
         }
 
-        // Remove any existing typing indicators
         const existingIndicators =
           assistantContent.querySelectorAll(".typing-indicator");
         existingIndicators.forEach((indicator) => indicator.remove());
@@ -1298,14 +1370,12 @@
         const typingIndicator = document.createElement("span");
         typingIndicator.className = "typing-indicator";
 
-        // Find the last actual content element
         let lastContentElement = assistantContent;
         const walker = document.createTreeWalker(
           assistantContent,
           NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
           {
             acceptNode: function (node) {
-              // Skip empty text nodes and typing indicators
               if (
                 node.nodeType === Node.TEXT_NODE &&
                 !node.textContent.trim()
@@ -1324,8 +1394,6 @@
           lastContentElement = walker.currentNode;
         }
 
-        // If the last element is a block element (like a list), append to it
-        // Otherwise append to its parent
         if (
           lastContentElement.nodeType === Node.TEXT_NODE ||
           getComputedStyle(lastContentElement).display === "inline"
@@ -1335,7 +1403,6 @@
           lastContentElement.appendChild(typingIndicator);
         }
 
-        // Handle context if needed
         if (!contextSet && context?.length) {
           const contextSection = createContextSection(context);
           if (contextSection) {
@@ -1363,7 +1430,6 @@
 
       function appendThinkingChunk(text, contentDiv) {
         if (!contentDiv) return;
-        // Filter out any <think> or </think> tags before displaying
         const cleanedText = text.replace(/<\/?think>/g, "");
         contentDiv.textContent += cleanedText;
       }
@@ -1406,35 +1472,52 @@
 
       queryInput.addEventListener("input", resizeTextarea);
 
-      // Keyboard shortcuts
       queryInput.addEventListener("keydown", async (e) => {
         if (e.key === "Enter") {
           if (e.shiftKey) {
             resizeTextarea();
             return;
           }
-
           if (e.ctrlKey) {
             e.preventDefault();
+            const toolsActorsInput =
+              document.getElementById("tools-actors-input");
+            const toolsActorsList = toolsActorsInput.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s !== "");
+            if (toolsActorsList.length === 0) {
+              alert("Please provide at least one tools actor.");
+              return;
+            }
             toolsEnabled = !toolsEnabled;
             updateToolButton();
             return;
           }
-
           if (e.altKey) {
             e.preventDefault();
             thinkEnabled = !thinkEnabled;
             updateThinkButton();
             return;
           }
-
           e.preventDefault();
           const endpoint = thinkEnabled ? "/think" : "/chat";
-          await sendQuery(endpoint, toolsEnabled);
+          await sendQuery(endpoint);
         }
       });
 
       document.getElementById("send-button").addEventListener("click", () => {
+        const toolsActorsInput = document.getElementById("tools-actors-input");
+        const toolsActorsList = toolsActorsInput.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s !== "");
+        if (toolsActorsList.length === 0) {
+          alert("Please provide at least one tools actor.");
+          toolsEnabled = false;
+          updateToolButton();
+          return;
+        }
         toolsEnabled = !toolsEnabled;
         updateToolButton();
       });
@@ -1460,10 +1543,54 @@
         localStorage.setItem("thinkEnabled", thinkEnabled);
       }
 
-      // Update the button states on page load
+      // Initialize sidebar state
+      function initializeSidebar() {
+        const sidebar = document.getElementById("sidebar");
+        const mainContent = document.getElementById("main-content");
+        const inputContainer = document.getElementById("input-container");
+
+        if (sidebarVisible) {
+          sidebar.classList.add("visible");
+          mainContent.classList.add("sidebar-visible");
+          inputContainer.classList.add("sidebar-visible");
+        }
+      }
+
+      // Toggle sidebar visibility
+      function toggleSidebar() {
+        const sidebar = document.getElementById("sidebar");
+        const mainContent = document.getElementById("main-content");
+        const inputContainer = document.getElementById("input-container");
+
+        sidebarVisible = !sidebarVisible;
+        localStorage.setItem("sidebarVisible", sidebarVisible);
+
+        sidebar.classList.toggle("visible");
+        mainContent.classList.toggle("sidebar-visible");
+        inputContainer.classList.toggle("sidebar-visible");
+
+        // Force recalculation of chat container scroll
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+
+      // Add event listener for sidebar toggle
+      document
+        .getElementById("sidebar-toggle")
+        .addEventListener("click", toggleSidebar);
+
+      // Initialize sidebar on page load
       document.addEventListener("DOMContentLoaded", () => {
+        initializeSidebar();
         updateToolButton();
         updateThinkButton();
+        const toolsActorsInput = document.getElementById("tools-actors-input");
+        const storedToolsActors = localStorage.getItem("toolsActors");
+        if (storedToolsActors) {
+          toolsActorsInput.value = storedToolsActors;
+        }
+        toolsActorsInput.addEventListener("change", function () {
+          localStorage.setItem("toolsActors", toolsActorsInput.value);
+        });
       });
     </script>
   </body>
