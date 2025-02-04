@@ -159,7 +159,6 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 5px;
       }
 
       .tool-item-name {
@@ -183,7 +182,6 @@
         border: 1px solid var(--border-color);
         border-radius: 6px;
         padding: 15px;
-        margin-top: 10px;
       }
 
       .tools-form.hidden {
@@ -797,7 +795,6 @@
         <div class="tools-form hidden" id="tool-form">
           <h4>Add New Actor</h4>
           <div class="form-group">
-            <label for="tool-actor">Actor:</label>
             <input type="text" id="tool-actor" placeholder="Actor name" />
           </div>
           <div class="form-actions">
@@ -811,7 +808,7 @@
         </div>
 
         <div class="saved-tools-section">
-          <h3>Saved Tools</h3>
+          <h3 style="margin-bottom: 10px">Saved Tools</h3>
           <div id="saved-tools-list" class="tools-list">
             <!-- Saved tools will be listed here -->
           </div>
