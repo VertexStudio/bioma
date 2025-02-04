@@ -1,5 +1,4 @@
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
-use bioma_actor::ActorId;
 use bioma_llm::{
     chat,
     prelude::{ChatMessage, DeleteSource, IndexGlobs, RetrieveContext, RetrieveQuery},
@@ -135,18 +134,6 @@ pub struct AskQueryRequestSchema {
 // /chat Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ActorIdSchema {
-    pub name: String,
-    pub tag: String,
-}
-
-impl From<ActorId> for ActorIdSchema {
-    fn from(actor_id: ActorId) -> Self {
-        ActorIdSchema { name: actor_id.name().to_string(), tag: actor_id.tag().to_string() }
-    }
-}
-
-#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
@@ -155,7 +142,6 @@ pub struct ChatQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
-    #[schema(value_type = Vec<ActorIdSchema>)]
     #[serde(default)]
     pub tools_actors: Vec<String>,
     #[serde(default = "default_chat_stream")]
@@ -175,7 +161,6 @@ pub struct ThinkQueryRequestSchema {
     pub format: Option<chat::Schema>,
     #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
-    #[schema(value_type = Vec<ActorIdSchema>)]
     #[serde(default)]
     pub tools_actors: Vec<String>,
     #[serde(default = "default_think_stream")]
