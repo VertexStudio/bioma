@@ -133,6 +133,7 @@
         padding: 8px;
         cursor: pointer;
         transition: all 0.2s ease;
+        position: relative; /* For tooltip positioning */
       }
 
       .tool-item:hover {
@@ -151,6 +152,42 @@
           rgba(255, 0, 160, 0.2) 0%,
           rgba(150, 0, 255, 0.2) 100%
         );
+      }
+
+      /* Add tooltip styles */
+      .tool-item::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 4px 8px;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 0.8em;
+        white-space: nowrap;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s, visibility 0.2s;
+        z-index: 1000;
+      }
+
+      .tool-item:hover::after {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      /* Add text selection color */
+      ::selection {
+        background: rgba(255, 0, 160, 0.3);
+        color: var(--text-primary);
+      }
+
+      ::-moz-selection {
+        background: rgba(255, 0, 160, 0.3);
+        color: var(--text-primary);
       }
 
       .tool-item-header {
@@ -1001,6 +1038,8 @@
             } else {
               normalLines.push(line);
             }
+          } else {
+            normalLines.push(line);
           }
         });
 
@@ -1373,20 +1412,12 @@
                   errorDiv.className = "message error-message";
                   const errorContent = `
                     <div class="error-toggle">▶</div>
-                    <div class="error-header">⚠️ ${errorBuffer.length} Error${
-                    errorBuffer.length > 1 ? "s" : ""
-                  } Occurred</div>
+                    <div class="error-header">⚠️ Error Occurred</div>
                     <div class="error-content">
-                      ${errorBuffer
-                        .map(
-                          (error) => `
-                        <div class="error-item">
-                          <i class="fas fa-exclamation-circle"></i>
-                          ${md.render(error)}
-                        </div>
-                      `
-                        )
-                        .join("")}
+                      <div class="error-item">
+                        <i class="fas fa-exclamation-circle"></i>
+                        ${md.render(e.toString())}
+                      </div>
                     </div>
                   `;
                   errorDiv.innerHTML = errorContent;
@@ -2049,6 +2080,7 @@
         const toolElement = document.createElement("div");
         toolElement.className = `tool-item${isActive ? " active" : ""}`;
         toolElement.dataset.toolId = tool.id;
+        toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
           <div class="tool-item-header">
             <span class="tool-icon"><i class="fas fa-wrench"></i></span>
@@ -2057,14 +2089,11 @@
               ${
                 isActive
                   ? `
-                <button class="tool-action-btn remove-tool" title="Remove">
-                  <i class="fas fa-times"></i>
+                <button class="tool-action-btn delete-tool" title="Delete">
+                  <i class="fas fa-trash"></i>
                 </button>
               `
                   : `
-                <button class="tool-action-btn add-tool" title="Add to Active">
-                  <i class="fas fa-plus"></i>
-                </button>
                 <button class="tool-action-btn delete-tool" title="Delete">
                   <i class="fas fa-trash"></i>
                 </button>
@@ -2076,17 +2105,23 @@
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
+
         if (isActive) {
-          actions
-            .querySelector(".remove-tool")
-            .addEventListener("click", () => removeFromActive(tool));
-        } else {
-          actions
-            .querySelector(".add-tool")
-            .addEventListener("click", () => addToActive(tool));
+          toolElement.addEventListener("click", () => removeFromActive(tool));
           actions
             .querySelector(".delete-tool")
-            .addEventListener("click", () => deleteTool(tool));
+            .addEventListener("click", (e) => {
+              e.stopPropagation(); // Prevent triggering the parent click
+              deleteTool(tool);
+            });
+        } else {
+          toolElement.addEventListener("click", () => addToActive(tool));
+          actions
+            .querySelector(".delete-tool")
+            .addEventListener("click", (e) => {
+              e.stopPropagation(); // Prevent triggering the parent click
+              deleteTool(tool);
+            });
         }
 
         return toolElement;
