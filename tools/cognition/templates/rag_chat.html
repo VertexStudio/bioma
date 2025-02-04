@@ -714,19 +714,62 @@
       }
 
       .error-message {
-        background-color: rgba(255, 0, 0, 0.1);
-        border: 1px solid rgba(255, 0, 0, 0.3);
+        background-color: var(--bg-main);
+        border: 1px solid var(--border-color);
         color: #ff6b6b;
         align-self: flex-start;
         padding: 12px;
         border-radius: 12px;
         max-width: 85%;
         margin-bottom: 15px;
+        position: relative;
       }
 
-      .error-message i {
-        margin-right: 8px;
+      .error-toggle {
+        color: var(--text-muted);
+        position: absolute;
+        top: 16px;
+        left: 8px;
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(255, 0, 0, 0.1);
+        border-radius: 4px;
+        user-select: none;
+        transition: background-color 0.2s, color 0.2s;
+      }
+
+      .error-toggle:hover {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 0, 0, 0.2) 0%,
+          rgba(255, 0, 0, 0.3) 100%
+        );
         color: #ff4444;
+      }
+
+      .error-header {
+        margin-left: 28px;
+        padding: 4px 0;
+        color: #ff6b6b;
+        font-weight: bold;
+      }
+
+      .error-content {
+        margin-left: 28px;
+        display: none;
+        padding-top: 8px;
+      }
+
+      .error-item {
+        margin-bottom: 8px;
+        padding: 8px;
+        background-color: rgba(255, 0, 0, 0.05);
+        border: 1px solid rgba(255, 0, 0, 0.1);
+        border-radius: 4px;
       }
 
       .typing-indicator {
@@ -1151,25 +1194,11 @@
         queryInput.value = "";
         resizeTextarea();
 
-        // Start thinking animation immediately for /think endpoint
-        if (endpoint === "/think") {
-          thinkingDiv = createThinkingProcessContainer();
-          chatContainer.appendChild(thinkingDiv);
-          thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
-          thinkingStartTime = Date.now();
-          const thinkingText = thinkingDiv.querySelector(".thinking-text");
-          if (thinkingText) {
-            thinkingText.classList.remove("static");
-          }
-          isThinkingActive = true;
-        } else if (endpoint === "/chat") {
-          createOrUpdateAssistantMessage("");
-        }
-
         // Reset state variables
         assistantTextBuffer = "";
         contextSet = false;
         latestContext = null;
+        let errorBuffer = []; // New: Buffer to store errors during connection
 
         // Get tools actors list from sidebar input
         const toolsActorsInput = document.getElementById("tools-actors-input");
@@ -1199,7 +1228,35 @@
           });
 
           if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            errorBuffer.push(`HTTP error! status: ${response.status}`);
+          }
+
+          // Display error container at the start if we have errors
+          let errorDiv = null;
+          if (errorBuffer.length > 0) {
+            errorDiv = document.createElement("div");
+            errorDiv.className = "message error-message";
+            const errorContent = `
+              <div class="error-toggle">▶</div>
+              <div class="error-header">⚠️ ${errorBuffer.length} Error${
+              errorBuffer.length > 1 ? "s" : ""
+            } Occurred</div>
+              <div class="error-content">
+                ${errorBuffer
+                  .map(
+                    (error) => `
+                  <div class="error-item">
+                    <i class="fas fa-exclamation-circle"></i>
+                    ${md.render(error)}
+                  </div>
+                `
+                  )
+                  .join("")}
+              </div>
+            `;
+            errorDiv.innerHTML = errorContent;
+            chatContainer.appendChild(errorDiv);
+            initializeErrorToggles(errorDiv);
           }
 
           // We'll collect everything in a stream and process it
@@ -1222,22 +1279,112 @@
               try {
                 const data = JSON.parse(line);
 
-                // Handle error responses
+                // Store errors in buffer and update error display
                 if (data.error) {
-                  const errorDiv = document.createElement("div");
-                  errorDiv.className = "message error-message";
-                  errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
-                    data.error
-                  )}`;
-                  chatContainer.appendChild(errorDiv);
-                  chatContainer.scrollTop = chatContainer.scrollHeight;
-                  return; // Exit early on error
+                  errorBuffer.push(data.error);
+                  if (errorDiv) {
+                    // Update existing error display
+                    const errorContent = `
+                      <div class="error-toggle">▶</div>
+                      <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                      errorBuffer.length > 1 ? "s" : ""
+                    } Occurred</div>
+                      <div class="error-content">
+                        ${errorBuffer
+                          .map(
+                            (error) => `
+                          <div class="error-item">
+                            <i class="fas fa-exclamation-circle"></i>
+                            ${md.render(error)}
+                          </div>
+                        `
+                          )
+                          .join("")}
+                      </div>
+                    `;
+                    errorDiv.innerHTML = errorContent;
+                    initializeErrorToggles(errorDiv);
+                  } else {
+                    // Create new error display
+                    errorDiv = document.createElement("div");
+                    errorDiv.className = "message error-message";
+                    const errorContent = `
+                      <div class="error-toggle">▶</div>
+                      <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                      errorBuffer.length > 1 ? "s" : ""
+                    } Occurred</div>
+                      <div class="error-content">
+                        ${errorBuffer
+                          .map(
+                            (error) => `
+                          <div class="error-item">
+                            <i class="fas fa-exclamation-circle"></i>
+                            ${md.render(error)}
+                          </div>
+                        `
+                          )
+                          .join("")}
+                      </div>
+                    `;
+                    errorDiv.innerHTML = errorContent;
+                    chatContainer.appendChild(errorDiv);
+                    initializeErrorToggles(errorDiv);
+                  }
+                  continue;
                 }
 
                 processJsonLine(line);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
                 console.error("Raw line content:", line);
+                errorBuffer.push(`Error processing response: ${e.message}`);
+                // Update error display with new error
+                if (errorDiv) {
+                  const errorContent = `
+                    <div class="error-toggle">▶</div>
+                    <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                    errorBuffer.length > 1 ? "s" : ""
+                  } Occurred</div>
+                    <div class="error-content">
+                      ${errorBuffer
+                        .map(
+                          (error) => `
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(error)}
+                        </div>
+                      `
+                        )
+                        .join("")}
+                    </div>
+                  `;
+                  errorDiv.innerHTML = errorContent;
+                  initializeErrorToggles(errorDiv);
+                } else {
+                  errorDiv = document.createElement("div");
+                  errorDiv.className = "message error-message";
+                  const errorContent = `
+                    <div class="error-toggle">▶</div>
+                    <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                    errorBuffer.length > 1 ? "s" : ""
+                  } Occurred</div>
+                    <div class="error-content">
+                      ${errorBuffer
+                        .map(
+                          (error) => `
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(error)}
+                        </div>
+                      `
+                        )
+                        .join("")}
+                    </div>
+                  `;
+                  errorDiv.innerHTML = errorContent;
+                  chatContainer.appendChild(errorDiv);
+                  initializeErrorToggles(errorDiv);
+                }
               }
             }
           }
@@ -1264,11 +1411,19 @@
           console.error("Error:", error);
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
-          errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i>${md.render(
-            error.toString()
-          )}`;
+          const errorContent = `
+            <div class="error-toggle">▶</div>
+            <div class="error-header">⚠️ Error Occurred</div>
+            <div class="error-content">
+              <div class="error-item">
+                <i class="fas fa-exclamation-circle"></i>
+                ${md.render(error.toString())}
+              </div>
+            </div>
+          `;
+          errorDiv.innerHTML = errorContent;
           chatContainer.appendChild(errorDiv);
-          chatContainer.scrollTop = chatContainer.scrollHeight;
+          initializeErrorToggles(errorDiv);
         }
       }
 
@@ -2064,6 +2219,22 @@
         `;
         document.head.appendChild(style);
       })();
+
+      function initializeErrorToggles(container) {
+        container.querySelectorAll(".error-toggle").forEach((toggle) => {
+          if (!toggle.hasListener) {
+            toggle.addEventListener("click", function () {
+              const content =
+                this.parentElement.querySelector(".error-content");
+              const isHidden =
+                content.style.display === "none" || !content.style.display;
+              content.style.display = isHidden ? "block" : "none";
+              this.textContent = isHidden ? "▼" : "▶";
+            });
+            toggle.hasListener = true;
+          }
+        });
+      }
     </script>
   </body>
 </html>
