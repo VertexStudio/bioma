@@ -2019,8 +2019,8 @@
         savedTools.push(tool);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
-        // Add to saved tools list
-        addToolToSavedList(tool);
+        // Add to saved tools list and automatically activate it
+        addToActive(tool);
 
         // Clear the form input
         clearToolForm();
