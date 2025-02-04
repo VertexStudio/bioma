@@ -162,6 +162,7 @@ pub struct ThinkQueryRequestSchema {
     #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
     #[serde(default)]
+    // TODO: Vec<ActorId> or Vec<String>? The first one requires custom deserialization.
     pub tools_actors: Vec<String>,
     #[serde(default = "default_think_stream")]
     pub stream: bool,

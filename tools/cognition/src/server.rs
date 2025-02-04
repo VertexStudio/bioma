@@ -546,6 +546,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                         .await;
                     match tool_info {
                         Ok(tool_info) => {
+                            // TODO: What if we have functions with the same name?
                             // Map each tool name to this hub's ID
                             for tool in &tool_info {
                                 tool_hub_map.insert(tool.name().to_string(), actor_id.clone());
