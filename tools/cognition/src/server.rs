@@ -535,7 +535,14 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 for actor_id in &body.tools_actors {
                     let actor_id = ActorId::of::<ToolsHub>(actor_id.clone());
                     let tool_info = user_actor
-                        .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
+                        .send_and_wait_reply::<ToolsHub, ListTools>(
+                            ListTools(None),
+                            &actor_id,
+                            SendOptions::builder()
+                                .timeout(std::time::Duration::from_secs(30))
+                                .check_health(true)
+                                .build(),
+                        )
                         .await;
                     match tool_info {
                         Ok(tool_info) => {
