@@ -177,7 +177,7 @@ pub struct ThinkQueryRequestSchema {
     pub tools: Vec<ToolInfoSchema>,
     #[schema(value_type = Vec<ActorIdSchema>)]
     #[serde(default)]
-    pub tools_actors: Vec<ActorId>,
+    pub tools_actors: Vec<String>,
     #[serde(default = "default_think_stream")]
     pub stream: bool,
 }
