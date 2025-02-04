@@ -1,6 +1,5 @@
 use anyhow::Result;
 use bioma_actor::EngineOptions;
-use bioma_tool::client::ClientConfig;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -9,7 +8,7 @@ use tracing::info;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct ServerConfig {
     #[serde(default = "default_engine")]
     pub engine: EngineOptions,
     #[serde(default = "default_rag_endpoint")]
@@ -32,7 +31,6 @@ pub struct Config {
     pub think_messages_limit: usize,
     #[serde(default = "default_think_context_length")]
     pub think_context_length: u32,
-    pub tools: Vec<ClientConfig>,
 }
 
 fn default_engine() -> EngineOptions {
@@ -106,7 +104,7 @@ fn default_think_context_length() -> u32 {
     4096
 }
 
-impl Default for Config {
+impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             engine: default_engine(),
@@ -120,7 +118,6 @@ impl Default for Config {
             chat_context_length: default_chat_context_length(),
             think_messages_limit: default_think_messages_limit(),
             think_context_length: default_think_context_length(),
-            tools: vec![],
         }
     }
 }
@@ -128,19 +125,21 @@ impl Default for Config {
 #[derive(Parser)]
 pub struct Args {
     pub config: Option<PathBuf>,
+    #[clap(long, default_value = "/rag/tools_hub")]
+    pub tools_hub_id: String,
 }
 
 impl Args {
-    pub fn load_config(&self) -> Result<Config> {
-        let config: Config = match &self.config {
+    pub fn load_config(&self) -> Result<ServerConfig> {
+        let config: ServerConfig = match &self.config {
             Some(path) => {
                 let config = std::fs::read_to_string(path)?;
                 info!("Loaded config: {}", path.display());
-                serde_json::from_str::<Config>(&config)?
+                serde_json::from_str::<ServerConfig>(&config)?
             }
             None => {
                 info!("Default config:");
-                Config::default()
+                ServerConfig::default()
             }
         };
         info!("├─ Engine Configuration:");
@@ -161,11 +160,6 @@ impl Args {
         info!("├─ Chat Context Length: {}", config.chat_context_length);
         info!("├─ Think Messages Limit: {}", config.think_messages_limit);
         info!("├─ Think Context Length: {}", config.think_context_length);
-        info!("├─ Tool Servers: {} configured", config.tools.len());
-        for (i, tool) in config.tools.iter().enumerate() {
-            let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };
-            info!("{}  {}", prefix, tool.server.name);
-        }
 
         Ok(config)
     }

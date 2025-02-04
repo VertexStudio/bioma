@@ -1,11 +1,10 @@
 use bioma_actor::prelude::*;
 use clap::Parser;
-use config::Args;
+use client_config::Args;
 use tool::ToolsHub;
 use tracing::info;
-use user::UserActor;
 
-pub mod config;
+pub mod client_config;
 pub mod tool;
 pub mod user;
 
@@ -22,17 +21,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize engine
     let engine = Engine::connect(config.engine.clone()).await?;
 
-    // Tools setup
-    let tools_user = UserActor::new(&engine, "/rag/client/tool/".into()).await?;
-    let mut tools_hub = ToolsHub::new();
-    for tool in &config.tools {
-        tools_hub.add_tool(&engine, tool.clone(), "/rag".into()).await?;
-    }
-    tools_hub.list_tools(&tools_user).await?;
+    // Create ToolsHub instance
+    let tools_hub = ToolsHub::new(&engine, config.tools.clone(), args.tools_hub_id.clone()).await?;
+
+    // Spawn the ToolsHub actor
+    let tools_hub_id_str = args.tools_hub_id.clone();
+    let tools_hub_id = ActorId::of::<ToolsHub>(tools_hub_id_str);
+    let (mut tools_hub_ctx, mut tools_hub_actor) = Actor::spawn(
+        engine.clone(),
+        tools_hub_id.clone(),
+        tools_hub,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await?;
+
+    // Spawn the actor's main loop in a separate task
+    let tools_hub_handle = tokio::spawn(async move {
+        if let Err(e) = tools_hub_actor.start(&mut tools_hub_ctx).await {
+            tracing::error!("ToolsHub actor error: {}", e);
+        }
+    });
 
     // Wait for interrupt signal
     tokio::signal::ctrl_c().await?;
     info!("Received shutdown signal, cleaning up...");
+
+    // Abort the actor task
+    tools_hub_handle.abort();
 
     Ok(())
 }

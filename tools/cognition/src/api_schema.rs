@@ -134,7 +134,6 @@ pub struct AskQueryRequestSchema {
 // /chat Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
@@ -142,9 +141,9 @@ pub struct ChatQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub use_tools: bool,
-    #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
+    #[serde(default)]
+    pub tools_actors: Vec<String>,
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
 }
@@ -161,9 +160,10 @@ pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub use_tools: bool,
-    #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
+    #[serde(default)]
+    // TODO: Vec<ActorId> or Vec<String>? The first one requires custom deserialization.
+    pub tools_actors: Vec<String>,
     #[serde(default = "default_think_stream")]
     pub stream: bool,
 }
