@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use actix_web::web::Json;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
@@ -52,7 +54,7 @@ pub async fn chat_with_tools(
     chat_actor: &ActorId,
     messages: &Vec<ChatMessage>,
     tools: &Vec<ToolInfo>,
-    tools_hub: &ActorId,
+    tool_hub_map: &HashMap<String, ActorId>,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
     stream: bool,
@@ -110,7 +112,7 @@ pub async fn chat_with_tools(
                     info!("Tool calls: {:#?}", message_response.message.tool_calls);
                     for tool_call in message_response.message.tool_calls.iter() {
                         // Call the tool
-                        let tool_response = chat_tool_call(user_actor, &tool_call, tools_hub, tx.clone()).await;
+                        let tool_response = chat_tool_call(user_actor, &tool_call, tool_hub_map, tx.clone()).await;
                         match tool_response {
                             Ok(tool_response) => {
                                 messages
@@ -124,7 +126,7 @@ pub async fn chat_with_tools(
                         chat_actor,
                         &messages,
                         tools,
-                        tools_hub,
+                        tool_hub_map,
                         tx.clone(),
                         format.clone(),
                         stream,
@@ -142,16 +144,22 @@ pub async fn chat_with_tools(
     Ok(())
 }
 
+pub type ToolHubMap = HashMap<String, ActorId>;
+
 async fn chat_tool_call(
     user_actor: &ActorContext<UserActor>,
     tool_call: &ToolCall,
-    tools_hub: &ActorId,
+    tool_hub_map: &ToolHubMap,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
 ) -> Result<ToolResponse, ChatToolError> {
+    let hub_id = tool_hub_map
+        .get(&tool_call.function.name)
+        .ok_or_else(|| ChatToolError::ToolNotFound(tool_call.function.name.clone()))?;
+
     let execution_result = user_actor
         .send_and_wait_reply::<ToolsHub, ToolCall>(
             tool_call.clone(),
-            tools_hub,
+            hub_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).check_health(true).build(),
         )
         .await

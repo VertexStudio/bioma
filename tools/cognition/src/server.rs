@@ -16,7 +16,7 @@ use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
     },
-    ChatResponse, ToolsHub, UserActor,
+    ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
 use config::{Args, Config};
 use embeddings::EmbeddingContent;
@@ -534,13 +534,20 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 }
 
                 let mut tools: Vec<ToolInfo> = vec![];
+                let mut tool_hub_map: ToolHubMap = HashMap::new();
 
                 for actor_id in &body.tools_actors {
                     let tool_info = user_actor
                         .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
                         .await;
                     match tool_info {
-                        Ok(tool_info) => tools.extend(tool_info),
+                        Ok(tool_info) => {
+                            // Map each tool name to this hub's ID
+                            for tool in &tool_info {
+                                tool_hub_map.insert(tool.name().to_string(), actor_id.clone());
+                            }
+                            tools.extend(tool_info);
+                        }
                         Err(e) => {
                             error!("Error fetching tools: {:?}", e);
                             let _ = tx.send(Err(e.to_string())).await;
@@ -559,7 +566,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     &data.chat,
                     &conversation,
                     &tools,
-                    &data.tools,
+                    &tool_hub_map,
                     chat_with_tools_tx,
                     body.format.clone(),
                     body.stream,
