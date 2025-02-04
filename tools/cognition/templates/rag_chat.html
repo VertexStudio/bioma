@@ -1194,6 +1194,22 @@
         queryInput.value = "";
         resizeTextarea();
 
+        // Start thinking animation immediately for /think endpoint
+        // or create empty assistant message for /chat
+        if (endpoint === "/think") {
+          thinkingDiv = createThinkingProcessContainer();
+          chatContainer.appendChild(thinkingDiv);
+          thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
+          thinkingStartTime = Date.now();
+          const thinkingText = thinkingDiv.querySelector(".thinking-text");
+          if (thinkingText) {
+            thinkingText.classList.remove("static");
+          }
+          isThinkingActive = true;
+        } else if (endpoint === "/chat") {
+          createOrUpdateAssistantMessage("");
+        }
+
         // Reset state variables
         assistantTextBuffer = "";
         contextSet = false;
