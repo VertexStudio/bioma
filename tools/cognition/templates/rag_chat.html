@@ -58,6 +58,8 @@
 
       #main-content.sidebar-visible {
         margin-right: calc(var(--sidebar-width) + 20px);
+        /* Reduce shrinkage by increasing max-width when sidebar is visible */
+        max-width: calc(1000px - var(--sidebar-width));
       }
 
       /* Sidebar styling */
@@ -123,7 +125,8 @@
       }
 
       #input-container.sidebar-visible {
-        max-width: calc(800px - var(--sidebar-width));
+        /* Adjust input container to match new content width */
+        max-width: calc(1000px - var(--sidebar-width));
         transform: translateX(calc(-50% - var(--sidebar-width) / 2));
       }
 
