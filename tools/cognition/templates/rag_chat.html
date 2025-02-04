@@ -782,6 +782,12 @@
         margin: 0.5em 0;
         padding-left: 1.5em;
       }
+
+      /* Add styles for disabled button state */
+      .action-button[style*="cursor: not-allowed"]:hover {
+        background: var(--bg-secondary) !important;
+        border-color: var(--border-color) !important;
+      }
     </style>
   </head>
   <body>
@@ -1691,12 +1697,12 @@
               .split(",")
               .map((s) => s.trim())
               .filter((s) => s !== "");
-            if (toolsActorsList.length === 0) {
-              alert("Please provide at least one tools actor.");
-              return;
+
+            // Only toggle if we have tools
+            if (toolsActorsList.length > 0) {
+              toolsEnabled = !toolsEnabled;
+              updateToolButton();
             }
-            toolsEnabled = !toolsEnabled;
-            updateToolButton();
             return;
           }
           if (e.altKey) {
@@ -1721,20 +1727,10 @@
             .map((s) => s.trim())
             .filter((s) => s !== "");
 
-          if (toolsActorsList.length === 0) {
-            alert("Please provide at least one tools actor.");
-            toolsEnabled = false;
+          // Only toggle if we have tools
+          if (toolsActorsList.length > 0) {
+            toolsEnabled = !toolsEnabled;
             updateToolButton();
-            return;
-          }
-
-          toolsEnabled = !toolsEnabled;
-          updateToolButton();
-
-          // If tools are enabled and there's text in the input, send the query
-          if (toolsEnabled && queryInput.value.trim()) {
-            const endpoint = thinkEnabled ? "/think" : "/chat";
-            await sendQuery(endpoint);
           }
         });
 
@@ -1751,14 +1747,21 @@
           .map((s) => s.trim())
           .filter((s) => s !== "");
 
-        // Check if we have any tools actors before enabling
-        if (toolsEnabled && toolsActorsList.length === 0) {
+        // Disable tools if no actors are available
+        if (toolsActorsList.length === 0) {
           toolsEnabled = false;
-          alert("Please provide at least one tools actor.");
+          toolButton.classList.remove("active");
+          toolButton.style.opacity = "0.5";
+          toolButton.style.cursor = "not-allowed";
+          toolButton.title =
+            "Please add at least one tool in the sidebar to enable tools";
+        } else {
+          toolButton.style.opacity = "1";
+          toolButton.style.cursor = "pointer";
+          toolButton.classList.toggle("active", toolsEnabled);
+          toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
         }
 
-        toolButton.classList.toggle("active", toolsEnabled);
-        toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
         localStorage.setItem("toolsEnabled", toolsEnabled);
       }
 
@@ -1949,6 +1952,7 @@
           localStorage.setItem("activeTools", JSON.stringify(activeTools));
           addToolToActiveList(tool);
           updateToolsActors();
+          updateToolButton();
         }
       }
 
@@ -1957,6 +1961,7 @@
         localStorage.setItem("activeTools", JSON.stringify(activeTools));
         loadActiveTools();
         updateToolsActors();
+        updateToolButton();
       }
 
       function deleteTool(tool) {
@@ -1970,13 +1975,21 @@
         loadSavedTools();
         loadActiveTools();
         updateToolsActors();
+        updateToolButton();
       }
 
       function updateToolsActors() {
         const activeTools = getActiveTools();
         const actors = activeTools.map((tool) => tool.actor);
-        document.getElementById("tools-actors-input").value = actors.join(", ");
+        const toolsActorsInput = document.getElementById("tools-actors-input");
+        toolsActorsInput.value = actors.join(", ");
         localStorage.setItem("toolsActors", actors.join(", "));
+
+        // Update tools state based on actors
+        if (actors.length === 0) {
+          toolsEnabled = false;
+        }
+        updateToolButton();
       }
 
       // Toggle sidebar visibility
@@ -2004,17 +2017,53 @@
       // Initialize sidebar on page load
       document.addEventListener("DOMContentLoaded", () => {
         initializeSidebar();
-        updateToolButton();
-        updateThinkButton();
+
+        // Load stored tools state
+        const storedToolsEnabled = localStorage.getItem("toolsEnabled");
         const toolsActorsInput = document.getElementById("tools-actors-input");
         const storedToolsActors = localStorage.getItem("toolsActors");
+
+        // First load the tools actors
         if (storedToolsActors) {
           toolsActorsInput.value = storedToolsActors;
         }
+
+        // Then set the tools state
+        if (storedToolsEnabled !== null) {
+          toolsEnabled = storedToolsEnabled === "true";
+
+          // Validate the state against available tools
+          const toolsActorsList = toolsActorsInput.value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s !== "");
+
+          if (toolsActorsList.length === 0) {
+            toolsEnabled = false;
+          }
+        }
+
+        updateToolButton();
+        updateThinkButton();
+
+        // Add change listener for tools actors
         toolsActorsInput.addEventListener("change", function () {
           localStorage.setItem("toolsActors", toolsActorsInput.value);
+          updateToolButton();
         });
       });
+
+      // Initialize styles for disabled button state
+      (function () {
+        const style = document.createElement("style");
+        style.textContent = `
+          .action-button[style*="cursor: not-allowed"]:hover {
+            background: var(--bg-secondary) !important;
+            border-color: var(--border-color) !important;
+          }
+        `;
+        document.head.appendChild(style);
+      })();
     </script>
   </body>
 </html>
