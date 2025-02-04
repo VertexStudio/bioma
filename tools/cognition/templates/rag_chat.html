@@ -73,7 +73,7 @@
         background-color: var(--bg-secondary);
         color: var(--text-primary);
         border-left: 1px solid var(--border-color);
-        padding: 20px;
+        padding: 15px;
         box-sizing: border-box;
         overflow-y: auto;
         transition: right 0.3s ease;
@@ -90,49 +90,49 @@
 
       #sidebar h2 {
         margin-top: 0;
-        margin-bottom: 20px;
-        font-size: 1.2em;
+        margin-bottom: 15px;
+        font-size: 1.1em;
         color: var(--text-primary);
         border-bottom: 1px solid var(--border-color);
-        padding-bottom: 10px;
+        padding-bottom: 8px;
       }
 
       #sidebar h3 {
-        font-size: 1.1em;
+        font-size: 1em;
         margin: 0;
         color: var(--text-secondary);
       }
 
       #sidebar h4 {
-        font-size: 1em;
-        margin: 10px 0;
+        font-size: 0.9em;
+        margin: 8px 0;
         color: var(--text-secondary);
       }
 
       .tools-section {
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 15px;
       }
 
       .tools-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
       }
 
       .tools-list {
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
       }
 
       .tool-item {
         background: var(--bg-main);
         border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 10px;
+        border-radius: 4px;
+        padding: 8px;
         cursor: pointer;
         transition: all 0.2s ease;
       }
@@ -159,11 +159,26 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 8px;
       }
 
       .tool-item-name {
+        font-size: 0.9em;
         font-weight: bold;
         color: var(--text-primary);
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .tool-icon {
+        color: var(--text-muted);
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .tool-item-actor {
@@ -180,8 +195,8 @@
       .tools-form {
         background: var(--bg-main);
         border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 15px;
+        border-radius: 4px;
+        padding: 12px;
       }
 
       .tools-form.hidden {
@@ -189,46 +204,44 @@
       }
 
       .form-group {
-        margin-bottom: 15px;
-      }
-
-      .form-group label {
-        display: block;
-        margin-bottom: 5px;
-        color: var(--text-secondary);
+        margin-bottom: 12px;
       }
 
       .form-group input,
       .form-group textarea {
         width: 100%;
-        padding: 8px;
+        padding: 6px 8px;
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         border-radius: 4px;
         color: var(--text-primary);
         font-family: var(--font-family);
-      }
-
-      .form-group textarea {
-        resize: vertical;
-        min-height: 60px;
+        font-size: 0.9em;
       }
 
       .form-actions {
         display: flex;
-        gap: 10px;
-        justify-content: flex-end;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      .form-actions .action-button {
+        padding: 6px 12px;
+        font-size: 0.9em;
+        display: flex;
+        align-items: center;
+        gap: 6px;
       }
 
       .saved-tools-section {
-        margin-top: 20px;
-        padding-top: 20px;
+        margin-top: 15px;
+        padding-top: 15px;
         border-top: 1px solid var(--border-color);
       }
 
       .tool-actions {
         display: flex;
-        gap: 5px;
+        gap: 4px;
       }
 
       .tool-action-btn {
@@ -236,37 +249,37 @@
         border: none;
         color: var(--text-muted);
         cursor: pointer;
-        padding: 2px;
+        padding: 4px;
         transition: color 0.2s;
-      }
-
-      .tool-action-btn:hover {
-        color: var(--primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
       }
 
       #add-tool-btn {
-        padding: 5px 10px;
+        padding: 4px 8px;
         font-size: 0.9em;
-      }
-
-      .tool-drag-handle {
-        cursor: move;
-        color: var(--text-muted);
-        margin-right: 5px;
       }
 
       #sidebar-toggle {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 15px;
+        right: 15px;
         z-index: 1001;
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         color: var(--text-primary);
         padding: 8px;
-        border-radius: 5px;
+        border-radius: 4px;
         cursor: pointer;
         transition: all 0.2s;
+        height: 35px;
+        width: 35px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       #sidebar-toggle:hover {
@@ -788,6 +801,9 @@
           </button>
         </div>
 
+        <!-- Add the hidden input for tools actors -->
+        <input type="hidden" id="tools-actors-input" value="" />
+
         <div id="active-tools-list" class="tools-list">
           <!-- Active tools will be listed here -->
         </div>
@@ -942,8 +958,11 @@
             } else {
               normalLines.push(line);
             }
+          } else {
+            normalLines.push(line);
           }
         });
+
         flushNormalLines();
         return processedContent;
       }
@@ -1692,21 +1711,32 @@
         }
       });
 
-      document.getElementById("send-button").addEventListener("click", () => {
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
-        if (toolsActorsList.length === 0) {
-          alert("Please provide at least one tools actor.");
-          toolsEnabled = false;
+      document
+        .getElementById("send-button")
+        .addEventListener("click", async () => {
+          const toolsActorsInput =
+            document.getElementById("tools-actors-input");
+          const toolsActorsList = toolsActorsInput.value
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s !== "");
+
+          if (toolsActorsList.length === 0) {
+            alert("Please provide at least one tools actor.");
+            toolsEnabled = false;
+            updateToolButton();
+            return;
+          }
+
+          toolsEnabled = !toolsEnabled;
           updateToolButton();
-          return;
-        }
-        toolsEnabled = !toolsEnabled;
-        updateToolButton();
-      });
+
+          // If tools are enabled and there's text in the input, send the query
+          if (toolsEnabled && queryInput.value.trim()) {
+            const endpoint = thinkEnabled ? "/think" : "/chat";
+            await sendQuery(endpoint);
+          }
+        });
 
       document.getElementById("think-button").addEventListener("click", () => {
         thinkEnabled = !thinkEnabled;
@@ -1715,6 +1745,18 @@
 
       function updateToolButton() {
         const toolButton = document.getElementById("send-button");
+        const toolsActorsInput = document.getElementById("tools-actors-input");
+        const toolsActorsList = toolsActorsInput.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s !== "");
+
+        // Check if we have any tools actors before enabling
+        if (toolsEnabled && toolsActorsList.length === 0) {
+          toolsEnabled = false;
+          alert("Please provide at least one tools actor.");
+        }
+
         toolButton.classList.toggle("active", toolsEnabled);
         toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
         localStorage.setItem("toolsEnabled", toolsEnabled);
@@ -1759,22 +1801,31 @@
         loadActiveTools();
 
         // Event Listeners
-        addToolBtn.addEventListener("click", showToolForm);
+        addToolBtn.addEventListener("click", toggleToolForm);
         saveToolBtn.addEventListener("click", saveTool);
         cancelToolBtn.addEventListener("click", hideToolForm);
-
-        // Make tools draggable
-        makeToolsDraggable();
       }
 
-      function showToolForm() {
+      function toggleToolForm() {
         const toolForm = document.getElementById("tool-form");
-        toolForm.classList.remove("hidden");
+        const addToolBtn = document.getElementById("add-tool-btn");
+        const isHidden = toolForm.classList.contains("hidden");
+
+        if (isHidden) {
+          toolForm.classList.remove("hidden");
+          addToolBtn.innerHTML = '<i class="fas fa-minus"></i>';
+          addToolBtn.title = "Cancel Adding Tool";
+        } else {
+          hideToolForm();
+        }
       }
 
       function hideToolForm() {
         const toolForm = document.getElementById("tool-form");
+        const addToolBtn = document.getElementById("add-tool-btn");
         toolForm.classList.add("hidden");
+        addToolBtn.innerHTML = '<i class="fas fa-plus"></i>';
+        addToolBtn.title = "Add New Tool";
         clearToolForm();
       }
 
@@ -1804,8 +1855,8 @@
         // Add to saved tools list
         addToolToSavedList(tool);
 
-        // Clear form and hide it
-        hideToolForm();
+        // Just clear the form input without hiding it
+        clearToolForm();
       }
 
       function getSavedTools() {
@@ -1838,7 +1889,7 @@
         toolElement.dataset.toolId = tool.id;
         toolElement.innerHTML = `
           <div class="tool-item-header">
-            <span class="tool-drag-handle"><i class="fas fa-grip-vertical"></i></span>
+            <span class="tool-icon"><i class="fas fa-wrench"></i></span>
             <span class="tool-item-name">${tool.actor}</span>
             <div class="tool-actions">
               ${
@@ -1909,8 +1960,6 @@
       }
 
       function deleteTool(tool) {
-        if (!confirm("Are you sure you want to delete this tool?")) return;
-
         const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
@@ -1921,26 +1970,6 @@
         loadSavedTools();
         loadActiveTools();
         updateToolsActors();
-      }
-
-      function makeToolsDraggable() {
-        new Sortable(document.getElementById("active-tools-list"), {
-          handle: ".tool-drag-handle",
-          animation: 150,
-          onEnd: function () {
-            const activeTools = Array.from(
-              document.getElementById("active-tools-list").children
-            )
-              .map((el) => {
-                const toolId = el.dataset.toolId;
-                return getActiveTools().find((t) => t.id === toolId);
-              })
-              .filter(Boolean);
-
-            localStorage.setItem("activeTools", JSON.stringify(activeTools));
-            updateToolsActors();
-          },
-        });
       }
 
       function updateToolsActors() {
