@@ -718,6 +718,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
 
         // First collect all tools from all actors
         for actor_id in &body.tools_actors {
+            let actor_id = ActorId::of::<ToolsHub>(actor_id.clone());
             match user_actor
                 .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
                 .await
