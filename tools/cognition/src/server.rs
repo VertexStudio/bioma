@@ -23,7 +23,7 @@ use cognition::{
     },
     ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
-use config::{Args, Config};
+use server_config::{Args, ServerConfig};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
@@ -36,10 +36,10 @@ use url::Url;
 use utoipa::{openapi::ServerBuilder, OpenApi};
 
 mod api_schema;
-mod config;
+mod server_config;
 
 struct AppState {
-    config: Config,
+    config: ServerConfig,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,

@@ -1,10 +1,10 @@
 use bioma_actor::prelude::*;
 use clap::Parser;
-use config::Args;
+use client_config::Args;
 use tool::ToolsHub;
 use tracing::info;
 
-pub mod config;
+pub mod client_config;
 pub mod tool;
 pub mod user;
 
