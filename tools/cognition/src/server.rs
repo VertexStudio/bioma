@@ -555,7 +555,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                         Err(e) => {
                             error!("Error fetching tools: {:?}", e);
                             let _ = tx.send(Err(e.to_string())).await;
-                            return Err(cognition::ChatToolError::FetchToolsError(e.to_string()));
+                            continue;
                         }
                     }
                 }
