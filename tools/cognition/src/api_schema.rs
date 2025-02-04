@@ -154,14 +154,12 @@ pub struct ChatQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub use_tools: bool,
-    #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
-    #[serde(default = "default_chat_stream")]
-    pub stream: bool,
     #[schema(value_type = Vec<ActorIdSchema>)]
     #[serde(default)]
     pub tools_actors: Vec<ActorId>,
+    #[serde(default = "default_chat_stream")]
+    pub stream: bool,
 }
 
 fn default_chat_stream() -> bool {
@@ -176,9 +174,10 @@ pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
-    pub use_tools: bool,
-    #[serde(default)]
     pub tools: Vec<ToolInfoSchema>,
+    #[schema(value_type = Vec<ActorIdSchema>)]
+    #[serde(default)]
+    pub tools_actors: Vec<ActorId>,
     #[serde(default = "default_think_stream")]
     pub stream: bool,
 }

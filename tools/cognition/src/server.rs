@@ -6,6 +6,11 @@ use actix_web::{
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
 };
+use api_schema::{
+    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
+    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
+    ThinkQueryRequestSchema, UploadRequestSchema,
+};
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
@@ -23,26 +28,18 @@ use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
-use request_schemas::{
-    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
-    ThinkQueryRequestSchema, UploadRequestSchema,
-};
 use serde::Serialize;
 use serde_json::json;
-use std::sync::Arc;
 use std::{collections::HashMap, error::Error as StdError};
-use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 use url::Url;
 use utoipa::{openapi::ServerBuilder, OpenApi};
 
+mod api_schema;
 mod config;
-mod request_schemas;
 
 struct AppState {
     config: Config,
-    // tools: Arc<Mutex<ToolsHub>>,
     engine: Engine,
     indexer: ActorId,
     retriever: ActorId,
@@ -369,8 +366,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     request_body(content = ChatQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
-            "messages": [{"role": "user", "content": "Why is the sky blue?"}],
-            "use_tools": false
+            "messages": [{"role": "user", "content": "Why is the sky blue?"}]
         }))),
         ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
@@ -391,8 +387,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     },
                     "type": "function"
                 }
-            ],
-            "use_tools": true
+            ]
         })))
     ))
 )]
@@ -500,7 +495,8 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conv
                 };
 
-                // If client provided tools, generate tool calling
+                // If caller provided tools in the request body, then we don't know how to execute them
+                // so we assume the caller knows what they are doing and we just generate tool calls
                 let client_tools = body.tools.clone();
 
                 if !client_tools.is_empty() {
@@ -639,8 +635,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     },
                     "type": "function"
                 }
-            ],
-            "use_tools": true
+            ]
         })))
     )),
     responses(
@@ -708,45 +703,54 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             data.config.tool_prompt.replace("{tools_list}", &tools_str),
             context_content
         )
-    } else if body.use_tools {
-        // Original logic for use_tools when no tools are explicitly provided
-        let tools_str = match user_actor
-            .send_and_wait_reply::<ToolsHub, ListTools>(
-                ListTools(None),
-                &data.tools,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-            )
-            .await
-        {
-            Ok(tools) => {
-                if tools.is_empty() {
-                    "No tools available".to_string()
-                } else {
-                    tools
-                        .iter()
-                        .map(|t| {
-                            let params = serde_json::to_string_pretty(t.parameters())
-                                .unwrap_or_else(|_| "Unable to parse parameters".to_string());
-                            format!(
-                                "- {}: {}\n  Parameters:\n{}",
-                                t.name(),
-                                t.description(),
-                                params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n\n")
-                }
-            }
-            Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
-        };
-        format!(
-            "{}\n\nADDITIONAL CONTEXT:\n{}",
-            data.config.tool_prompt.replace("{tools_list}", &tools_str),
-            context_content
-        )
     } else {
-        format!("{}\n\nADDITIONAL CONTEXT:\n{}", data.config.chat_prompt, context_content)
+        // Get tools from tools_actors like in chat endpoint
+        let mut tools: Vec<ToolInfo> = vec![];
+        let mut tool_hub_map: ToolHubMap = HashMap::new();
+
+        // First collect all tools from all actors
+        for actor_id in &body.tools_actors {
+            match user_actor
+                .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
+                .await
+            {
+                Ok(tool_info) => {
+                    // Map each tool name to this hub's ID
+                    for tool in &tool_info {
+                        tool_hub_map.insert(tool.name().to_string(), actor_id.clone());
+                    }
+                    tools.extend(tool_info);
+                }
+                Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
+            };
+        }
+
+        // Then build the tools string once we have all tools
+        if !tools.is_empty() {
+            let tools_str = tools
+                .iter()
+                .map(|t| {
+                    let params = serde_json::to_string_pretty(t.parameters())
+                        .unwrap_or_else(|_| "Unable to parse parameters".to_string());
+                    format!(
+                        "- {}: {}\n  Parameters:\n{}",
+                        t.name(),
+                        t.description(),
+                        params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            format!(
+                "{}\n\nADDITIONAL CONTEXT:\n{}",
+                data.config.tool_prompt.replace("{tools_list}", &tools_str),
+                context_content
+            )
+        } else {
+            // Default system prompt if no tools were found
+            format!("{}\n\nADDITIONAL CONTEXT:\n{}", data.config.chat_prompt, context_content)
+        }
     };
     let mut context_message = ChatMessage::system(system_prompt);
 
@@ -1394,16 +1398,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     actor_handles.push(think_chat_handle);
 
-    // Tools setup
-    // let mut tools = ToolsHub::new();
-    // for tool_config in &config.tools {
-    //     tools.add_tool(&engine, tool_config.clone(), "/rag".into()).await?;
-    // }
-
     // Create app state
     let data = web::Data::new(AppState {
         config: config.clone(),
-        // tools: Arc::new(Mutex::new(tools)),
         engine: engine.clone(),
         indexer: indexer_id,
         retriever: retriever_id,
