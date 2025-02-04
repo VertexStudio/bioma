@@ -2,9 +2,11 @@ use anyhow::Result;
 use bioma_actor::EngineOptions;
 use bioma_tool::client::ClientConfig as ToolClientConfig;
 use clap::Parser;
+use hostname;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::info;
+use ulid::Ulid;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,18 +28,20 @@ fn default_rag_endpoint() -> Url {
 
 impl Default for ClientConfig {
     fn default() -> Self {
-        Self {
-            engine: default_engine(),
-            rag_endpoint: default_rag_endpoint(),
-            tools: vec![],
-        }
+        Self { engine: default_engine(), rag_endpoint: default_rag_endpoint(), tools: vec![] }
     }
+}
+
+fn get_default_tools_hub_id() -> String {
+    hostname::get()
+        .map(|h| format!("/rag/tools_hub/{}", h.to_string_lossy()))
+        .unwrap_or_else(|_| format!("/rag/tools_hub/{}", Ulid::new()))
 }
 
 #[derive(Parser)]
 pub struct Args {
     pub config: Option<PathBuf>,
-    #[clap(long, default_value = "/rag/tools_hub")]
+    #[clap(long, default_value_t = get_default_tools_hub_id())]
     pub tools_hub_id: String,
 }
 
@@ -54,6 +58,9 @@ impl Args {
                 ClientConfig::default()
             }
         };
+        info!("╔═══════════════════════════════════════════");
+        info!("║ Tools Hub ID: {}", self.tools_hub_id);
+        info!("╚═══════════════════════════════════════════");
         info!("├─ Engine Configuration:");
         info!("│  ├─ Endpoint: {}", config.engine.endpoint);
         info!("│  ├─ Namespace: {}", config.engine.namespace);

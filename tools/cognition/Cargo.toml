@@ -31,8 +31,8 @@ bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
 bioma_tool = { path = "../../bioma_tool" }
 askama = { workspace = true }
-
-actix-files = "0.6"
+actix-files = { workspace = true }
+hostname = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

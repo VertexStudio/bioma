@@ -23,13 +23,13 @@ use cognition::{
     },
     ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
-use server_config::{Args, ServerConfig};
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
 use indexer::Metadata;
 use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use serde::Serialize;
 use serde_json::json;
+use server_config::{Args, ServerConfig};
 use std::{collections::HashMap, error::Error as StdError};
 use tracing::{debug, error, info};
 use url::Url;
