@@ -388,6 +388,16 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     "type": "function"
                 }
             ]
+        }))),
+        ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "stream": true,
+            "tools_actors":  ["/rag/tools_hub/vertex-eq06"]
         })))
     ))
 )]
