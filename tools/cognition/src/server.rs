@@ -713,7 +713,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             "messages": [
                 {
                     "role": "user",
-                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number"
+                    "content": "Please generate a random number, start 15, end 1566, then, echo that number and write it as content into to the file /path/to/file.txt"
                 }
             ],
             "stream": false,
@@ -735,6 +735,27 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                         "parameters": {
                             "start": 12,
                             "end": 150
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.",
+                        "name": "write_file",
+                        "parameters": {
+                            "path": "/path/to/file",
+                            "content": "writing into file"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Only works within allowed directories.",
+                        "name": "read_file",
+                        "parameters": {
+                            "path": "/path/to/file"
                         }
                     },
                     "type": "function"
