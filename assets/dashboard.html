@@ -133,6 +133,19 @@
         box-sizing: border-box; /* Important */
       }
 
+      .nav-items {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        height: calc(100vh - 150px);
+      }
+
+      .nav-spacer {
+        flex: 1;
+        min-height: 1rem;
+      }
+
       .sidebar.collapsed .nav-items .nav-item {
         display: flex;
         justify-content: center;
@@ -560,6 +573,8 @@
             </svg>
           </a>
         </div>
+
+        <div class="nav-spacer"></div>
 
         <div class="nav-item" data-target="service-status">
           <svg
