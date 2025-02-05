@@ -16,6 +16,11 @@
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
         --error-bg: rgba(255, 0, 0, 0.2);
+        --surrealist-gradient: linear-gradient(
+          135deg,
+          var(--primary) 0%,
+          #9600ff 100%
+        );
       }
 
       @font-face {
@@ -33,12 +38,27 @@
       }
 
       .page-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
+        min-height: 100vh;
         padding: 20px;
         box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .status-title-container {
+        text-align: center;
+        padding: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      .status-title {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin: 0;
+        background: var(--surrealist-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
       }
 
       .services-container {
@@ -47,6 +67,7 @@
         max-width: 1200px;
         gap: 20px;
         width: 100%;
+        margin: 0 auto;
       }
 
       .service {
@@ -111,6 +132,9 @@
   </head>
   <body>
     <div class="page-container">
+      <div class="status-title-container">
+        <h1 class="status-title">Service Status Dashboard</h1>
+      </div>
       <div class="services-container" id="services-container"></div>
     </div>
 
@@ -130,7 +154,7 @@
         try {
           const response = await fetch("http://0.0.0.0:5766/health", {
             method: "GET",
-            timeout: 5000, // 5 second timeout
+            timeout: 5000,
           });
 
           if (!response.ok) {
@@ -138,8 +162,6 @@
           }
 
           const data = await response.json();
-
-          // Clear any previous content
           container.innerHTML = "";
 
           for (const [name, info] of Object.entries(data)) {
@@ -171,7 +193,6 @@
         }
       }
 
-      // Attempt to fetch live data
       fetchHealth();
     </script>
   </body>
