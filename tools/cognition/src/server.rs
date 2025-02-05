@@ -397,7 +397,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                 }
             ],
             "stream": true,
-            "tools_actors":  ["/rag/tools_hub/vertex-eq06"]
+            "tools_actors":  ["/rag/tools_hub/your_id"]
         })))
     ))
 )]
@@ -664,7 +664,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 }
             ],
             "stream": true,
-            "tools_actors":  ["/rag/tools_hub/vertex-eq06"]
+            "tools_actors":  ["/rag/tools_hub/your_id"]
         })))
     )),
     responses(
