@@ -59,6 +59,11 @@ impl ToolDef for RandomNumber {
         }
 
         let random_number: i32 = rand::thread_rng().gen_range(start..=end);
+
+        if random_number > end || random_number < start {
+            return Ok(Self::error("Invalid value"));
+        }
+
         Ok(Self::success(format!(
             "Generated number: {}",
             random_number
