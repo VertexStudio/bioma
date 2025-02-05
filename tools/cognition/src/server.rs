@@ -389,11 +389,43 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                 }
             ]
         }))),
+        ("with_multiple_tools" = (summary = "Sending multiple tools", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number"
+                }
+            ],
+            "stream": false,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Generate a random number",
+                        "name": "random",
+                        "parameters": {
+                            "start": 12,
+                            "end": 150
+                        }
+                    },
+                    "type": "function"
+                },
+            ]
+        }))),
         ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
             "messages": [
                 {
                     "role": "user",
-                    "content": "Why is the sky blue?"
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number"
                 }
             ],
             "stream": true,
@@ -654,6 +686,38 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     },
                     "type": "function"
                 }
+            ]
+        }))),
+        ("with_multiple_tools" = (summary = "Sending multiple tools", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number"
+                }
+            ],
+            "stream": false,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Generate a random number",
+                        "name": "random",
+                        "parameters": {
+                            "start": 12,
+                            "end": 150
+                        }
+                    },
+                    "type": "function"
+                },
             ]
         }))),
         ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
