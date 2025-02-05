@@ -430,6 +430,16 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     },
                     "type": "function"
                 },
+                {
+                    "function": {
+                        "description": "Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Only works within allowed directories.",
+                        "name": "read_file",
+                        "parameters": {
+                            "path": "/path/to/file"
+                        }
+                    },
+                    "type": "function"
+                },
             ]
         }))),
         ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
