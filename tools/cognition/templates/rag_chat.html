@@ -192,17 +192,14 @@
         left: 50%;
         transform: translateX(-50%);
         padding: 4px 8px;
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
+        color: var(--text-secondary);
         font-size: 0.8em;
         white-space: nowrap;
         opacity: 0;
         visibility: hidden;
         transition: opacity 0.2s, visibility 0.2s;
         z-index: 1000;
-        pointer-events: none; /* Prevent tooltip from being clickable */
+        pointer-events: none;
       }
 
       .tool-item:hover::after {
@@ -986,11 +983,10 @@
         margin-left: 0;
         white-space: nowrap;
         z-index: 1001;
-        pointer-events: none; /* Prevent tooltip from being clickable */
-        min-width: max-content;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        pointer-events: none;
+        padding: 4px 8px;
+        color: var(--text-secondary);
+        font-size: 0.8em;
       }
 
       /* Remove the arrow styles since we don't want them */
