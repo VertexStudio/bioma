@@ -96,7 +96,6 @@ pub async fn chat_with_tools(
         match response {
             Ok(message_response) => {
                 if message_response.message.tool_calls.is_empty() {
-                    info!("Chat response: {:#?}", message_response);
                     // Stream the response chunk
                     let response = ChatResponse {
                         response: message_response,
