@@ -87,6 +87,7 @@
         display: flex;
         flex-direction: column;
         align-items: center;
+        overflow-x: visible; /* Allow tooltips to overflow */
       }
 
       .sidebar-header {
@@ -931,8 +932,7 @@
 
       /* Fix sidebar overflow issues */
       #sidebar.collapsed .tools-section,
-      #sidebar.collapsed .tools-list,
-      #sidebar.collapsed .tool-item {
+      #sidebar.collapsed .tools-list {
         width: 100%;
         display: flex;
         flex-direction: column;
@@ -940,27 +940,58 @@
       }
 
       #sidebar.collapsed .tool-item {
-        width: 40px;
-        height: 40px;
-        min-width: 40px;
-        padding: 8px;
-        margin: 4px auto;
+        width: 32px;
+        height: 32px;
+        min-width: 32px;
+        padding: 6px;
+        margin: 4px 0;
         display: flex;
         justify-content: center;
         align-items: center;
-        border-radius: 8px;
+        border-radius: 6px;
+        position: relative;
       }
 
       #sidebar.collapsed .tool-icon {
         margin: 0;
-        width: 16px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
       }
 
       #sidebar.collapsed .tool-item-header {
         width: auto;
         margin: 0;
         padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Update tooltip positioning for collapsed state */
+      #sidebar.collapsed .tool-item::after {
+        left: auto;
+        right: calc(100% + 8px);
+        bottom: 50%;
+        transform: translateY(50%);
+      }
+
+      /* Add a small arrow to the tooltip */
+      #sidebar.collapsed .tool-item::before {
+        content: "";
+        position: absolute;
+        right: calc(100% + 4px);
+        top: 50%;
+        transform: translateY(-50%);
+        border: 4px solid transparent;
+        border-left-color: var(--border-color);
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s, visibility 0.2s;
+      }
+
+      #sidebar.collapsed .tool-item:hover::before {
+        opacity: 1;
+        visibility: visible;
       }
     </style>
   </head>
