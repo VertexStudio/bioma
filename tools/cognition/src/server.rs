@@ -655,6 +655,16 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     "type": "function"
                 }
             ]
+        }))),
+        ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Echo this message: Why is the sky blue?"
+                }
+            ],
+            "stream": true,
+            "tools_actors":  ["/rag/tools_hub/vertex-eq06"]
         })))
     )),
     responses(
