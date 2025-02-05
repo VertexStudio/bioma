@@ -17,6 +17,7 @@ lazy_static = { workspace = true }
 reqwest = { workspace = true }
 html2md = { workspace = true }
 readability-rs = { workspace = true }
+rand ={ workspace = true}
 url = { workspace = true }
 robotstxt = { workspace = true }
 schemars = { workspace = true }

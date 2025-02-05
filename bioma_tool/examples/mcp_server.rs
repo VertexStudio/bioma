@@ -41,6 +41,7 @@ impl ModelContextProtocolServer for McpServer {
                 Box::new(tools::echo::Echo),
                 Box::new(tools::memory::Memory),
                 Box::new(tools::fetch::Fetch::default()),
+                Box::new(tools::random::RandomNumber)
             ],
             resources: vec![Box::new(resources::readme::Readme)],
             prompts: vec![Box::new(prompts::greet::Greet)],
