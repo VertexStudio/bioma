@@ -2181,6 +2181,20 @@
           return;
         }
 
+        // Check for duplicates in both saved and active tools
+        const savedTools = getSavedTools();
+        const activeTools = getActiveTools();
+        const allTools = [...savedTools, ...activeTools];
+
+        if (
+          allTools.some(
+            (tool) => tool.actor.toLowerCase() === actor.toLowerCase()
+          )
+        ) {
+          alert("This tool already exists!");
+          return;
+        }
+
         const tool = {
           id: Date.now().toString(),
           actor,
@@ -2188,7 +2202,6 @@
         };
 
         // Save to localStorage
-        const savedTools = getSavedTools();
         savedTools.push(tool);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
