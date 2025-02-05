@@ -389,11 +389,11 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                 }
             ]
         }))),
-        ("with_multiple_tools" = (summary = "Sending multiple tools", value = json!({
+        ("with_multiple_tools" = (summary = "Sending multiple tools in payload", value = json!({
             "messages": [
                 {
                     "role": "user",
-                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number"
+                    "content": "Please generate a random number, start 15, end 1566, then, echo that number and write it as content into to the file /path/to/file.txt"
                 }
             ],
             "stream": false,
@@ -415,6 +415,17 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                         "parameters": {
                             "start": 12,
                             "end": 150
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.",
+                        "name": "write_file",
+                        "parameters": {
+                            "path": "/path/to/file",
+                            "content": "writing into file"
                         }
                     },
                     "type": "function"
