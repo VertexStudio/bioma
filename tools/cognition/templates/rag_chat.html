@@ -95,10 +95,14 @@
         align-items: center;
         justify-content: space-between;
         margin-bottom: 1rem;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border-color);
       }
 
       #sidebar.collapsed .sidebar-header {
         justify-content: center;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border-color);
       }
 
       #sidebar.collapsed h2,
@@ -112,12 +116,13 @@
       }
 
       #sidebar h2 {
-        margin-top: 0;
-        margin-bottom: 15px;
+        margin: 0;
         font-size: 1.1em;
         color: var(--text-primary);
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: 8px;
+        /* Remove border-bottom since it's moved to header */
+        padding: 0;
+        display: flex;
+        align-items: center;
       }
 
       #sidebar h3 {
@@ -972,29 +977,36 @@
 
       /* Update tooltip positioning for collapsed state */
       #sidebar.collapsed .tool-item::after {
-        left: auto;
-        right: calc(100% + 8px);
-        bottom: 50%;
-        transform: translateY(50%);
+        position: fixed; /* Change to fixed positioning */
+        left: 0; /* Start from the left edge of the viewport */
+        right: auto;
+        margin-left: 8px; /* Add some spacing from the left edge */
+        bottom: auto;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1001; /* Ensure it's above other elements */
       }
 
-      /* Add a small arrow to the tooltip */
+      /* Update arrow positioning for collapsed state */
       #sidebar.collapsed .tool-item::before {
-        content: "";
-        position: absolute;
-        right: calc(100% + 4px);
+        position: fixed; /* Change to fixed positioning */
+        left: 4px; /* Position slightly to the right of the left edge */
+        right: auto;
         top: 50%;
         transform: translateY(-50%);
         border: 4px solid transparent;
-        border-left-color: var(--border-color);
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.2s, visibility 0.2s;
+        border-left: none;
+        border-right-color: var(--border-color);
+        z-index: 1001;
       }
 
-      #sidebar.collapsed .tool-item:hover::before {
-        opacity: 1;
-        visibility: visible;
+      /* Ensure tooltips are visible */
+      #sidebar.collapsed {
+        overflow: visible !important;
+      }
+
+      #sidebar.collapsed .tool-item {
+        overflow: visible !important;
       }
     </style>
   </head>
