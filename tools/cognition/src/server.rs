@@ -393,7 +393,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
             "messages": [
                 {
                     "role": "user",
-                    "content": "Please generate a random number, start 15, end 1566, then, echo that number and write it as content into to the file /path/to/file.txt"
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
                 }
             ],
             "stream": false,
@@ -446,7 +446,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
             "messages": [
                 {
                     "role": "user",
-                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number"
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
                 }
             ],
             "stream": true,
@@ -766,7 +766,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             "messages": [
                 {
                     "role": "user",
-                    "content": "Echo this message: Why is the sky blue?"
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
                 }
             ],
             "stream": true,
