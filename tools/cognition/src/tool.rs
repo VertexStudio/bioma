@@ -58,7 +58,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
                 CallTool(request),
                 &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
             )
             .await?;
         Ok(response)
@@ -73,7 +73,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
                 ListTools(None),
                 tools_actor,
-                SendOptions::builder().timeout(Duration::from_secs(30)).check_health(true).build(),
+                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
             )
             .await?;
         info!("Tools from {} ({})", self.server.name, list_tools.tools.len());
@@ -113,10 +113,7 @@ impl ToolsHub {
                     engine.clone(),
                     client_id.clone(),
                     ModelContextProtocolClientActor::new(server.clone()),
-                    SpawnOptions::builder()
-                        .exists(SpawnExistsOptions::Reset)
-                        .health_config(HealthConfig::builder().update_interval(Duration::from_secs(1).into()).build())
-                        .build(),
+                    SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
                 )
                 .await?;
 
@@ -363,11 +360,7 @@ impl Message<ListTools> for ToolsHub {
                     }
                 }
             } else {
-                if client.health(ctx).await? {
-                    all_tools.extend(client.tools.clone());
-                } else {
-                    error!("Client {} is unhealthy, skipping tools", client.client_id);
-                }
+                all_tools.extend(client.tools.clone());
             }
         }
         ctx.reply(all_tools).await?;
