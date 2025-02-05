@@ -149,30 +149,21 @@
         gap: 15px;
       }
 
+      /* Add border above active tools header */
       .tools-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 8px;
+        border-top: 1px solid var(--border-color);
+        padding-top: 15px;
+        margin-top: 5px;
       }
 
       .tools-list {
         display: flex;
         flex-direction: column;
         gap: 8px;
-      }
-
-      /* Add form separator */
-      #tool-form {
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: 15px;
-        margin-bottom: 15px;
-      }
-
-      #sidebar.collapsed #tool-form {
-        border-bottom: none;
-        padding-bottom: 0;
-        margin-bottom: 0;
       }
 
       .tool-item {
