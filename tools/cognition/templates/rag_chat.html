@@ -254,6 +254,14 @@
         font-size: 0.9em;
       }
 
+      /* Add focus styles to match chat input */
+      .form-group input:focus,
+      .form-group textarea:focus {
+        border-color: var(--primary);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
+      }
+
       .form-actions {
         display: flex;
         gap: 8px;
@@ -896,11 +904,11 @@
     <div id="sidebar">
       <h2>Tools</h2>
       <div class="section tools-section">
-        <!-- Add New Actor form moved to top -->
+        <!-- Add New Agent form moved to top -->
         <div class="tools-form" id="tool-form">
-          <h4>Add New Actor</h4>
+          <h4>Add Agent</h4>
           <div class="form-group">
-            <input type="text" id="tool-actor" placeholder="Actor name" />
+            <input type="text" id="tool-actor" placeholder="Agent name" />
           </div>
           <div class="form-actions">
             <button id="save-tool-btn" class="action-button">
