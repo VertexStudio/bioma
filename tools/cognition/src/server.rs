@@ -538,10 +538,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                         .send_and_wait_reply::<ToolsHub, ListTools>(
                             ListTools(None),
                             &actor_id,
-                            SendOptions::builder()
-                                .timeout(std::time::Duration::from_secs(30))
-                                .check_health(true)
-                                .build(),
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
                         )
                         .await;
                     match tool_info {
