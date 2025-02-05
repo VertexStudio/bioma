@@ -357,10 +357,13 @@
         width: 16px;
         height: 16px;
         transition: transform var(--transition-speed);
+        transform: rotate(180deg); /* Start rotated */
       }
 
       #sidebar.collapsed #sidebar-toggle svg {
-        transform: rotate(180deg);
+        transform: rotate(
+          0deg
+        ); /* Return to original position when collapsed */
       }
 
       #input-container {
@@ -2131,6 +2134,15 @@
       // Tool Management
       function initializeToolsManagement() {
         const saveToolBtn = document.getElementById("save-tool-btn");
+        const toolActorInput = document.getElementById("tool-actor");
+
+        // Add keypress event listener for Enter key
+        toolActorInput.addEventListener("keypress", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault(); // Prevent form submission
+            saveTool();
+          }
+        });
 
         // Load saved tools from localStorage
         loadSavedTools();
