@@ -615,13 +615,47 @@
         transition: all 0.2s;
       }
 
-      .action-button:hover {
+      .action-button:not(.active):hover {
         background: var(--surrealist-gradient);
         border-color: var(--primary);
       }
 
+      .action-button.active {
+        background: var(--surrealist-gradient);
+        border-color: var(--primary);
+      }
+
+      .action-button.active i {
+        color: var(--text-primary);
+      }
+
       .action-button i {
         font-size: 1.2em;
+      }
+
+      /* Remove hover styles for disabled buttons */
+      .action-button[style*="cursor: not-allowed"]:hover {
+        background: var(--bg-secondary) !important;
+        border-color: var(--border-color) !important;
+      }
+
+      /* Override any specific button hover styles */
+      #send-button:hover:not(.active),
+      #think-button:hover:not(.active) {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 0, 160, 0.2) 0%,
+          rgba(150, 0, 255, 0.2) 100%
+        );
+        border-color: var(--primary);
+      }
+
+      #send-button:hover:not(.active) i,
+      #think-button:hover:not(.active) i {
+        background: var(--surrealist-gradient);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
       }
 
       /* Thinking process styles - simplified */
@@ -705,15 +739,6 @@
         to {
           opacity: 1;
         }
-      }
-
-      .action-button.active {
-        background: var(--surrealist-gradient) !important;
-        border-color: var(--primary) !important;
-      }
-
-      .action-button.active i {
-        color: var(--text-primary) !important;
       }
 
       .message a {
@@ -838,12 +863,6 @@
       .message .chunk > ol {
         margin: 0.5em 0;
         padding-left: 1.5em;
-      }
-
-      /* Add styles for disabled button state */
-      .action-button[style*="cursor: not-allowed"]:hover {
-        background: var(--bg-secondary) !important;
-        border-color: var(--border-color) !important;
       }
 
       #sidebar .section {
