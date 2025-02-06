@@ -728,9 +728,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
                     }
                     tools.extend(tool_info);
                 }
-                Err(e) => {
-                    error!("Error fetching tools: {:?}", e);
-                }
+                Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
             };
         }
 
