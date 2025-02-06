@@ -135,7 +135,8 @@ body {
 
 .last-updated {
   color: #666;
-  font-size: 14px;
+  font-size: 18px;
+  font-weight: bold;
 }
 
 .controls-bar {
