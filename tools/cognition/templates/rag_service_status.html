@@ -27,6 +27,7 @@
       }
 
       async function fetchHealth() {
+        console.log("Fetching health status...");
         try {
           const response = await fetch("http://0.0.0.0:5766/health", {
             method: "GET",
@@ -68,8 +69,11 @@
           displayError(`Unable to connect to health service. ${error.message}`);
         }
       }
-
+      // Initial fetch
       fetchHealth();
+
+      // Refresh every minute (60000 milliseconds)
+      setInterval(fetchHealth, 60000);
     </script>
   </body>
 </html>
