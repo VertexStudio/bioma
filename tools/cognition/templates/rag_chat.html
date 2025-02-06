@@ -956,6 +956,48 @@
         border-radius: 4px;
       }
 
+      /* Branch navigation styles */
+      .branch-navigation {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        padding: 4px 8px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+
+      .branch-nav-btn {
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .branch-nav-btn:not(:disabled):hover {
+        background: var(--surrealist-gradient);
+      }
+
+      .branch-nav-btn:disabled {
+        color: var(--text-muted);
+        cursor: not-allowed;
+      }
+
+      .version-indicator {
+        color: var(--text-muted);
+        font-size: 0.9em;
+        min-width: 40px;
+        text-align: center;
+      }
+
       .typing-indicator {
         display: inline-block;
         width: 8px;
@@ -1239,6 +1281,164 @@
     </div>
 
     <script>
+      // Message branch data structure
+      class MessageBranch {
+        constructor(messageId, content, elements) {
+          this.id = messageId;
+          this.content = content;
+          this.elements = elements; // HTML elements following this message
+          this.versions = []; // Other versions of this message
+          this.currentVersionIndex = 0;
+        }
+
+        addVersion(content, elements) {
+          const newBranch = new MessageBranch(Date.now(), content, elements);
+          this.versions.push(newBranch);
+          return newBranch;
+        }
+
+        getCurrentVersion() {
+          return this.versions[this.currentVersionIndex] || this;
+        }
+
+        getVersionCount() {
+          return this.versions.length + 1; // +1 for the original version
+        }
+
+        nextVersion() {
+          if (this.currentVersionIndex < this.versions.length) {
+            this.currentVersionIndex++;
+            return this.getCurrentVersion();
+          }
+          return null;
+        }
+
+        previousVersion() {
+          if (this.currentVersionIndex > 0) {
+            this.currentVersionIndex--;
+            return this.getCurrentVersion();
+          }
+          return null;
+        }
+      }
+
+      // Global map to store message branches
+      const messageBranches = new Map();
+
+      // Helper to serialize DOM elements
+      function serializeElements(startElement) {
+        const elements = [];
+        let currentElement = startElement.nextElementSibling;
+
+        while (currentElement) {
+          elements.push({
+            html: currentElement.outerHTML,
+            className: currentElement.className,
+            dataset: { ...currentElement.dataset },
+          });
+          currentElement = currentElement.nextElementSibling;
+        }
+
+        return elements;
+      }
+
+      // Helper to restore serialized elements
+      function restoreElements(elements, container, startAfterElement) {
+        // Clear existing elements after the start element
+        let currentElement = startAfterElement.nextElementSibling;
+        while (currentElement) {
+          const nextElement = currentElement.nextElementSibling;
+          currentElement.remove();
+          currentElement = nextElement;
+        }
+
+        // Restore the saved elements
+        elements.forEach((element) => {
+          const tempDiv = document.createElement("div");
+          tempDiv.innerHTML = element.html;
+          const restoredElement = tempDiv.firstElementChild;
+          container.appendChild(restoredElement);
+
+          // Reattach event listeners
+          if (restoredElement.classList.contains("tool-message")) {
+            initializeToolToggles(restoredElement);
+          }
+          if (restoredElement.classList.contains("error-message")) {
+            initializeErrorToggles(restoredElement);
+          }
+        });
+      }
+
+      // Helper to create branch navigation UI
+      function createBranchNavigation(messageDiv, branch) {
+        const versionCount = branch.getVersionCount();
+        if (versionCount <= 1) return;
+
+        const nav = document.createElement("div");
+        nav.className = "branch-navigation";
+        nav.innerHTML = `
+          <button class="branch-nav-btn prev-version" ${
+            branch.currentVersionIndex === 0 ? "disabled" : ""
+          }>
+            <i class="fas fa-chevron-left"></i>
+          </button>
+          <span class="version-indicator">${
+            branch.currentVersionIndex + 1
+          }/${versionCount}</span>
+          <button class="branch-nav-btn next-version" ${
+            branch.currentVersionIndex === versionCount - 1 ? "disabled" : ""
+          }>
+            <i class="fas fa-chevron-right"></i>
+          </button>
+        `;
+
+        // Add event listeners
+        nav.querySelector(".prev-version").addEventListener("click", () => {
+          const prevVersion = branch.previousVersion();
+          if (prevVersion) {
+            restoreElements(prevVersion.elements, chatContainer, messageDiv);
+            messageDiv.dataset.originalContent = prevVersion.content;
+            messageDiv.innerHTML = md.render(
+              md.utils.escapeHtml(prevVersion.content)
+            );
+            messageDiv.appendChild(nav);
+            updateBranchNavigation(messageDiv, branch);
+          }
+        });
+
+        nav.querySelector(".next-version").addEventListener("click", () => {
+          const nextVersion = branch.nextVersion();
+          if (nextVersion) {
+            restoreElements(nextVersion.elements, chatContainer, messageDiv);
+            messageDiv.dataset.originalContent = nextVersion.content;
+            messageDiv.innerHTML = md.render(
+              md.utils.escapeHtml(nextVersion.content)
+            );
+            messageDiv.appendChild(nav);
+            updateBranchNavigation(messageDiv, branch);
+          }
+        });
+
+        return nav;
+      }
+
+      // Helper to update branch navigation UI
+      function updateBranchNavigation(messageDiv, branch) {
+        const nav = messageDiv.querySelector(".branch-navigation");
+        if (!nav) return;
+
+        const prevBtn = nav.querySelector(".prev-version");
+        const nextBtn = nav.querySelector(".next-version");
+        const indicator = nav.querySelector(".version-indicator");
+
+        prevBtn.disabled = branch.currentVersionIndex === 0;
+        nextBtn.disabled =
+          branch.currentVersionIndex === branch.versions.length;
+        indicator.textContent = `${
+          branch.currentVersionIndex + 1
+        }/${branch.getVersionCount()}`;
+      }
+
       // Remove any trailing slashes from the endpoint
       const RAG_ENDPOINT = window.location.origin;
 
@@ -1724,6 +1924,9 @@
       // Add stop button event listener
       stopButton.addEventListener("click", stopGeneration);
 
+      // DS to hold everything in the chat
+      let chatHistory = [];
+
       // Function to handle editing a user message.
       function editUserMessage(messageDiv) {
         const originalContent =
@@ -1798,6 +2001,14 @@
             editUserMessage(messageDiv);
           });
           messageDiv.appendChild(editButton);
+
+          // Restore branch navigation if it exists
+          const messageId = messageDiv.dataset.messageId;
+          if (messageId && messageBranches.has(messageId)) {
+            const branch = messageBranches.get(messageId);
+            const nav = createBranchNavigation(messageDiv, branch);
+            if (nav) messageDiv.appendChild(nav);
+          }
         });
 
         saveButton.addEventListener("click", function () {
@@ -1806,19 +2017,37 @@
 
           const newContent = textarea.value.trim();
           if (!newContent) return;
-          const indexInChat = Array.from(chatContainer.children).indexOf(
-            messageDiv
-          );
-          while (chatContainer.children.length > indexInChat + 1) {
-            chatContainer.removeChild(chatContainer.lastChild);
+
+          // Get or create message branch
+          let messageId = messageDiv.dataset.messageId;
+          let branch;
+
+          if (!messageId) {
+            // First edit of this message
+            messageId = Date.now().toString();
+            messageDiv.dataset.messageId = messageId;
+            branch = new MessageBranch(
+              messageId,
+              originalContent,
+              serializeElements(messageDiv)
+            );
+            messageBranches.set(messageId, branch);
+          } else {
+            branch = messageBranches.get(messageId);
           }
-          const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
-          messageHistory = messageHistory.slice(0, msgIndex + 1);
-          messageHistory[msgIndex].content = newContent;
+
+          // Create new version
+          const elements = serializeElements(messageDiv);
+          branch.addVersion(newContent, elements);
+          branch.currentVersionIndex = branch.versions.length; // Set to latest version
+
+          // Update message div
           messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
           messageDiv.style.marginRight = "";
           messageDiv.style.width = "";
           messageDiv.dataset.originalContent = newContent;
+
+          // Add edit button
           const editButton = document.createElement("div");
           editButton.className = "edit-icon";
           editButton.innerHTML = '<i class="fas fa-edit"></i>';
@@ -1827,6 +2056,25 @@
             editUserMessage(messageDiv);
           });
           messageDiv.appendChild(editButton);
+
+          // Add branch navigation
+          const nav = createBranchNavigation(messageDiv, branch);
+          if (nav) messageDiv.appendChild(nav);
+
+          // Update message history
+          const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
+          messageHistory = messageHistory.slice(0, msgIndex + 1);
+          messageHistory[msgIndex].content = newContent;
+
+          // Clear subsequent elements in chat
+          const indexInChat = Array.from(chatContainer.children).indexOf(
+            messageDiv
+          );
+          while (chatContainer.children.length > indexInChat + 1) {
+            chatContainer.removeChild(chatContainer.lastChild);
+          }
+
+          // Update query input and send
           queryInput.value = newContent;
           sendQuery(thinkEnabled ? "/think" : "/chat", true);
         });
