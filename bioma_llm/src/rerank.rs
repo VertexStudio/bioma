@@ -10,6 +10,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
+// Max number of tokens to be processed for each input
+const DEFAULT_MAX_LENGTH: usize = 512;
+
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
 pub enum RerankError {
@@ -234,8 +237,9 @@ impl Rerank {
                     // Get the reranker model
                     let model = get_fastembed_model(&model);
 
-                    let mut options =
-                        fastembed::RerankInitOptions::new(model).with_cache_dir(cache_dir).with_max_length(8192);
+                    let mut options = fastembed::RerankInitOptions::new(model)
+                        .with_cache_dir(cache_dir)
+                        .with_max_length(DEFAULT_MAX_LENGTH);
 
                     #[cfg(target_os = "macos")]
                     {
