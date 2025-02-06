@@ -2573,12 +2573,15 @@
         const queryInput = document.getElementById("query-input");
 
         inputContainer.addEventListener("click", (e) => {
-          // Focus the input unless we clicked on a button
-          if (!e.target.closest("button")) {
-            queryInput.focus();
-            // Place cursor at the end of the text
-            const len = queryInput.value.length;
-            queryInput.setSelectionRange(len, len);
+          // Always focus the input, but let button clicks still work
+          queryInput.focus();
+          // Place cursor at the end of the text
+          const len = queryInput.value.length;
+          queryInput.setSelectionRange(len, len);
+
+          // Don't prevent default for buttons so they still work
+          if (e.target.closest("button")) {
+            e.stopPropagation();
           }
         });
 
