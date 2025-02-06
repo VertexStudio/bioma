@@ -75,26 +75,31 @@
           const data = await response.json();
           container.innerHTML = "";
 
-          for (const [name, info] of Object.entries(data)) {
+          // Orders the services by name
+          const sortedEntries = Object.entries(data).sort((a, b) =>
+            a[0].localeCompare(b[0])
+          );
+
+          for (const [name, info] of sortedEntries) {
             const div = document.createElement("div");
             div.className = `service ${
               info.is_healthy ? "healthy" : "unhealthy"
             }`;
 
             div.innerHTML = `
-        <h3>${name.replace("_", " ")}</h3>
-        <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-        ${
-          !info.is_healthy
-            ? `<p class='error-message'>Error: ${info.error}</p>`
-            : ""
-        }
-        ${
-          info.health?.info
-            ? `<div class="health-info"><code>${info.health.info}</code></div>`
-            : ""
-        }
-      `;
+                <h3>${name.replace("_", " ")}</h3>
+                <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+                ${
+                  !info.is_healthy
+                    ? `<p class='error-message'>Error: ${info.error}</p>`
+                    : ""
+                }
+                ${
+                  info.health?.info
+                    ? `<div class="health-info"><code>${info.health.info}</code></div>`
+                    : ""
+                }
+              `;
 
             container.appendChild(div);
           }
