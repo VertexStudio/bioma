@@ -1207,7 +1207,7 @@
     <div id="input-container">
       <textarea
         id="query-input"
-        placeholder="Enter your question here"
+        placeholder="How can I help you today?"
         rows="1"
       ></textarea>
       <div class="utilities-container">
@@ -1801,6 +1801,9 @@
         });
 
         saveButton.addEventListener("click", function () {
+          // Stop any ongoing generation first
+          stopGeneration();
+
           const newContent = textarea.value.trim();
           if (!newContent) return;
           const indexInChat = Array.from(chatContainer.children).indexOf(
