@@ -237,8 +237,9 @@ impl Rerank {
                     // Get the reranker model
                     let model = get_fastembed_model(&model);
 
-                    let mut options =
-                        fastembed::RerankInitOptions::new(model).with_cache_dir(cache_dir).with_max_length(DEFAULT_MAX_LENGTH);
+                    let mut options = fastembed::RerankInitOptions::new(model)
+                        .with_cache_dir(cache_dir)
+                        .with_max_length(DEFAULT_MAX_LENGTH);
 
                     #[cfg(target_os = "macos")]
                     {
