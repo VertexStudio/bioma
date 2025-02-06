@@ -387,20 +387,129 @@
         transform: translateX(-50%);
         margin-left: calc(-1 * (var(--sidebar-width) + 20px) / 2);
         padding: 20px;
-        background-color: var(--bg-main);
-        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        background-color: var(--bg-secondary);
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
         box-sizing: border-box;
         border-radius: 10px 10px 0 0;
-        border-top: 1px solid var(--border-color);
         display: flex;
-        gap: 10px;
-        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
         transition: margin-left 0.3s ease;
         z-index: 999;
       }
 
+      #input-container * {
+        cursor: inherit;
+      }
+
+      #query-input {
+        width: 100%;
+        margin: 0;
+        padding: 12px;
+        box-sizing: border-box;
+        border-radius: 8px;
+        background-color: var(--bg-main);
+        color: var(--text-primary);
+        border: none;
+        resize: none;
+        min-height: 50px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: var(--font-family);
+        font-size: 1em;
+        line-height: 1.5;
+        cursor: text;
+      }
+
+      #query-input:focus {
+        outline: none;
+      }
+
+      .utilities-container {
+        cursor: default !important;
+      }
+
+      .utilities-container button,
+      .action-button,
+      .send-button,
+      #stop-button {
+        cursor: pointer !important;
+      }
+
+      .send-button:disabled {
+        cursor: not-allowed !important;
+      }
+
       #input-container.sidebar-collapsed {
         margin-left: calc(-1 * (var(--sidebar-width-collapsed) + 20px) / 2);
+      }
+
+      .input-wrapper {
+        position: relative;
+        width: 100%;
+      }
+
+      .utilities-container {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .utilities-left {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .utilities-right {
+        position: relative;
+        width: 48px; /* Fixed width for both send and stop buttons */
+        height: 48px; /* Fixed height for both send and stop buttons */
+      }
+
+      .send-button,
+      #stop-button {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 48px;
+        height: 48px;
+        border: none;
+        border-radius: 50%;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-family);
+      }
+
+      .send-button {
+        background: var(--surrealist-gradient);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+
+      .send-button:disabled {
+        background: var(--bg-secondary);
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .send-button:hover:not(:disabled) {
+        opacity: 0.9;
+      }
+
+      #stop-button {
+        background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
+        color: var(--text-primary);
+        display: none; /* Hidden by default */
+        cursor: pointer;
+      }
+
+      .send-button i,
+      #stop-button i {
+        font-size: 1.2em;
       }
 
       #chat-container {
@@ -409,22 +518,6 @@
         flex-direction: column;
         position: relative;
         z-index: 1;
-      }
-
-      #query-input {
-        flex: 1;
-        margin-right: 10px;
-        padding: 10px;
-        box-sizing: border-box;
-        border-radius: 5px;
-        background-color: var(--bg-main);
-        color: var(--text-primary);
-        border: 1px solid var(--border-color);
-        resize: none;
-        min-height: 40px;
-        max-height: 200px;
-        overflow-y: auto;
-        font-family: var(--font-family);
       }
 
       .message {
@@ -626,12 +719,6 @@
       .tool-details code {
         font-size: 0.9em;
         color: #ff80cc;
-      }
-
-      #query-input:focus {
-        border-color: var(--primary);
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
       }
 
       .tool-toggle:hover {
@@ -1119,30 +1206,39 @@
       <div id="chat-container"></div>
     </div>
 
-    <!-- Input Container (moved outside main-content) -->
+    <!-- Input Container -->
     <div id="input-container">
       <textarea
         id="query-input"
         placeholder="Enter your question here"
         rows="1"
       ></textarea>
-      <button
-        id="send-button"
-        class="action-button"
-        title="Chat with tools (Ctrl+Enter)"
-      >
-        <i class="fas fa-comments fa-wrench"></i>
-      </button>
-      <button
-        id="think-button"
-        class="action-button"
-        title="Think deeply (Alt+Enter)"
-      >
-        <i class="fas fa-brain"></i>
-      </button>
-      <button id="stop-button" class="action-button" title="Stop generation">
-        <i class="fas fa-stop"></i>
-      </button>
+      <div class="utilities-container">
+        <div class="utilities-left">
+          <button
+            id="send-button"
+            class="action-button"
+            title="Chat with tools (Ctrl+Enter)"
+          >
+            <i class="fas fa-comments fa-wrench"></i>
+          </button>
+          <button
+            id="think-button"
+            class="action-button"
+            title="Think deeply (Alt+Enter)"
+          >
+            <i class="fas fa-brain"></i>
+          </button>
+        </div>
+        <div class="utilities-right">
+          <button class="send-button" title="Send message" disabled>
+            <i class="fas fa-arrow-up"></i>
+          </button>
+          <button id="stop-button" title="Stop generation">
+            <i class="fas fa-stop"></i>
+          </button>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -1437,9 +1533,12 @@
         }
         currentController = new AbortController();
         isGenerating = true;
-        stopButton.style.display = "inline-flex";
-        // Remove this line to allow writing while generating
-        // queryInput.disabled = true;
+
+        // Update button visibility
+        const stopButton = document.getElementById("stop-button");
+        const sendButton = document.querySelector(".send-button");
+        stopButton.style.display = "flex";
+        sendButton.style.display = "none";
 
         if (!skipUserAppend) {
           appendMessage("User", queryText);
@@ -2429,6 +2528,15 @@
       document.addEventListener("DOMContentLoaded", () => {
         initializeSidebar();
 
+        // Initialize send button functionality
+        const sendButton = document.querySelector(".send-button");
+        sendButton.addEventListener("click", async () => {
+          if (!isGenerating) {
+            const endpoint = thinkEnabled ? "/think" : "/chat";
+            await sendQuery(endpoint);
+          }
+        });
+
         // Load stored tools state
         const storedToolsEnabled = localStorage.getItem("toolsEnabled");
         const toolsActorsInput = document.getElementById("tools-actors-input");
@@ -2461,6 +2569,31 @@
         toolsActorsInput.addEventListener("change", function () {
           localStorage.setItem("toolsActors", toolsActorsInput.value);
           updateToolButton();
+        });
+
+        // Add click handler for input container
+        const inputContainer = document.getElementById("input-container");
+        const queryInput = document.getElementById("query-input");
+
+        inputContainer.addEventListener("click", (e) => {
+          // Focus the input unless we clicked on a button or utilities
+          if (
+            !e.target.closest("button") &&
+            !e.target.closest(".utilities-container")
+          ) {
+            queryInput.focus();
+            // Place cursor at the end of the text
+            const len = queryInput.value.length;
+            queryInput.setSelectionRange(len, len);
+          }
+        });
+
+        // Prevent click propagation from utilities
+        const utilitiesContainer = document.querySelector(
+          ".utilities-container"
+        );
+        utilitiesContainer.addEventListener("click", (e) => {
+          e.stopPropagation();
         });
       });
 
@@ -2503,7 +2636,13 @@
 
       function resetGenerationState() {
         isGenerating = false;
+        const stopButton = document.getElementById("stop-button");
+        const sendButton = document.querySelector(".send-button");
         stopButton.style.display = "none";
+        sendButton.style.display = "flex";
+
+        // Check input content to set correct button state
+        sendButton.disabled = !queryInput.value.trim();
 
         // Reset thinking state if active
         if (isThinkingActive) {
@@ -2546,6 +2685,13 @@
         queryInput.disabled = false;
         queryInput.focus();
       }
+
+      // Add input validation for send button
+      queryInput.addEventListener("input", function () {
+        const sendButton = document.querySelector(".send-button");
+        sendButton.disabled = !this.value.trim();
+        resizeTextarea();
+      });
     </script>
   </body>
 </html>
