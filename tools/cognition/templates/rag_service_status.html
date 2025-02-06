@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Service Health Dashboard</title>
+    <link rel="stylesheet" href="css/service_status.css" />
+  </head>
+  <body>
+    <div class="page-container">
+      <div class="status-title-container">
+        <h1 class="status-title">Service Status Dashboard</h1>
+      </div>
+      <div class="controls-bar">
+        <button id="refresh-button" class="refresh-button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"
+            />
+          </svg>
+          Refresh
+        </button>
+        <div id="last-updated" class="last-updated">Last updated: --:--:--</div>
+      </div>
+      <div class="services-container" id="services-container"></div>
+    </div>
+
+    <script>
+      const container = document.getElementById("services-container");
+      const lastUpdatedElement = document.getElementById("last-updated");
+      const refreshButton = document.getElementById("refresh-button");
+
+      function displayError(message) {
+        container.innerHTML = `
+    <div class="error-container" style="grid-column: 1 / -1;">
+      <h2>API Error</h2>
+      <p>${message}</p>
+    </div>
+  `;
+      }
+
+      function updateLastUpdated() {
+        const now = new Date();
+        const time = now.toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        lastUpdatedElement.textContent = `Last updated: ${time}`;
+      }
+
+      async function fetchHealth() {
+        console.log("Fetching health status...");
+        try {
+          const response = await fetch("http://0.0.0.0:5766/health", {
+            method: "GET",
+            timeout: 5000,
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          container.innerHTML = "";
+
+          // Orders the services by name
+          const sortedEntries = Object.entries(data).sort((a, b) =>
+            a[0].localeCompare(b[0])
+          );
+
+          for (const [name, info] of sortedEntries) {
+            const div = document.createElement("div");
+            div.className = `service ${
+              info.is_healthy ? "healthy" : "unhealthy"
+            }`;
+
+            div.innerHTML = `
+                <h3>${name
+                  .replace(/_/g, " ")
+                  .toLowerCase()
+                  .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+                <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+                ${
+                  !info.is_healthy
+                    ? `<p class='error-message'>Error: ${info.error}</p>`
+                    : ""
+                }
+                ${
+                  info.health?.info
+                    ? `<div class="health-info"><code>${info.health.info}</code></div>`
+                    : ""
+                }
+              `;
+
+            container.appendChild(div);
+          }
+          // Moved outside the loop
+          updateLastUpdated();
+        } catch (error) {
+          console.error("Failed to fetch health status:", error);
+          displayError(`Unable to connect to health service. ${error.message}`);
+          updateLastUpdated();
+        }
+      }
+
+      function setupHealthStatusRefresh() {
+        // Clear any existing intervals to prevent multiple timers
+        if (window.healthInterval) {
+          window.clearInterval(window.healthInterval);
+        }
+
+        // Initial fetch
+        fetchHealth();
+
+        // Set a new interval and store its reference
+        window.healthInterval = window.setInterval(fetchHealth, 60000);
+      }
+
+      // Add refresh button click handler
+      refreshButton.addEventListener("click", fetchHealth);
+
+      // Initial setup
+      setupHealthStatusRefresh();
+
+      // Single load event listener
+      window.addEventListener("load", setupHealthStatusRefresh);
+    </script>
+  </body>
+</html>

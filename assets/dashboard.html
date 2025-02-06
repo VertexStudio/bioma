@@ -133,6 +133,19 @@
         box-sizing: border-box; /* Important */
       }
 
+      .nav-items {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        height: calc(100vh - 150px);
+      }
+
+      .nav-spacer {
+        flex: 1;
+        min-height: 1rem;
+      }
+
       .sidebar.collapsed .nav-items .nav-item {
         display: flex;
         justify-content: center;
@@ -560,6 +573,48 @@
             </svg>
           </a>
         </div>
+
+        <div class="nav-spacer"></div>
+
+        <div class="nav-item" data-target="service-status">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth="{1.5}"
+            stroke="currentColor"
+            className="size-6"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z"
+            />
+          </svg>
+
+          <span>Service Status</span>
+          <a
+            href="/templates/rag_service_status.html"
+            target="_blank"
+            class="external-link"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              width="16"
+              height="16"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+          </a>
+        </div>
       </div>
     </div>
 
@@ -578,6 +633,9 @@
       </div>
       <div class="interface-container" id="swagger-ui-container">
         <iframe src="/docs/swagger-ui/dist/index.html"></iframe>
+      </div>
+      <div class="interface-container" id="service-status-container">
+        <iframe src="/templates/rag_service_status.html"></iframe>
       </div>
     </div>
 
