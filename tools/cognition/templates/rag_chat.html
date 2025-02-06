@@ -531,18 +531,61 @@
         align-self: flex-end;
         margin-left: auto;
         color: var(--text-primary);
-        position: relative; /* For positioning the edit icon */
-        position: relative; /* For positioning the edit icon */
+        position: relative;
       }
 
-      .user-message::before {
-        content: "";
+      /* Branch navigation styles */
+      .branch-nav {
         position: absolute;
         left: -35px;
-        top: 0;
-        bottom: 0;
-        width: 35px;
-        pointer-events: auto;
+        bottom: -20px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.8em;
+        color: var(--text-muted);
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none; /* Allow clicking through when not visible */
+      }
+
+      .user-message:hover .branch-nav {
+        opacity: 1;
+        pointer-events: auto; /* Re-enable pointer events when visible */
+      }
+
+      .branch-nav-button {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .branch-nav-button:hover {
+        background: var(--surrealist-gradient);
+        border-color: var(--primary);
+      }
+
+      .branch-nav-count {
+        font-size: 0.9em;
+        color: var(--text-muted);
+      }
+
+      .branch-nav-button.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .branch-nav-button.disabled:hover {
+        background: var(--bg-secondary);
+        border-color: var(--border-color);
       }
 
       .assistant-message {
@@ -578,14 +621,34 @@
         padding: 5px;
         border-radius: 50%;
         cursor: pointer;
-        display: none;
+        opacity: 0;
+        transition: opacity 0.2s;
         font-size: 1em;
         z-index: 100;
       }
 
-      .user-message:hover .edit-icon,
+      .user-message:hover .edit-icon {
+        opacity: 1;
+      }
+
+      /* Create a hover area to prevent flickering */
+      .user-message::before {
+        content: "";
+        position: absolute;
+        left: -50px; /* Wider than the edit button */
+        top: -10px;
+        bottom: -10px;
+        width: 50px;
+      }
+
+      /* Ensure edit icon stays visible while hovering it */
       .edit-icon:hover {
-        display: block;
+        opacity: 1;
+        background: var(--surrealist-gradient);
+      }
+
+      .edit-icon {
+        pointer-events: auto !important;
       }
 
       .context-toggle {
@@ -1261,6 +1324,231 @@
       let messageHistory = [];
       let thinkingStartTime = null;
 
+      // Message branching data structures
+      let messageBranches = {}; // Maps message index to array of branches
+      let currentBranches = {}; // Maps message index to current branch index
+
+      // Create a new branch at the given message index
+      function createBranch(messageIndex, content) {
+        console.group("createBranch");
+        console.log("Creating branch:", { messageIndex, content });
+
+        if (!messageBranches[messageIndex]) {
+          messageBranches[messageIndex] = [];
+        }
+
+        messageBranches[messageIndex].push({
+          content,
+          history: [], // Will store subsequent messages
+        });
+
+        currentBranches[messageIndex] =
+          messageBranches[messageIndex].length - 1;
+        console.log("Updated branches:", messageBranches[messageIndex]);
+        console.log("Current branch index:", currentBranches[messageIndex]);
+
+        console.groupEnd();
+      }
+
+      // Modified switchBranch to properly restore history
+      function switchBranch(messageIndex, branchIndex) {
+        console.group("switchBranch");
+        console.log("Switching to branch:", { messageIndex, branchIndex });
+
+        if (
+          !messageBranches[messageIndex] ||
+          !messageBranches[messageIndex][branchIndex]
+        ) {
+          console.warn("Invalid branch:", { messageIndex, branchIndex });
+          console.groupEnd();
+          return;
+        }
+
+        currentBranches[messageIndex] = branchIndex;
+        console.log(
+          "Updated current branch index:",
+          currentBranches[messageIndex]
+        );
+
+        // Remove all messages after this point
+        const messageElements = Array.from(chatContainer.children);
+        const targetMessageElement = messageElements.find(
+          (el) =>
+            el.classList.contains("user-message") &&
+            parseInt(el.dataset.msgIndex) === messageIndex
+        );
+
+        if (!targetMessageElement) {
+          console.warn("Target message element not found");
+          console.groupEnd();
+          return;
+        }
+
+        const targetIndex = messageElements.indexOf(targetMessageElement);
+        console.log("Found target element at index:", targetIndex);
+
+        // Remove messages one by one from the end
+        while (messageElements.length > targetIndex + 1) {
+          const lastElement = messageElements[messageElements.length - 1];
+          if (lastElement && lastElement.parentNode === chatContainer) {
+            console.log(
+              "Removing message:",
+              lastElement.textContent.slice(0, 50) + "..."
+            );
+            chatContainer.removeChild(lastElement);
+          }
+          messageElements.pop();
+        }
+
+        // Update the message content
+        const branch = messageBranches[messageIndex][branchIndex];
+        console.log(
+          "Loading branch content:",
+          branch.content.slice(0, 50) + "..."
+        );
+
+        // Clear the target message content
+        targetMessageElement.innerHTML = "";
+
+        // Create and append user content
+        const userContentDiv = document.createElement("div");
+        userContentDiv.className = "user-message-content";
+        userContentDiv.innerHTML = md.render(
+          md.utils.escapeHtml(branch.content)
+        );
+        targetMessageElement.appendChild(userContentDiv);
+
+        // Add branch navigation
+        addBranchNavigation(targetMessageElement, messageIndex);
+
+        // Add edit button
+        const editButton = document.createElement("div");
+        editButton.className = "edit-icon";
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.addEventListener("click", function (e) {
+          e.stopPropagation();
+          editUserMessage(targetMessageElement);
+        });
+        targetMessageElement.appendChild(editButton);
+
+        // Restore branch history
+        messageHistory = messageHistory.slice(0, messageIndex + 1);
+        messageHistory[messageIndex].content = branch.content;
+        console.log(
+          "Restoring branch history:",
+          branch.history?.length || 0,
+          "messages"
+        );
+
+        if (branch.history && branch.history.length > 0) {
+          console.log("Branch history found:", branch.history);
+
+          // First, update messageHistory with all messages
+          branch.history.forEach((msg) => {
+            messageHistory.push(msg);
+          });
+
+          // Then, render all messages
+          branch.history.forEach((msg, idx) => {
+            console.log(
+              `Restoring message ${idx}:`,
+              msg.role,
+              msg.content.slice(0, 50) + "..."
+            );
+
+            // Create a new message div without updating messageHistory
+            const messageDiv = document.createElement("div");
+            messageDiv.className = `message ${msg.role}-message`;
+
+            if (msg.role === "user") {
+              const userContentDiv = document.createElement("div");
+              userContentDiv.className = "user-message-content";
+              userContentDiv.innerHTML = md.render(
+                md.utils.escapeHtml(msg.content)
+              );
+              messageDiv.appendChild(userContentDiv);
+            } else {
+              const mainContent =
+                msg.role === "user"
+                  ? md.utils.escapeHtml(msg.content)
+                  : msg.content;
+              const rendered = md.render(mainContent);
+              const contextSection =
+                msg.role === "assistant"
+                  ? createContextSection(msg.context)
+                  : "";
+              messageDiv.innerHTML = rendered + contextSection;
+            }
+
+            chatContainer.appendChild(messageDiv);
+          });
+        } else {
+          console.log("No branch history found");
+        }
+
+        // Update input with the branch content
+        queryInput.value = branch.content;
+        resizeTextarea();
+
+        console.groupEnd();
+      }
+
+      // Add branch navigation UI to a message
+      function addBranchNavigation(messageDiv, messageIndex) {
+        console.group("addBranchNavigation");
+        console.log("Adding navigation for message:", messageIndex);
+
+        const branches = messageBranches[messageIndex] || [];
+        if (branches.length <= 1) {
+          console.log("No branches to navigate");
+          console.groupEnd();
+          return;
+        }
+
+        const currentBranch = currentBranches[messageIndex] || 0;
+        console.log("Current branch:", currentBranch, "of", branches.length);
+
+        const branchNav = document.createElement("div");
+        branchNav.className = "branch-nav";
+
+        const prevButton = document.createElement("button");
+        prevButton.className = `branch-nav-button${
+          currentBranch === 0 ? " disabled" : ""
+        }`;
+        prevButton.innerHTML = '<i class="fas fa-chevron-left"></i>';
+        prevButton.title = "Previous version";
+        if (currentBranch > 0) {
+          prevButton.addEventListener("click", (e) => {
+            e.stopPropagation();
+            switchBranch(messageIndex, currentBranch - 1);
+          });
+        }
+
+        const branchCount = document.createElement("span");
+        branchCount.className = "branch-nav-count";
+        branchCount.textContent = `${currentBranch + 1}/${branches.length}`;
+
+        const nextButton = document.createElement("button");
+        nextButton.className = `branch-nav-button${
+          currentBranch === branches.length - 1 ? " disabled" : ""
+        }`;
+        nextButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
+        nextButton.title = "Next version";
+        if (currentBranch < branches.length - 1) {
+          nextButton.addEventListener("click", (e) => {
+            e.stopPropagation();
+            switchBranch(messageIndex, currentBranch + 1);
+          });
+        }
+
+        branchNav.appendChild(prevButton);
+        branchNav.appendChild(branchCount);
+        branchNav.appendChild(nextButton);
+        messageDiv.appendChild(branchNav);
+
+        console.groupEnd();
+      }
+
       mermaid.initialize({ startOnLoad: true });
 
       // Custom renderer for code fences (handles mermaid code blocks)
@@ -1466,8 +1754,11 @@
         return result;
       }
 
-      // Modified appendMessage to add an edit icon for user messages
+      // Modified appendMessage to properly handle branch history
       function appendMessage(sender, content, context = null) {
+        console.group("appendMessage");
+        console.log("Adding message:", { sender, role: sender.toLowerCase() });
+
         const role =
           sender.toLowerCase() === "user"
             ? "user"
@@ -1477,27 +1768,71 @@
             ? "tool"
             : "assistant";
 
-        messageHistory.push({ role: role, content: content });
+        const messageObj = { role, content, context };
+        messageHistory.push(messageObj);
 
         const messageDiv = document.createElement("div");
         messageDiv.className = `message ${role}-message`;
 
-        // For user messages, store the original content and history index.
+        // For user messages, store the original content and history index
         if (role === "user") {
           messageDiv.dataset.originalContent = content;
           messageDiv.dataset.msgIndex = messageHistory.length - 1;
+
+          // Create initial branch for user messages
+          const messageIndex = messageHistory.length - 1;
+          createBranch(messageIndex, content);
+
+          // Create user content div
+          const userContentDiv = document.createElement("div");
+          userContentDiv.className = "user-message-content";
+          userContentDiv.innerHTML = md.render(md.utils.escapeHtml(content));
+          messageDiv.appendChild(userContentDiv);
+        } else {
+          const mainContent =
+            sender === "User" ? md.utils.escapeHtml(content) : content;
+          const rendered = md.render(mainContent);
+          const contextSection =
+            role === "assistant" ? createContextSection(context) : "";
+          messageDiv.innerHTML = rendered + contextSection;
+
+          // Store non-user messages in the current branch's history
+          const lastUserMessageIndex = findLastUserMessageIndex();
+          console.log(
+            "Last user message index for history:",
+            lastUserMessageIndex
+          );
+
+          if (lastUserMessageIndex !== -1) {
+            const currentBranch = currentBranches[lastUserMessageIndex] || 0;
+            console.log("Current branch for history:", currentBranch);
+
+            if (
+              messageBranches[lastUserMessageIndex] &&
+              messageBranches[lastUserMessageIndex][currentBranch]
+            ) {
+              console.log("Storing message in branch history");
+              messageBranches[lastUserMessageIndex][currentBranch].history.push(
+                messageObj
+              );
+              console.log(
+                "Updated branch history length:",
+                messageBranches[lastUserMessageIndex][currentBranch].history
+                  .length
+              );
+              // Add debug logging for branch history
+              console.log(
+                "Current branch history:",
+                messageBranches[lastUserMessageIndex][currentBranch].history
+              );
+            }
+          }
         }
 
-        const mainContent =
-          sender === "User" ? md.utils.escapeHtml(content) : content;
-        const rendered = md.render(mainContent);
-        const contextSection =
-          role === "assistant" ? createContextSection(context) : "";
-
-        messageDiv.innerHTML = rendered + contextSection;
-
-        // If this is a user message, append an edit icon.
+        // If this is a user message, add branch navigation and edit icon
         if (role === "user") {
+          addBranchNavigation(messageDiv, messageHistory.length - 1);
+
           const editButton = document.createElement("div");
           editButton.className = "edit-icon";
           editButton.innerHTML = '<i class="fas fa-edit"></i>';
@@ -1516,6 +1851,158 @@
         });
 
         mermaid.init(undefined, document.querySelectorAll(".mermaid"));
+        console.groupEnd();
+      }
+
+      // Helper function to find the last user message index
+      function findLastUserMessageIndex() {
+        for (let i = messageHistory.length - 1; i >= 0; i--) {
+          if (messageHistory[i].role === "user") {
+            return i;
+          }
+        }
+        return -1;
+      }
+
+      // Modified editUserMessage function to handle message history correctly
+      function editUserMessage(messageDiv) {
+        const originalContent =
+          messageDiv.dataset.originalContent || messageDiv.innerText;
+        const messageIndex = parseInt(messageDiv.dataset.msgIndex, 10);
+
+        // Get container and message dimensions before clearing content
+        const containerRect = chatContainer.getBoundingClientRect();
+        const messageRect = messageDiv.getBoundingClientRect();
+        const rightOffset = containerRect.right - messageRect.right;
+
+        // Clear current message content
+        messageDiv.innerHTML = "";
+        messageDiv.style.marginRight = rightOffset + "px";
+        messageDiv.style.width = containerRect.width - rightOffset + "px";
+
+        // Create edit container
+        const editContainer = document.createElement("div");
+        editContainer.style.position = "relative";
+        editContainer.style.width = "100%";
+        editContainer.style.display = "block";
+        editContainer.style.minHeight = "150px";
+
+        const textarea = document.createElement("textarea");
+        textarea.value = originalContent;
+        textarea.style.width = "100%";
+        textarea.style.height = "150px";
+        textarea.style.boxSizing = "border-box";
+        textarea.style.padding = "10px";
+        textarea.style.border = "1px solid var(--border-color)";
+        textarea.style.borderRadius = "5px";
+        textarea.style.backgroundColor = "var(--bg-main)";
+        textarea.style.color = "var(--text-primary)";
+        textarea.style.marginBottom = "60px";
+
+        editContainer.appendChild(textarea);
+
+        const buttonContainer = document.createElement("div");
+        buttonContainer.style.position = "absolute";
+        buttonContainer.style.bottom = "10px";
+        buttonContainer.style.right = "10px";
+        buttonContainer.style.display = "flex";
+        buttonContainer.style.gap = "5px";
+
+        const cancelButton = document.createElement("button");
+        cancelButton.textContent = "Cancel";
+        cancelButton.className = "action-button";
+        cancelButton.style.margin = "0";
+
+        const saveButton = document.createElement("button");
+        saveButton.textContent = "Send";
+        saveButton.className = "action-button";
+        saveButton.style.margin = "0";
+
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(saveButton);
+        editContainer.appendChild(buttonContainer);
+
+        messageDiv.appendChild(editContainer);
+
+        cancelButton.addEventListener("click", function () {
+          const currentBranch = currentBranches[messageIndex] || 0;
+          const branch = messageBranches[messageIndex][currentBranch];
+
+          // Create user content div
+          const userContentDiv = document.createElement("div");
+          userContentDiv.className = "user-message-content";
+          userContentDiv.innerHTML = md.render(
+            md.utils.escapeHtml(branch.content)
+          );
+
+          // Clear and update message content
+          messageDiv.innerHTML = "";
+          messageDiv.appendChild(userContentDiv);
+          messageDiv.dataset.originalContent = branch.content;
+          messageDiv.style.marginRight = "";
+          messageDiv.style.width = "";
+
+          addBranchNavigation(messageDiv, messageIndex);
+          const editButton = document.createElement("div");
+          editButton.className = "edit-icon";
+          editButton.innerHTML = '<i class="fas fa-edit"></i>';
+          editButton.addEventListener("click", function (e) {
+            e.stopPropagation();
+            editUserMessage(messageDiv);
+          });
+          messageDiv.appendChild(editButton);
+        });
+
+        saveButton.addEventListener("click", function () {
+          // Stop any ongoing generation first
+          stopGeneration();
+
+          const newContent = textarea.value.trim();
+          if (!newContent) return;
+
+          // Create a new branch with the edited content
+          createBranch(messageIndex, newContent);
+
+          // Create user content div
+          const userContentDiv = document.createElement("div");
+          userContentDiv.className = "user-message-content";
+          userContentDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
+
+          // Clear and update message content
+          messageDiv.innerHTML = "";
+          messageDiv.appendChild(userContentDiv);
+          messageDiv.dataset.originalContent = newContent;
+          messageDiv.style.marginRight = "";
+          messageDiv.style.width = "";
+
+          // Add branch navigation and edit button
+          addBranchNavigation(messageDiv, messageIndex);
+          const editButton = document.createElement("div");
+          editButton.className = "edit-icon";
+          editButton.innerHTML = '<i class="fas fa-edit"></i>';
+          editButton.addEventListener("click", function (e) {
+            e.stopPropagation();
+            editUserMessage(messageDiv);
+          });
+          messageDiv.appendChild(editButton);
+
+          // Find all messages after this one and remove them
+          const messageElements = Array.from(chatContainer.children);
+          const targetIndex = messageElements.indexOf(messageDiv);
+          while (messageElements.length > targetIndex + 1) {
+            const lastElement = messageElements[messageElements.length - 1];
+            if (lastElement && lastElement.parentNode === chatContainer) {
+              chatContainer.removeChild(lastElement);
+            }
+            messageElements.pop();
+          }
+
+          // Update message history and trigger new response
+          messageHistory[messageIndex].content = newContent;
+          messageHistory = messageHistory.slice(0, messageIndex + 1);
+          queryInput.value = newContent;
+          sendQuery(thinkEnabled ? "/think" : "/chat", true);
+        });
       }
 
       // Modified sendQuery to handle stopping
@@ -1724,114 +2211,6 @@
       // Add stop button event listener
       stopButton.addEventListener("click", stopGeneration);
 
-      // Function to handle editing a user message.
-      function editUserMessage(messageDiv) {
-        const originalContent =
-          messageDiv.dataset.originalContent || messageDiv.innerText;
-
-        // Get container and message dimensions before clearing content
-        const containerRect = chatContainer.getBoundingClientRect();
-        const messageRect = messageDiv.getBoundingClientRect();
-        const rightOffset = containerRect.right - messageRect.right;
-
-        // Clear current message content
-        messageDiv.innerHTML = "";
-        messageDiv.style.marginRight = rightOffset + "px";
-        messageDiv.style.width = containerRect.width - rightOffset + "px";
-
-        // Create edit container
-        const editContainer = document.createElement("div");
-        editContainer.style.position = "relative";
-        editContainer.style.width = "100%";
-        editContainer.style.display = "block";
-        editContainer.style.minHeight = "150px";
-
-        const textarea = document.createElement("textarea");
-        textarea.value = originalContent;
-        textarea.style.width = "100%";
-        textarea.style.height = "150px";
-        textarea.style.boxSizing = "border-box";
-        textarea.style.padding = "10px";
-        textarea.style.border = "1px solid var(--border-color)";
-        textarea.style.borderRadius = "5px";
-        textarea.style.backgroundColor = "var(--bg-main)";
-        textarea.style.color = "var(--text-primary)";
-        textarea.style.marginBottom = "60px";
-
-        editContainer.appendChild(textarea);
-
-        const buttonContainer = document.createElement("div");
-        buttonContainer.style.position = "absolute";
-        buttonContainer.style.bottom = "10px";
-        buttonContainer.style.right = "10px";
-        buttonContainer.style.display = "flex";
-        buttonContainer.style.gap = "5px";
-
-        const cancelButton = document.createElement("button");
-        cancelButton.textContent = "Cancel";
-        cancelButton.className = "action-button";
-        cancelButton.style.margin = "0";
-
-        const saveButton = document.createElement("button");
-        saveButton.textContent = "Send";
-        saveButton.className = "action-button";
-        saveButton.style.margin = "0";
-
-        buttonContainer.appendChild(cancelButton);
-        buttonContainer.appendChild(saveButton);
-        editContainer.appendChild(buttonContainer);
-
-        messageDiv.appendChild(editContainer);
-
-        cancelButton.addEventListener("click", function () {
-          messageDiv.innerHTML = md.render(
-            md.utils.escapeHtml(originalContent)
-          );
-          messageDiv.dataset.originalContent = originalContent;
-          messageDiv.style.marginRight = "";
-          messageDiv.style.width = "";
-          const editButton = document.createElement("div");
-          editButton.className = "edit-icon";
-          editButton.innerHTML = '<i class="fas fa-edit"></i>';
-          editButton.addEventListener("click", function (e) {
-            e.stopPropagation();
-            editUserMessage(messageDiv);
-          });
-          messageDiv.appendChild(editButton);
-        });
-
-        saveButton.addEventListener("click", function () {
-          // Stop any ongoing generation first
-          stopGeneration();
-
-          const newContent = textarea.value.trim();
-          if (!newContent) return;
-          const indexInChat = Array.from(chatContainer.children).indexOf(
-            messageDiv
-          );
-          while (chatContainer.children.length > indexInChat + 1) {
-            chatContainer.removeChild(chatContainer.lastChild);
-          }
-          const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
-          messageHistory = messageHistory.slice(0, msgIndex + 1);
-          messageHistory[msgIndex].content = newContent;
-          messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
-          messageDiv.style.marginRight = "";
-          messageDiv.style.width = "";
-          messageDiv.dataset.originalContent = newContent;
-          const editButton = document.createElement("div");
-          editButton.className = "edit-icon";
-          editButton.innerHTML = '<i class="fas fa-edit"></i>';
-          editButton.addEventListener("click", function (e) {
-            e.stopPropagation();
-            editUserMessage(messageDiv);
-          });
-          messageDiv.appendChild(editButton);
-          queryInput.value = newContent;
-          sendQuery(thinkEnabled ? "/think" : "/chat", true);
-        });
-      }
-
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
 
@@ -1962,21 +2341,57 @@
           if (data.done) {
             const indicators = document.querySelectorAll(".typing-indicator");
             indicators.forEach((indicator) => indicator.remove());
-            if (
-              assistantTextBuffer &&
-              !messageHistory.some(
-                (msg) =>
-                  msg.role === "assistant" &&
-                  msg.content === assistantTextBuffer
-              )
-            ) {
-              messageHistory.push({
+            if (assistantTextBuffer.trim()) {
+              // Create or update the assistant message in the DOM
+              createOrUpdateAssistantMessage(
+                assistantTextBuffer,
+                latestContext
+              );
+
+              // Prepare the assistant message object
+              const assistantMsg = {
                 role: "assistant",
                 content: assistantTextBuffer,
+                context: latestContext,
                 images: data.message?.images,
-              });
+              };
+
+              // Push the assistant message to the global history
+              if (
+                !messageHistory.some(
+                  (msg) =>
+                    msg.role === "assistant" &&
+                    msg.content === assistantTextBuffer
+                )
+              ) {
+                messageHistory.push(assistantMsg);
+              }
+
+              // Update the branch history
+              const lastUserMessageIndex = findLastUserMessageIndex();
+              if (lastUserMessageIndex !== -1) {
+                const currentBranch =
+                  currentBranches[lastUserMessageIndex] || 0;
+                if (
+                  messageBranches[lastUserMessageIndex] &&
+                  messageBranches[lastUserMessageIndex][currentBranch]
+                ) {
+                  messageBranches[lastUserMessageIndex][
+                    currentBranch
+                  ].history.push(assistantMsg);
+                  console.log(
+                    "Updated branch history length:",
+                    messageBranches[lastUserMessageIndex][currentBranch].history
+                      .length
+                  );
+                  // Add debug logging for branch history
+                  console.log(
+                    "Current branch history:",
+                    messageBranches[lastUserMessageIndex][currentBranch].history
+                  );
+                }
+              }
             }
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
             assistantTextBuffer = "";
           }
         }
