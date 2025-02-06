@@ -137,3 +137,40 @@ body {
   color: #666;
   font-size: 14px;
 }
+
+.controls-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.refresh-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  color: #374151;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.refresh-button:hover {
+  background-color: #e5e7eb;
+}
+
+.refresh-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.last-updated {
+  color: #6b7280;
+  font-size: 14px;
+}
