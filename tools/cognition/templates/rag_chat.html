@@ -1734,6 +1734,25 @@
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
 
+        if (data.error) {
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          const errorContent = `
+            <div class="error-toggle">▶</div>
+            <div class="error-header">⚠️ Error Occurred</div>
+            <div class="error-content">
+              <div class="error-item">
+                <i class="fas fa-exclamation-circle"></i>
+                ${md.render(data.error)}
+              </div>
+            </div>
+          `;
+          errorDiv.innerHTML = errorContent;
+          chatContainer.appendChild(errorDiv);
+          initializeErrorToggles(errorDiv);
+          return;
+        }
+
         if (data.context) {
           latestContext = data.context;
         }
