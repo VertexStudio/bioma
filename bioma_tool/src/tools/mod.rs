@@ -10,6 +10,7 @@ use std::pin::Pin;
 pub mod echo;
 pub mod fetch;
 pub mod memory;
+pub mod random;
 
 /// Errors that can occur during tool operations
 #[derive(Debug, thiserror::Error)]

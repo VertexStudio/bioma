@@ -1019,6 +1019,7 @@ dependencies = [
  "jsonrpc-core",
  "lazy_static",
  "mockito",
+ "rand",
  "readability-rs",
  "reqwest",
  "robotstxt",

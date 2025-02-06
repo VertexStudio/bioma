@@ -363,6 +363,9 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 #[utoipa::path(
     post,
     path = "/chat",
+    description =   "For the usage of this endpoint, and more specifically, for the 'tools' and 'tools_actor' field, only send of the two.<br>
+                    If you send 'tools', the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
+                    If you send 'tools_actors', the endpoint with call the client that contains the tools and actually execute them.",
     request_body(content = ChatQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
@@ -388,6 +391,69 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     "type": "function"
                 }
             ]
+        }))),
+        ("with_multiple_tools" = (summary = "Sending multiple tools in payload", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
+                }
+            ],
+            "stream": false,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Generate a random number",
+                        "name": "random",
+                        "parameters": {
+                            "start": 12,
+                            "end": 150
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.",
+                        "name": "write_file",
+                        "parameters": {
+                            "path": "/path/to/file",
+                            "content": "writing into file"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Only works within allowed directories.",
+                        "name": "read_file",
+                        "parameters": {
+                            "path": "/path/to/file"
+                        }
+                    },
+                    "type": "function"
+                },
+            ]
+        }))),
+        ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
+                }
+            ],
+            "stream": true,
+            "tools_actors":  ["/rag/tools_hub/your_id"]
         })))
     ))
 )]
@@ -612,7 +678,10 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 #[utoipa::path(
     post,
     path = "/think",
-    description = "Analyzes query and determines which tools to use and in what order.",
+    description =   "Analyzes query and determines which tools to use and in what order.<br>
+                    For the usage of this endpoint, and more specifically, for the 'tools' and 'tools_actor' field, only send of the two.<br>
+                    If you send 'tools', the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
+                    If you send 'tools_actors', the endpoint with call the client that contains the tools and actually execute them.",
     request_body(content = ThinkQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "messages": [
@@ -642,6 +711,69 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     "type": "function"
                 }
             ]
+        }))),
+        ("with_multiple_tools" = (summary = "Sending multiple tools", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Please generate a random number, start 15, end 1566, then, echo that number and write it as content into to the file /path/to/file.txt"
+                }
+            ],
+            "stream": false,
+            "tools": [
+                {
+                    "function": {
+                        "description": "Echoes back the input message",
+                        "name": "echo",
+                        "parameters": {
+                            "message": "Echo this message"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Generate a random number",
+                        "name": "random",
+                        "parameters": {
+                            "start": 12,
+                            "end": 150
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.",
+                        "name": "write_file",
+                        "parameters": {
+                            "path": "/path/to/file",
+                            "content": "writing into file"
+                        }
+                    },
+                    "type": "function"
+                },
+                {
+                    "function": {
+                        "description": "Read the complete contents of a file from the file system. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Only works within allowed directories.",
+                        "name": "read_file",
+                        "parameters": {
+                            "path": "/path/to/file"
+                        }
+                    },
+                    "type": "function"
+                },
+            ]
+        }))),
+        ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
+                }
+            ],
+            "stream": true,
+            "tools_actors":  ["/rag/tools_hub/your_id"]
         })))
     )),
     responses(
