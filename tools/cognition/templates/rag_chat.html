@@ -382,25 +382,131 @@
       #input-container {
         position: fixed;
         bottom: 0;
-        width: 800px;
+        width: 820px;
         left: 50%;
         transform: translateX(-50%);
         margin-left: calc(-1 * (var(--sidebar-width) + 20px) / 2);
         padding: 20px;
-        background-color: var(--bg-main);
-        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+        background-color: var(--bg-secondary);
+        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
         box-sizing: border-box;
         border-radius: 10px 10px 0 0;
-        border-top: 1px solid var(--border-color);
         display: flex;
-        gap: 10px;
-        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
         transition: margin-left 0.3s ease;
         z-index: 999;
+        cursor: text;
+      }
+
+      #input-container * {
+        cursor: inherit;
+      }
+
+      #query-input {
+        width: 100%;
+        margin: 0;
+        padding: 12px;
+        box-sizing: border-box;
+        border-radius: 8px;
+        background-color: transparent;
+        color: var(--text-primary);
+        border: none;
+        resize: none;
+        min-height: 50px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: var(--font-family);
+        font-size: 1em;
+        line-height: 1.5;
+        cursor: text;
+      }
+
+      #query-input:focus {
+        outline: none;
+      }
+
+      .utilities-container button,
+      .action-button,
+      .send-button,
+      #stop-button {
+        cursor: pointer !important;
+      }
+
+      .send-button:disabled {
+        cursor: not-allowed !important;
       }
 
       #input-container.sidebar-collapsed {
         margin-left: calc(-1 * (var(--sidebar-width-collapsed) + 20px) / 2);
+      }
+
+      .input-wrapper {
+        position: relative;
+        width: 100%;
+      }
+
+      .utilities-container {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .utilities-left {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .utilities-right {
+        position: relative;
+        width: 48px; /* Fixed width for both send and stop buttons */
+        height: 48px; /* Fixed height for both send and stop buttons */
+      }
+
+      .send-button,
+      #stop-button {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 48px;
+        height: 48px;
+        border: none;
+        border-radius: 50%;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-family);
+      }
+
+      .send-button {
+        background: var(--surrealist-gradient);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+
+      .send-button:disabled {
+        background: var(--bg-secondary);
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .send-button:hover:not(:disabled) {
+        opacity: 0.9;
+      }
+
+      #stop-button {
+        background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
+        color: var(--text-primary);
+        display: none; /* Hidden by default */
+        cursor: pointer;
+      }
+
+      .send-button i,
+      #stop-button i {
+        font-size: 1.2em;
       }
 
       #chat-container {
@@ -409,22 +515,6 @@
         flex-direction: column;
         position: relative;
         z-index: 1;
-      }
-
-      #query-input {
-        flex: 1;
-        margin-right: 10px;
-        padding: 10px;
-        box-sizing: border-box;
-        border-radius: 5px;
-        background-color: var(--bg-main);
-        color: var(--text-primary);
-        border: 1px solid var(--border-color);
-        resize: none;
-        min-height: 40px;
-        max-height: 200px;
-        overflow-y: auto;
-        font-family: var(--font-family);
       }
 
       .message {
@@ -626,12 +716,6 @@
       .tool-details code {
         font-size: 0.9em;
         color: #ff80cc;
-      }
-
-      #query-input:focus {
-        border-color: var(--primary);
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
       }
 
       .tool-toggle:hover {
@@ -1013,6 +1097,48 @@
         overflow: visible !important;
         position: relative; /* Ensure proper tooltip positioning */
       }
+
+      /* Add stop button styles */
+      #stop-button {
+        display: none;
+        background: var(--bg-secondary);
+        border: 1px solid #ff4444;
+        color: #ff4444;
+      }
+
+      #stop-button:hover {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 68, 68, 0.2) 0%,
+          rgba(255, 68, 68, 0.3) 100%
+        );
+      }
+
+      #stop-button.active {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 68, 68, 0.8) 0%,
+          rgba(255, 68, 68, 0.9) 100%
+        );
+        border-color: #ff4444;
+        color: var(--text-primary);
+      }
+
+      #stop-button i {
+        animation: pulse 1s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0.4;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1077,27 +1203,39 @@
       <div id="chat-container"></div>
     </div>
 
-    <!-- Input Container (moved outside main-content) -->
+    <!-- Input Container -->
     <div id="input-container">
       <textarea
         id="query-input"
-        placeholder="Enter your question here"
+        placeholder="How can I help you today?"
         rows="1"
       ></textarea>
-      <button
-        id="send-button"
-        class="action-button"
-        title="Chat with tools (Ctrl+Enter)"
-      >
-        <i class="fas fa-comments fa-wrench"></i>
-      </button>
-      <button
-        id="think-button"
-        class="action-button"
-        title="Think deeply (Alt+Enter)"
-      >
-        <i class="fas fa-brain"></i>
-      </button>
+      <div class="utilities-container">
+        <div class="utilities-left">
+          <button
+            id="send-button"
+            class="action-button"
+            title="Chat with tools (Ctrl+Enter)"
+          >
+            <i class="fas fa-comments fa-wrench"></i>
+          </button>
+          <button
+            id="think-button"
+            class="action-button"
+            title="Think deeply (Alt+Enter)"
+          >
+            <i class="fas fa-brain"></i>
+          </button>
+        </div>
+        <div class="utilities-right">
+          <button class="send-button" title="Send message" disabled>
+            <i class="fas fa-arrow-up"></i>
+          </button>
+          <button id="stop-button" title="Stop generation">
+            <i class="fas fa-stop"></i>
+          </button>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -1113,10 +1251,13 @@
       let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
       let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
       let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
+      let currentController = null; // Store the AbortController for the current request
+      let isGenerating = false; // Track if we're currently generating a response
 
       const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
       const queryInput = document.getElementById("query-input");
+      const stopButton = document.getElementById("stop-button");
       let messageHistory = [];
       let thinkingStartTime = null;
 
@@ -1377,10 +1518,25 @@
         mermaid.init(undefined, document.querySelectorAll(".mermaid"));
       }
 
-      // Modified sendQuery to optionally skip appending a new user message.
+      // Modified sendQuery to handle stopping
       async function sendQuery(endpoint = "/chat", skipUserAppend = false) {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
+        if (isGenerating) return; // Prevent sending while generating
+
+        // Reset any previous state and setup for new generation
+        if (currentController) {
+          currentController.abort();
+        }
+        currentController = new AbortController();
+        isGenerating = true;
+
+        // Update button visibility
+        const stopButton = document.getElementById("stop-button");
+        const sendButton = document.querySelector(".send-button");
+        stopButton.style.display = "flex";
+        sendButton.style.display = "none";
+
         if (!skipUserAppend) {
           appendMessage("User", queryText);
         }
@@ -1407,7 +1563,7 @@
         assistantTextBuffer = "";
         contextSet = false;
         latestContext = null;
-        let errorBuffer = []; // New: Buffer to store errors during connection
+        let errorBuffer = [];
 
         // Get tools actors list from sidebar input
         const toolsActorsInput = document.getElementById("tools-actors-input");
@@ -1419,6 +1575,7 @@
           alert("Please provide at least one tools actor.");
           toolsEnabled = false;
           updateToolButton();
+          resetGenerationState();
           return;
         }
 
@@ -1434,6 +1591,7 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(queryObject),
+            signal: currentController.signal,
           });
 
           if (!response.ok) {
@@ -1468,7 +1626,6 @@
             initializeErrorToggles(errorDiv);
           }
 
-          // We'll collect everything in a stream and process it
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";
@@ -1486,103 +1643,17 @@
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
-                const data = JSON.parse(line);
-
-                // Store errors in buffer and update error display
-                if (data.error) {
-                  errorBuffer.push(data.error);
-                  if (errorDiv) {
-                    // Update existing error display
-                    const errorContent = `
-                      <div class="error-toggle">▶</div>
-                      <div class="error-header">⚠️ ${errorBuffer.length} Error${
-                      errorBuffer.length > 1 ? "s" : ""
-                    } Occurred</div>
-                      <div class="error-content">
-                        ${errorBuffer
-                          .map(
-                            (error) => `
-                          <div class="error-item">
-                            <i class="fas fa-exclamation-circle"></i>
-                            ${md.render(error)}
-                          </div>
-                        `
-                          )
-                          .join("")}
-                      </div>
-                    `;
-                    errorDiv.innerHTML = errorContent;
-                    initializeErrorToggles(errorDiv);
-                  } else {
-                    // Create new error display
-                    errorDiv = document.createElement("div");
-                    errorDiv.className = "message error-message";
-                    const errorContent = `
-                      <div class="error-toggle">▶</div>
-                      <div class="error-header">⚠️ ${errorBuffer.length} Error${
-                      errorBuffer.length > 1 ? "s" : ""
-                    } Occurred</div>
-                      <div class="error-content">
-                        ${errorBuffer
-                          .map(
-                            (error) => `
-                          <div class="error-item">
-                            <i class="fas fa-exclamation-circle"></i>
-                            ${md.render(error)}
-                          </div>
-                        `
-                          )
-                          .join("")}
-                      </div>
-                    `;
-                    errorDiv.innerHTML = errorContent;
-                    chatContainer.appendChild(errorDiv);
-                    initializeErrorToggles(errorDiv);
-                  }
-                  continue;
-                }
-
                 processJsonLine(line);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
                 console.error("Raw line content:", line);
                 errorBuffer.push(`Error processing response: ${e.message}`);
-                // Update error display with new error
                 if (errorDiv) {
-                  const errorContent = `
-                    <div class="error-toggle">▶</div>
-                    <div class="error-header">⚠️ ${errorBuffer.length} Error${
-                    errorBuffer.length > 1 ? "s" : ""
-                  } Occurred</div>
-                    <div class="error-content">
-                      ${errorBuffer
-                        .map(
-                          (error) => `
-                        <div class="error-item">
-                          <i class="fas fa-exclamation-circle"></i>
-                          ${md.render(error)}
-                        </div>
-                      `
-                        )
-                        .join("")}
-                    </div>
-                  `;
+                  const errorContent = createErrorContent(errorBuffer);
                   errorDiv.innerHTML = errorContent;
                   initializeErrorToggles(errorDiv);
                 } else {
-                  errorDiv = document.createElement("div");
-                  errorDiv.className = "message error-message";
-                  const errorContent = `
-                    <div class="error-toggle">▶</div>
-                    <div class="error-header">⚠️ Error Occurred</div>
-                    <div class="error-content">
-                      <div class="error-item">
-                        <i class="fas fa-exclamation-circle"></i>
-                        ${md.render(e.toString())}
-                      </div>
-                    </div>
-                  `;
-                  errorDiv.innerHTML = errorContent;
+                  errorDiv = createErrorDiv(errorBuffer);
                   chatContainer.appendChild(errorDiv);
                   initializeErrorToggles(errorDiv);
                 }
@@ -1590,43 +1661,68 @@
             }
           }
 
-          // leftover text after streaming
+          // Handle any remaining text after streaming
           if (assistantTextBuffer) {
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
-
-          // Stop the thinking animation if active
-          if (thinkingDiv) {
-            const thinkingText = thinkingDiv.querySelector(".thinking-text");
-            if (thinkingText) {
-              thinkingText.classList.add("static");
-            }
-          }
-
-          // Remove typing indicator when done
-          const indicators = document.querySelectorAll(".typing-indicator");
-          indicators.forEach((indicator) => indicator.remove());
-
-          mermaid.init(undefined, chatContainer.querySelectorAll(".mermaid"));
         } catch (error) {
-          console.error("Error:", error);
-          const errorDiv = document.createElement("div");
-          errorDiv.className = "message error-message";
-          const errorContent = `
-            <div class="error-toggle">▶</div>
-            <div class="error-header">⚠️ Error Occurred</div>
-            <div class="error-content">
-              <div class="error-item">
-                <i class="fas fa-exclamation-circle"></i>
-                ${md.render(error.toString())}
+          if (error.name === "AbortError") {
+            console.log("Request was aborted");
+          } else {
+            console.error("Error:", error);
+            const errorDiv = document.createElement("div");
+            errorDiv.className = "message error-message";
+            const errorContent = `
+              <div class="error-toggle">▶</div>
+              <div class="error-header">⚠️ Error Occurred</div>
+              <div class="error-content">
+                <div class="error-item">
+                  <i class="fas fa-exclamation-circle"></i>
+                  ${md.render(error.toString())}
+                </div>
               </div>
-            </div>
-          `;
-          errorDiv.innerHTML = errorContent;
-          chatContainer.appendChild(errorDiv);
-          initializeErrorToggles(errorDiv);
+            `;
+            errorDiv.innerHTML = errorContent;
+            chatContainer.appendChild(errorDiv);
+            initializeErrorToggles(errorDiv);
+          }
+        } finally {
+          resetGenerationState();
         }
       }
+
+      // Helper function to create error content
+      function createErrorContent(errorBuffer) {
+        return `
+          <div class="error-toggle">▶</div>
+          <div class="error-header">⚠️ ${errorBuffer.length} Error${
+          errorBuffer.length > 1 ? "s" : ""
+        } Occurred</div>
+          <div class="error-content">
+            ${errorBuffer
+              .map(
+                (error) => `
+              <div class="error-item">
+                <i class="fas fa-exclamation-circle"></i>
+                ${md.render(error)}
+              </div>
+            `
+              )
+              .join("")}
+          </div>
+        `;
+      }
+
+      // Helper function to create error div
+      function createErrorDiv(errorBuffer) {
+        const errorDiv = document.createElement("div");
+        errorDiv.className = "message error-message";
+        errorDiv.innerHTML = createErrorContent(errorBuffer);
+        return errorDiv;
+      }
+
+      // Add stop button event listener
+      stopButton.addEventListener("click", stopGeneration);
 
       // Function to handle editing a user message.
       function editUserMessage(messageDiv) {
@@ -1705,6 +1801,9 @@
         });
 
         saveButton.addEventListener("click", function () {
+          // Stop any ongoing generation first
+          stopGeneration();
+
           const newContent = textarea.value.trim();
           if (!newContent) return;
           const indexInChat = Array.from(chatContainer.children).indexOf(
@@ -1736,18 +1835,50 @@
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
 
+        if (data.error) {
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          const errorContent = `
+            <div class="error-toggle">▶</div>
+            <div class="error-header">⚠️ Error Occurred</div>
+            <div class="error-content">
+              <div class="error-item">
+                <i class="fas fa-exclamation-circle"></i>
+                ${md.render(data.error)}
+              </div>
+            </div>
+          `;
+          errorDiv.innerHTML = errorContent;
+          chatContainer.appendChild(errorDiv);
+          initializeErrorToggles(errorDiv);
+          return;
+        }
+
         if (data.context) {
           latestContext = data.context;
         }
 
         if (!data.message?.content) {
-          if (data.done && assistantTextBuffer) {
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-            messageHistory.push({
-              role: "assistant",
-              content: assistantTextBuffer,
-              images: data.message?.images,
-            });
+          if (data.done) {
+            if (assistantTextBuffer) {
+              createOrUpdateAssistantMessage(
+                assistantTextBuffer,
+                latestContext
+              );
+              if (
+                !messageHistory.some(
+                  (msg) =>
+                    msg.role === "assistant" &&
+                    msg.content === assistantTextBuffer
+                )
+              ) {
+                messageHistory.push({
+                  role: "assistant",
+                  content: assistantTextBuffer,
+                  images: data.message?.images,
+                });
+              }
+            }
           }
           return;
         }
@@ -2045,6 +2176,11 @@
             resizeTextarea();
             return;
           }
+          if (isGenerating) {
+            // Prevent sending while generating
+            e.preventDefault();
+            return;
+          }
           if (e.ctrlKey) {
             e.preventDefault();
             const toolsActorsInput =
@@ -2070,12 +2206,18 @@
           e.preventDefault();
           const endpoint = thinkEnabled ? "/think" : "/chat";
           await sendQuery(endpoint);
+        } else if (e.key === "Escape") {
+          // Add Escape key handler
+          if (isGenerating) {
+            stopGeneration();
+          }
         }
       });
 
       document
         .getElementById("send-button")
         .addEventListener("click", async () => {
+          // Allow toggling tools even during generation
           const toolsActorsInput =
             document.getElementById("tools-actors-input");
           const toolsActorsList = toolsActorsInput.value
@@ -2091,6 +2233,7 @@
         });
 
       document.getElementById("think-button").addEventListener("click", () => {
+        // Allow toggling think mode even during generation
         thinkEnabled = !thinkEnabled;
         updateThinkButton();
       });
@@ -2385,6 +2528,15 @@
       document.addEventListener("DOMContentLoaded", () => {
         initializeSidebar();
 
+        // Initialize send button functionality
+        const sendButton = document.querySelector(".send-button");
+        sendButton.addEventListener("click", async () => {
+          if (!isGenerating) {
+            const endpoint = thinkEnabled ? "/think" : "/chat";
+            await sendQuery(endpoint);
+          }
+        });
+
         // Load stored tools state
         const storedToolsEnabled = localStorage.getItem("toolsEnabled");
         const toolsActorsInput = document.getElementById("tools-actors-input");
@@ -2418,6 +2570,26 @@
           localStorage.setItem("toolsActors", toolsActorsInput.value);
           updateToolButton();
         });
+
+        // Add click handler for input container
+        const inputContainer = document.getElementById("input-container");
+        const queryInput = document.getElementById("query-input");
+
+        inputContainer.addEventListener("click", (e) => {
+          // Always focus the input, but let button clicks still work
+          queryInput.focus();
+          // Place cursor at the end of the text
+          const len = queryInput.value.length;
+          queryInput.setSelectionRange(len, len);
+
+          // Don't prevent default for buttons so they still work
+          if (e.target.closest("button")) {
+            e.stopPropagation();
+          }
+        });
+
+        // Remove the utilities container click handler since we want clicks there to work
+        // ... existing code ...
       });
 
       // Initialize styles for disabled button state
@@ -2447,6 +2619,74 @@
           }
         });
       }
+
+      // Add stop generation functionality
+      function stopGeneration() {
+        if (currentController) {
+          currentController.abort();
+          currentController = null;
+        }
+        resetGenerationState();
+      }
+
+      function resetGenerationState() {
+        isGenerating = false;
+        const stopButton = document.getElementById("stop-button");
+        const sendButton = document.querySelector(".send-button");
+        stopButton.style.display = "none";
+        sendButton.style.display = "flex";
+
+        // Check input content to set correct button state
+        sendButton.disabled = !queryInput.value.trim();
+
+        // Reset thinking state if active
+        if (isThinkingActive) {
+          isThinkingActive = false;
+          if (thinkingDiv) {
+            const thinkingText = thinkingDiv.querySelector(".thinking-text");
+            if (thinkingText) {
+              const duration = (
+                (Date.now() - thinkingStartTime) /
+                1000
+              ).toFixed(1);
+              thinkingText.textContent = `Thought stopped after ${duration}s`;
+              thinkingText.classList.add("static");
+            }
+          }
+          thinkingStartTime = null;
+        }
+
+        // If we have a partial assistant message, finalize it
+        if (assistantTextBuffer) {
+          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+          if (
+            !messageHistory.some(
+              (msg) =>
+                msg.role === "assistant" && msg.content === assistantTextBuffer
+            )
+          ) {
+            messageHistory.push({
+              role: "assistant",
+              content: assistantTextBuffer,
+            });
+          }
+          assistantTextBuffer = "";
+        }
+
+        const indicators = document.querySelectorAll(".typing-indicator");
+        indicators.forEach((indicator) => indicator.remove());
+
+        // Re-enable input
+        queryInput.disabled = false;
+        queryInput.focus();
+      }
+
+      // Add input validation for send button
+      queryInput.addEventListener("input", function () {
+        const sendButton = document.querySelector(".send-button");
+        sendButton.disabled = !this.value.trim();
+        resizeTextarea();
+      });
     </script>
   </body>
 </html>
