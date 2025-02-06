@@ -232,6 +232,7 @@ curl -X 'POST' \
             }
         ]
     }'
+```
 
 ### Chat completion:
 
