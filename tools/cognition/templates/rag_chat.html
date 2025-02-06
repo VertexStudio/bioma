@@ -1429,6 +1429,7 @@
       async function sendQuery(endpoint = "/chat", skipUserAppend = false) {
         const queryText = queryInput.value.trim();
         if (!queryText) return;
+        if (isGenerating) return; // Prevent sending while generating
 
         // Reset any previous state and setup for new generation
         if (currentController) {
@@ -1437,7 +1438,8 @@
         currentController = new AbortController();
         isGenerating = true;
         stopButton.style.display = "inline-flex";
-        queryInput.disabled = true;
+        // Remove this line to allow writing while generating
+        // queryInput.disabled = true;
 
         if (!skipUserAppend) {
           appendMessage("User", queryText);
@@ -2075,6 +2077,11 @@
             resizeTextarea();
             return;
           }
+          if (isGenerating) {
+            // Prevent sending while generating
+            e.preventDefault();
+            return;
+          }
           if (e.ctrlKey) {
             e.preventDefault();
             const toolsActorsInput =
@@ -2100,12 +2107,18 @@
           e.preventDefault();
           const endpoint = thinkEnabled ? "/think" : "/chat";
           await sendQuery(endpoint);
+        } else if (e.key === "Escape") {
+          // Add Escape key handler
+          if (isGenerating) {
+            stopGeneration();
+          }
         }
       });
 
       document
         .getElementById("send-button")
         .addEventListener("click", async () => {
+          // Allow toggling tools even during generation
           const toolsActorsInput =
             document.getElementById("tools-actors-input");
           const toolsActorsList = toolsActorsInput.value
@@ -2121,6 +2134,7 @@
         });
 
       document.getElementById("think-button").addEventListener("click", () => {
+        // Allow toggling think mode even during generation
         thinkEnabled = !thinkEnabled;
         updateThinkButton();
       });
