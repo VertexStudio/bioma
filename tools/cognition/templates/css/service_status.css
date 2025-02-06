@@ -43,6 +43,9 @@ body {
   text-align: center;
   padding: 2rem;
   margin-bottom: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .status-title {
@@ -120,23 +123,9 @@ body {
   }
 }
 
-.status-title-container {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
 .last-updated {
   color: #666;
   font-size: 14px;
-}
-
-.status-title-container {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
 }
 
 .last-updated {
