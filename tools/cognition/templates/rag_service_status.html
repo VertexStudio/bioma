@@ -17,6 +17,7 @@
 
     <script>
       const container = document.getElementById("services-container");
+      const lastUpdatedElement = document.getElementById("last-updated");
 
       function displayError(message) {
         container.innerHTML = `
@@ -82,6 +83,7 @@
         } catch (error) {
           console.error("Failed to fetch health status:", error);
           displayError(`Unable to connect to health service. ${error.message}`);
+          updateLastUpdated();
         }
       }
       // Initial fetch
