@@ -467,7 +467,77 @@ mod tests {
             assert_eq!(files_obj.instance_type, Some(SingleOrVec::Single(Box::new(InstanceType::Array))));
             assert!(files_obj.array.is_some());
 
-            // ... rest of the assertions remain the same ...
+            // Check the items schema of the files array
+            let items = files_obj.array.as_ref().unwrap().items.as_ref().unwrap();
+            if let SingleOrVec::Single(item_schema) = items {
+                if let Schema::Object(item_obj) = item_schema.as_ref() {
+                    assert_eq!(item_obj.instance_type, Some(SingleOrVec::Single(Box::new(InstanceType::Object))));
+
+                    // Check file_path and ranges properties
+                    let item_properties = item_obj.object.as_ref().unwrap().properties.clone();
+
+                    // Verify file_path
+                    let file_path = item_properties.get("file_path").unwrap();
+                    if let Schema::Object(file_path_obj) = file_path {
+                        assert_eq!(
+                            file_path_obj.instance_type,
+                            Some(SingleOrVec::Single(Box::new(InstanceType::String)))
+                        );
+                        assert_eq!(
+                            file_path_obj.metadata.as_ref().unwrap().description,
+                            Some("Path to the text file.".to_string())
+                        );
+                    }
+
+                    // Verify ranges
+                    let ranges = item_properties.get("ranges").unwrap();
+                    if let Schema::Object(ranges_obj) = ranges {
+                        assert_eq!(ranges_obj.instance_type, Some(SingleOrVec::Single(Box::new(InstanceType::Array))));
+
+                        // Check ranges items (start/end properties)
+                        if let Some(ranges_array) = &ranges_obj.array {
+                            if let Some(SingleOrVec::Single(ranges_item)) = &ranges_array.items {
+                                if let Schema::Object(ranges_item_obj) = ranges_item.as_ref() {
+                                    let range_properties = ranges_item_obj.object.as_ref().unwrap().properties.clone();
+
+                                    // Verify start property
+                                    let start = range_properties.get("start").unwrap();
+                                    if let Schema::Object(start_obj) = start {
+                                        assert_eq!(
+                                            start_obj.instance_type,
+                                            Some(SingleOrVec::Single(Box::new(InstanceType::Integer)))
+                                        );
+                                        assert_eq!(
+                                            start_obj.metadata.as_ref().unwrap().description,
+                                            Some("Starting line number (1-based)".to_string())
+                                        );
+                                    }
+
+                                    // Verify end property
+                                    let end = range_properties.get("end").unwrap();
+                                    if let Schema::Object(end_obj) = end {
+                                        assert_eq!(
+                                            end_obj.instance_type,
+                                            Some(SingleOrVec::Vec(vec![InstanceType::Integer, InstanceType::Null]))
+                                        );
+                                        assert_eq!(
+                                            end_obj.metadata.as_ref().unwrap().description,
+                                            Some("Ending line number (null for end of file)".to_string())
+                                        );
+                                    }
+
+                                    // Verify required fields in ranges
+                                    assert!(ranges_item_obj.object.as_ref().unwrap().required.contains("start"));
+                                }
+                            }
+                        }
+                    }
+
+                    // Verify required fields in items
+                    assert!(item_obj.object.as_ref().unwrap().required.contains("file_path"));
+                    assert!(item_obj.object.as_ref().unwrap().required.contains("ranges"));
+                }
+            }
         }
 
         // Check encoding field
