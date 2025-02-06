@@ -72,8 +72,17 @@
       // Initial fetch
       fetchHealth();
 
-      // Refresh every minute (60000 milliseconds)
-      setInterval(fetchHealth, 60000);
+      // Use window.setInterval to ensure it continues even if the page is in an iframe
+      window.setInterval(fetchHealth, 60000);
+
+      // Add event listener to handle potential iframe reload
+      window.addEventListener("load", () => {
+        // Clear any existing intervals to prevent multiple timers
+        window.clearInterval(window.healthInterval);
+
+        // Set a new interval and store its reference
+        window.healthInterval = window.setInterval(fetchHealth, 60000);
+      });
     </script>
   </body>
 </html>
