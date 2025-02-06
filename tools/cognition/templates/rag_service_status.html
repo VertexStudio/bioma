@@ -10,6 +10,26 @@
     <div class="page-container">
       <div class="status-title-container">
         <h1 class="status-title">Service Status Dashboard</h1>
+      </div>
+      <div class="controls-bar">
+        <button id="refresh-button" class="refresh-button">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"
+            />
+          </svg>
+          Refresh
+        </button>
         <div id="last-updated" class="last-updated">Last updated: --:--:--</div>
       </div>
       <div class="services-container" id="services-container"></div>
@@ -18,14 +38,15 @@
     <script>
       const container = document.getElementById("services-container");
       const lastUpdatedElement = document.getElementById("last-updated");
+      const refreshButton = document.getElementById("refresh-button");
 
       function displayError(message) {
         container.innerHTML = `
-          <div class="error-container" style="grid-column: 1 / -1;">
-            <h2>API Error</h2>
-            <p>${message}</p>
-          </div>
-        `;
+    <div class="error-container" style="grid-column: 1 / -1;">
+      <h2>API Error</h2>
+      <p>${message}</p>
+    </div>
+  `;
       }
 
       function updateLastUpdated() {
@@ -61,45 +82,52 @@
             }`;
 
             div.innerHTML = `
-              <h3>${name.replace("_", " ")}</h3>
-              <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-              ${
-                !info.is_healthy
-                  ? `<p class='error-message'>Error: ${info.error}</p>`
-                  : ""
-              }
-              ${
-                info.health?.info
-                  ? `<div class="health-info"><code>${info.health.info}</code></div>`
-                  : ""
-              }
-            `;
+        <h3>${name.replace("_", " ")}</h3>
+        <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+        ${
+          !info.is_healthy
+            ? `<p class='error-message'>Error: ${info.error}</p>`
+            : ""
+        }
+        ${
+          info.health?.info
+            ? `<div class="health-info"><code>${info.health.info}</code></div>`
+            : ""
+        }
+      `;
 
             container.appendChild(div);
-
-            // Update the last updated time
-            updateLastUpdated();
           }
+          // Moved outside the loop
+          updateLastUpdated();
         } catch (error) {
           console.error("Failed to fetch health status:", error);
           displayError(`Unable to connect to health service. ${error.message}`);
           updateLastUpdated();
         }
       }
-      // Initial fetch
-      fetchHealth();
 
-      // Use window.setInterval to ensure it continues even if the page is in an iframe
-      window.setInterval(fetchHealth, 60000);
-
-      // Add event listener to handle potential iframe reload
-      window.addEventListener("load", () => {
+      function setupHealthStatusRefresh() {
         // Clear any existing intervals to prevent multiple timers
-        window.clearInterval(window.healthInterval);
+        if (window.healthInterval) {
+          window.clearInterval(window.healthInterval);
+        }
+
+        // Initial fetch
+        fetchHealth();
 
         // Set a new interval and store its reference
         window.healthInterval = window.setInterval(fetchHealth, 60000);
-      });
+      }
+
+      // Add refresh button click handler
+      refreshButton.addEventListener("click", fetchHealth);
+
+      // Initial setup
+      setupHealthStatusRefresh();
+
+      // Single load event listener
+      window.addEventListener("load", setupHealthStatusRefresh);
     </script>
   </body>
 </html>
