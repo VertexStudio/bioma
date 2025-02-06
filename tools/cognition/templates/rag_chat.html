@@ -396,6 +396,7 @@
         gap: 12px;
         transition: margin-left 0.3s ease;
         z-index: 999;
+        cursor: text;
       }
 
       #input-container * {
@@ -408,7 +409,7 @@
         padding: 12px;
         box-sizing: border-box;
         border-radius: 8px;
-        background-color: var(--bg-main);
+        background-color: transparent;
         color: var(--text-primary);
         border: none;
         resize: none;
@@ -423,10 +424,6 @@
 
       #query-input:focus {
         outline: none;
-      }
-
-      .utilities-container {
-        cursor: default !important;
       }
 
       .utilities-container button,
@@ -2576,11 +2573,8 @@
         const queryInput = document.getElementById("query-input");
 
         inputContainer.addEventListener("click", (e) => {
-          // Focus the input unless we clicked on a button or utilities
-          if (
-            !e.target.closest("button") &&
-            !e.target.closest(".utilities-container")
-          ) {
+          // Focus the input unless we clicked on a button
+          if (!e.target.closest("button")) {
             queryInput.focus();
             // Place cursor at the end of the text
             const len = queryInput.value.length;
@@ -2588,13 +2582,8 @@
           }
         });
 
-        // Prevent click propagation from utilities
-        const utilitiesContainer = document.querySelector(
-          ".utilities-container"
-        );
-        utilitiesContainer.addEventListener("click", (e) => {
-          e.stopPropagation();
-        });
+        // Remove the utilities container click handler since we want clicks there to work
+        // ... existing code ...
       });
 
       // Initialize styles for disabled button state
