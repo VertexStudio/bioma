@@ -1758,13 +1758,26 @@
         }
 
         if (!data.message?.content) {
-          if (data.done && assistantTextBuffer) {
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-            messageHistory.push({
-              role: "assistant",
-              content: assistantTextBuffer,
-              images: data.message?.images,
-            });
+          if (data.done) {
+            if (assistantTextBuffer) {
+              createOrUpdateAssistantMessage(
+                assistantTextBuffer,
+                latestContext
+              );
+              if (
+                !messageHistory.some(
+                  (msg) =>
+                    msg.role === "assistant" &&
+                    msg.content === assistantTextBuffer
+                )
+              ) {
+                messageHistory.push({
+                  role: "assistant",
+                  content: assistantTextBuffer,
+                  images: data.message?.images,
+                });
+              }
+            }
           }
           return;
         }
@@ -2495,19 +2508,25 @@
           thinkingStartTime = null;
         }
 
-        // Remove any typing indicators
-        const indicators = document.querySelectorAll(".typing-indicator");
-        indicators.forEach((indicator) => indicator.remove());
-
         // If we have a partial assistant message, finalize it
         if (assistantTextBuffer) {
           createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          messageHistory.push({
-            role: "assistant",
-            content: assistantTextBuffer,
-          });
+          if (
+            !messageHistory.some(
+              (msg) =>
+                msg.role === "assistant" && msg.content === assistantTextBuffer
+            )
+          ) {
+            messageHistory.push({
+              role: "assistant",
+              content: assistantTextBuffer,
+            });
+          }
           assistantTextBuffer = "";
         }
+
+        const indicators = document.querySelectorAll(".typing-indicator");
+        indicators.forEach((indicator) => indicator.remove());
 
         // Re-enable input
         queryInput.disabled = false;
