@@ -113,3 +113,15 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.status-title-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.last-updated {
+  color: #666;
+  font-size: 14px;
+}

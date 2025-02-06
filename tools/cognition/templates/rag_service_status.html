@@ -10,6 +10,7 @@
     <div class="page-container">
       <div class="status-title-container">
         <h1 class="status-title">Service Status Dashboard</h1>
+        <div id="last-updated" class="last-updated">Last updated: --:--:--</div>
       </div>
       <div class="services-container" id="services-container"></div>
     </div>
@@ -24,6 +25,17 @@
             <p>${message}</p>
           </div>
         `;
+      }
+
+      function updateLastUpdated() {
+        const now = new Date();
+        const time = now.toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        lastUpdatedElement.textContent = `Last updated: ${time}`;
       }
 
       async function fetchHealth() {
@@ -63,6 +75,9 @@
             `;
 
             container.appendChild(div);
+
+            // Update the last updated time
+            updateLastUpdated();
           }
         } catch (error) {
           console.error("Failed to fetch health status:", error);
