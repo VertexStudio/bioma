@@ -87,7 +87,8 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        overflow-x: visible; /* Allow tooltips to overflow */
+        overflow-x: visible;
+        /* Allow tooltips to overflow */
       }
 
       .sidebar-header {
@@ -143,6 +144,7 @@
         color: var(--text-secondary);
       }
 
+      .source-section,
       .tools-section {
         display: flex;
         flex-direction: column;
@@ -150,6 +152,7 @@
       }
 
       /* Add border above active tools header */
+      .sources-header,
       .tools-header {
         display: flex;
         justify-content: space-between;
@@ -160,6 +163,7 @@
         margin-top: 5px;
       }
 
+      .sources-list,
       .tools-list {
         display: flex;
         flex-direction: column;
@@ -173,7 +177,8 @@
         padding: 8px;
         cursor: pointer;
         transition: all 0.2s ease;
-        position: relative; /* For tooltip positioning */
+        position: relative;
+        /* For tooltip positioning */
       }
 
       .tool-item:hover {
@@ -265,6 +270,7 @@
         margin-top: 5px;
       }
 
+      .source-form,
       .tools-form {
         background: var(--bg-main);
         border: 1px solid var(--border-color);
@@ -314,6 +320,7 @@
         gap: 6px;
       }
 
+      .saved-sources-section,
       .saved-tools-section {
         margin-top: 15px;
         padding-top: 15px;
@@ -370,13 +377,13 @@
         width: 16px;
         height: 16px;
         transition: transform var(--transition-speed);
-        transform: rotate(180deg); /* Start rotated */
+        transform: rotate(180deg);
+        /* Start rotated */
       }
 
       #sidebar.collapsed #sidebar-toggle svg {
-        transform: rotate(
-          0deg
-        ); /* Return to original position when collapsed */
+        transform: rotate(0deg);
+        /* Return to original position when collapsed */
       }
 
       #input-container {
@@ -461,8 +468,10 @@
 
       .utilities-right {
         position: relative;
-        width: 48px; /* Fixed width for both send and stop buttons */
-        height: 48px; /* Fixed height for both send and stop buttons */
+        width: 48px;
+        /* Fixed width for both send and stop buttons */
+        height: 48px;
+        /* Fixed height for both send and stop buttons */
       }
 
       .send-button,
@@ -500,7 +509,8 @@
       #stop-button {
         background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
         color: var(--text-primary);
-        display: none; /* Hidden by default */
+        display: none;
+        /* Hidden by default */
         cursor: pointer;
       }
 
@@ -531,8 +541,10 @@
         align-self: flex-end;
         margin-left: auto;
         color: var(--text-primary);
-        position: relative; /* For positioning the edit icon */
-        position: relative; /* For positioning the edit icon */
+        position: relative;
+        /* For positioning the edit icon */
+        position: relative;
+        /* For positioning the edit icon */
       }
 
       .user-message::before {
@@ -735,13 +747,16 @@
       ::-webkit-scrollbar {
         width: 8px;
       }
+
       ::-webkit-scrollbar-track {
         background: var(--bg-secondary);
       }
+
       ::-webkit-scrollbar-thumb {
         background: var(--primary);
         border-radius: 4px;
       }
+
       ::-webkit-scrollbar-thumb:hover {
         background: var(--primary-hover);
       }
@@ -810,6 +825,7 @@
         max-width: 85%;
         align-self: flex-start;
       }
+
       .thinking-header {
         display: inline-flex;
         align-items: center;
@@ -846,6 +862,7 @@
         0% {
           background-position: 200% 0;
         }
+
         100% {
           background-position: -200% 0;
         }
@@ -881,6 +898,7 @@
         from {
           opacity: 0;
         }
+
         to {
           opacity: 1;
         }
@@ -973,9 +991,11 @@
         0% {
           opacity: 0.4;
         }
+
         50% {
           opacity: 1;
         }
+
         100% {
           opacity: 0.4;
         }
@@ -1095,7 +1115,8 @@
 
       #sidebar.collapsed .tool-item {
         overflow: visible !important;
-        position: relative; /* Ensure proper tooltip positioning */
+        position: relative;
+        /* Ensure proper tooltip positioning */
       }
 
       /* Add stop button styles */
@@ -1132,15 +1153,18 @@
         0% {
           opacity: 0.4;
         }
+
         50% {
           opacity: 1;
         }
+
         100% {
           opacity: 0.4;
         }
       }
     </style>
   </head>
+
   <body>
     <!-- Sidebar with helper Tools section -->
     <div id="sidebar">
@@ -1193,6 +1217,43 @@
           </h3>
           <div id="saved-tools-list" class="tools-list">
             <!-- Saved tools will be listed here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Sources section stars here-->
+
+      <div class="section source-section">
+        <!-- Add New Agent form moved to top -->
+        <div class="source-form" id="source-form">
+          <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
+          <div class="form-group">
+            <input type="text" id="source" placeholder="Source path" />
+          </div>
+          <div class="form-actions">
+            <button id="save-source-btn" class="action-button">
+              <i class="fas fa-save"></i> Save
+            </button>
+          </div>
+        </div>
+
+        <div class="sources-header">
+          <h3><i class="fas fa-play-circle"></i> Active Sources</h3>
+        </div>
+
+        <!-- Add the hidden input for sources actors -->
+        <input type="hidden" id="sources-actors-input" value="" />
+
+        <div id="active-sources-list" class="sources-list">
+          <!-- Active sources will be listed here -->
+        </div>
+
+        <div class="saved-sources-section">
+          <h3 style="margin-bottom: 10px">
+            <i class="fas fa-archive"></i> Available Sources
+          </h3>
+          <div id="saved-sources-list" class="sources-list">
+            <!-- Saved sources will be listed here -->
           </div>
         </div>
       </div>
@@ -2542,9 +2603,17 @@
         const toolsActorsInput = document.getElementById("tools-actors-input");
         const storedToolsActors = localStorage.getItem("toolsActors");
 
-        // First load the tools actors
+        // Load stored sources state
+        const sourcesInput = document.getElementById("sources-input");
+        const storedSources = localStorage.getItem("sources");
+
+        // First load the tools actors and sources
         if (storedToolsActors) {
           toolsActorsInput.value = storedToolsActors;
+        }
+
+        if (storedSources) {
+          sourcesInput.value = storedSources;
         }
 
         // Then set the tools state
