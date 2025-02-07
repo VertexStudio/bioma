@@ -19,10 +19,13 @@ class TreeNode {
     this.data = data;
     /** @type {Map<TreeNode<T>, Edge<T>>} */
     this.children = new Map();
+    /** @type {TreeNode<T> | null} */
+    this.activeChild = null;
   }
 
   /**
-   * Add a child node with an edge
+   * Add a child node with an edge.
+   * If no active child is set, the first added child becomes active (i.e. the leftmost child).
    * @param {TreeNode<T>} child - Child node to add
    * @param {string} edgeHtml - HTML content for the edge
    * @param {T} [edgeData] - Optional data for the edge
@@ -30,20 +33,30 @@ class TreeNode {
    */
   addChild(child, edgeHtml, edgeData = undefined) {
     this.children.set(child, { html: edgeHtml, data: edgeData });
+    // If no active child is set, set this new child as active.
+    if (this.activeChild === null) {
+      this.activeChild = child;
+    }
     return child;
   }
 
   /**
-   * Remove a child node
+   * Remove a child node.
+   * If the removed child was the active child, update the active child to the leftmost remaining child (or null).
    * @param {TreeNode<T>} child - Child node to remove
    * @returns {boolean} - True if the child was removed
    */
   removeChild(child) {
-    return this.children.delete(child);
+    const removed = this.children.delete(child);
+    if (removed && this.activeChild === child) {
+      const remaining = this.getChildren();
+      this.activeChild = remaining.length > 0 ? remaining[0] : null;
+    }
+    return removed;
   }
 
   /**
-   * Get the edge connecting to a child
+   * Get the edge connecting to a child.
    * @param {TreeNode<T>} child - Child node
    * @returns {Edge<T> | undefined} - The edge or undefined if child not found
    */
@@ -52,7 +65,7 @@ class TreeNode {
   }
 
   /**
-   * Get all children nodes
+   * Get all children nodes.
    * @returns {TreeNode<T>[]} - Array of child nodes
    */
   getChildren() {
@@ -60,7 +73,7 @@ class TreeNode {
   }
 
   /**
-   * Update node's HTML content
+   * Update node's HTML content.
    * @param {string} html - New HTML content
    */
   updateHtml(html) {
@@ -68,7 +81,7 @@ class TreeNode {
   }
 
   /**
-   * Update edge HTML content to a specific child
+   * Update edge HTML content to a specific child.
    * @param {TreeNode<T>} child - Target child node
    * @param {string} html - New HTML content for the edge
    * @returns {boolean} - True if the edge was updated
@@ -83,7 +96,47 @@ class TreeNode {
   }
 
   /**
-   * Generate a string visualization of the tree
+   * Set the active child of this node.
+   * @param {TreeNode<T>} child - Child node to set as active
+   */
+  setActiveChild(child) {
+    if (!this.children.has(child)) {
+      throw new Error("Child not found in this node.");
+    }
+    this.activeChild = child;
+  }
+
+  /**
+   * Get the active child of this node.
+   * If no active child is set but there are children, defaults to the leftmost child.
+   * @returns {TreeNode<T> | null}
+   */
+  getActiveChild() {
+    if (!this.activeChild && this.children.size > 0) {
+      this.activeChild = this.getChildren()[0];
+    }
+    return this.activeChild;
+  }
+
+  /**
+   * Recursively render the HTML along the active path.
+   * It renders this node's HTML, then the edge HTML to the active child,
+   * then recursively the active child's rendered HTML.
+   * @returns {string} - Concatenated HTML from this node down its active branch.
+   */
+  renderActivePath() {
+    let result = this.html;
+    const active = this.getActiveChild();
+    if (active) {
+      const edge = this.getEdge(active);
+      result += edge.html;
+      result += active.renderActivePath();
+    }
+    return result;
+  }
+
+  /**
+   * Generate a string visualization of the tree.
    * @param {string} [prefix=''] - Prefix for current line
    * @param {boolean} [isLast=true] - Is this the last child of its parent
    * @returns {string} - String representation of the tree
@@ -310,6 +363,62 @@ runner.test("Complex nested tree structure", () => {
   runner.assert(
     child1A.getEdge(greatChild1).data.branch === "leftmost",
     "Great-Grandchild 1 should be on leftmost branch"
+  );
+});
+
+runner.test("Active Path Rendering", () => {
+  // Build a tree structure similar to the example:
+  //
+  //       Root
+  //         └── A (active)
+  //               └── A2 (active)
+  //                      └── A2b (active)
+  // Other children exist but are not on the active path.
+  const root = new TreeNode("<div>Root</div>");
+  const A = new TreeNode("<div>A</div>");
+  const B = new TreeNode("<div>B</div>");
+  const C = new TreeNode("<div>C</div>");
+  root.addChild(A, "<span>Edge Root-A</span>");
+  root.addChild(B, "<span>Edge Root-B</span>");
+  root.addChild(C, "<span>Edge Root-C</span>");
+
+  // Under A, add A1, A2, A3. (A is active by default because it is the first child of root)
+  const A1 = new TreeNode("<div>A1</div>");
+  const A2 = new TreeNode("<div>A2</div>");
+  const A3 = new TreeNode("<div>A3</div>");
+  A.addChild(A1, "<span>Edge A-A1</span>");
+  A.addChild(A2, "<span>Edge A-A2</span>");
+  A.addChild(A3, "<span>Edge A-A3</span>");
+  // Set A2 explicitly as active
+  A.setActiveChild(A2);
+
+  // Under A2, add A2a, A2b, A2c.
+  const A2a = new TreeNode("<div>A2a</div>");
+  const A2b = new TreeNode("<div>A2b</div>");
+  const A2c = new TreeNode("<div>A2c</div>");
+  A2.addChild(A2a, "<span>Edge A2-A2a</span>");
+  A2.addChild(A2b, "<span>Edge A2-A2b</span>");
+  A2.addChild(A2c, "<span>Edge A2-A2c</span>");
+  // Set A2b explicitly as active
+  A2.setActiveChild(A2b);
+
+  // The expected active path HTML:
+  // Root html + edge Root-A + A html + edge A-A2 + A2 html + edge A2-A2b + A2b html
+  const expected =
+    "<div>Root</div>" +
+    "<span>Edge Root-A</span>" +
+    "<div>A</div>" +
+    "<span>Edge A-A2</span>" +
+    "<div>A2</div>" +
+    "<span>Edge A2-A2b</span>" +
+    "<div>A2b</div>";
+
+  const activePathHtml = root.renderActivePath();
+  console.log("\nActive path HTML:");
+  console.log(activePathHtml);
+  runner.assert(
+    activePathHtml === expected,
+    "Active path HTML did not match expected output"
   );
 });
 
