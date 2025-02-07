@@ -1284,41 +1284,42 @@
       // Message branch data structure
       class MessageBranch {
         constructor(messageId, content, elements) {
+          console.log('Creating new MessageBranch:', { messageId, content, elementsCount: elements.length });
           this.id = messageId;
           this.content = content;
-          this.elements = elements; // HTML elements following this message
-          this.versions = []; // Other versions of this message
+          this.elements = elements;
+          this.versions = [{
+            content: content,
+            elements: elements
+          }];
           this.currentVersionIndex = 0;
         }
 
         addVersion(content, elements) {
-          const newBranch = new MessageBranch(Date.now(), content, elements);
-          this.versions.push(newBranch);
-          return newBranch;
+          console.log('Adding version to branch:', { 
+            branchId: this.id, 
+            content, 
+            elementsCount: elements.length,
+            currentVersions: this.versions.length 
+          });
+          this.versions.push({
+            content: content,
+            elements: elements
+          });
+          return this.versions[this.versions.length - 1];
         }
 
         getCurrentVersion() {
-          return this.versions[this.currentVersionIndex] || this;
+          console.log('Getting current version:', {
+            branchId: this.id,
+            currentIndex: this.currentVersionIndex,
+            totalVersions: this.versions.length
+          });
+          return this.versions[this.currentVersionIndex];
         }
 
         getVersionCount() {
-          return this.versions.length + 1; // +1 for the original version
-        }
-
-        nextVersion() {
-          if (this.currentVersionIndex < this.versions.length) {
-            this.currentVersionIndex++;
-            return this.getCurrentVersion();
-          }
-          return null;
-        }
-
-        previousVersion() {
-          if (this.currentVersionIndex > 0) {
-            this.currentVersionIndex--;
-            return this.getCurrentVersion();
-          }
-          return null;
+          return this.versions.length;
         }
       }
 
@@ -1371,8 +1372,17 @@
 
       // Helper to create branch navigation UI
       function createBranchNavigation(messageDiv, branch) {
+        console.log('Creating branch navigation:', {
+          messageId: messageDiv.dataset.messageId,
+          versionCount: branch.getVersionCount(),
+          currentIndex: branch.currentVersionIndex
+        });
+        
         const versionCount = branch.getVersionCount();
-        if (versionCount <= 1) return;
+        if (versionCount <= 1) {
+          console.log('Skipping navigation - only one version');
+          return;
+        }
 
         const nav = document.createElement("div");
         nav.className = "branch-navigation";
@@ -1394,32 +1404,52 @@
 
         // Add event listeners
         nav.querySelector(".prev-version").addEventListener("click", () => {
-          const prevVersion = branch.previousVersion();
-          if (prevVersion) {
-            restoreElements(prevVersion.elements, chatContainer, messageDiv);
-            messageDiv.dataset.originalContent = prevVersion.content;
-            messageDiv.innerHTML = md.render(
-              md.utils.escapeHtml(prevVersion.content)
-            );
+          console.log('Previous version clicked:', {
+            currentIndex: branch.currentVersionIndex,
+            totalVersions: branch.versions.length
+          });
+          if (branch.currentVersionIndex > 0) {
+            branch.currentVersionIndex--;
+            const version = branch.getCurrentVersion();
+            restoreElements(version.elements, chatContainer, messageDiv);
+            messageDiv.dataset.originalContent = version.content;
+            messageDiv.innerHTML = md.render(md.utils.escapeHtml(version.content));
+            messageDiv.appendChild(editButton(messageDiv));
             messageDiv.appendChild(nav);
             updateBranchNavigation(messageDiv, branch);
           }
         });
 
         nav.querySelector(".next-version").addEventListener("click", () => {
-          const nextVersion = branch.nextVersion();
-          if (nextVersion) {
-            restoreElements(nextVersion.elements, chatContainer, messageDiv);
-            messageDiv.dataset.originalContent = nextVersion.content;
-            messageDiv.innerHTML = md.render(
-              md.utils.escapeHtml(nextVersion.content)
-            );
+          console.log('Next version clicked:', {
+            currentIndex: branch.currentVersionIndex,
+            totalVersions: branch.versions.length
+          });
+          if (branch.currentVersionIndex < branch.versions.length - 1) {
+            branch.currentVersionIndex++;
+            const version = branch.getCurrentVersion();
+            restoreElements(version.elements, chatContainer, messageDiv);
+            messageDiv.dataset.originalContent = version.content;
+            messageDiv.innerHTML = md.render(md.utils.escapeHtml(version.content));
+            messageDiv.appendChild(editButton(messageDiv));
             messageDiv.appendChild(nav);
             updateBranchNavigation(messageDiv, branch);
           }
         });
 
         return nav;
+      }
+
+      // Helper function to create edit button
+      function editButton(messageDiv) {
+        const editButton = document.createElement("div");
+        editButton.className = "edit-icon";
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.addEventListener("click", function (e) {
+          e.stopPropagation();
+          editUserMessage(messageDiv);
+        });
+        return editButton;
       }
 
       // Helper to update branch navigation UI
@@ -1432,11 +1462,8 @@
         const indicator = nav.querySelector(".version-indicator");
 
         prevBtn.disabled = branch.currentVersionIndex === 0;
-        nextBtn.disabled =
-          branch.currentVersionIndex === branch.versions.length;
-        indicator.textContent = `${
-          branch.currentVersionIndex + 1
-        }/${branch.getVersionCount()}`;
+        nextBtn.disabled = branch.currentVersionIndex === branch.versions.length - 1;
+        indicator.textContent = `${branch.currentVersionIndex + 1}/${branch.getVersionCount()}`;
       }
 
       // Remove any trailing slashes from the endpoint
@@ -1929,6 +1956,10 @@
 
       // Function to handle editing a user message.
       function editUserMessage(messageDiv) {
+        console.log('Starting edit of message:', {
+          messageId: messageDiv.dataset.messageId,
+          content: messageDiv.dataset.originalContent
+        });
         const originalContent =
           messageDiv.dataset.originalContent || messageDiv.innerText;
 
@@ -2012,34 +2043,46 @@
         });
 
         saveButton.addEventListener("click", function () {
-          // Stop any ongoing generation first
+          console.log('Save button clicked for message edit');
           stopGeneration();
 
           const newContent = textarea.value.trim();
           if (!newContent) return;
 
-          // Get or create message branch
           let messageId = messageDiv.dataset.messageId;
           let branch;
 
+          console.log('Processing edit save:', { 
+            messageId,
+            existingBranch: messageBranches.has(messageId),
+            newContent 
+          });
+
           if (!messageId) {
-            // First edit of this message
             messageId = Date.now().toString();
             messageDiv.dataset.messageId = messageId;
-            branch = new MessageBranch(
+            const elements = serializeElements(messageDiv);
+            console.log('Creating first branch for message:', {
               messageId,
-              originalContent,
-              serializeElements(messageDiv)
-            );
+              elementsCount: elements.length
+            });
+            branch = new MessageBranch(messageId, originalContent, elements);
             messageBranches.set(messageId, branch);
           } else {
             branch = messageBranches.get(messageId);
+            console.log('Retrieved existing branch:', {
+              branchId: branch.id,
+              versionsCount: branch.versions.length
+            });
           }
 
-          // Create new version
           const elements = serializeElements(messageDiv);
+          console.log('Creating new version:', {
+            elementsCount: elements.length,
+            currentVersionIndex: branch.currentVersionIndex
+          });
           branch.addVersion(newContent, elements);
-          branch.currentVersionIndex = branch.versions.length; // Set to latest version
+          branch.currentVersionIndex = branch.versions.length - 1; // Fix: Set to last version index
 
           // Update message div
           messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
@@ -2938,3 +2981,7 @@
     </script>
   </body>
 </html>
+    </script>
+  </body>
+</html>
+
