@@ -1,13 +1,25 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Tree Visualization Demo</title>
+    <title>Interactive Tree Visualization</title>
     <style>
-      .tree-container {
-        display: flex;
+      .container {
+        display: grid;
+        grid-template-columns: 300px 1fr;
         gap: 2rem;
         padding: 2rem;
         font-family: Arial, sans-serif;
+      }
+
+      .controls {
+        padding: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+
+      .tree-container {
+        display: flex;
+        gap: 2rem;
       }
 
       .visualization {
@@ -38,47 +50,199 @@
         border-left: 2px solid #90caf9;
       }
 
-      pre {
-        white-space: pre-wrap;
-        background: #f5f5f5;
-        padding: 1rem;
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.5rem;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+
+      button {
+        width: 100%;
+        padding: 0.5rem;
+        background: #2196f3;
+        color: white;
+        border: none;
         border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 0.5rem;
+      }
+
+      button:hover {
+        background: #1976d2;
+      }
+
+      .error {
+        color: red;
+        margin-top: 0.5rem;
       }
     </style>
   </head>
   <body>
-    <div class="tree-container">
-      <div class="visualization">
-        <h3>Full Tree (click nodes to set active)</h3>
-        <div id="fullTree"></div>
+    <div class="container">
+      <div class="controls">
+        <h3>Tree Controls</h3>
+
+        <div class="form-group">
+          <label>Add Node</label>
+          <input type="text" id="nodeName" placeholder="Node name" />
+          <select id="parentNode">
+            <option value="root">Root</option>
+          </select>
+          <input type="text" id="edgeLabel" placeholder="Edge label" />
+          <button onclick="addNode()">Add Node</button>
+        </div>
+
+        <div class="form-group">
+          <label>Remove Node</label>
+          <select id="nodeToRemove">
+            <option value="">Select node</option>
+          </select>
+          <button onclick="removeNode()">Remove Node</button>
+        </div>
+
+        <div class="form-group">
+          <button onclick="resetTree()">Reset Tree</button>
+        </div>
+
+        <div id="error" class="error"></div>
       </div>
-      <div class="visualization">
-        <h3>Active Path</h3>
-        <div id="activePath"></div>
+
+      <div class="tree-container">
+        <div class="visualization">
+          <h3>Full Tree (click nodes to set active)</h3>
+          <div id="fullTree"></div>
+        </div>
+        <div class="visualization">
+          <h3>Active Path</h3>
+          <div id="activePath"></div>
+        </div>
       </div>
     </div>
 
     <script src="../js/conversation.js"></script>
     <script>
-      // Create a sample tree
-      const root = new TreeNode("Root");
-      const A = new TreeNode("Branch A");
-      const B = new TreeNode("Branch B");
-      const C = new TreeNode("Branch C");
+      let root = new TreeNode("Root");
+      let nodeMap = new Map();
+      nodeMap.set("root", root);
 
-      root.addChild(A, "→ to A");
-      root.addChild(B, "→ to B");
-      root.addChild(C, "→ to C");
+      function updateNodeSelects() {
+        const parentSelect = document.getElementById("parentNode");
+        const removeSelect = document.getElementById("nodeToRemove");
 
-      const A1 = new TreeNode("A1");
-      const A2 = new TreeNode("A2");
-      A.addChild(A1, "→ to A1");
-      A.addChild(A2, "→ to A2");
+        // Save current selections
+        const parentValue = parentSelect.value;
+        const removeValue = removeSelect.value;
 
-      const B1 = new TreeNode("B1");
-      const B2 = new TreeNode("B2");
-      B.addChild(B1, "→ to B1");
-      B.addChild(B2, "→ to B2");
+        // Clear current options
+        parentSelect.innerHTML = '<option value="root">Root</option>';
+        removeSelect.innerHTML = '<option value="">Select node</option>';
+
+        // Add all nodes to selects
+        nodeMap.forEach((node, id) => {
+          if (id !== "root") {
+            const parentOpt = document.createElement("option");
+            parentOpt.value = id;
+            parentOpt.textContent = node.html;
+            parentSelect.appendChild(parentOpt);
+
+            const removeOpt = document.createElement("option");
+            removeOpt.value = id;
+            removeOpt.textContent = node.html;
+            removeSelect.appendChild(removeOpt);
+          }
+        });
+
+        // Restore selections if they still exist
+        if (
+          [...parentSelect.options].some((opt) => opt.value === parentValue)
+        ) {
+          parentSelect.value = parentValue;
+        }
+        if (
+          [...removeSelect.options].some((opt) => opt.value === removeValue)
+        ) {
+          removeSelect.value = removeValue;
+        }
+      }
+
+      function addNode() {
+        const nodeName = document.getElementById("nodeName").value;
+        const parentId = document.getElementById("parentNode").value;
+        const edgeLabel = document.getElementById("edgeLabel").value || "→";
+        const error = document.getElementById("error");
+
+        if (!nodeName) {
+          error.textContent = "Please enter a node name";
+          return;
+        }
+
+        const parent = nodeMap.get(parentId);
+        if (!parent) {
+          error.textContent = "Parent node not found";
+          return;
+        }
+
+        const newNode = new TreeNode(nodeName);
+        const nodeId = nodeName.toLowerCase().replace(/\s+/g, "_");
+
+        if (nodeMap.has(nodeId)) {
+          error.textContent = "Node with this name already exists";
+          return;
+        }
+
+        parent.addChild(newNode, edgeLabel);
+        nodeMap.set(nodeId, newNode);
+
+        error.textContent = "";
+        document.getElementById("nodeName").value = "";
+        document.getElementById("edgeLabel").value = "";
+
+        updateNodeSelects();
+        updateVisualizations();
+      }
+
+      function removeNode() {
+        const nodeId = document.getElementById("nodeToRemove").value;
+        const error = document.getElementById("error");
+
+        if (!nodeId) {
+          error.textContent = "Please select a node to remove";
+          return;
+        }
+
+        const node = nodeMap.get(nodeId);
+        if (!node) {
+          error.textContent = "Node not found";
+          return;
+        }
+
+        const parent = findParentNode(root, node);
+        if (parent) {
+          parent.removeChild(node);
+          nodeMap.delete(nodeId);
+          error.textContent = "";
+          updateNodeSelects();
+          updateVisualizations();
+        }
+      }
+
+      function resetTree() {
+        root = new TreeNode("Root");
+        nodeMap.clear();
+        nodeMap.set("root", root);
+        updateNodeSelects();
+        updateVisualizations();
+      }
 
       // Helper function to create DOM elements for the tree
       function createTreeDOM(node, isActivePath = false) {
@@ -88,7 +252,6 @@
         nodeDiv.className = "node" + (isActivePath ? " active" : "");
         nodeDiv.textContent = node.html;
 
-        // Add click handler to set active child
         nodeDiv.onclick = (e) => {
           e.stopPropagation();
           const parent = findParentNode(root, node);
@@ -117,7 +280,6 @@
         return container;
       }
 
-      // Helper function to find parent node
       function findParentNode(current, target) {
         for (const child of current.getChildren()) {
           if (child === target) return current;
@@ -127,7 +289,6 @@
         return null;
       }
 
-      // Function to update both visualizations
       function updateVisualizations() {
         const fullTreeContainer = document.getElementById("fullTree");
         const activePathContainer = document.getElementById("activePath");
@@ -139,7 +300,8 @@
         activePathContainer.appendChild(createTreeDOM(root, true));
       }
 
-      // Initial render
+      // Initial setup
+      updateNodeSelects();
       updateVisualizations();
     </script>
   </body>
