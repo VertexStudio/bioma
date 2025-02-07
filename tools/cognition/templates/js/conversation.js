@@ -4,7 +4,7 @@
  *
  * Each node now stores an array of HTML elements. For a root node, you might
  * simply pass something like ["<div>Root</div>"]. For a child node, you can include
- * the “edge” (connection) HTML as the first element and then its own content:
+ * the "edge" (connection) HTML as the first element and then its own content:
  * e.g., ["<span>Edge Parent-Child</span>", "<div>Child</div>"]
  */
 class TreeNode {
@@ -466,6 +466,103 @@ runner.test("Active Path Recomputing on Deep Tree", () => {
   runner.assert(
     activePath === expected,
     "Active path after changing A1's active child does not match expected"
+  );
+});
+
+// Test: HTML Path Reconstruction
+runner.test("HTML Path Reconstruction", () => {
+  // Create a deeply nested tree with multiple branches
+  const root = new TreeNode(['<div class="root">']);
+
+  // Branch A with deep nesting
+  const branchA = new TreeNode(['<div class="branch-a">']);
+  const a1 = new TreeNode(['<div class="a1">']);
+  const a1x = new TreeNode(['<div class="a1x">']);
+  const a1y = new TreeNode(['<div class="a1y">']);
+  const a1z = new TreeNode(['<div class="a1z">']);
+
+  // Branch B with multiple sub-branches
+  const branchB = new TreeNode(['<div class="branch-b">']);
+  const b1 = new TreeNode(['<div class="b1">']);
+  const b2 = new TreeNode(['<div class="b2">']);
+  const b1x = new TreeNode(['<div class="b1x">']);
+  const b1y = new TreeNode(['<div class="b1y">']);
+  const b2x = new TreeNode(['<div class="b2x">']);
+
+  // Branch C with asymmetric depth
+  const branchC = new TreeNode(['<div class="branch-c">']);
+  const c1 = new TreeNode(['<div class="c1">']);
+  const c2 = new TreeNode(['<div class="c2">']);
+  const c1x = new TreeNode(['<div class="c1x">']);
+  const c1x1 = new TreeNode(['<div class="c1x1">']);
+  const c1x2 = new TreeNode(['<div class="c1x2">']);
+  const c1x1a = new TreeNode(['<div class="c1x1a">']);
+
+  // Build the complex tree structure
+  root.addChild(branchA);
+  root.addChild(branchB);
+  root.addChild(branchC);
+
+  branchA.addChild(a1);
+  a1.addChild(a1x);
+  a1.addChild(a1y);
+  a1y.addChild(a1z);
+
+  branchB.addChild(b1);
+  branchB.addChild(b2);
+  b1.addChild(b1x);
+  b1.addChild(b1y);
+  b2.addChild(b2x);
+
+  branchC.addChild(c1);
+  branchC.addChild(c2);
+  c1.addChild(c1x);
+  c1x.addChild(c1x1);
+  c1x.addChild(c1x2);
+  c1x1.addChild(c1x1a);
+
+  // Print the full tree structure
+  console.log("\nComplete tree structure:");
+  console.log(root.visualize());
+
+  // Test different paths through the tree
+  console.log("\nPath 1 - Deepest A branch:");
+  root.setActiveChild(branchA);
+  branchA.setActiveChild(a1);
+  a1.setActiveChild(a1y);
+  a1y.setActiveChild(a1z);
+  console.log(root.renderActivePath());
+
+  console.log("\nPath 2 - B branch with b1x:");
+  root.setActiveChild(branchB);
+  branchB.setActiveChild(b1);
+  b1.setActiveChild(b1x);
+  console.log(root.renderActivePath());
+
+  console.log("\nPath 3 - Deepest C branch:");
+  root.setActiveChild(branchC);
+  branchC.setActiveChild(c1);
+  c1.setActiveChild(c1x);
+  c1x.setActiveChild(c1x1);
+  c1x1.setActiveChild(c1x1a);
+  console.log(root.renderActivePath());
+
+  // Verify the structure
+  const deepestCPath = root.renderActivePath();
+  runner.assert(
+    deepestCPath.includes("root") &&
+      deepestCPath.includes("branch-c") &&
+      deepestCPath.includes("c1x1a"),
+    "Deepest C path should contain root, branch-c, and c1x1a elements"
+  );
+
+  root.setActiveChild(branchB);
+  const bPath = root.renderActivePath();
+  runner.assert(
+    bPath.includes("root") &&
+      bPath.includes("branch-b") &&
+      bPath.includes("b1x"),
+    "B path should contain root, branch-b, and b1x elements"
   );
 });
 
