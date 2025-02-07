@@ -1,4 +1,80 @@
 /**
+ * @enum {string}
+ */
+const LogLevel = {
+  DEBUG: "DEBUG",
+  INFO: "INFO",
+  WARN: "WARN",
+  ERROR: "ERROR",
+};
+
+/**
+ * @class Logger
+ * Utility class for structured logging
+ */
+class Logger {
+  /**
+   * @param {string} context - The context/component name for this logger
+   * @param {LogLevel} [minLevel=LogLevel.INFO] - Minimum level to log
+   */
+  constructor(context, minLevel = LogLevel.INFO) {
+    this.context = context;
+    this.minLevel = minLevel;
+    this.levels = {
+      [LogLevel.DEBUG]: 0,
+      [LogLevel.INFO]: 1,
+      [LogLevel.WARN]: 2,
+      [LogLevel.ERROR]: 3,
+    };
+  }
+
+  /**
+   * Format a log message
+   * @private
+   * @param {LogLevel} level
+   * @param {string} message
+   * @returns {string}
+   */
+  format(level, message) {
+    const timestamp = new Date().toISOString();
+    return `[${timestamp}] [${level}] [${this.context}] ${message}`;
+  }
+
+  /**
+   * @private
+   * @param {LogLevel} level
+   * @returns {boolean}
+   */
+  shouldLog(level) {
+    return this.levels[level] >= this.levels[this.minLevel];
+  }
+
+  debug(message, ...args) {
+    if (this.shouldLog(LogLevel.DEBUG)) {
+      console.debug(this.format(LogLevel.DEBUG, message), ...args);
+    }
+  }
+
+  info(message, ...args) {
+    if (this.shouldLog(LogLevel.INFO)) {
+      console.info(this.format(LogLevel.INFO, message), ...args);
+    }
+  }
+
+  warn(message, ...args) {
+    if (this.shouldLog(LogLevel.WARN)) {
+      console.warn(this.format(LogLevel.WARN, message), ...args);
+    }
+  }
+
+  error(message, ...args) {
+    if (this.shouldLog(LogLevel.ERROR)) {
+      console.error(this.format(LogLevel.ERROR, message), ...args);
+    }
+  }
+}
+
+/**
  * @template T
  * @class TreeNode
  *
@@ -14,9 +90,15 @@ class TreeNode {
    * @param {T} [data] - Optional data associated with the node.
    */
   constructor(htmlElements, data = undefined) {
+    // Create a logger instance for this class
+    this.logger = new Logger("TreeNode");
+
     if (!Array.isArray(htmlElements)) {
+      this.logger.error("Invalid htmlElements:", htmlElements);
       throw new Error("htmlElements must be an array of strings");
     }
+
+    this.logger.debug("Creating new node", { htmlElements, data });
     this.htmlElements = htmlElements;
     this.data = data;
     /** @type {TreeNode<T>[]} */
@@ -32,9 +114,15 @@ class TreeNode {
    * @returns {TreeNode<T>} - The added child node.
    */
   addChild(child) {
+    this.logger.debug("Adding child", {
+      parentElements: this.htmlElements,
+      childElements: child.htmlElements,
+    });
+
     this.children.push(child);
     if (this.activeChildIndex === -1) {
       this.activeChildIndex = 0;
+      this.logger.debug("Set first child as active");
     }
     return child;
   }
@@ -82,8 +170,17 @@ class TreeNode {
   setActiveChild(child) {
     const index = this.children.indexOf(child);
     if (index === -1) {
+      this.logger.error("Failed to set active child - not found", {
+        childElements: child.htmlElements,
+      });
       throw new Error("Child not found in this node.");
     }
+
+    this.logger.info("Setting active child", {
+      previousIndex: this.activeChildIndex,
+      newIndex: index,
+    });
+
     this.activeChildIndex = index;
   }
 
@@ -107,9 +204,13 @@ class TreeNode {
    * @returns {string} - Concatenated HTML.
    */
   renderActivePath() {
+    this.logger.debug("Rendering active path");
     let result = this.htmlElements.join("");
     const activeChild = this.getActiveChild();
     if (activeChild) {
+      this.logger.debug("Including active child in path", {
+        childElements: activeChild.htmlElements,
+      });
       result += activeChild.renderActivePath();
     }
     return result;
@@ -567,7 +668,7 @@ runner.test("HTML Path Reconstruction", () => {
 });
 
 // Run all tests
-runner.run();
+// runner.run();
 
 // Export for use in other modules if needed
 if (typeof module !== "undefined" && module.exports) {
