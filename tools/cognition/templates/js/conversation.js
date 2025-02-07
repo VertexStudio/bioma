@@ -33,7 +33,7 @@ class TreeNode {
    */
   addChild(child, edgeHtml, edgeData = undefined) {
     this.children.set(child, { html: edgeHtml, data: edgeData });
-    // If no active child is set, set this new child as active.
+    // If no active child is set, assign the newly added child as active.
     if (this.activeChild === null) {
       this.activeChild = child;
     }
@@ -201,7 +201,6 @@ class TestRunner {
 
   run() {
     console.log("Running tests...\n");
-
     this.tests.forEach(({ name, fn }) => {
       try {
         fn();
@@ -213,14 +212,13 @@ class TestRunner {
         this.failed++;
       }
     });
-
     console.log(`\nResults: ${this.passed} passed, ${this.failed} failed`);
   }
 }
 
-// Run tests
 const runner = new TestRunner();
 
+// --- Existing tests (unchanged) ---
 runner.test("Create node with HTML content", () => {
   const node = new TreeNode("<div>Test</div>");
   console.log("\nTree visualization:");
@@ -233,7 +231,6 @@ runner.test("Add child with edge", () => {
   const parent = new TreeNode("<div>Parent</div>");
   const child = new TreeNode("<div>Child</div>");
   parent.addChild(child, "<line>Connection</line>");
-
   console.log("\nTree visualization:");
   console.log(parent.visualize());
   runner.assert(parent.children.size === 1, "Parent should have one child");
@@ -247,12 +244,9 @@ runner.test("Remove child", () => {
   const parent = new TreeNode("<div>Parent</div>");
   const child = new TreeNode("<div>Child</div>");
   parent.addChild(child, "<line>Connection</line>");
-
   console.log("\nBefore removal:");
   console.log(parent.visualize());
-
   const removed = parent.removeChild(child);
-
   console.log("\nAfter removal:");
   console.log(parent.visualize());
   runner.assert(removed === true, "Child removal should return true");
@@ -266,13 +260,10 @@ runner.test("Update node and edge HTML", () => {
   const parent = new TreeNode("<div>Parent</div>");
   const child = new TreeNode("<div>Child</div>");
   parent.addChild(child, "<line>Connection</line>");
-
   console.log("\nBefore updates:");
   console.log(parent.visualize());
-
   parent.updateHtml("<div>Updated Parent</div>");
   parent.updateEdgeHtml(child, "<line>Updated Connection</line>");
-
   console.log("\nAfter updates:");
   console.log(parent.visualize());
   runner.assert(
@@ -289,7 +280,6 @@ runner.test("Generic type support", () => {
   const parent = new TreeNode("<div>Parent</div>", { id: 1 });
   const child = new TreeNode("<div>Child</div>", { id: 2 });
   parent.addChild(child, "<line>Connection</line>", { weight: 10 });
-
   console.log("\nTree visualization (with data):");
   console.log(parent.visualize());
   runner.assert(parent.data.id === 1, "Node data mismatch");
@@ -299,17 +289,12 @@ runner.test("Generic type support", () => {
 runner.test("Complex nested tree structure", () => {
   // Create a complex family tree with multiple generations and relationships
   const root = new TreeNode("<div>Grandparent</div>", { generation: 1 });
-
-  // First generation children
   const parent1 = new TreeNode("<div>Parent 1</div>", { generation: 2 });
   const parent2 = new TreeNode("<div>Parent 2</div>", { generation: 2 });
   const parent3 = new TreeNode("<div>Parent 3</div>", { generation: 2 });
-
   root.addChild(parent1, "<line>First child</line>", { relation: "eldest" });
   root.addChild(parent2, "<line>Second child</line>", { relation: "middle" });
   root.addChild(parent3, "<line>Third child</line>", { relation: "youngest" });
-
-  // Second generation - Parent 1's children
   const child1A = new TreeNode("<div>Child 1A</div>", { generation: 3 });
   const child1B = new TreeNode("<div>Child 1B</div>", { generation: 3 });
   parent1.addChild(child1A, "<line>First grandchild</line>", {
@@ -318,14 +303,10 @@ runner.test("Complex nested tree structure", () => {
   parent1.addChild(child1B, "<line>Second grandchild</line>", {
     branch: "left",
   });
-
-  // Second generation - Parent 2's child
   const child2A = new TreeNode("<div>Child 2A</div>", { generation: 3 });
   parent2.addChild(child2A, "<line>Third grandchild</line>", {
     branch: "middle",
   });
-
-  // Third generation - Child 1A's children
   const greatChild1 = new TreeNode("<div>Great-Grandchild 1</div>", {
     generation: 4,
   });
@@ -338,11 +319,8 @@ runner.test("Complex nested tree structure", () => {
   child1A.addChild(greatChild2, "<line>Second great-grandchild</line>", {
     branch: "leftmost",
   });
-
   console.log("\nComplex tree visualization:");
   console.log(root.visualize());
-
-  // Assertions to verify the structure
   runner.assert(root.getChildren().length === 3, "Root should have 3 children");
   runner.assert(
     parent1.getChildren().length === 2,
@@ -360,8 +338,6 @@ runner.test("Complex nested tree structure", () => {
     child1A.getChildren().length === 2,
     "Child 1A should have 2 children"
   );
-
-  // Verify data and relationships
   runner.assert(root.data.generation === 1, "Root should be generation 1");
   runner.assert(
     parent1.data.generation === 2,
@@ -375,8 +351,6 @@ runner.test("Complex nested tree structure", () => {
     greatChild1.data.generation === 4,
     "Great-Grandchild 1 should be generation 4"
   );
-
-  // Verify edge data
   runner.assert(
     root.getEdge(parent1).data.relation === "eldest",
     "Parent 1 should be eldest child"
@@ -388,13 +362,11 @@ runner.test("Complex nested tree structure", () => {
 });
 
 runner.test("Active Path Rendering", () => {
-  // Build a tree structure similar to the example:
-  //
+  // Build a tree structure:
   //       Root
   //         └── A (active)
   //               └── A2 (active)
   //                      └── A2b (active)
-  // Other children exist but are not on the active path.
   const root = new TreeNode("<div>Root</div>");
   const A = new TreeNode("<div>A</div>");
   const B = new TreeNode("<div>B</div>");
@@ -402,29 +374,27 @@ runner.test("Active Path Rendering", () => {
   root.addChild(A, "<span>Edge Root-A</span>");
   root.addChild(B, "<span>Edge Root-B</span>");
   root.addChild(C, "<span>Edge Root-C</span>");
-
-  // Under A, add A1, A2, A3. (A is active by default because it is the first child of root)
   const A1 = new TreeNode("<div>A1</div>");
   const A2 = new TreeNode("<div>A2</div>");
   const A3 = new TreeNode("<div>A3</div>");
   A.addChild(A1, "<span>Edge A-A1</span>");
   A.addChild(A2, "<span>Edge A-A2</span>");
   A.addChild(A3, "<span>Edge A-A3</span>");
-  // Set A2 explicitly as active
   A.setActiveChild(A2);
-
-  // Under A2, add A2a, A2b, A2c.
   const A2a = new TreeNode("<div>A2a</div>");
   const A2b = new TreeNode("<div>A2b</div>");
   const A2c = new TreeNode("<div>A2c</div>");
   A2.addChild(A2a, "<span>Edge A2-A2a</span>");
   A2.addChild(A2b, "<span>Edge A2-A2b</span>");
   A2.addChild(A2c, "<span>Edge A2-A2c</span>");
-  // Set A2b explicitly as active
   A2.setActiveChild(A2b);
 
-  // The expected active path HTML:
-  // Root html + edge Root-A + A html + edge A-A2 + A2 html + edge A2-A2b + A2b html
+  console.log("\nFull tree visualization:");
+  console.log(root.visualize());
+
+  console.log("\nActive path visualization:");
+  console.log(root.visualizeActivePath());
+
   const expected =
     "<div>Root</div>" +
     "<span>Edge Root-A</span>" +
@@ -433,21 +403,125 @@ runner.test("Active Path Rendering", () => {
     "<div>A2</div>" +
     "<span>Edge A2-A2b</span>" +
     "<div>A2b</div>";
-
   const activePathHtml = root.renderActivePath();
-  console.log("\nActive path HTML:");
-  console.log(activePathHtml);
   runner.assert(
     activePathHtml === expected,
     "Active path HTML did not match expected output"
   );
+});
 
-  console.log("\nActive path visualization:");
+// --- New tests for active path recomputation ---
+
+runner.test("Active Path Recomputing after Changing Active Child", () => {
+  // Build a tree:
+  //        Root
+  //        /   \
+  //       A     B
+  //     /   \  /  \
+  //    A1   A2 B1  B2
+  const root = new TreeNode("<div>Root</div>");
+  const A = new TreeNode("<div>A</div>");
+  const B = new TreeNode("<div>B</div>");
+  root.addChild(A, "<span>Edge Root-A</span>");
+  root.addChild(B, "<span>Edge Root-B</span>");
+
+  // Under A, add A1 and A2 (A1 is active by default)
+  const A1 = new TreeNode("<div>A1</div>");
+  const A2 = new TreeNode("<div>A2</div>");
+  A.addChild(A1, "<span>Edge A-A1</span>");
+  A.addChild(A2, "<span>Edge A-A2</span>");
+
+  // Under B, add B1 and B2 (B1 is active by default)
+  const B1 = new TreeNode("<div>B1</div>");
+  const B2 = new TreeNode("<div>B2</div>");
+  B.addChild(B1, "<span>Edge B-B1</span>");
+  B.addChild(B2, "<span>Edge B-B2</span>");
+
+  console.log("\nInitial full tree visualization:");
+  console.log(root.visualize());
+
+  console.log("\nInitial active path visualization:");
   console.log(root.visualizeActivePath());
+
+  // Change A's active child from A1 to A2
+  A.setActiveChild(A2);
+  console.log("\nActive path after changing A's active child to A2:");
+  console.log(root.visualizeActivePath());
+
+  // Change Root's active child from A to B
+  root.setActiveChild(B);
+  console.log("\nActive path after changing Root's active child to B:");
+  console.log(root.visualizeActivePath());
+
+  const expected =
+    "<div>Root</div>" +
+    "<span>Edge Root-B</span>" +
+    "<div>B</div>" +
+    "<span>Edge B-B1</span>" +
+    "<div>B1</div>";
+  const activePath = root.renderActivePath();
+  runner.assert(
+    activePath === expected,
+    "Active path after changing Root's active child does not match expected"
+  );
+});
+
+runner.test("Active Path Recomputing on Deep Tree", () => {
+  // Build a deeper tree:
+  //        Root
+  //         └── A
+  //              └── A1
+  //                   ├── A1a (default active)
+  //                   └── A1b
+  const root = new TreeNode("<div>Root</div>");
+  const A = new TreeNode("<div>A</div>");
+  root.addChild(A, "<span>Edge Root-A</span>");
+  const A1 = new TreeNode("<div>A1</div>");
+  A.addChild(A1, "<span>Edge A-A1</span>");
+  const A1a = new TreeNode("<div>A1a</div>");
+  const A1b = new TreeNode("<div>A1b</div>");
+  A1.addChild(A1a, "<span>Edge A1-A1a</span>");
+  A1.addChild(A1b, "<span>Edge A1-A1b</span>");
+
+  console.log("\nInitial full tree visualization:");
+  console.log(root.visualize());
+
+  console.log("\nInitial active path visualization:");
+  console.log(root.visualizeActivePath());
+
+  // Change A1's active child from A1a to A1b
+  A1.setActiveChild(A1b);
+  console.log("\nActive path after changing A1's active child to A1b:");
+  console.log(root.visualizeActivePath());
+
+  const expected =
+    "<div>Root</div>" +
+    "<span>Edge Root-A</span>" +
+    "<div>A</div>" +
+    "<span>Edge A-A1</span>" +
+    "<div>A1</div>" +
+    "<span>Edge A1-A1b</span>" +
+    "<div>A1b</div>";
+  const activePath = root.renderActivePath();
+  runner.assert(
+    activePath === expected,
+    "Active path after changing A1's active child does not match expected"
+  );
 });
 
 // Run all tests
 runner.run();
+
+/*
+    > "What might happen if I set A to B when I already rendered the whole tree HTML to the last child,
+    > how does it recompute, does it even?"
+  
+    In our implementation, the method renderActivePath() always recalculates the active path from scratch
+    whenever it is called. It does not cache the previously rendered HTML. Therefore, if you change the active
+    child (for example, changing node A's active child from one branch to another) after having rendered the active
+    path, a subsequent call to renderActivePath() will return a new HTML string reflecting the updated active path.
+    This means that changes are immediately effective on the next render.
+  */
 
 // Export for use in other modules
 if (typeof module !== "undefined" && module.exports) {
