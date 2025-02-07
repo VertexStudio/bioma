@@ -137,7 +137,8 @@ pub struct AskQueryRequestSchema {
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]

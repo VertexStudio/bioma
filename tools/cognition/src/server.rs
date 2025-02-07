@@ -371,6 +371,11 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}]
         }))),
+        ("Message with_sources" = (summary = "With sources", value = json!({
+            "model": "llama3.2",
+            "messages": [{"role": "user", "content": "Why is the sky blue?"}],
+            "sources":["path/to/source1","path/to/source2"]
+        }))),
         ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
                 {
@@ -486,13 +491,11 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         result
     };
 
+    let source_regex = if !body.sources.is_empty() { Some(body.sources.join("|")) } else { None };
+
     // Retrieve relevant context based on the user's query
-    let retrieve_context = RetrieveContext {
-        query: RetrieveQuery::Text(query.clone()),
-        limit: 5,
-        threshold: 0.0,
-        source: body.source.clone(),
-    };
+    let retrieve_context =
+        RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0, source: source_regex };
 
     let context = user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
