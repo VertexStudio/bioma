@@ -158,6 +158,27 @@ class TreeNode {
 
     return result;
   }
+
+  /**
+   * Generate a string visualization of the active path.
+   * @param {string} [prefix=''] - Prefix for current line
+   * @returns {string} - String representation of the active path
+   */
+  visualizeActivePath(prefix = "") {
+    let result = prefix + (prefix ? "└── " : "") + this.html + "\n";
+
+    const activeChild = this.getActiveChild();
+    if (activeChild) {
+      const edge = this.getEdge(activeChild);
+      const newPrefix = prefix + "    ";
+
+      // Add edge visualization
+      result += newPrefix + "└─┤ " + edge.html + "\n";
+      result += activeChild.visualizeActivePath(newPrefix);
+    }
+
+    return result;
+  }
 }
 
 // Unit Tests
@@ -420,6 +441,9 @@ runner.test("Active Path Rendering", () => {
     activePathHtml === expected,
     "Active path HTML did not match expected output"
   );
+
+  console.log("\nActive path visualization:");
+  console.log(root.visualizeActivePath());
 });
 
 // Run all tests
