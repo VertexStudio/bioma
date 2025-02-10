@@ -2696,7 +2696,7 @@
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item${isActive ? " active" : ""}`;
         sourceElement.dataset.sourceId = source.id;
-        sourceElement.dataset.sourcetip = source.path; // Add tooltip text
+        sourceElement.dataset.tooltip = source.path; // Add tooltip text
         sourceElement.innerHTML = `
 				<div class="source-item-header">
 					<span class="source-icon"><i class="fa-solid fa-book"></i></span>
