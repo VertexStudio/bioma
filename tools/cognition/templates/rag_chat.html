@@ -2682,7 +2682,7 @@
 		}
 
 		function removeFromActiveSource(source) {
-			const activeSources = getActiveTools().filter(
+			const activeSources = getActiveSources().filter(
 				(s) => s.id !== source.id
 			);
 			localStorage.setItem("activeSources", JSON.stringify(activeSources));
