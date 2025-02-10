@@ -124,7 +124,7 @@
 
 		#sidebar h2 {
 			margin: 0;
-			font-size: 1.1em;
+			font-size: 1.4em;
 			color: var(--text-primary);
 			/* Remove border-bottom since it's moved to header */
 			padding: 0;
@@ -144,6 +144,12 @@
 			color: var(--text-secondary);
 		}
 
+		.source-section-title {
+			border-top: 1px solid var(--border-color);
+			padding-top: 15px !important;
+			margin-top: 5px !important;
+		}
+
 		.source-section,
 		.tools-section {
 			display: flex;
@@ -161,6 +167,10 @@
 			border-top: 1px solid var(--border-color);
 			padding-top: 15px;
 			margin-top: 5px;
+		}
+
+		.section-inner-title {
+			font-size: 0.8em !important;
 		}
 
 		.sources-list,
@@ -1166,13 +1176,16 @@
 	<!-- Sidebar with helper Tools section -->
 	<div id="sidebar">
 		<div class="sidebar-header">
-			<h2><i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools</h2>
+			<h2><i class="fa-solid fa-gear" style="margin-right: 8px"></i> Config</h2>
 			<button id="sidebar-toggle">
 				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
 				</svg>
 			</button>
 		</div>
+
+		<h2 style="font-size: 1em"><i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools</h2><br />
+
 		<div class="section tools-section">
 			<!-- Add New Agent form moved to top -->
 			<div class="tools-form" id="tool-form">
@@ -1188,7 +1201,7 @@
 			</div>
 
 			<div class="tools-header">
-				<h3><i class="fas fa-play-circle"></i> Active Tools</h3>
+				<h3 class="section-inner-title"><i class="fas fa-play-circle"></i> Active Tools</h3>
 			</div>
 
 			<!-- Add the hidden input for tools actors -->
@@ -1199,7 +1212,7 @@
 			</div>
 
 			<div class="saved-tools-section">
-				<h3 style="margin-bottom: 10px">
+				<h3 class="section-inner-title" style="margin-bottom: 10px">
 					<i class="fas fa-archive"></i> Available Tools
 				</h3>
 				<div id="saved-tools-list" class="tools-list">
@@ -1209,6 +1222,11 @@
 		</div>
 
 		<!-- Sources section stars here-->
+
+		<h2 class="source-section-title" style="font-size: 1em">
+			<i class="fa-solid fa-book" style="margin-right: 8px">
+			</i>Context Sources
+		</h2><br />
 
 		<div class="section source-section">
 			<!-- Add New Agent form moved to top -->
@@ -1225,7 +1243,7 @@
 			</div>
 
 			<div class="sources-header">
-				<h3><i class="fas fa-play-circle"></i> Active Sources</h3>
+				<h3 class="section-inner-title"><i class="fas fa-play-circle"></i> Active Sources</h3>
 			</div>
 
 			<!-- Add the hidden input for sources actors -->
@@ -1236,7 +1254,7 @@
 			</div>
 
 			<div class="saved-sources-section">
-				<h3 style="margin-bottom: 10px">
+				<h3 class="section-inner-title " style="margin-bottom: 10px">
 					<i class="fas fa-archive"></i> Available Sources
 				</h3>
 				<div id="saved-sources-list" class="sources-list">
@@ -1624,7 +1642,6 @@
 				tools_actors: toolsEnabled ? toolsActorsList : [],
 				sources: activeSources.length > 0 ? sources_regex : null,
 			};
-			console.log("🚀 ~ sendQuery ~ queryObject:", queryObject)
 
 			try {
 				const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
@@ -2437,11 +2454,15 @@
 				return;
 			}
 
+			let split_path = path.split("/");
+
 			const source = {
 				id: Date.now().toString(),
 				path,
+				display_name: split_path[split_path.length - 1],
 				active: false,
 			};
+			console.log("🚀 ~ saveSource ~ source:", source)
 
 			// Save to localStorage
 			savedSources.push(source);
@@ -2613,7 +2634,7 @@
 			sourceElement.innerHTML = `
 				<div class="source-item-header">
 					<span class="source-icon"><i class="fas fa-wrench"></i></span>
-					<span class="source-item-name">${source.path}</span>
+					<span class="source-item-name">${source.display_name}</span>
 					<div class="source-actions">
 					${isActive
 					? `
