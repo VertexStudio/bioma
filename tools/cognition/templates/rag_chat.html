@@ -112,6 +112,7 @@
 		#sidebar.collapsed h3,
 		#sidebar.collapsed h4,
 		#sidebar.collapsed .tools-form,
+		#sidebar.collapsed .source-form,
 		#sidebar.collapsed .tool-item-name,
 		#sidebar.collapsed .tool-item-description,
 		#sidebar.collapsed .tool-actions {
@@ -1033,6 +1034,8 @@
 		}
 
 		/* Fix sidebar overflow issues */
+		#sidebar.collapsed .source-section,
+		#sidebar.collapsed .sources-list,
 		#sidebar.collapsed .tools-section,
 		#sidebar.collapsed .tools-list {
 			width: 100%;
@@ -2301,13 +2304,20 @@
 			}
 
 			// Initialize tools management
-			initializeToolsManagement();
+			initializeManagement();
 		}
 
 		// Tool Management
-		function initializeToolsManagement() {
+		function initializeManagement() {
+			// Tools
+
 			const saveToolBtn = document.getElementById("save-tool-btn");
 			const toolActorInput = document.getElementById("tool-actor");
+
+			//Sources
+
+			const saveSourceBtn = document.getElementById("save-source-btn");
+			const sourceInput = document.getElementById("source");
 
 			// Add keypress event listener for Enter key
 			toolActorInput.addEventListener("keypress", function (e) {
@@ -2317,16 +2327,33 @@
 				}
 			});
 
+			sourceInput.addEventListener("keypress", function (e) {
+				if (e.key === "Enter") {
+					e.preventDefault(); // Prevent form submission
+					console.log("TODO: saveSource()");
+					// saveSource();
+				}
+			});
+
 			// Load saved tools from localStorage
 			loadSavedTools();
 			loadActiveTools();
 
+			// Load sources from localStorage
+			console.log("TODO: loadSavedSources()");
+			// loadSavedSources();
+			console.log("TODO: loadActiveSources()");
+			// loadActiveSources();
+
 			// Event Listeners
 			saveToolBtn.addEventListener("click", saveTool);
+			console.log("TODO: saveSourceBtn.addEventListener");
+			saveSourceBtn.addEventListener("click", saveSource);
 		}
 
-		function clearToolForm() {
-			document.getElementById("tool-actor").value = "";
+		// Clear based on id of the input
+		function clearForm(input) {
+			document.getElementById(input).value = "";
 		}
 
 		function saveTool() {
@@ -2365,7 +2392,46 @@
 			addToActive(tool);
 
 			// Clear the form input
-			clearToolForm();
+			clearForm("tool-actor");
+		}
+
+		function saveSource() {
+			const path = document.getElementById("source").value.trim();
+
+			if (!path) {
+				alert("Source path is required!");
+				return;
+			}
+
+			// Check for duplicates in both saved and active sources
+			const savedSources = getSavedSources();
+			const activeSources = getActiveSources();
+			const allSources = [...savedSources, ...activeSources];
+
+			if (
+				allSources.some(
+					(source) => source.path.toLowerCase() === path.toLowerCase()
+				)
+			) {
+				alert("This source already exists!");
+				return;
+			}
+
+			const source = {
+				id: Date.now().toString(),
+				path,
+				active: false,
+			};
+
+			// Save to localStorage
+			savedSources.push(source);
+			localStorage.setItem("savedSources", JSON.stringify(savedSources));
+
+			// Add to saved tools list and automatically activate it
+			addToActive(source);
+
+			// Clear the form input
+			clearForm("source");
 		}
 
 		function getSavedTools() {
@@ -2373,8 +2439,18 @@
 			return tools ? JSON.parse(tools) : [];
 		}
 
+		function getSavedSources() {
+			const tools = localStorage.getItem("savedSources");
+			return tools ? JSON.parse(tools) : [];
+		}
+
 		function getActiveTools() {
 			const tools = localStorage.getItem("activeTools");
+			return tools ? JSON.parse(tools) : [];
+		}
+
+		function getActiveSources() {
+			const tools = localStorage.getItem("activeSources");
 			return tools ? JSON.parse(tools) : [];
 		}
 
