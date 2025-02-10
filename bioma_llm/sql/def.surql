@@ -16,15 +16,12 @@ DEFINE INDEX {prefix}_embedding_text_search ON {prefix}_embedding FIELDS text SE
 
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
+DEFINE INDEX source_idx ON source FIELDS id.source;
 -- DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
 -- DEFINE FIELD uri ON source TYPE string PERMISSIONS FULL;
 -- DEFINE INDEX source_uri_unique_idx ON source FIELDS source, uri UNIQUE;
 
 -- Add a full-text search index for regex matching
-DEFINE ANALYZER source_analyzer TOKENIZERS blank, class FILTERS lowercase;
-DEFINE INDEX source_search_idx ON source 
-    FIELDS id.source  
-    SEARCH ANALYZER source_analyzer BM25 HIGHLIGHTS;
 
 -- Define the source_embeddings table
 DEFINE TABLE {prefix}_source_embeddings TYPE RELATION IN source OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;

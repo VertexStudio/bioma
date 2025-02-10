@@ -1,12 +1,10 @@
 -- First get the filtered embeddings by regex pattern
-LET $filtered_embeddings = array::flatten((
-    SELECT ->{prefix}_source_embeddings.out.id AS embeddings
+LET $filtered_embeddings = array::flatten(((SELECT ->{prefix}_source_embeddings.out.id AS embeddings
     FROM source 
-    WHERE id.source @@ $source
-).embeddings);
+    WHERE id.source IN $sources).embeddings));
 
 -- Then perform vector similarity search on the filtered subset
-SELECT 
+LET $results = SELECT 
     id,
     text,
     vector::similarity::cosine(embedding, $query) AS similarity,
@@ -19,3 +17,5 @@ WHERE
     -- Then do vector similarity search on filtered results
     AND embedding <|{top_k}|> $query
 ORDER BY similarity DESC;
+
+RETURN $results;

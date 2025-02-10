@@ -293,7 +293,7 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
     // Test top-k similarities
     let query = "How are you doing?";
     let top_k =
-        embeddings::TopK { query: embeddings::Query::Text(query.to_string()), threshold: -0.5, k: 2, source: None };
+        embeddings::TopK::builder().query(embeddings::Query::Text(query.to_string())).threshold(-0.5).k(2).build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -390,12 +390,11 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Check if the previously generated embedding is still available
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("Persistent test".to_string()),
-        threshold: -0.5,
-        k: 1,
-        source: None,
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("Persistent test".to_string()))
+        .threshold(-0.5)
+        .k(1)
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -469,12 +468,11 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
         .map_err(SystemActorError::from)?;
 
     // Query for the embedding
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("Text with metadata".to_string()),
-        threshold: -0.5,
-        k: 1,
-        source: None,
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("Text with metadata".to_string()))
+        .threshold(-0.5)
+        .k(1)
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -600,12 +598,11 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
     let mut similarity_futures = Vec::new();
 
     for embeddings_id in embeddings_actors.iter() {
-        let top_k = embeddings::TopK {
-            query: embeddings::Query::Text("Hello, how are you?".to_string()),
-            threshold: -0.5,
-            k: 2,
-            source: None,
-        };
+        let top_k = embeddings::TopK::builder()
+            .query(embeddings::Query::Text("Hello, how are you?".to_string()))
+            .threshold(-0.5)
+            .k(2)
+            .build();
         let future =
             relay_ctx.send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
         similarity_futures.push(future);
@@ -734,12 +731,11 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         .map_err(SystemActorError::from)?;
 
     // Search using the same image
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Image(ImageData::Path("../assets/images/elephant.jpg".to_string())),
-        threshold: 0.5,
-        k: 1,
-        source: None,
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Image(ImageData::Path("../assets/images/elephant.jpg".to_string())))
+        .threshold(0.5)
+        .k(1)
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -814,12 +810,11 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
         .map_err(SystemActorError::from)?;
 
     // Search using text query
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("an elephant".to_string()),
-        threshold: 0.2,
-        k: 1,
-        source: None,
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("an elephant".to_string()))
+        .threshold(0.2)
+        .k(1)
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -959,12 +954,11 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
     // Search across both modalities
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(
-            embeddings::TopK {
-                query: embeddings::Query::Text("elephant".to_string()),
-                threshold: 0.2,
-                k: 2,
-                source: None,
-            },
+            embeddings::TopK::builder()
+                .query(embeddings::Query::Text("elephant".to_string()))
+                .threshold(0.2)
+                .k(2)
+                .build(),
             &embeddings_id,
             SendOptions::default(),
         )
@@ -1039,12 +1033,12 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     }
 
     // Test 1: Query with specific source filter
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("content from document".to_string()),
-        threshold: -0.5,
-        k: 4,
-        source: Some("document1.pdf".to_string()),
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("content from document".to_string()))
+        .threshold(-0.5)
+        .k(4)
+        .sources(vec!["document1.pdf".to_string()])
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -1062,12 +1056,12 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     }
 
     // Test 2: Query with multiple source filters
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("content".to_string()),
-        threshold: -0.5,
-        k: 4,
-        source: Some("document1.pdf".to_string()),
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("content".to_string()))
+        .threshold(-0.5)
+        .k(4)
+        .sources(vec!["document1.pdf".to_string(), "document2.pdf".to_string()])
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -1088,7 +1082,7 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
 
     // Test 3: Query without source filter (should return all results)
     let top_k =
-        embeddings::TopK { query: embeddings::Query::Text("content".to_string()), threshold: -0.5, k: 6, source: None };
+        embeddings::TopK::builder().query(embeddings::Query::Text("content".to_string())).threshold(-0.5).k(6).build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -1182,12 +1176,11 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
             .map_err(SystemActorError::from)?;
 
         // Search using the same base64 image
-        let top_k = embeddings::TopK {
-            query: embeddings::Query::Image(ImageData::Base64(base64_str.clone())),
-            threshold: 0.5,
-            k: 1,
-            source: None,
-        };
+        let top_k = embeddings::TopK::builder()
+            .query(embeddings::Query::Image(ImageData::Base64(base64_str.clone())))
+            .threshold(0.5)
+            .k(1)
+            .build();
 
         let similarities = relay_ctx
             .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -1200,12 +1193,11 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
     }
 
     // Cross-modal search using text
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Text("an elephant".to_string()),
-        threshold: 0.2,
-        k: 2,
-        source: None,
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("an elephant".to_string()))
+        .threshold(0.2)
+        .k(2)
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
