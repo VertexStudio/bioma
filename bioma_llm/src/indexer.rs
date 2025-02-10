@@ -139,7 +139,7 @@ pub struct ContentSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSource {
-    pub source: String,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,7 +395,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
                                     AnalyzePdf { file_path: pathbuf.clone() },
                                     pdf_analyzer_id,
-                                    SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
+                                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
                                 )
                                 .await
                             {
@@ -498,7 +498,7 @@ impl Message<DeleteSource> for Indexer {
             .lock()
             .await
             .query(&query)
-            .bind(("source", message.source.clone()))
+            .bind(("sources", message.sources.clone()))
             .await
             .map_err(SystemActorError::from)?;
 

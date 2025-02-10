@@ -13,6 +13,7 @@ enum TestError {
 }
 
 #[test(tokio::test)]
+// TODO: Test ain't working, fix how we save the files, then fix the test.
 async fn test_delete_source_with_files() -> Result<(), TestError> {
     let engine = Engine::test().await?;
 
@@ -57,7 +58,7 @@ async fn test_delete_source_with_files() -> Result<(), TestError> {
     // Delete one of the files and its source
     let delete_result = relay_ctx
         .send_and_wait_reply::<Indexer, DeleteSource>(
-            DeleteSource { source: file_path1.to_string_lossy().into_owned() },
+            DeleteSource { sources: vec![file_path1.to_string_lossy().into_owned()] },
             &indexer_id,
             SendOptions::default(),
         )
@@ -66,7 +67,7 @@ async fn test_delete_source_with_files() -> Result<(), TestError> {
     // Verify deletion results
     assert!(delete_result.deleted_embeddings > 0, "Expected at least one embedding to be deleted");
     assert!(
-        delete_result.deleted_sources.iter().any(|s| s.uri == file_path1.to_string_lossy()),
+        delete_result.deleted_sources.iter().any(|s| s.uri == file_path1.to_string_lossy().into_owned()),
         "Expected file1 to be in deleted sources"
     );
 

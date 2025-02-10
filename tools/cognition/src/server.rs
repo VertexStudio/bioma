@@ -491,8 +491,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         result
     };
 
-    dbg!(&body.sources.clone());
-
     // Retrieve relevant context based on the user's query
     let retrieve_context = RetrieveContext {
         query: RetrieveQuery::Text(query.clone()),
@@ -1181,7 +1179,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
 
     let delete_source = body.clone().into();
 
-    info!("Sending delete message to indexer actor for sources: {:?}", body.source);
+    info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
     let response = user_actor
         .send_and_wait_reply::<Indexer, DeleteSource>(
             delete_source,
