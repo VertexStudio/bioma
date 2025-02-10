@@ -684,7 +684,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     description =   "Analyzes query and determines which tools to use and in what order.<br>
                     For the usage of this endpoint, and more specifically, for the 'tools' and 'tools_actor' field, only send of the two.<br>
                     If you send 'tools', the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
-                    If you send 'tools_actors', the endpoint with call the client that contains the tools and actually execute them.",
+                    If you send 'tools_actors', the endpoint with call the client that contains the tools and return the tools information from all tools_actors.",
     request_body(content = ThinkQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "messages": [
