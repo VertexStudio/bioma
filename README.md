@@ -175,7 +175,7 @@ curl -X POST http://localhost:5766/retrieve \
         "query": "What is Bioma?",
         "threshold": 0.0,
         "limit": 10,
-        "source": ".*"
+         "sources": ["path/to/source1", "path/to/source2"]
     }'
 ```
 

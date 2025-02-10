@@ -1697,14 +1697,13 @@
         // Get Active sources
 
         let activeSources = getActiveSources().map((source) => source.path);
-        let sources_regex = activeSources.join("|");
 
         const queryObject = {
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
           tools_actors: toolsEnabled ? toolsActorsList : [],
-          sources: activeSources.length > 0 ? sources_regex : null,
+          sources: activeSources? activeSources : [],
         };
 
         try {
