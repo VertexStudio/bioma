@@ -395,7 +395,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
                                     AnalyzePdf { file_path: pathbuf.clone() },
                                     pdf_analyzer_id,
-                                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                    SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                                 )
                                 .await
                             {
