@@ -1617,7 +1617,9 @@
 				model: "llama3.2",
 				stream: true,
 				tools_actors: toolsEnabled ? toolsActorsList : [],
+				sources: sourcesEnabled ? getActiveSources() : [],
 			};
+			console.log("🚀 ~ sendQuery ~ queryObject:", queryObject);
 
 			try {
 				const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
@@ -2315,7 +2317,9 @@
 				sourceButton.style.opacity = "1";
 				sourceButton.style.cursor = "pointer";
 				sourceButton.classList.toggle("active", sourcesEnabled);
-				sourceButton.title = sourcesEnabled ? "Sources enabled" : "Sources disabled";
+				sourceButton.title = sourcesEnabled
+					? "Sources enabled"
+					: "Sources disabled";
 			}
 
 			localStorage.setItem("sourcesEnabled", sourcesEnabled);
@@ -2529,7 +2533,9 @@
 		}
 
 		function loadActiveSources() {
-			const activeSourcesList = document.getElementById("active-sources-list");
+			const activeSourcesList = document.getElementById(
+				"active-sources-list"
+			);
 			activeSourcesList.innerHTML = "";
 			const sources = getActiveSources();
 			sources.forEach((source) => addSourceToActiveList(source));
@@ -2562,6 +2568,7 @@
 
 		function addToActiveSources(source) {
 			const activeSources = getActiveSources();
+			console.log("🚀 ~ addToActiveSources ~ activeSources:", activeSources)
 			if (!activeSources.some((s) => s.id === source.id)) {
 				activeSources.push(source);
 				localStorage.setItem("activeSources", JSON.stringify(activeSources));
@@ -2653,7 +2660,9 @@
 			const actions = sourceElement.querySelector(".source-actions");
 
 			if (isActive) {
-				sourceElement.addEventListener("click", () => removeFromActiveSource(source));
+				sourceElement.addEventListener("click", () =>
+					removeFromActiveSource(source)
+				);
 				actions
 					.querySelector(".delete-source")
 					.addEventListener("click", (e) => {
@@ -2661,7 +2670,9 @@
 						deleteSource(source);
 					});
 			} else {
-				sourceElement.addEventListener("click", () => addToActiveSources(source));
+				sourceElement.addEventListener("click", () =>
+					addToActiveSources(source)
+				);
 				actions
 					.querySelector(".delete-source")
 					.addEventListener("click", (e) => {
@@ -2696,7 +2707,9 @@
 		}
 
 		function removeFromActiveSource(source) {
-			const activeSources = getActiveTools().filter((s) => s.id !== source.id);
+			const activeSources = getActiveTools().filter(
+				(s) => s.id !== source.id
+			);
 			localStorage.setItem("activeSources", JSON.stringify(activeSources));
 			loadActiveSources();
 			// Refresh saved tools list to show the deactivated tool
@@ -2706,7 +2719,6 @@
 		}
 
 		function deleteTool(tool) {
-			console.log("🚀 ~ deleteTool ~ tool:", tool)
 			const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
 			localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
@@ -2721,11 +2733,15 @@
 		}
 
 		function deleteSource(source) {
-			const savedSources = getSavedSources().filter((s) => s.id !== source.id);
+			const savedSources = getSavedSources().filter(
+				(s) => s.id !== source.id
+			);
 			localStorage.setItem("savedSources", JSON.stringify(savedSources));
 
 			// Also remove from active if present
-			const activeSources = getActiveSources().filter((s) => s.id !== source.id);
+			const activeSources = getActiveSources().filter(
+				(s) => s.id !== source.id
+			);
 			localStorage.setItem("activeSources", JSON.stringify(activeSources));
 
 			loadSavedSources();
