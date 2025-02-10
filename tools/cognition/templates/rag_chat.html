@@ -1612,14 +1612,17 @@
 				return;
 			}
 
+			// Get Active sources
+
+			let activeSources = getActiveSources().map((source) => source.path);
+
 			const queryObject = {
 				messages: messageHistory,
 				model: "llama3.2",
 				stream: true,
 				tools_actors: toolsEnabled ? toolsActorsList : [],
-				sources: sourcesEnabled ? getActiveSources() : [],
+				sources: activeSources ? activeSources : [],
 			};
-			console.log("🚀 ~ sendQuery ~ queryObject:", queryObject);
 
 			try {
 				const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
@@ -2568,7 +2571,6 @@
 
 		function addToActiveSources(source) {
 			const activeSources = getActiveSources();
-			console.log("🚀 ~ addToActiveSources ~ activeSources:", activeSources)
 			if (!activeSources.some((s) => s.id === source.id)) {
 				activeSources.push(source);
 				localStorage.setItem("activeSources", JSON.stringify(activeSources));

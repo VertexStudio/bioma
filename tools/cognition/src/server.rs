@@ -491,8 +491,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         result
     };
 
-    dbg!(&body.sources);
-
     let source_regex = if !body.sources.is_empty() { Some(body.sources.join("|")) } else { None };
 
     // Retrieve relevant context based on the user's query
