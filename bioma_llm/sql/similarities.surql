@@ -1,16 +1,21 @@
--- Get the top k most similar embeddings to the query
--- $source is the regex pattern to match against
-SELECT
+-- First get the filtered embeddings by regex pattern
+LET $filtered_embeddings = array::flatten((
+    SELECT ->{prefix}_source_embeddings.out.id AS embeddings
+    FROM source 
+    WHERE id.source @@ $source
+).embeddings);
+
+-- Then perform vector similarity search on the filtered subset
+SELECT 
     id,
     text,
     vector::similarity::cosine(embedding, $query) AS similarity,
     metadata,
-    <-NomicEmbedTextV15_source_embeddings.in[0].id.{source, uri} AS source
+    <-{prefix}_source_embeddings.in[0].id.{source, uri} AS source
 FROM type::table($prefix + "_embedding")
-WHERE embedding <|{top_k}|> $query
-AND id IN (
-    SELECT out AS embeddings
-    FROM type::table($prefix + "_source_embeddings")
-    WHERE string::matches(in.id.uri, $source)
-).embeddings
-ORDER BY similarity DESC
+WHERE 
+    -- First apply the regex filter
+    id IN $filtered_embeddings
+    -- Then do vector similarity search on filtered results
+    AND embedding <|{top_k}|> $query
+ORDER BY similarity DESC;
