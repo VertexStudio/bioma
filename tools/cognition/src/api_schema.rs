@@ -180,12 +180,12 @@ fn default_think_stream() -> bool {
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct DeleteSourceRequestSchema {
-    pub source: String,
+    pub sources: Vec<String>,
 }
 
 impl Into<DeleteSource> for DeleteSourceRequestSchema {
     fn into(self) -> DeleteSource {
-        DeleteSource { source: self.source }
+        DeleteSource { sources: self.sources }
     }
 }
 

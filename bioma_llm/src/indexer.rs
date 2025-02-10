@@ -139,7 +139,7 @@ pub struct ContentSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteSource {
-    pub source: String,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -498,7 +498,7 @@ impl Message<DeleteSource> for Indexer {
             .lock()
             .await
             .query(&query)
-            .bind(("source", message.source.clone()))
+            .bind(("sources", message.sources.clone()))
             .await
             .map_err(SystemActorError::from)?;
 
