@@ -1624,6 +1624,7 @@
 				tools_actors: toolsEnabled ? toolsActorsList : [],
 				sources: activeSources.length > 0 ? sources_regex : null,
 			};
+			console.log("🚀 ~ sendQuery ~ queryObject:", queryObject)
 
 			try {
 				const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
@@ -2301,34 +2302,6 @@
 			localStorage.setItem("toolsEnabled", toolsEnabled);
 		}
 
-		function updateSourceButton() {
-			const sourceButton = document.getElementById("send-button");
-			const sourcesInput = document.getElementById("sources-input");
-			const sourcesList = sourcesInput.value
-				.split(",")
-				.map((s) => s.trim())
-				.filter((s) => s !== "");
-
-			// Disable sources if no actors are available
-			if (sourcesList.length === 0) {
-				sourcesEnabled = false;
-				sourceButton.classList.remove("active");
-				sourceButton.style.opacity = "0.5";
-				sourceButton.style.cursor = "not-allowed";
-				sourceButton.title =
-					"Please add at least one source in the sidebar to enable sources";
-			} else {
-				sourceButton.style.opacity = "1";
-				sourceButton.style.cursor = "pointer";
-				sourceButton.classList.toggle("active", sourcesEnabled);
-				sourceButton.title = sourcesEnabled
-					? "Sources enabled"
-					: "Sources disabled";
-			}
-
-			localStorage.setItem("sourcesEnabled", sourcesEnabled);
-		}
-
 		function updateThinkButton() {
 			const thinkButton = document.getElementById("think-button");
 			thinkButton.classList.toggle("active", thinkEnabled);
@@ -2579,7 +2552,6 @@
 				// Refresh saved tools list to remove the activated source
 				loadSavedSources();
 				updateSources();
-				updateSourceButton();
 			}
 		}
 
@@ -2718,7 +2690,6 @@
 			// Refresh saved tools list to show the deactivated tool
 			loadSavedSources();
 			updateSources();
-			updateSourceButton();
 		}
 
 		function deleteTool(tool) {
@@ -2750,7 +2721,6 @@
 			loadSavedSources();
 			loadActiveSources();
 			updateSources();
-			updateSourceButton();
 		}
 
 		function updateToolsActors() {
@@ -2780,8 +2750,6 @@
 			if (paths.length === 0) {
 				sourcesEnabled = false;
 			}
-
-			updateSourceButton();
 		}
 
 		// Toggle sidebar visibility
