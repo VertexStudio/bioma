@@ -374,7 +374,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         ("Message with_sources" = (summary = "With sources", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}],
-            "sources":["path/to/source1","path/to/source2"]
+            "source": "regex_expresion"
         }))),
         ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
