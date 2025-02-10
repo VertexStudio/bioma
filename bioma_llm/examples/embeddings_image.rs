@@ -58,12 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Search for similar images using an image query
-    let top_k = embeddings::TopK {
-        query: embeddings::Query::Image(ImageData::Path("assets/images/rust-pet.png".to_string())),
-        threshold: 0.5,
-        k: 3,
-        source: None,
-    };
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Image(ImageData::Path("assets/images/rust-pet.png".to_string())))
+        .threshold(0.5)
+        .k(3)
+        .build();
     info!("Image query: {:?}", top_k);
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())

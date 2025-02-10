@@ -47,9 +47,10 @@ pub struct RetrieveContext {
     #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
     #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
-    /// A source regex pattern to filter the search
+    /// A list of sources to filter the search
     #[serde(default)]
-    pub source: Option<String>,
+    #[builder(default)]
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +136,7 @@ impl Message<RetrieveContext> for Retriever {
                     query: embeddings::Query::Text(text.clone()),
                     k: message.limit * 2,
                     threshold: message.threshold,
-                    source: message.source.clone(),
+                    sources: message.sources.clone(),
                 };
 
                 info!("Searching for similarities");

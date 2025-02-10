@@ -95,12 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut similarity_futures = Vec::new();
 
     for (i, embeddings_id) in embeddings_actors.iter().enumerate() {
-        let top_k = embeddings::TopK {
-            query: embeddings::Query::Text("Hello, how are you?".to_string()),
-            threshold: -0.5,
-            k: 5,
-            source: None,
-        };
+        let top_k = embeddings::TopK::builder()
+            .query(embeddings::Query::Text("Hello, how are you?".to_string()))
+            .threshold(-0.5)
+            .k(5)
+            .build();
         info!("Query for actor {}: {:?}", i, top_k);
         let future =
             relay_ctx.send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
