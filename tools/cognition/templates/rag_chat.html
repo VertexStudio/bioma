@@ -87,7 +87,8 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        overflow-x: visible; /* Allow tooltips to overflow */
+        overflow-x: visible;
+        /* Allow tooltips to overflow */
       }
 
       .sidebar-header {
@@ -115,15 +116,19 @@
       #sidebar.collapsed h3,
       #sidebar.collapsed h4,
       #sidebar.collapsed .tools-form,
+      #sidebar.collapsed .source-form,
+      #sidebar.collapsed .source-item-name,
+      #sidebar.collapsed .source-item-description,
       #sidebar.collapsed .tool-item-name,
       #sidebar.collapsed .tool-item-description,
+      #sidebar.collapsed .source-actions,
       #sidebar.collapsed .tool-actions {
         display: none;
       }
 
       #sidebar h2 {
         margin: 0;
-        font-size: 1.1em;
+        font-size: 1.4em;
         color: var(--text-primary);
         /* Remove border-bottom since it's moved to header */
         padding: 0;
@@ -143,6 +148,13 @@
         color: var(--text-secondary);
       }
 
+      .source-section-title {
+        border-top: 1px solid var(--border-color);
+        padding-top: 15px !important;
+        margin-top: 5px !important;
+      }
+
+      .source-section,
       .tools-section {
         display: flex;
         flex-direction: column;
@@ -150,6 +162,7 @@
       }
 
       /* Add border above active tools header */
+      .sources-header,
       .tools-header {
         display: flex;
         justify-content: space-between;
@@ -160,12 +173,18 @@
         margin-top: 5px;
       }
 
+      .section-inner-title {
+        font-size: 0.8em !important;
+      }
+
+      .sources-list,
       .tools-list {
         display: flex;
         flex-direction: column;
         gap: 8px;
       }
 
+      .source-item,
       .tool-item {
         background: var(--bg-main);
         border: 1px solid var(--border-color);
@@ -173,9 +192,11 @@
         padding: 8px;
         cursor: pointer;
         transition: all 0.2s ease;
-        position: relative; /* For tooltip positioning */
+        position: relative;
+        /* For tooltip positioning */
       }
 
+      .source-item:hover,
       .tool-item:hover {
         border-color: var(--primary);
         background: linear-gradient(
@@ -185,6 +206,7 @@
         );
       }
 
+      .source-item.active,
       .tool-item.active {
         border-color: var(--primary);
         background: linear-gradient(
@@ -195,6 +217,7 @@
       }
 
       /* Add tooltip styles */
+      .source-item::after,
       .tool-item::after {
         content: attr(data-tooltip);
         position: absolute;
@@ -212,6 +235,7 @@
         pointer-events: none;
       }
 
+      .source-item:hover::after,
       .tool-item:hover::after {
         opacity: 1;
         visibility: visible;
@@ -228,6 +252,7 @@
         color: var(--text-primary);
       }
 
+      .source-item-header,
       .tool-item-header {
         display: flex;
         justify-content: space-between;
@@ -235,6 +260,7 @@
         gap: 8px;
       }
 
+      .source-item-name,
       .tool-item-name {
         font-size: 0.9em;
         font-weight: bold;
@@ -245,6 +271,7 @@
         text-overflow: ellipsis;
       }
 
+      .source-icon,
       .tool-icon {
         color: var(--text-muted);
         width: 24px;
@@ -259,12 +286,14 @@
         color: var(--text-muted);
       }
 
+      .source-item-description,
       .tool-item-description {
         font-size: 0.9em;
         color: var(--text-secondary);
         margin-top: 5px;
       }
 
+      .source-form,
       .tools-form {
         background: var(--bg-main);
         border: 1px solid var(--border-color);
@@ -314,17 +343,20 @@
         gap: 6px;
       }
 
+      .saved-sources-section,
       .saved-tools-section {
         margin-top: 15px;
         padding-top: 15px;
         border-top: 1px solid var(--border-color);
       }
 
+      .source-actions,
       .tool-actions {
         display: flex;
         gap: 4px;
       }
 
+      .source-action-btn,
       .tool-action-btn {
         background: none;
         border: none;
@@ -370,13 +402,13 @@
         width: 16px;
         height: 16px;
         transition: transform var(--transition-speed);
-        transform: rotate(180deg); /* Start rotated */
+        transform: rotate(180deg);
+        /* Start rotated */
       }
 
       #sidebar.collapsed #sidebar-toggle svg {
-        transform: rotate(
-          0deg
-        ); /* Return to original position when collapsed */
+        transform: rotate(0deg);
+        /* Return to original position when collapsed */
       }
 
       #input-container {
@@ -461,8 +493,10 @@
 
       .utilities-right {
         position: relative;
-        width: 48px; /* Fixed width for both send and stop buttons */
-        height: 48px; /* Fixed height for both send and stop buttons */
+        width: 48px;
+        /* Fixed width for both send and stop buttons */
+        height: 48px;
+        /* Fixed height for both send and stop buttons */
       }
 
       .send-button,
@@ -500,7 +534,8 @@
       #stop-button {
         background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
         color: var(--text-primary);
-        display: none; /* Hidden by default */
+        display: none;
+        /* Hidden by default */
         cursor: pointer;
       }
 
@@ -531,8 +566,10 @@
         align-self: flex-end;
         margin-left: auto;
         color: var(--text-primary);
-        position: relative; /* For positioning the edit icon */
-        position: relative; /* For positioning the edit icon */
+        position: relative;
+        /* For positioning the edit icon */
+        position: relative;
+        /* For positioning the edit icon */
       }
 
       .user-message::before {
@@ -735,13 +772,16 @@
       ::-webkit-scrollbar {
         width: 8px;
       }
+
       ::-webkit-scrollbar-track {
         background: var(--bg-secondary);
       }
+
       ::-webkit-scrollbar-thumb {
         background: var(--primary);
         border-radius: 4px;
       }
+
       ::-webkit-scrollbar-thumb:hover {
         background: var(--primary-hover);
       }
@@ -810,6 +850,7 @@
         max-width: 85%;
         align-self: flex-start;
       }
+
       .thinking-header {
         display: inline-flex;
         align-items: center;
@@ -846,6 +887,7 @@
         0% {
           background-position: 200% 0;
         }
+
         100% {
           background-position: -200% 0;
         }
@@ -881,6 +923,7 @@
         from {
           opacity: 0;
         }
+
         to {
           opacity: 1;
         }
@@ -973,9 +1016,11 @@
         0% {
           opacity: 0.4;
         }
+
         50% {
           opacity: 1;
         }
+
         100% {
           opacity: 0.4;
         }
@@ -1031,6 +1076,8 @@
       }
 
       /* Fix sidebar overflow issues */
+      #sidebar.collapsed .source-section,
+      #sidebar.collapsed .sources-list,
       #sidebar.collapsed .tools-section,
       #sidebar.collapsed .tools-list {
         width: 100%;
@@ -1039,7 +1086,7 @@
         align-items: center;
       }
 
-      #sidebar.collapsed .tool-item {
+      #sidebar.collapsed .source-item #sidebar.collapsed .tool-item {
         width: 32px;
         height: 32px;
         min-width: 32px;
@@ -1052,12 +1099,14 @@
         position: relative;
       }
 
+      #sidebar.collapsed .source-icon,
       #sidebar.collapsed .tool-icon {
         margin: 0;
         width: 14px;
         height: 14px;
       }
 
+      #sidebar.collapsed .source-item-header,
       #sidebar.collapsed .tool-item-header {
         width: auto;
         margin: 0;
@@ -1068,7 +1117,10 @@
       }
 
       /* Update tooltip positioning for collapsed state */
-      #sidebar.collapsed .tool-item::after {
+      #sidebar.collapsed
+        .source-item::after
+        #sidebar.collapsed
+        .tool-item::after {
         position: absolute;
         left: auto;
         right: calc(100% + 8px);
@@ -1084,7 +1136,10 @@
       }
 
       /* Remove the arrow styles since we don't want them */
-      #sidebar.collapsed .tool-item::before {
+      #sidebar.collapsed
+        .source-item::before
+        #sidebar.collapsed
+        .tool-item::before {
         display: none;
       }
 
@@ -1093,9 +1148,10 @@
         overflow: visible !important;
       }
 
-      #sidebar.collapsed .tool-item {
+      #sidebar.collapsed .source-item #sidebar.collapsed .tool-item {
         overflow: visible !important;
-        position: relative; /* Ensure proper tooltip positioning */
+        position: relative;
+        /* Ensure proper tooltip positioning */
       }
 
       /* Add stop button styles */
@@ -1132,20 +1188,25 @@
         0% {
           opacity: 0.4;
         }
+
         50% {
           opacity: 1;
         }
+
         100% {
           opacity: 0.4;
         }
       }
     </style>
   </head>
+
   <body>
     <!-- Sidebar with helper Tools section -->
     <div id="sidebar">
       <div class="sidebar-header">
-        <h2><i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools</h2>
+        <h2>
+          <i class="fa-solid fa-gear" style="margin-right: 8px"></i> Config
+        </h2>
         <button id="sidebar-toggle">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -1162,6 +1223,12 @@
           </svg>
         </button>
       </div>
+
+      <h2 style="font-size: 1em">
+        <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
+      </h2>
+      <br />
+
       <div class="section tools-section">
         <!-- Add New Agent form moved to top -->
         <div class="tools-form" id="tool-form">
@@ -1177,7 +1244,9 @@
         </div>
 
         <div class="tools-header">
-          <h3><i class="fas fa-play-circle"></i> Active Tools</h3>
+          <h3 class="section-inner-title">
+            <i class="fas fa-play-circle"></i> Active Tools
+          </h3>
         </div>
 
         <!-- Add the hidden input for tools actors -->
@@ -1188,11 +1257,56 @@
         </div>
 
         <div class="saved-tools-section">
-          <h3 style="margin-bottom: 10px">
+          <h3 class="section-inner-title" style="margin-bottom: 10px">
             <i class="fas fa-archive"></i> Available Tools
           </h3>
           <div id="saved-tools-list" class="tools-list">
             <!-- Saved tools will be listed here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Sources section stars here-->
+
+      <h2 class="source-section-title" style="font-size: 1em">
+        <i class="fa-solid fa-book" style="margin-right: 8px"> </i>Context
+        Sources
+      </h2>
+      <br />
+
+      <div class="section source-section">
+        <!-- Add New Source form moved to top -->
+        <div class="source-form" id="source-form">
+          <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
+          <div class="form-group">
+            <input type="text" id="source" placeholder="Source path" />
+          </div>
+          <div class="form-actions">
+            <button id="save-source-btn" class="action-button">
+              <i class="fas fa-save"></i> Save
+            </button>
+          </div>
+        </div>
+
+        <div class="sources-header">
+          <h3 class="section-inner-title">
+            <i class="fas fa-play-circle"></i> Active Sources
+          </h3>
+        </div>
+
+        <!-- Add the hidden input for sources actors -->
+        <input type="hidden" id="sources-input" value="" />
+
+        <div id="active-sources-list" class="sources-list">
+          <!-- Active sources will be listed here -->
+        </div>
+
+        <div class="saved-sources-section">
+          <h3 class="section-inner-title" style="margin-bottom: 10px">
+            <i class="fas fa-archive"></i> Available Sources
+          </h3>
+          <div id="saved-sources-list" class="sources-list">
+            <!-- Saved sources will be listed here -->
           </div>
         </div>
       </div>
@@ -1249,6 +1363,7 @@
       let latestContext = null; // store context from the most recent chunk
       let contextSet = false; // track if we've appended the context yet
       let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
+      let sourcesEnabled = localStorage.getItem("sourcesEnabled") === "true";
       let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
       let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
       let currentController = null; // Store the AbortController for the current request
@@ -1579,11 +1694,16 @@
           return;
         }
 
+        // Get Active sources
+
+        let activeSources = getActiveSources().map((source) => source.path);
+
         const queryObject = {
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
           tools_actors: toolsEnabled ? toolsActorsList : [],
+          sources: activeSources? activeSources : [],
         };
 
         try {
@@ -2290,19 +2410,33 @@
         }
 
         // Initialize tools management
-        initializeToolsManagement();
+        initializeManagement();
       }
 
       // Tool Management
-      function initializeToolsManagement() {
+      function initializeManagement() {
+        // Tools
+
         const saveToolBtn = document.getElementById("save-tool-btn");
         const toolActorInput = document.getElementById("tool-actor");
+
+        //Sources
+
+        const saveSourceBtn = document.getElementById("save-source-btn");
+        const sourceInput = document.getElementById("source");
 
         // Add keypress event listener for Enter key
         toolActorInput.addEventListener("keypress", function (e) {
           if (e.key === "Enter") {
             e.preventDefault(); // Prevent form submission
-            saveTool();
+            saveSource();
+          }
+        });
+
+        sourceInput.addEventListener("keypress", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault(); // Prevent form submission
+            saveSource();
           }
         });
 
@@ -2310,12 +2444,18 @@
         loadSavedTools();
         loadActiveTools();
 
+        // Load sources from localStorage
+        loadSavedSources();
+        loadActiveSources();
+
         // Event Listeners
         saveToolBtn.addEventListener("click", saveTool);
+        saveSourceBtn.addEventListener("click", saveSource);
       }
 
-      function clearToolForm() {
-        document.getElementById("tool-actor").value = "";
+      // Clear based on id of the input
+      function clearForm(input) {
+        document.getElementById(input).value = "";
       }
 
       function saveTool() {
@@ -2354,7 +2494,50 @@
         addToActive(tool);
 
         // Clear the form input
-        clearToolForm();
+        clearForm("tool-actor");
+      }
+
+      function saveSource() {
+        const path = document.getElementById("source").value.trim();
+
+        if (!path) {
+          alert("Source path is required!");
+          return;
+        }
+
+        // Check for duplicates in both saved and active sources
+        const savedSources = getSavedSources();
+        const activeSources = getActiveSources();
+        const allSources = [...savedSources, ...activeSources];
+
+        if (
+          allSources.some(
+            (source) => source.path.toLowerCase() === path.toLowerCase()
+          )
+        ) {
+          alert("This source already exists!");
+          return;
+        }
+
+        let split_path = path.split("/");
+
+        const source = {
+          id: Date.now().toString(),
+          path,
+          display_name: split_path[split_path.length - 1],
+          active: false,
+        };
+        console.log("🚀 ~ saveSource ~ source:", source);
+
+        // Save to localStorage
+        savedSources.push(source);
+        localStorage.setItem("savedSources", JSON.stringify(savedSources));
+
+        // Add to saved sources list and automatically activate it
+        addToActiveSources(source);
+
+        // Clear the form input
+        clearForm("source");
       }
 
       function getSavedTools() {
@@ -2362,8 +2545,18 @@
         return tools ? JSON.parse(tools) : [];
       }
 
+      function getSavedSources() {
+        const tools = localStorage.getItem("savedSources");
+        return tools ? JSON.parse(tools) : [];
+      }
+
       function getActiveTools() {
         const tools = localStorage.getItem("activeTools");
+        return tools ? JSON.parse(tools) : [];
+      }
+
+      function getActiveSources() {
+        const tools = localStorage.getItem("activeSources");
         return tools ? JSON.parse(tools) : [];
       }
 
@@ -2381,6 +2574,20 @@
         availableTools.forEach((tool) => addToolToSavedList(tool));
       }
 
+      function loadSavedSources() {
+        const savedSourcesList = document.getElementById("saved-sources-list");
+        savedSourcesList.innerHTML = "";
+        const savedSources = getSavedSources();
+        const activeSources = getActiveSources();
+
+        // Filter out active sources from saved sources display
+        const availableSources = savedSources.filter(
+          (saved) => !activeSources.some((active) => active.id === saved.id)
+        );
+
+        availableSources.forEach((source) => addSourceToSavedList(source));
+      }
+
       function loadActiveTools() {
         const activeToolsList = document.getElementById("active-tools-list");
         activeToolsList.innerHTML = "";
@@ -2388,10 +2595,25 @@
         tools.forEach((tool) => addToolToActiveList(tool));
       }
 
+      function loadActiveSources() {
+        const activeSourcesList = document.getElementById(
+          "active-sources-list"
+        );
+        activeSourcesList.innerHTML = "";
+        const sources = getActiveSources();
+        sources.forEach((source) => addSourceToActiveList(source));
+      }
+
       function addToolToActiveList(tool) {
         const activeToolsList = document.getElementById("active-tools-list");
         const toolElement = createToolElement(tool, true);
         activeToolsList.appendChild(toolElement);
+      }
+
+      function addSourceToActiveList(source) {
+        const activeSourceList = document.getElementById("active-sources-list");
+        const sourceElement = createSourceElement(source, true);
+        activeSourceList.appendChild(sourceElement);
       }
 
       function addToActive(tool) {
@@ -2404,6 +2626,18 @@
           loadSavedTools();
           updateToolsActors();
           updateToolButton();
+        }
+      }
+
+      function addToActiveSources(source) {
+        const activeSources = getActiveSources();
+        if (!activeSources.some((s) => s.id === source.id)) {
+          activeSources.push(source);
+          localStorage.setItem("activeSources", JSON.stringify(activeSources));
+          addSourceToActiveList(source);
+          // Refresh saved tools list to remove the activated source
+          loadSavedSources();
+          updateSources();
         }
       }
 
@@ -2458,10 +2692,71 @@
         return toolElement;
       }
 
+      function createSourceElement(source, isActive = false) {
+        const sourceElement = document.createElement("div");
+        sourceElement.className = `source-item${isActive ? " active" : ""}`;
+        sourceElement.dataset.sourceId = source.id;
+        sourceElement.dataset.sourcetip = source.path; // Add tooltip text
+        sourceElement.innerHTML = `
+				<div class="source-item-header">
+					<span class="source-icon"><i class="fas fa-wrench"></i></span>
+					<span class="source-item-name">${source.display_name}</span>
+					<div class="source-actions">
+					${
+            isActive
+              ? `
+						<button class="source-action-btn delete-source" title="Delete">
+						<i class="fas fa-trash"></i>
+						</button>
+					`
+              : `
+						<button class="source-action-btn delete-source" title="Delete">
+						<i class="fas fa-trash"></i>
+						</button>
+					`
+          }
+					</div>
+				</div>
+				`;
+
+        // Add event listeners
+        const actions = sourceElement.querySelector(".source-actions");
+
+        if (isActive) {
+          sourceElement.addEventListener("click", () =>
+            removeFromActiveSource(source)
+          );
+          actions
+            .querySelector(".delete-source")
+            .addEventListener("click", (e) => {
+              e.stopPropagation(); // Prevent triggering the parent click
+              deleteSource(source);
+            });
+        } else {
+          sourceElement.addEventListener("click", () =>
+            addToActiveSources(source)
+          );
+          actions
+            .querySelector(".delete-source")
+            .addEventListener("click", (e) => {
+              e.stopPropagation(); // Prevent triggering the parent click
+              deleteSource(source);
+            });
+        }
+
+        return sourceElement;
+      }
+
       function addToolToSavedList(tool) {
         const savedToolsList = document.getElementById("saved-tools-list");
         const toolElement = createToolElement(tool, false);
         savedToolsList.appendChild(toolElement);
+      }
+
+      function addSourceToSavedList(source) {
+        const savedSourcesList = document.getElementById("saved-sources-list");
+        const sourceElement = createSourceElement(source, false);
+        savedSourcesList.appendChild(sourceElement);
       }
 
       function removeFromActive(tool) {
@@ -2472,6 +2767,17 @@
         loadSavedTools();
         updateToolsActors();
         updateToolButton();
+      }
+
+      function removeFromActiveSource(source) {
+        const activeSources = getActiveSources().filter(
+          (s) => s.id !== source.id
+        );
+        localStorage.setItem("activeSources", JSON.stringify(activeSources));
+        loadActiveSources();
+        // Refresh saved tools list to show the deactivated tool
+        loadSavedSources();
+        updateSources();
       }
 
       function deleteTool(tool) {
@@ -2488,6 +2794,23 @@
         updateToolButton();
       }
 
+      function deleteSource(source) {
+        const savedSources = getSavedSources().filter(
+          (s) => s.id !== source.id
+        );
+        localStorage.setItem("savedSources", JSON.stringify(savedSources));
+
+        // Also remove from active if present
+        const activeSources = getActiveSources().filter(
+          (s) => s.id !== source.id
+        );
+        localStorage.setItem("activeSources", JSON.stringify(activeSources));
+
+        loadSavedSources();
+        loadActiveSources();
+        updateSources();
+      }
+
       function updateToolsActors() {
         const activeTools = getActiveTools();
         const actors = activeTools.map((tool) => tool.actor);
@@ -2500,6 +2823,21 @@
           toolsEnabled = false;
         }
         updateToolButton();
+      }
+
+      function updateSources() {
+        const activeSources = getActiveSources();
+        const paths = activeSources.map((source) => source.path);
+
+        const sourcesInput = document.getElementById("sources-input");
+        sourcesInput.value = paths.join(", ");
+
+        localStorage.setItem("sources", paths.join(", "));
+
+        // Update sources state based on paths
+        if (paths.length === 0) {
+          sourcesEnabled = false;
+        }
       }
 
       // Toggle sidebar visibility
@@ -2542,9 +2880,17 @@
         const toolsActorsInput = document.getElementById("tools-actors-input");
         const storedToolsActors = localStorage.getItem("toolsActors");
 
-        // First load the tools actors
+        // Load stored sources state
+        const sourcesInput = document.getElementById("sources-input");
+        const storedSources = localStorage.getItem("sources");
+
+        // First load the tools actors and sources
         if (storedToolsActors) {
           toolsActorsInput.value = storedToolsActors;
+        }
+
+        if (storedSources) {
+          sourcesInput.value = storedSources;
         }
 
         // Then set the tools state
