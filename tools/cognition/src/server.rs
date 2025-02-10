@@ -319,7 +319,7 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
             "query": "What is Bioma?",
             "threshold": 0.0,
             "limit": 10,
-            "source": ".*",
+            "sources": ["path/to/source1", "path/to/source2"],
             "format": "markdown"
         })))
     )),
