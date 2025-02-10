@@ -436,12 +436,11 @@ pub async fn load_test_retrieve(user: &mut GooseUser) -> TransactionResult {
 
     get_next_variation(TestType::Retrieve, &mut variation_state, variations, &mut ordering_state).await;
 
-    let payload = RetrieveContext {
-        query: RetrieveQuery::Text("Explain About ubuntu, surrealdb and Rust?".to_string()),
-        limit: 5,
-        threshold: 0.0,
-        source: None,
-    };
+    let payload = RetrieveContext::builder()
+        .query(RetrieveQuery::Text("Explain About ubuntu, surrealdb and Rust?".to_string()))
+        .limit(5)
+        .threshold(0.0)
+        .build();
 
     make_request(
         user,
