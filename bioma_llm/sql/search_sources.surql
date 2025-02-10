@@ -6,7 +6,7 @@ SELECT
     <-{prefix}_source_embeddings.in[0].id.{source, uri} AS source
 FROM type::table($prefix + "_embedding")
 WHERE 
-    -- First apply the regex filter
+    -- First apply the source filter
     id IN array::flatten(((SELECT ->{prefix}_source_embeddings.out.id AS embeddings
     FROM source 
     WHERE id.source IN $sources).embeddings))

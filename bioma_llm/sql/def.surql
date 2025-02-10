@@ -21,8 +21,6 @@ DEFINE INDEX source_idx ON source FIELDS id.source;
 -- DEFINE FIELD uri ON source TYPE string PERMISSIONS FULL;
 -- DEFINE INDEX source_uri_unique_idx ON source FIELDS source, uri UNIQUE;
 
--- Add a full-text search index for regex matching
-
 -- Define the source_embeddings table
 DEFINE TABLE {prefix}_source_embeddings TYPE RELATION IN source OUT {prefix}_embedding SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD in ON {prefix}_source_embeddings TYPE record<source> PERMISSIONS FULL;
