@@ -491,11 +491,9 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         result
     };
 
-    let source_regex = if !body.sources.is_empty() { Some(body.sources.join("|")) } else { None };
-
     // Retrieve relevant context based on the user's query
     let retrieve_context =
-        RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0, source: source_regex };
+        RetrieveContext { query: RetrieveQuery::Text(query.clone()), limit: 5, threshold: 0.0, source: body.source };
 
     let context = user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
