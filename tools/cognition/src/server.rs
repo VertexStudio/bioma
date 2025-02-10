@@ -491,7 +491,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         query: RetrieveQuery::Text(query.clone()),
         limit: 5,
         threshold: 0.0,
-        source: body.source.clone(),
+        sources: body.sources.clone(),
     };
 
     let context = user_actor
@@ -798,7 +798,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         query: RetrieveQuery::Text(query.clone()),
         limit: 5,
         threshold: 0.0,
-        source: body.source.clone(),
+        sources: body.sources.clone(),
     };
 
     let retrieved = match user_actor
@@ -1064,7 +1064,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         query: RetrieveQuery::Text(query.clone()),
         limit: 5,
         threshold: 0.0,
-        source: body.source.clone(),
+        sources: body.sources.clone(),
     };
 
     let retrieved = user_actor

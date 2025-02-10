@@ -196,8 +196,9 @@ pub enum Query {
 pub struct TopK {
     /// The query to search for
     pub query: Query,
-    /// The source regex pattern to match against
-    pub source: Option<String>,
+    /// A list of sources to filter the search
+    #[builder(default)]
+    pub sources: Vec<String>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
@@ -285,7 +286,15 @@ impl Message<TopK> for Embeddings {
         };
 
         let db = ctx.engine().db();
-        let query_sql = include_str!("../sql/similarities.surql").replace("{top_k}", &message.k.to_string());
+        let query_sql = if message.sources.is_empty() {
+            include_str!("../sql/search.surql")
+                .replace("{top_k}", &message.k.to_string())
+                .replace("{prefix}", &self.table_prefix())
+        } else {
+            include_str!("../sql/search_sources.surql")
+                .replace("{top_k}", &message.k.to_string())
+                .replace("{prefix}", &self.table_prefix())
+        };
 
         let mut results = db
             .lock()
@@ -293,10 +302,11 @@ impl Message<TopK> for Embeddings {
             .query(query_sql)
             .bind(("query", query_embedding))
             .bind(("threshold", message.threshold))
-            .bind(("source", message.source.clone().unwrap_or(".*".to_string())))
+            .bind(("sources", message.sources.clone()))
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
+        println!("Results: {:?}", results);
         let results: Vec<Similarity> = results.take(0).map_err(SystemActorError::from)?;
         ctx.reply(results).await?;
         Ok(())

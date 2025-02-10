@@ -99,7 +99,8 @@ pub struct RetrieveContextRequest {
     pub query: RetrieveQueryRequestSchema,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
-    pub source: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[serde(default)]
     pub format: RetrieveOutputFormat,
 }
@@ -115,7 +116,7 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
             .query(query)
             .limit(self.limit.unwrap_or(DEFAULT_RETRIEVER_LIMIT))
             .threshold(self.threshold.unwrap_or(DEFAULT_RETRIEVER_THRESHOLD))
-            .source(self.source.unwrap_or_default())
+            .sources(self.sources)
             .build()
     }
 }
@@ -126,7 +127,8 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
 }
@@ -137,7 +139,8 @@ pub struct AskQueryRequestSchema {
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]
@@ -156,7 +159,8 @@ fn default_chat_stream() -> bool {
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    pub source: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
     #[serde(default)]

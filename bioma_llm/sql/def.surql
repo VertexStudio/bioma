@@ -16,6 +16,7 @@ DEFINE INDEX {prefix}_embedding_text_search ON {prefix}_embedding FIELDS text SE
 
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
+DEFINE INDEX source_idx ON source FIELDS id.source;
 -- DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
 -- DEFINE FIELD uri ON source TYPE string PERMISSIONS FULL;
 -- DEFINE INDEX source_uri_unique_idx ON source FIELDS source, uri UNIQUE;
