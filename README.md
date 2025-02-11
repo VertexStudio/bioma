@@ -155,6 +155,10 @@ curl -X POST http://localhost:5766/upload \
 curl -X POST http://localhost:5766/upload \
     -F 'file=@./archive.zip' \
     -F 'metadata={"path": "dest/path/archive.zip"};type=application/json'
+
+# Test upload endpoint configuration
+# Returns max file size and memory buffer limits in bytes
+curl -X 'OPTIONS' 'http://0.0.0.0:5766/upload' -H 'accept: application/json'
 ```
 
 ### Index files:
