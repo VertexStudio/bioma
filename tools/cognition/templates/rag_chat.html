@@ -1328,6 +1328,10 @@
 
     mermaid.initialize({ startOnLoad: true });
 
+    (async () => {
+      await fetchAvailableSources();
+    })();
+
     // Custom renderer for code fences (handles mermaid code blocks)
     md.renderer.rules.fence = function (tokens, idx) {
       const token = tokens[idx];
@@ -2389,7 +2393,7 @@
       loadActiveTools();
 
       // Load sources from localStorage
-      loadSavedSources();
+      // loadSavedSources();
       loadActiveSources();
 
       // Event Listeners
@@ -2471,7 +2475,6 @@
         display_name: split_path[split_path.length - 1],
         active: false,
       };
-      console.log("🚀 ~ saveSource ~ source:", source);
 
       // Save to localStorage
       savedSources.push(source);
@@ -2532,6 +2535,66 @@
       availableSources.forEach((source) => addSourceToSavedList(source));
     }
 
+    async function fetchAvailableSources() {
+
+      let savedSources = getSavedSources();
+      console.log("🚀 ~ fetchAvailableSources ~ savedSources:", savedSources)
+      let activeSources = getActiveSources();
+      console.log("🚀 ~ fetchAvailableSources ~ activeSources:", activeSources)
+
+      let endpoint = `${RAG_ENDPOINT}/sources`;
+
+      const response = await fetch(endpoint, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      let body = await response.json();
+
+      let maped_sources = body.sources.map(source_element => {
+
+        let split_path = source_element.source.split("/");
+
+        const source = {
+          id: Date.now().toString() + "-" + split_path[split_path.length - 1],
+          path: source_element.source,
+          display_name: split_path[split_path.length - 1],
+          active: false,
+        };
+
+        return source;
+
+      });
+      console.log("🚀 ~ fetchAvailableSources ~ maped_sources:", maped_sources)
+
+      const active = maped_sources.filter(item1 =>
+        activeSources.some(item2 => item2.path === item1.path)
+      );
+      console.log("🚀 ~ fetchAvailableSources ~ active:", active)
+
+      const notSaved = maped_sources.filter(item1 =>
+        !savedSources.some(item2 => item2.path === item1.path)
+      );
+      console.log("🚀 ~ fetchAvailableSources ~ notSaved:", notSaved)
+
+      let final_array = [...notSaved, ...savedSources];
+      console.log("🚀 ~ fetchAvailableSources ~ final_array:", final_array)
+
+      final_array.forEach(source => {
+        addSourceToSavedList(source);
+      });
+
+      active.forEach(source => {
+        addSourceToActiveList(source);
+      });
+
+      localStorage.setItem("savedSources", JSON.stringify(final_array));
+
+      localStorage.setItem("activeSources", JSON.stringify(active));
+
+      return body.sources;
+    }
+
     function loadActiveTools() {
       const activeToolsList = document.getElementById("active-tools-list");
       activeToolsList.innerHTML = "";
@@ -2579,7 +2642,7 @@
         activeSources.push(source);
         localStorage.setItem("activeSources", JSON.stringify(activeSources));
         addSourceToActiveList(source);
-        // Refresh saved tools list to remove the activated source
+        // Refresh saved sources list to remove the activated source
         loadSavedSources();
         updateSources();
       }
