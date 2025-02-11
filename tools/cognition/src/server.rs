@@ -39,6 +39,9 @@ use utoipa::{openapi::ServerBuilder, OpenApi};
 mod api_schema;
 mod server_config;
 
+const UPLOAD_MEMORY_LIMIT: usize = 50 * 1024 * 1024; // 50MB in bytes
+const UPLOAD_TOTAL_LIMIT: usize = 100 * 1024 * 1024; // 100MB in bytes
+
 struct AppState {
     config: ServerConfig,
     engine: Engine,
@@ -1569,8 +1572,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .app_data(data.clone())
             .app_data(
                 actix_multipart::form::MultipartFormConfig::default()
-                    .memory_limit(50 * 1024 * 1024)
-                    .total_limit(100 * 1024 * 1024),
+                    .memory_limit(UPLOAD_MEMORY_LIMIT)
+                    .total_limit(UPLOAD_TOTAL_LIMIT),
             )
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
@@ -1592,8 +1595,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "/upload",
                 web::route().method(Method::OPTIONS).to(|| async {
                     HttpResponse::Ok().append_header(("Content-Type", "application/json")).json(json!({
-                        "max_file_size": 100 * 1024 * 1024, // 100MB in bytes
-                        "max_memory_buffer": 50 * 1024 * 1024, // 50MB in bytes
+                        "max_file_size": UPLOAD_TOTAL_LIMIT,
+                        "max_memory_buffer": UPLOAD_MEMORY_LIMIT,
                         "supported_formats": {
                             "files": ["*"],
                             "archives": ["zip"]
