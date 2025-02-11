@@ -183,6 +183,12 @@ curl -X POST http://localhost:5766/retrieve \
     }'
 ```
 
+### List all indexed sources:
+
+```bash
+curl -X GET http://localhost:5766/sources
+```
+
 ### Generate embeddings:
 
 ```bash
