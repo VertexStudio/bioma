@@ -1,1798 +1,1743 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RAG Server Chat</title>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
-    />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Server Chat</title>
 
-    <style>
-      :root {
-        --primary: #ff00a0;
-        --primary-hover: #e4008e;
-        --text-primary: #ffffff;
-        --text-secondary: #e5e7eb;
-        --text-muted: #a0a0a0;
-        --bg-main: #121214;
-        --bg-secondary: #1c1c1f;
-        --border-color: #2a2a2d;
-        --font-family: "JetBrains Mono", monospace;
-        --sidebar-width: 250px;
-        --sidebar-width-collapsed: 60px;
-        --surrealist-gradient: linear-gradient(
-          135deg,
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <style>
+    :root {
+      --primary: #ff00a0;
+      --primary-hover: #e4008e;
+      --text-primary: #ffffff;
+      --text-secondary: #e5e7eb;
+      --text-muted: #a0a0a0;
+      --bg-main: #121214;
+      --bg-secondary: #1c1c1f;
+      --border-color: #2a2a2d;
+      --font-family: "JetBrains Mono", monospace;
+      --sidebar-width: 250px;
+      --sidebar-width-collapsed: 60px;
+      --surrealist-gradient: linear-gradient(135deg,
           var(--primary) 0%,
-          #9600ff 100%
-        );
-      }
+          #9600ff 100%);
+    }
 
-      @font-face {
-        font-family: "JetBrains Mono";
-        src: url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap");
-      }
+    @font-face {
+      font-family: "JetBrains Mono";
+      src: url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap");
+    }
 
-      html,
-      body {
-        background-color: var(--bg-main);
-        color: var(--text-primary);
-        font-family: var(--font-family);
-        margin: 0;
-        padding: 0;
-      }
+    html,
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      margin: 0;
+      padding: 0;
+    }
 
-      /* Wrap main content to avoid overlapping the sidebar */
-      #main-content {
-        width: 800px;
-        margin: 20px auto;
-        padding: 20px;
-        padding-bottom: 80px;
-        transition: margin-right 0.3s ease;
-        position: relative;
-        left: calc(-1 * (var(--sidebar-width) + 20px) / 2);
-      }
+    /* Wrap main content to avoid overlapping the sidebar */
+    #main-content {
+      width: 800px;
+      margin: 20px auto;
+      padding: 20px;
+      padding-bottom: 80px;
+      transition: margin-right 0.3s ease;
+      position: relative;
+      left: calc(-1 * (var(--sidebar-width) + 20px) / 2);
+    }
 
-      #main-content.sidebar-collapsed {
-        left: calc(-1 * (var(--sidebar-width-collapsed) + 20px) / 2);
-      }
+    #main-content.sidebar-collapsed {
+      left: calc(-1 * (var(--sidebar-width-collapsed) + 20px) / 2);
+    }
 
-      /* Sidebar styling */
-      #sidebar {
-        position: fixed;
-        top: 0;
-        right: 0;
-        width: var(--sidebar-width);
-        height: 100vh;
-        background-color: rgba(25, 25, 29, 0.95);
-        backdrop-filter: blur(10px);
-        border-left: 1px solid var(--border-color);
-        padding: 1.5rem;
-        padding-top: 1rem;
-        box-sizing: border-box;
-        overflow-x: hidden;
-        overflow-y: auto;
-        transition: width 0.3s ease;
-        z-index: 1000;
-      }
+    /* Sidebar styling */
+    #sidebar {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: var(--sidebar-width);
+      height: 100vh;
+      background-color: rgba(25, 25, 29, 0.95);
+      backdrop-filter: blur(10px);
+      border-left: 1px solid var(--border-color);
+      padding: 1.5rem;
+      padding-top: 1rem;
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      transition: width 0.3s ease;
+      z-index: 1000;
+    }
 
-      #sidebar.collapsed {
-        width: var(--sidebar-width-collapsed);
-        padding: 1rem 0.5rem;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        overflow-x: visible;
-        /* Allow tooltips to overflow */
-      }
+    #sidebar.collapsed {
+      width: var(--sidebar-width-collapsed);
+      padding: 1rem 0.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: visible;
+      /* Allow tooltips to overflow */
+    }
 
-      .sidebar-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 1rem;
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--border-color);
-      }
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-color);
+    }
 
-      #sidebar.collapsed .sidebar-header {
-        justify-content: center;
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--border-color);
-        width: 100%;
-        margin: 0 auto;
-      }
+    #sidebar.collapsed .sidebar-header {
+      justify-content: center;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-color);
+      width: 100%;
+      margin: 0 auto;
+    }
 
-      #sidebar.collapsed .sidebar-header #sidebar-toggle {
-        width: 100%;
-      }
+    #sidebar.collapsed .sidebar-header #sidebar-toggle {
+      width: 100%;
+    }
 
-      #sidebar.collapsed h2,
-      #sidebar.collapsed h3,
-      #sidebar.collapsed h4,
-      #sidebar.collapsed .tools-form,
-      #sidebar.collapsed .source-form,
-      #sidebar.collapsed .source-item-name,
-      #sidebar.collapsed .source-item-description,
-      #sidebar.collapsed .tool-item-name,
-      #sidebar.collapsed .tool-item-description,
-      #sidebar.collapsed .source-actions,
-      #sidebar.collapsed .tool-actions {
-        display: none;
-      }
+    #sidebar.collapsed h2,
+    #sidebar.collapsed h3,
+    #sidebar.collapsed h4,
+    #sidebar.collapsed .tools-form,
+    #sidebar.collapsed .source-form,
+    #sidebar.collapsed .source-item-name,
+    #sidebar.collapsed .source-item-description,
+    #sidebar.collapsed .tool-item-name,
+    #sidebar.collapsed .tool-item-description,
+    #sidebar.collapsed .source-actions,
+    #sidebar.collapsed .tool-actions {
+      display: none;
+    }
 
-      #sidebar h2 {
-        margin: 0;
-        font-size: 1.4em;
-        color: var(--text-primary);
-        /* Remove border-bottom since it's moved to header */
-        padding: 0;
-        display: flex;
-        align-items: center;
-      }
+    #sidebar h2 {
+      margin: 0;
+      font-size: 1.4em;
+      color: var(--text-primary);
+      /* Remove border-bottom since it's moved to header */
+      padding: 0;
+      display: flex;
+      align-items: center;
+    }
 
-      #sidebar h3 {
-        font-size: 1em;
-        margin: 0;
-        color: var(--text-secondary);
-      }
+    #sidebar h3 {
+      font-size: 1em;
+      margin: 0;
+      color: var(--text-secondary);
+    }
 
-      #sidebar h4 {
-        font-size: 0.9em;
-        margin: 8px 0;
-        color: var(--text-secondary);
-      }
+    #sidebar h4 {
+      font-size: 0.9em;
+      margin: 8px 0;
+      color: var(--text-secondary);
+    }
 
-      .source-section-title {
-        border-top: 1px solid var(--border-color);
-        padding-top: 15px !important;
-        margin-top: 5px !important;
-      }
+    .source-section-title {
+      border-top: 1px solid var(--border-color);
+      padding-top: 15px !important;
+      margin-top: 5px !important;
+    }
 
-      .source-section,
-      .tools-section {
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
-      }
+    .source-section,
+    .tools-section {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
 
-      /* Add border above active tools header */
-      .sources-header,
-      .tools-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-        border-top: 1px solid var(--border-color);
-        padding-top: 15px;
-        margin-top: 5px;
-      }
+    /* Add border above active tools header */
+    .sources-header,
+    .tools-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      border-top: 1px solid var(--border-color);
+      padding-top: 15px;
+      margin-top: 5px;
+    }
 
-      .section-inner-title {
-        font-size: 0.8em !important;
-      }
+    .section-inner-title {
+      font-size: 0.8em !important;
+    }
 
-      .sources-list,
-      .tools-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
+    .sources-list,
+    .tools-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
-      .source-item,
-      .tool-item {
-        background: var(--bg-main);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        padding: 8px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        position: relative;
-        /* For tooltip positioning */
-      }
+    .source-item,
+    .tool-item {
+      background: var(--bg-main);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+      /* For tooltip positioning */
+    }
 
-      .source-item:hover,
-      .tool-item:hover {
-        border-color: var(--primary);
-        background: linear-gradient(
-          135deg,
+    .source-item:hover,
+    .tool-item:hover {
+      border-color: var(--primary);
+      background: linear-gradient(135deg,
           rgba(255, 0, 160, 0.1) 0%,
-          rgba(150, 0, 255, 0.1) 100%
-        );
-      }
+          rgba(150, 0, 255, 0.1) 100%);
+    }
 
-      .source-item.active,
-      .tool-item.active {
-        border-color: var(--primary);
-        background: linear-gradient(
-          135deg,
+    .source-item.active,
+    .tool-item.active {
+      border-color: var(--primary);
+      background: linear-gradient(135deg,
           rgba(255, 0, 160, 0.2) 0%,
-          rgba(150, 0, 255, 0.2) 100%
-        );
-      }
+          rgba(150, 0, 255, 0.2) 100%);
+    }
 
-      /* Add tooltip styles */
-      .source-item::after,
-      .tool-item::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 4px 8px;
-        color: var(--text-secondary);
-        font-size: 0.8em;
-        white-space: nowrap;
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.2s, visibility 0.2s;
-        z-index: 1000;
-        pointer-events: none;
-      }
+    /* Add tooltip styles */
+    .source-item::after,
+    .tool-item::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 8px;
+      color: var(--text-secondary);
+      font-size: 0.8em;
+      white-space: nowrap;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
+      z-index: 1000;
+      pointer-events: none;
+    }
 
-      .source-item:hover::after,
-      .tool-item:hover::after {
-        opacity: 1;
-        visibility: visible;
-      }
+    .source-item:hover::after,
+    .tool-item:hover::after {
+      opacity: 1;
+      visibility: visible;
+    }
 
-      /* Add text selection color */
-      ::selection {
-        background: rgba(255, 0, 160, 0.3);
-        color: var(--text-primary);
-      }
+    /* Add text selection color */
+    ::selection {
+      background: rgba(255, 0, 160, 0.3);
+      color: var(--text-primary);
+    }
 
-      ::-moz-selection {
-        background: rgba(255, 0, 160, 0.3);
-        color: var(--text-primary);
-      }
+    ::-moz-selection {
+      background: rgba(255, 0, 160, 0.3);
+      color: var(--text-primary);
+    }
 
-      .source-item-header,
-      .tool-item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 8px;
-      }
+    .source-item-header,
+    .tool-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
 
-      .source-item-name,
-      .tool-item-name {
-        font-size: 0.9em;
-        font-weight: bold;
-        color: var(--text-primary);
-        flex: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+    .source-item-name,
+    .tool-item-name {
+      font-size: 0.9em;
+      font-weight: bold;
+      color: var(--text-primary);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-      .source-icon,
-      .tool-icon {
-        color: var(--text-muted);
-        width: 24px;
-        height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
+    .source-icon,
+    .tool-icon {
+      color: var(--text-muted);
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
 
-      .tool-item-actor {
-        font-size: 0.9em;
-        color: var(--text-muted);
-      }
+    .tool-item-actor {
+      font-size: 0.9em;
+      color: var(--text-muted);
+    }
 
-      .source-item-description,
-      .tool-item-description {
-        font-size: 0.9em;
-        color: var(--text-secondary);
-        margin-top: 5px;
-      }
+    .source-item-description,
+    .tool-item-description {
+      font-size: 0.9em;
+      color: var(--text-secondary);
+      margin-top: 5px;
+    }
 
-      .source-form,
-      .tools-form {
-        background: var(--bg-main);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        padding: 12px;
-      }
+    .source-form,
+    .tools-form {
+      background: var(--bg-main);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 12px;
+    }
 
-      .tools-form.hidden {
-        display: none;
-      }
+    .tools-form.hidden {
+      display: none;
+    }
 
-      .form-group {
-        margin-bottom: 12px;
-      }
+    .form-group {
+      margin-bottom: 12px;
+    }
 
-      .form-group input,
-      .form-group textarea {
-        width: 100%;
-        padding: 6px 8px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        color: var(--text-primary);
-        font-family: var(--font-family);
-        font-size: 0.9em;
-      }
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 6px 8px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      font-size: 0.9em;
+    }
 
-      /* Add focus styles to match chat input */
-      .form-group input:focus,
-      .form-group textarea:focus {
-        border-color: var(--primary);
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
-      }
+    /* Add focus styles to match chat input */
+    .form-group input:focus,
+    .form-group textarea:focus {
+      border-color: var(--primary);
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(255, 0, 160, 0.2);
+    }
 
-      .form-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: end;
-      }
+    .form-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: end;
+    }
 
-      .form-actions .action-button {
-        padding: 6px 12px;
-        font-size: 0.9em;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
+    .form-actions .action-button {
+      padding: 6px 12px;
+      font-size: 0.9em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
 
-      .saved-sources-section,
-      .saved-tools-section {
-        margin-top: 15px;
-        padding-top: 15px;
-        border-top: 1px solid var(--border-color);
-      }
+    .saved-sources-section,
+    .saved-tools-section {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid var(--border-color);
+    }
 
-      .source-actions,
-      .tool-actions {
-        display: flex;
-        gap: 4px;
-      }
+    .source-actions,
+    .tool-actions {
+      display: flex;
+      gap: 4px;
+    }
 
-      .source-action-btn,
-      .tool-action-btn {
-        background: none;
-        border: none;
-        color: var(--text-muted);
-        cursor: pointer;
-        padding: 4px;
-        transition: color 0.2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 24px;
-        height: 24px;
-      }
+    .source-action-btn,
+    .tool-action-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      transition: color 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+    }
 
-      #add-tool-btn {
-        padding: 4px 8px;
-        font-size: 0.9em;
-      }
+    #add-tool-btn {
+      padding: 4px 8px;
+      font-size: 0.9em;
+    }
 
-      #sidebar-toggle {
-        position: static;
-        background: none;
-        border: none;
-        color: var(--text-primary);
-        cursor: pointer;
-        padding: 0.5rem;
-        border-radius: 0.375rem;
-        transition: all 0.2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-      }
+    #sidebar-toggle {
+      position: static;
+      background: none;
+      border: none;
+      color: var(--text-primary);
+      cursor: pointer;
+      padding: 0.5rem;
+      border-radius: 0.375rem;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+    }
 
-      #sidebar-toggle:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-        box-shadow: var(--surrealist-glow);
-        color: var(--primary);
-      }
+    #sidebar-toggle:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+      box-shadow: var(--surrealist-glow);
+      color: var(--primary);
+    }
 
-      #sidebar-toggle svg {
-        width: 16px;
-        height: 16px;
-        transition: transform var(--transition-speed);
-        transform: rotate(180deg);
-        /* Start rotated */
-      }
+    #sidebar-toggle svg {
+      width: 16px;
+      height: 16px;
+      transition: transform var(--transition-speed);
+      transform: rotate(180deg);
+      /* Start rotated */
+    }
 
-      #sidebar.collapsed #sidebar-toggle svg {
-        transform: rotate(0deg);
-        /* Return to original position when collapsed */
-      }
+    #sidebar.collapsed #sidebar-toggle svg {
+      transform: rotate(0deg);
+      /* Return to original position when collapsed */
+    }
 
-      #input-container {
-        position: fixed;
-        bottom: 0;
-        width: 820px;
-        left: 50%;
-        transform: translateX(-50%);
-        margin-left: calc(-1 * (var(--sidebar-width) + 20px) / 2);
-        padding: 20px;
-        background-color: var(--bg-secondary);
-        box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
-        box-sizing: border-box;
-        border-radius: 10px 10px 0 0;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        transition: margin-left 0.3s ease;
-        z-index: 999;
-        cursor: text;
-      }
+    #input-container {
+      position: fixed;
+      bottom: 0;
+      width: 820px;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-left: calc(-1 * (var(--sidebar-width) + 20px) / 2);
+      padding: 20px;
+      background-color: var(--bg-secondary);
+      box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
+      box-sizing: border-box;
+      border-radius: 10px 10px 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: margin-left 0.3s ease;
+      z-index: 999;
+      cursor: text;
+    }
 
-      #input-container * {
-        cursor: inherit;
-      }
+    #input-container * {
+      cursor: inherit;
+    }
 
-      #query-input {
-        width: 100%;
-        margin: 0;
-        padding: 12px;
-        box-sizing: border-box;
-        border-radius: 8px;
-        background-color: transparent;
-        color: var(--text-primary);
-        border: none;
-        resize: none;
-        min-height: 50px;
-        max-height: 200px;
-        overflow-y: auto;
-        font-family: var(--font-family);
-        font-size: 1em;
-        line-height: 1.5;
-        cursor: text;
-      }
+    #query-input {
+      width: 100%;
+      margin: 0;
+      padding: 12px;
+      box-sizing: border-box;
+      border-radius: 8px;
+      background-color: transparent;
+      color: var(--text-primary);
+      border: none;
+      resize: none;
+      min-height: 50px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: var(--font-family);
+      font-size: 1em;
+      line-height: 1.5;
+      cursor: text;
+    }
 
-      #query-input:focus {
-        outline: none;
-      }
+    #query-input:focus {
+      outline: none;
+    }
 
-      .utilities-container button,
-      .action-button,
-      .send-button,
-      #stop-button {
-        cursor: pointer !important;
-      }
+    .utilities-container button,
+    .action-button,
+    .send-button,
+    #stop-button {
+      cursor: pointer !important;
+    }
 
-      .send-button:disabled {
-        cursor: not-allowed !important;
-      }
+    .send-button:disabled {
+      cursor: not-allowed !important;
+    }
 
-      #input-container.sidebar-collapsed {
-        margin-left: calc(-1 * (var(--sidebar-width-collapsed) + 20px) / 2);
-      }
+    #input-container.sidebar-collapsed {
+      margin-left: calc(-1 * (var(--sidebar-width-collapsed) + 20px) / 2);
+    }
 
-      .input-wrapper {
-        position: relative;
-        width: 100%;
-      }
+    .input-wrapper {
+      position: relative;
+      width: 100%;
+    }
 
-      .utilities-container {
-        display: flex;
-        gap: 10px;
-        justify-content: space-between;
-        align-items: center;
-      }
+    .utilities-container {
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+    }
 
-      .utilities-left {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-      }
+    .utilities-left {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
 
-      .utilities-right {
-        position: relative;
-        width: 48px;
-        /* Fixed width for both send and stop buttons */
-        height: 48px;
-        /* Fixed height for both send and stop buttons */
-      }
+    .utilities-right {
+      position: relative;
+      width: 48px;
+      /* Fixed width for both send and stop buttons */
+      height: 48px;
+      /* Fixed height for both send and stop buttons */
+    }
 
-      .send-button,
-      #stop-button {
-        position: absolute;
-        top: 0;
-        right: 0;
-        width: 48px;
-        height: 48px;
-        border: none;
-        border-radius: 50%;
-        transition: all 0.2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: var(--font-family);
-      }
+    .send-button,
+    #stop-button {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 48px;
+      height: 48px;
+      border: none;
+      border-radius: 50%;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-family);
+    }
 
-      .send-button {
-        background: var(--surrealist-gradient);
-        color: var(--text-primary);
-        cursor: pointer;
-      }
+    .send-button {
+      background: var(--surrealist-gradient);
+      color: var(--text-primary);
+      cursor: pointer;
+    }
 
-      .send-button:disabled {
-        background: var(--bg-secondary);
-        cursor: not-allowed;
-        opacity: 0.5;
-      }
+    .send-button:disabled {
+      background: var(--bg-secondary);
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
 
-      .send-button:hover:not(:disabled) {
-        opacity: 0.9;
-      }
+    .send-button:hover:not(:disabled) {
+      opacity: 0.9;
+    }
 
-      #stop-button {
-        background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
-        color: var(--text-primary);
-        display: none;
-        /* Hidden by default */
-        cursor: pointer;
-      }
+    #stop-button {
+      background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
+      color: var(--text-primary);
+      display: none;
+      /* Hidden by default */
+      cursor: pointer;
+    }
 
-      .send-button i,
-      #stop-button i {
-        font-size: 1.2em;
-      }
+    .send-button i,
+    #stop-button i {
+      font-size: 1.2em;
+    }
 
-      #chat-container {
-        margin-bottom: 80px;
-        display: flex;
-        flex-direction: column;
-        position: relative;
-        z-index: 1;
-      }
+    #chat-container {
+      margin-bottom: 80px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      z-index: 1;
+    }
 
-      .message {
-        margin-bottom: 15px;
-        padding: 12px;
-        border-radius: 12px;
-        max-width: 85%;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        position: relative;
-      }
+    .message {
+      margin-bottom: 15px;
+      padding: 12px;
+      border-radius: 12px;
+      max-width: 85%;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
 
-      .user-message {
-        background: var(--surrealist-gradient);
-        align-self: flex-end;
-        margin-left: auto;
-        color: var(--text-primary);
-        position: relative;
-        /* For positioning the edit icon */
-        position: relative;
-        /* For positioning the edit icon */
-      }
+    .user-message {
+      background: var(--surrealist-gradient);
+      align-self: flex-end;
+      margin-left: auto;
+      color: var(--text-primary);
+      position: relative;
+      /* For positioning the edit icon */
+      position: relative;
+      /* For positioning the edit icon */
+    }
 
-      .user-message::before {
-        content: "";
-        position: absolute;
-        left: -35px;
-        top: 0;
-        bottom: 0;
-        width: 35px;
-        pointer-events: auto;
-      }
+    .user-message::before {
+      content: "";
+      position: absolute;
+      left: -35px;
+      top: 0;
+      bottom: 0;
+      width: 35px;
+      pointer-events: auto;
+    }
 
-      .assistant-message {
-        background-color: var(--bg-secondary);
-        align-self: flex-start;
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-      }
+    .assistant-message {
+      background-color: var(--bg-secondary);
+      align-self: flex-start;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
 
-      .system-message {
-        background-color: #2a2a2d;
-        align-self: flex-start;
-        border: 1px solid var(--border-color);
-        color: var(--text-secondary);
-      }
+    .system-message {
+      background-color: #2a2a2d;
+      align-self: flex-start;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
 
-      .tool-message {
-        background-color: #1a1a1d;
-        align-self: flex-start;
-        font-family: var(--font-family);
-        position: relative;
-        border: 1px solid var(--border-color);
-        color: var(--text-secondary);
-      }
+    .tool-message {
+      background-color: #1a1a1d;
+      align-self: flex-start;
+      font-family: var(--font-family);
+      position: relative;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
 
-      .edit-icon {
-        position: absolute;
-        top: 50%;
-        left: -35px;
-        transform: translateY(-50%);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        padding: 5px;
-        border-radius: 50%;
-        cursor: pointer;
-        display: none;
-        font-size: 1em;
-        z-index: 100;
-      }
+    .edit-icon {
+      position: absolute;
+      top: 50%;
+      left: -35px;
+      transform: translateY(-50%);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      padding: 5px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: none;
+      font-size: 1em;
+      z-index: 100;
+    }
 
-      .user-message:hover .edit-icon,
-      .edit-icon:hover {
-        display: block;
-      }
+    .user-message:hover .edit-icon,
+    .edit-icon:hover {
+      display: block;
+    }
 
-      .context-toggle {
-        font-size: 0.8em;
-        color: var(--text-muted);
-        cursor: pointer;
-        margin-top: 10px;
-        padding: 5px 10px;
-        background-color: var(--bg-secondary);
-        border-radius: 4px;
-        display: inline-block;
-        user-select: none;
-        transition: background-color 0.2s, color 0.2s;
-        border: 1px solid var(--border-color);
-      }
+    .context-toggle {
+      font-size: 0.8em;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin-top: 10px;
+      padding: 5px 10px;
+      background-color: var(--bg-secondary);
+      border-radius: 4px;
+      display: inline-block;
+      user-select: none;
+      transition: background-color 0.2s, color 0.2s;
+      border: 1px solid var(--border-color);
+    }
 
-      .context-toggle:hover {
-        background: var(--surrealist-gradient);
-        color: var(--text-primary);
-      }
+    .context-toggle:hover {
+      background: var(--surrealist-gradient);
+      color: var(--text-primary);
+    }
 
-      .context-content {
-        display: none;
-        margin-top: 10px;
-        padding: 12px;
-        background-color: var(--bg-secondary);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-        color: var(--text-secondary);
-      }
+    .context-content {
+      display: none;
+      margin-top: 10px;
+      padding: 12px;
+      background-color: var(--bg-secondary);
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
 
-      .context-content .message {
-        margin: 8px 0;
-        padding: 10px;
-        font-size: 0.9em;
-        max-width: 100%;
-        background-color: var(--bg-main);
-      }
+    .context-content .message {
+      margin: 8px 0;
+      padding: 10px;
+      font-size: 0.9em;
+      max-width: 100%;
+      background-color: var(--bg-main);
+    }
 
-      .context-content .user-message {
-        background: linear-gradient(
-          135deg,
+    .context-content .user-message {
+      background: linear-gradient(135deg,
           rgba(255, 0, 160, 0.15) 0%,
-          rgba(150, 0, 255, 0.15) 100%
-        );
-        border: 1px solid rgba(255, 0, 160, 0.2);
-        color: var(--text-primary);
-      }
+          rgba(150, 0, 255, 0.15) 100%);
+      border: 1px solid rgba(255, 0, 160, 0.2);
+      color: var(--text-primary);
+    }
 
-      .context-content .assistant-message {
-        background-color: var(--bg-main);
-        border: 1px solid var(--border-color);
-        color: var(--text-secondary);
-      }
+    .context-content .assistant-message {
+      background-color: var(--bg-main);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
 
-      .context-content .system-message {
-        background-color: rgba(42, 42, 45, 0.5);
-        border: 1px solid var(--border-color);
-        color: var(--text-muted);
-      }
+    .context-content .system-message {
+      background-color: rgba(42, 42, 45, 0.5);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
 
-      .context-content .tool-message {
-        background-color: rgba(26, 26, 29, 0.8);
-        border: 1px solid var(--border-color);
-        color: var(--text-secondary);
-      }
+    .context-content .tool-message {
+      background-color: rgba(26, 26, 29, 0.8);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
 
-      .context-content .message strong {
-        display: block;
-        margin-bottom: 5px;
-        color: var(--text-muted);
-      }
+    .context-content .message strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--text-muted);
+    }
 
-      .source-separator {
-        border-top: 1px solid var(--border-color);
-        margin-top: 10px;
-        padding-top: 10px;
-      }
+    .source-separator {
+      border-top: 1px solid var(--border-color);
+      margin-top: 10px;
+      padding-top: 10px;
+    }
 
-      .source,
-      .uri,
-      .chunk {
-        margin-bottom: 5px;
-      }
+    .source,
+    .uri,
+    .chunk {
+      margin-bottom: 5px;
+    }
 
-      .tool-toggle {
-        color: var(--text-muted);
-        position: absolute;
-        top: 16px;
-        left: 8px;
-        cursor: pointer;
-        width: 16px;
-        height: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: rgba(255, 255, 255, 0.1);
-        border-radius: 4px;
-        user-select: none;
-        transition: background-color 0.2s, color 0.2s;
-      }
+    .tool-toggle {
+      color: var(--text-muted);
+      position: absolute;
+      top: 16px;
+      left: 8px;
+      cursor: pointer;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      user-select: none;
+      transition: background-color 0.2s, color 0.2s;
+    }
 
-      .tool-content {
-        margin-left: 28px;
-        display: none;
-      }
+    .tool-content {
+      margin-left: 28px;
+      display: none;
+    }
 
-      .tool-header {
-        margin-left: 28px;
-        padding: 4px 0;
-        color: var(--text-muted);
-      }
+    .tool-header {
+      margin-left: 28px;
+      padding: 4px 0;
+      color: var(--text-muted);
+    }
 
-      .tool-function {
-        margin-bottom: 8px;
-        color: var(--text-secondary);
-      }
+    .tool-function {
+      margin-bottom: 8px;
+      color: var(--text-secondary);
+    }
 
-      .tool-details pre {
-        background-color: rgba(255, 255, 255, 0.05);
-        padding: 10px;
-        border-radius: 6px;
-        margin: 6px 0 14px 0;
-        overflow-x: auto;
-        border: 1px solid var(--border-color);
-      }
+    .tool-details pre {
+      background-color: rgba(255, 255, 255, 0.05);
+      padding: 10px;
+      border-radius: 6px;
+      margin: 6px 0 14px 0;
+      overflow-x: auto;
+      border: 1px solid var(--border-color);
+    }
 
-      .tool-details code {
-        font-size: 0.9em;
-        color: #ff80cc;
-      }
+    .tool-details code {
+      font-size: 0.9em;
+      color: #ff80cc;
+    }
 
-      .tool-toggle:hover {
-        background: var(--surrealist-gradient);
-        color: var(--text-primary);
-      }
+    .tool-toggle:hover {
+      background: var(--surrealist-gradient);
+      color: var(--text-primary);
+    }
 
-      .message,
-      .context-toggle,
-      .tool-toggle,
-      #query-input {
-        transition: background-color 0.2s, color 0.2s, border-color 0.2s,
-          box-shadow 0.2s;
-      }
+    .message,
+    .context-toggle,
+    .tool-toggle,
+    #query-input {
+      transition: background-color 0.2s, color 0.2s, border-color 0.2s,
+        box-shadow 0.2s;
+    }
 
-      /* Scrollbar styling */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
 
-      ::-webkit-scrollbar-track {
-        background: var(--bg-secondary);
-      }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+    }
 
-      ::-webkit-scrollbar-thumb {
-        background: var(--primary);
-        border-radius: 4px;
-      }
+    ::-webkit-scrollbar-thumb {
+      background: var(--primary);
+      border-radius: 4px;
+    }
 
-      ::-webkit-scrollbar-thumb:hover {
-        background: var(--primary-hover);
-      }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--primary-hover);
+    }
 
-      .action-button {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 10px 15px;
-        border-radius: 5px;
-        cursor: pointer;
-        height: 40px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-      }
+    .action-button {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 10px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
 
-      .action-button:not(.active):hover {
-        background: var(--surrealist-gradient);
-        border-color: var(--primary);
-      }
+    .action-button:not(.active):hover {
+      background: var(--surrealist-gradient);
+      border-color: var(--primary);
+    }
 
-      .action-button.active {
-        background: var(--surrealist-gradient);
-        border-color: var(--primary);
-      }
+    .action-button.active {
+      background: var(--surrealist-gradient);
+      border-color: var(--primary);
+    }
 
-      .action-button.active i {
-        color: var(--text-primary);
-      }
+    .action-button.active i {
+      color: var(--text-primary);
+    }
 
-      .action-button i {
-        font-size: 1.2em;
-      }
+    .action-button i {
+      font-size: 1.2em;
+    }
 
-      /* Remove hover styles for disabled buttons */
-      .action-button[style*="cursor: not-allowed"]:hover {
-        background: var(--bg-secondary) !important;
-        border-color: var(--border-color) !important;
-      }
+    /* Remove hover styles for disabled buttons */
+    .action-button[style*="cursor: not-allowed"]:hover {
+      background: var(--bg-secondary) !important;
+      border-color: var(--border-color) !important;
+    }
 
-      /* Override any specific button hover styles */
-      #send-button:hover:not(.active),
-      #think-button:hover:not(.active) {
-        background: linear-gradient(
-          135deg,
+    /* Override any specific button hover styles */
+    #send-button:hover:not(.active),
+    #think-button:hover:not(.active) {
+      background: linear-gradient(135deg,
           rgba(255, 0, 160, 0.2) 0%,
-          rgba(150, 0, 255, 0.2) 100%
-        );
-        border-color: var(--primary);
-      }
+          rgba(150, 0, 255, 0.2) 100%);
+      border-color: var(--primary);
+    }
 
-      #send-button:hover:not(.active) i,
-      #think-button:hover:not(.active) i {
-        background: var(--surrealist-gradient);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
+    #send-button:hover:not(.active) i,
+    #think-button:hover:not(.active) i {
+      background: var(--surrealist-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
 
-      /* Thinking process styles - simplified */
-      .thinking-process {
-        margin-bottom: 15px;
-        position: relative;
-        max-width: 85%;
-        align-self: flex-start;
-      }
+    /* Thinking process styles - simplified */
+    .thinking-process {
+      margin-bottom: 15px;
+      position: relative;
+      max-width: 85%;
+      align-self: flex-start;
+    }
 
-      .thinking-header {
-        display: inline-flex;
-        align-items: center;
-        cursor: pointer;
-        user-select: none;
-        color: var(--text-muted);
-        font-size: 0.95rem;
-        width: 100%;
-      }
+    .thinking-header {
+      display: inline-flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      width: 100%;
+    }
 
-      .thinking-header i,
-      .thinking-header .thinking-text {
-        background: linear-gradient(
-          to right,
+    .thinking-header i,
+    .thinking-header .thinking-text {
+      background: linear-gradient(to right,
           var(--text-muted) 25%,
           var(--primary) 50%,
-          var(--text-muted) 75%
-        );
-        background-size: 200% 100%;
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        animation: sweepingHighlight 2s infinite linear;
-        transition: all 0.2s ease;
+          var(--text-muted) 75%);
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: sweepingHighlight 2s infinite linear;
+      transition: all 0.2s ease;
+    }
+
+    .thinking-text.static {
+      background: none;
+      -webkit-text-fill-color: var(--text-muted);
+      color: var(--text-muted);
+    }
+
+    @keyframes sweepingHighlight {
+      0% {
+        background-position: 200% 0;
       }
 
-      .thinking-text.static {
-        background: none;
-        -webkit-text-fill-color: var(--text-muted);
-        color: var(--text-muted);
+      100% {
+        background-position: -200% 0;
       }
+    }
 
-      @keyframes sweepingHighlight {
-        0% {
-          background-position: 200% 0;
-        }
-
-        100% {
-          background-position: -200% 0;
-        }
-      }
-
-      .thinking-content {
-        margin-top: 8px;
-        padding: 12px;
-        display: none;
-        white-space: pre-wrap;
-        font-family: var(--font-family);
-        font-size: 0.9em;
-        color: var(--text-muted);
-        background: linear-gradient(
-          135deg,
+    .thinking-content {
+      margin-top: 8px;
+      padding: 12px;
+      display: none;
+      white-space: pre-wrap;
+      font-family: var(--font-family);
+      font-size: 0.9em;
+      color: var(--text-muted);
+      background: linear-gradient(135deg,
           rgba(255, 0, 160, 0.05) 0%,
-          rgba(150, 0, 255, 0.05) 100%
-        );
-        border: 1px solid rgba(255, 0, 160, 0.2);
-        border-radius: 8px;
-        line-height: 1.5;
-        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
-        max-width: 100%;
-        overflow-wrap: break-word;
+          rgba(150, 0, 255, 0.05) 100%);
+      border: 1px solid rgba(255, 0, 160, 0.2);
+      border-radius: 8px;
+      line-height: 1.5;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+      max-width: 100%;
+      overflow-wrap: break-word;
+    }
+
+    .thinking-content.visible {
+      display: block;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
       }
 
-      .thinking-content.visible {
-        display: block;
-        animation: fadeIn 0.2s ease-in-out;
+      to {
+        opacity: 1;
       }
+    }
 
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-        }
+    .message a {
+      color: var(--primary);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
 
-        to {
-          opacity: 1;
-        }
-      }
+    .message a:hover {
+      color: var(--primary-hover);
+      text-decoration: underline;
+    }
 
-      .message a {
-        color: var(--primary);
-        text-decoration: none;
-        transition: color 0.2s;
-      }
+    .error-message {
+      background-color: var(--bg-main);
+      border: 1px solid var(--border-color);
+      color: #ff6b6b;
+      align-self: flex-start;
+      padding: 12px;
+      border-radius: 12px;
+      max-width: 85%;
+      margin-bottom: 15px;
+      position: relative;
+    }
 
-      .message a:hover {
-        color: var(--primary-hover);
-        text-decoration: underline;
-      }
+    .error-toggle {
+      color: var(--text-muted);
+      position: absolute;
+      top: 16px;
+      left: 8px;
+      cursor: pointer;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: rgba(255, 0, 0, 0.1);
+      border-radius: 4px;
+      user-select: none;
+      transition: background-color 0.2s, color 0.2s;
+    }
 
-      .error-message {
-        background-color: var(--bg-main);
-        border: 1px solid var(--border-color);
-        color: #ff6b6b;
-        align-self: flex-start;
-        padding: 12px;
-        border-radius: 12px;
-        max-width: 85%;
-        margin-bottom: 15px;
-        position: relative;
-      }
-
-      .error-toggle {
-        color: var(--text-muted);
-        position: absolute;
-        top: 16px;
-        left: 8px;
-        cursor: pointer;
-        width: 16px;
-        height: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: rgba(255, 0, 0, 0.1);
-        border-radius: 4px;
-        user-select: none;
-        transition: background-color 0.2s, color 0.2s;
-      }
-
-      .error-toggle:hover {
-        background: linear-gradient(
-          135deg,
+    .error-toggle:hover {
+      background: linear-gradient(135deg,
           rgba(255, 0, 0, 0.2) 0%,
-          rgba(255, 0, 0, 0.3) 100%
-        );
-        color: #ff4444;
+          rgba(255, 0, 0, 0.3) 100%);
+      color: #ff4444;
+    }
+
+    .error-header {
+      margin-left: 28px;
+      padding: 4px 0;
+      color: #ff6b6b;
+      font-weight: bold;
+    }
+
+    .error-content {
+      margin-left: 28px;
+      display: none;
+      padding-top: 8px;
+    }
+
+    .error-item {
+      margin-bottom: 8px;
+      padding: 8px;
+      background-color: rgba(255, 0, 0, 0.05);
+      border: 1px solid rgba(255, 0, 0, 0.1);
+      border-radius: 4px;
+    }
+
+    .typing-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: var(--primary);
+      border-radius: 50%;
+      margin-left: 2px;
+      margin-right: 2px;
+      vertical-align: middle;
+      animation: pulse 1s infinite;
+      white-space: pre;
+    }
+
+    @keyframes pulse {
+      0% {
+        opacity: 0.4;
       }
 
-      .error-header {
-        margin-left: 28px;
-        padding: 4px 0;
-        color: #ff6b6b;
-        font-weight: bold;
+      50% {
+        opacity: 1;
       }
 
-      .error-content {
-        margin-left: 28px;
-        display: none;
-        padding-top: 8px;
+      100% {
+        opacity: 0.4;
       }
+    }
 
-      .error-item {
-        margin-bottom: 8px;
-        padding: 8px;
-        background-color: rgba(255, 0, 0, 0.05);
-        border: 1px solid rgba(255, 0, 0, 0.1);
-        border-radius: 4px;
-      }
+    .assistant-message p {
+      display: inline;
+      margin: 0;
+      padding: 0;
+    }
 
-      .typing-indicator {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        background: var(--primary);
-        border-radius: 50%;
-        margin-left: 2px;
-        margin-right: 2px;
-        vertical-align: middle;
-        animation: pulse 1s infinite;
-        white-space: pre;
-      }
+    .message pre code {
+      display: block;
+      padding: 1em;
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 0.9em;
+      line-height: 1.4;
+      tab-size: 2;
+    }
 
-      @keyframes pulse {
-        0% {
-          opacity: 0.4;
-        }
+    .message .chunk>p {
+      margin: 0.5em 0;
+      display: block;
+    }
 
-        50% {
-          opacity: 1;
-        }
+    .message .chunk>ul,
+    .message .chunk>ol {
+      margin: 0.5em 0;
+      padding-left: 1.5em;
+    }
 
-        100% {
-          opacity: 0.4;
-        }
-      }
+    #sidebar .section {
+      margin-bottom: 20px;
+    }
 
-      .assistant-message p {
-        display: inline;
-        margin: 0;
-        padding: 0;
-      }
+    #sidebar label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--text-secondary);
+    }
 
-      .message pre code {
-        display: block;
-        padding: 1em;
-        background-color: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        overflow-x: auto;
-        font-size: 0.9em;
-        line-height: 1.4;
-        tab-size: 2;
-      }
+    #sidebar input {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      border: 1px solid var(--border-color);
+      border-radius: 5px;
+      background-color: var(--bg-main);
+      color: var(--text-primary);
+    }
 
-      .message .chunk > p {
-        margin: 0.5em 0;
-        display: block;
-      }
+    /* Fix sidebar overflow issues */
+    #sidebar.collapsed .source-section,
+    #sidebar.collapsed .sources-list,
+    #sidebar.collapsed .tools-section,
+    #sidebar.collapsed .tools-list {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
 
-      .message .chunk > ul,
-      .message .chunk > ol {
-        margin: 0.5em 0;
-        padding-left: 1.5em;
-      }
+    #sidebar.collapsed .source-item #sidebar.collapsed .tool-item {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      padding: 6px;
+      margin: 4px 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border-radius: 6px;
+      position: relative;
+    }
 
-      #sidebar .section {
-        margin-bottom: 20px;
-      }
+    #sidebar.collapsed .source-icon,
+    #sidebar.collapsed .tool-icon {
+      margin: 0;
+      width: 14px;
+      height: 14px;
+    }
 
-      #sidebar label {
-        display: block;
-        margin-bottom: 5px;
-        color: var(--text-secondary);
-      }
+    #sidebar.collapsed .source-item-header,
+    #sidebar.collapsed .tool-item-header {
+      width: auto;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
 
-      #sidebar input {
-        width: 100%;
-        padding: 8px;
-        box-sizing: border-box;
-        border: 1px solid var(--border-color);
-        border-radius: 5px;
-        background-color: var(--bg-main);
-        color: var(--text-primary);
-      }
+    /* Update tooltip positioning for collapsed state */
+    #sidebar.collapsed .source-item::after #sidebar.collapsed .tool-item::after {
+      position: absolute;
+      left: auto;
+      right: calc(100% + 8px);
+      top: 50%;
+      transform: translateY(-50%);
+      margin-left: 0;
+      white-space: nowrap;
+      z-index: 1001;
+      pointer-events: none;
+      padding: 4px 8px;
+      color: var(--text-secondary);
+      font-size: 0.8em;
+    }
 
-      /* Fix sidebar overflow issues */
-      #sidebar.collapsed .source-section,
-      #sidebar.collapsed .sources-list,
-      #sidebar.collapsed .tools-section,
-      #sidebar.collapsed .tools-list {
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-      }
+    /* Remove the arrow styles since we don't want them */
+    #sidebar.collapsed .source-item::before #sidebar.collapsed .tool-item::before {
+      display: none;
+    }
 
-      #sidebar.collapsed .source-item #sidebar.collapsed .tool-item {
-        width: 32px;
-        height: 32px;
-        min-width: 32px;
-        padding: 6px;
-        margin: 4px 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        border-radius: 6px;
-        position: relative;
-      }
+    /* Ensure tooltips are visible */
+    #sidebar.collapsed {
+      overflow: visible !important;
+    }
 
-      #sidebar.collapsed .source-icon,
-      #sidebar.collapsed .tool-icon {
-        margin: 0;
-        width: 14px;
-        height: 14px;
-      }
+    #sidebar.collapsed .source-item #sidebar.collapsed .tool-item {
+      overflow: visible !important;
+      position: relative;
+      /* Ensure proper tooltip positioning */
+    }
 
-      #sidebar.collapsed .source-item-header,
-      #sidebar.collapsed .tool-item-header {
-        width: auto;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
+    /* Add stop button styles */
+    #stop-button {
+      display: none;
+      background: var(--bg-secondary);
+      border: 1px solid #ff4444;
+      color: #ff4444;
+    }
 
-      /* Update tooltip positioning for collapsed state */
-      #sidebar.collapsed
-        .source-item::after
-        #sidebar.collapsed
-        .tool-item::after {
-        position: absolute;
-        left: auto;
-        right: calc(100% + 8px);
-        top: 50%;
-        transform: translateY(-50%);
-        margin-left: 0;
-        white-space: nowrap;
-        z-index: 1001;
-        pointer-events: none;
-        padding: 4px 8px;
-        color: var(--text-secondary);
-        font-size: 0.8em;
-      }
-
-      /* Remove the arrow styles since we don't want them */
-      #sidebar.collapsed
-        .source-item::before
-        #sidebar.collapsed
-        .tool-item::before {
-        display: none;
-      }
-
-      /* Ensure tooltips are visible */
-      #sidebar.collapsed {
-        overflow: visible !important;
-      }
-
-      #sidebar.collapsed .source-item #sidebar.collapsed .tool-item {
-        overflow: visible !important;
-        position: relative;
-        /* Ensure proper tooltip positioning */
-      }
-
-      /* Add stop button styles */
-      #stop-button {
-        display: none;
-        background: var(--bg-secondary);
-        border: 1px solid #ff4444;
-        color: #ff4444;
-      }
-
-      #stop-button:hover {
-        background: linear-gradient(
-          135deg,
+    #stop-button:hover {
+      background: linear-gradient(135deg,
           rgba(255, 68, 68, 0.2) 0%,
-          rgba(255, 68, 68, 0.3) 100%
-        );
-      }
+          rgba(255, 68, 68, 0.3) 100%);
+    }
 
-      #stop-button.active {
-        background: linear-gradient(
-          135deg,
+    #stop-button.active {
+      background: linear-gradient(135deg,
           rgba(255, 68, 68, 0.8) 0%,
-          rgba(255, 68, 68, 0.9) 100%
-        );
-        border-color: #ff4444;
-        color: var(--text-primary);
+          rgba(255, 68, 68, 0.9) 100%);
+      border-color: #ff4444;
+      color: var(--text-primary);
+    }
+
+    #stop-button i {
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0% {
+        opacity: 0.4;
       }
 
-      #stop-button i {
-        animation: pulse 1s infinite;
+      50% {
+        opacity: 1;
       }
 
-      @keyframes pulse {
-        0% {
-          opacity: 0.4;
-        }
-
-        50% {
-          opacity: 1;
-        }
-
-        100% {
-          opacity: 0.4;
-        }
+      100% {
+        opacity: 0.4;
       }
-    </style>
-  </head>
+    }
+  </style>
+</head>
 
-  <body>
-    <!-- Sidebar with helper Tools section -->
-    <div id="sidebar">
-      <div class="sidebar-header">
-        <h2>
-          <i class="fa-solid fa-gear" style="margin-right: 8px"></i> Config
-        </h2>
-        <button id="sidebar-toggle">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
+<body>
+  <!-- Sidebar with helper Tools section -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <h2>
+        <i class="fa-solid fa-gear" style="margin-right: 8px"></i> Config
+      </h2>
+      <button id="sidebar-toggle">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+    </div>
+
+    <h2 style="font-size: 1em">
+      <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
+    </h2>
+    <br />
+
+    <div class="section tools-section">
+      <!-- Add New Agent form moved to top -->
+      <div class="tools-form" id="tool-form">
+        <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
+        <div class="form-group">
+          <input type="text" id="tool-actor" placeholder="Agent name" />
+        </div>
+        <div class="form-actions">
+          <button id="save-tool-btn" class="action-button">
+            <i class="fas fa-save"></i> Save
+          </button>
+        </div>
+      </div>
+
+      <div class="tools-header">
+        <h3 class="section-inner-title">
+          <i class="fas fa-play-circle"></i> Active Tools
+        </h3>
+      </div>
+
+      <!-- Add the hidden input for tools actors -->
+      <input type="hidden" id="tools-actors-input" value="" />
+
+      <div id="active-tools-list" class="tools-list">
+        <!-- Active tools will be listed here -->
+      </div>
+
+      <div class="saved-tools-section">
+        <h3 class="section-inner-title" style="margin-bottom: 10px">
+          <i class="fas fa-archive"></i> Available Tools
+        </h3>
+        <div id="saved-tools-list" class="tools-list">
+          <!-- Saved tools will be listed here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Sources section stars here-->
+
+    <h2 class="source-section-title" style="font-size: 1em">
+      <i class="fa-solid fa-book" style="margin-right: 8px"> </i>Context
+      Sources
+    </h2>
+    <br />
+
+    <div class="section source-section">
+      <!-- Add New Source form moved to top -->
+      <div class="source-form" id="source-form">
+        <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
+        <div class="form-group">
+          <input type="text" id="source" placeholder="Source path" />
+        </div>
+        <div class="form-actions">
+          <button id="save-source-btn" class="action-button">
+            <i class="fas fa-save"></i> Save
+          </button>
+        </div>
+      </div>
+
+      <div class="sources-header">
+        <h3 class="section-inner-title">
+          <i class="fas fa-play-circle"></i> Active Sources
+        </h3>
+      </div>
+
+      <!-- Add the hidden input for sources actors -->
+      <input type="hidden" id="sources-input" value="" />
+
+      <div id="active-sources-list" class="sources-list">
+        <!-- Active sources will be listed here -->
+      </div>
+
+      <div class="saved-sources-section">
+        <h3 class="section-inner-title" style="margin-bottom: 10px">
+          <i class="fas fa-archive"></i> Available Sources
+        </h3>
+        <div id="saved-sources-list" class="sources-list">
+          <!-- Saved sources will be listed here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div id="main-content">
+    <div id="chat-container"></div>
+  </div>
+
+  <!-- Input Container -->
+  <div id="input-container">
+    <textarea id="query-input" placeholder="How can I help you today?" rows="1"></textarea>
+    <div class="utilities-container">
+      <div class="utilities-left">
+        <button id="send-button" class="action-button" title="Chat with tools (Ctrl+Enter)">
+          <i class="fas fa-comments fa-wrench"></i>
+        </button>
+        <button id="think-button" class="action-button" title="Think deeply (Alt+Enter)">
+          <i class="fas fa-brain"></i>
         </button>
       </div>
-
-      <h2 style="font-size: 1em">
-        <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
-      </h2>
-      <br />
-
-      <div class="section tools-section">
-        <!-- Add New Agent form moved to top -->
-        <div class="tools-form" id="tool-form">
-          <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
-          <div class="form-group">
-            <input type="text" id="tool-actor" placeholder="Agent name" />
-          </div>
-          <div class="form-actions">
-            <button id="save-tool-btn" class="action-button">
-              <i class="fas fa-save"></i> Save
-            </button>
-          </div>
-        </div>
-
-        <div class="tools-header">
-          <h3 class="section-inner-title">
-            <i class="fas fa-play-circle"></i> Active Tools
-          </h3>
-        </div>
-
-        <!-- Add the hidden input for tools actors -->
-        <input type="hidden" id="tools-actors-input" value="" />
-
-        <div id="active-tools-list" class="tools-list">
-          <!-- Active tools will be listed here -->
-        </div>
-
-        <div class="saved-tools-section">
-          <h3 class="section-inner-title" style="margin-bottom: 10px">
-            <i class="fas fa-archive"></i> Available Tools
-          </h3>
-          <div id="saved-tools-list" class="tools-list">
-            <!-- Saved tools will be listed here -->
-          </div>
-        </div>
-      </div>
-
-      <!-- Sources section stars here-->
-
-      <h2 class="source-section-title" style="font-size: 1em">
-        <i class="fa-solid fa-book" style="margin-right: 8px"> </i>Context
-        Sources
-      </h2>
-      <br />
-
-      <div class="section source-section">
-        <!-- Add New Source form moved to top -->
-        <div class="source-form" id="source-form">
-          <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
-          <div class="form-group">
-            <input type="text" id="source" placeholder="Source path" />
-          </div>
-          <div class="form-actions">
-            <button id="save-source-btn" class="action-button">
-              <i class="fas fa-save"></i> Save
-            </button>
-          </div>
-        </div>
-
-        <div class="sources-header">
-          <h3 class="section-inner-title">
-            <i class="fas fa-play-circle"></i> Active Sources
-          </h3>
-        </div>
-
-        <!-- Add the hidden input for sources actors -->
-        <input type="hidden" id="sources-input" value="" />
-
-        <div id="active-sources-list" class="sources-list">
-          <!-- Active sources will be listed here -->
-        </div>
-
-        <div class="saved-sources-section">
-          <h3 class="section-inner-title" style="margin-bottom: 10px">
-            <i class="fas fa-archive"></i> Available Sources
-          </h3>
-          <div id="saved-sources-list" class="sources-list">
-            <!-- Saved sources will be listed here -->
-          </div>
-        </div>
+      <div class="utilities-right">
+        <button class="send-button" title="Send message" disabled>
+          <i class="fas fa-arrow-up"></i>
+        </button>
+        <button id="stop-button" title="Stop generation">
+          <i class="fas fa-stop"></i>
+        </button>
       </div>
     </div>
+  </div>
 
-    <!-- Main Content -->
-    <div id="main-content">
-      <div id="chat-container"></div>
-    </div>
+  <script>
+    // Remove any trailing slashes from the endpoint
+    const RAG_ENDPOINT = window.location.origin;
 
-    <!-- Input Container -->
-    <div id="input-container">
-      <textarea
-        id="query-input"
-        placeholder="How can I help you today?"
-        rows="1"
-      ></textarea>
-      <div class="utilities-container">
-        <div class="utilities-left">
-          <button
-            id="send-button"
-            class="action-button"
-            title="Chat with tools (Ctrl+Enter)"
-          >
-            <i class="fas fa-comments fa-wrench"></i>
-          </button>
-          <button
-            id="think-button"
-            class="action-button"
-            title="Think deeply (Alt+Enter)"
-          >
-            <i class="fas fa-brain"></i>
-          </button>
-        </div>
-        <div class="utilities-right">
-          <button class="send-button" title="Send message" disabled>
-            <i class="fas fa-arrow-up"></i>
-          </button>
-          <button id="stop-button" title="Stop generation">
-            <i class="fas fa-stop"></i>
-          </button>
-        </div>
-      </div>
-    </div>
+    let isThinkingActive = false;
+    let thinkingDiv = null;
+    let thinkingContentDiv = null;
+    let assistantTextBuffer = ""; // store user-visible assistant text
+    let latestContext = null; // store context from the most recent chunk
+    let contextSet = false; // track if we've appended the context yet
+    let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
+    let sourcesEnabled = localStorage.getItem("sourcesEnabled") === "true";
+    let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
+    let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
+    let currentController = null; // Store the AbortController for the current request
+    let isGenerating = false; // Track if we're currently generating a response
 
-    <script>
-      // Remove any trailing slashes from the endpoint
-      const RAG_ENDPOINT = window.location.origin;
+    const md = window.markdownit({ breaks: true });
+    const chatContainer = document.getElementById("chat-container");
+    const queryInput = document.getElementById("query-input");
+    const stopButton = document.getElementById("stop-button");
+    let messageHistory = [];
+    let thinkingStartTime = null;
 
-      let isThinkingActive = false;
-      let thinkingDiv = null;
-      let thinkingContentDiv = null;
-      let assistantTextBuffer = ""; // store user-visible assistant text
-      let latestContext = null; // store context from the most recent chunk
-      let contextSet = false; // track if we've appended the context yet
-      let toolsEnabled = localStorage.getItem("toolsEnabled") === "true";
-      let sourcesEnabled = localStorage.getItem("sourcesEnabled") === "true";
-      let thinkEnabled = localStorage.getItem("thinkEnabled") === "true";
-      let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
-      let currentController = null; // Store the AbortController for the current request
-      let isGenerating = false; // Track if we're currently generating a response
+    mermaid.initialize({ startOnLoad: true });
 
-      const md = window.markdownit({ breaks: true });
-      const chatContainer = document.getElementById("chat-container");
-      const queryInput = document.getElementById("query-input");
-      const stopButton = document.getElementById("stop-button");
-      let messageHistory = [];
-      let thinkingStartTime = null;
+    // Custom renderer for code fences (handles mermaid code blocks)
+    md.renderer.rules.fence = function (tokens, idx) {
+      const token = tokens[idx];
+      const code = token.content.trim();
+      if (token.info.trim() === "mermaid") {
+        return '<div class="mermaid">' + code + "</div>";
+      }
+      return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
+    };
 
-      mermaid.initialize({ startOnLoad: true });
+    // Updated helper to process a base64 image
+    function processBase64Image(base64String, type = "jpeg") {
+      base64String = base64String.trim();
+      if (base64String.startsWith("data:image")) {
+        return base64String;
+      }
+      try {
+        atob(base64String); // verify Base64
+        return `data:image/${type};base64,${base64String}`;
+      } catch (e) {
+        console.error("Invalid base64 string:", e);
+        return null;
+      }
+    }
 
-      // Custom renderer for code fences (handles mermaid code blocks)
-      md.renderer.rules.fence = function (tokens, idx) {
-        const token = tokens[idx];
-        const code = token.content.trim();
-        if (token.info.trim() === "mermaid") {
-          return '<div class="mermaid">' + code + "</div>";
-        }
-        return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
-      };
+    // New helper: process message content (for both system and non-system messages)
+    function processMessageContent(content, images = []) {
+      let processedContent = "";
+      let normalLines = [];
+      let imageIndex = 0;
 
-      // Updated helper to process a base64 image
-      function processBase64Image(base64String, type = "jpeg") {
-        base64String = base64String.trim();
-        if (base64String.startsWith("data:image")) {
-          return base64String;
-        }
-        try {
-          atob(base64String); // verify Base64
-          return `data:image/${type};base64,${base64String}`;
-        } catch (e) {
-          console.error("Invalid base64 string:", e);
-          return null;
+      // Flush accumulated normal text
+      function flushNormalLines() {
+        if (normalLines.length) {
+          const joined = normalLines.join("\n").trim();
+          if (joined) {
+            try {
+              // Try to detect JSON and pretty-print it
+              const jsonObj = JSON.parse(joined);
+              processedContent += `<pre><code>${JSON.stringify(
+                jsonObj,
+                null,
+                2
+              )}</code></pre>`;
+              console.log("Detected JSON content and formatted as code.");
+            } catch (e) {
+              // Not valid JSON; render as Markdown
+              processedContent += md.render(joined);
+            }
+          }
+          normalLines = [];
         }
       }
 
-      // New helper: process message content (for both system and non-system messages)
-      function processMessageContent(content, images = []) {
-        let processedContent = "";
-        let normalLines = [];
-        let imageIndex = 0;
-
-        // Flush accumulated normal text
-        function flushNormalLines() {
-          if (normalLines.length) {
-            const joined = normalLines.join("\n").trim();
-            if (joined) {
-              try {
-                // Try to detect JSON and pretty-print it
-                const jsonObj = JSON.parse(joined);
-                processedContent += `<pre><code>${JSON.stringify(
-                  jsonObj,
-                  null,
-                  2
-                )}</code></pre>`;
-                console.log("Detected JSON content and formatted as code.");
-              } catch (e) {
-                // Not valid JSON; render as Markdown
-                processedContent += md.render(joined);
-              }
+      // Process each line for markers
+      const lines = content.split("\n");
+      lines.forEach((line) => {
+        const trimmedLine = line.trim();
+        if (trimmedLine.startsWith("[URI:")) {
+          flushNormalLines();
+          let uri = trimmedLine.slice(5, -1).trim();
+          processedContent += `<div class="uri">URI: ${uri}</div>`;
+        } else if (trimmedLine.startsWith("Source:")) {
+          flushNormalLines();
+          let source = trimmedLine.slice(7).trim();
+          processedContent += `<div class="source">Source: ${source}</div>`;
+        } else if (trimmedLine.startsWith("[IMAGE:")) {
+          flushNormalLines();
+          let imageType = trimmedLine.slice(7, -1).trim();
+          if (images && imageIndex < images.length) {
+            let imageUrl = processBase64Image(images[imageIndex], imageType);
+            if (imageUrl) {
+              processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
             }
-            normalLines = [];
-          }
-        }
-
-        // Process each line for markers
-        const lines = content.split("\n");
-        lines.forEach((line) => {
-          const trimmedLine = line.trim();
-          if (trimmedLine.startsWith("[URI:")) {
-            flushNormalLines();
-            let uri = trimmedLine.slice(5, -1).trim();
-            processedContent += `<div class="uri">URI: ${uri}</div>`;
-          } else if (trimmedLine.startsWith("Source:")) {
-            flushNormalLines();
-            let source = trimmedLine.slice(7).trim();
-            processedContent += `<div class="source">Source: ${source}</div>`;
-          } else if (trimmedLine.startsWith("[IMAGE:")) {
-            flushNormalLines();
-            let imageType = trimmedLine.slice(7, -1).trim();
-            if (images && imageIndex < images.length) {
-              let imageUrl = processBase64Image(images[imageIndex], imageType);
-              if (imageUrl) {
-                processedContent += `<div class="context-image"><img src="${imageUrl}" style="max-width: 100%; margin: 10px 0;"></div>`;
-              }
-              imageIndex++;
-            } else {
-              normalLines.push(line);
-            }
+            imageIndex++;
           } else {
             normalLines.push(line);
           }
-        });
+        } else {
+          normalLines.push(line);
+        }
+      });
 
-        flushNormalLines();
-        return processedContent;
+      flushNormalLines();
+      return processedContent;
+    }
+
+    // Replace the existing createContextSection with this updated version
+    function createContextSection(context) {
+      console.group("createContextSection");
+      console.log("Input context:", context);
+
+      if (!context?.length) {
+        console.log("No context provided, returning empty string");
+        console.groupEnd();
+        return "";
       }
 
-      // Replace the existing createContextSection with this updated version
-      function createContextSection(context) {
-        console.group("createContextSection");
-        console.log("Input context:", context);
+      let regularMessages = "";
+      let systemMessage = "";
+      let lastUserMessage = "";
 
-        if (!context?.length) {
-          console.log("No context provided, returning empty string");
-          console.groupEnd();
-          return "";
-        }
+      // Find the index of the last user message
+      const lastUserIndex = [...context]
+        .reverse()
+        .findIndex((msg) => msg.role === "user");
+      const lastMessageIndex =
+        lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
+      console.log("Last user message index:", lastMessageIndex);
 
-        let regularMessages = "";
-        let systemMessage = "";
-        let lastUserMessage = "";
-
-        // Find the index of the last user message
-        const lastUserIndex = [...context]
-          .reverse()
-          .findIndex((msg) => msg.role === "user");
-        const lastMessageIndex =
-          lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
-        console.log("Last user message index:", lastMessageIndex);
-
-        // Process non-system messages (except the last user message)
-        console.group("Processing regular messages");
-        context.forEach((msg, index) => {
-          if (msg.role !== "system" && index !== lastMessageIndex) {
-            console.group(`Message ${index} (${msg.role})`);
-            const roleClass = msg.role + "-message";
-            const processedContent = processMessageContent(
-              msg.content || "",
-              msg.images || []
-            );
-            regularMessages += `
-              <div class="message ${roleClass}">
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
-            console.groupEnd();
-          }
-        });
-        console.groupEnd();
-
-        // Process system messages
-        console.group("Processing system messages");
-        context.forEach((msg, index) => {
-          if (msg.role === "system") {
-            console.group(`System message ${index}`);
-            const roleClass = msg.role + "-message";
-            let systemContent = msg.content.replace(
-              /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
-              "ADDITIONAL CONTEXT:"
-            );
-            const processedContent = processMessageContent(
-              systemContent,
-              msg.images || []
-            );
-            systemMessage += `
-              <div class="message ${roleClass}">
-                <strong>${
-                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-                }:</strong>
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
-            console.groupEnd();
-          }
-        });
-        console.groupEnd();
-
-        // Process the last user message separately
-        console.group("Processing last user message");
-        if (lastMessageIndex !== -1) {
-          const lastMsg = context[lastMessageIndex];
-          const roleClass = lastMsg.role + "-message";
+      // Process non-system messages (except the last user message)
+      console.group("Processing regular messages");
+      context.forEach((msg, index) => {
+        if (msg.role !== "system" && index !== lastMessageIndex) {
+          console.group(`Message ${index} (${msg.role})`);
+          const roleClass = msg.role + "-message";
           const processedContent = processMessageContent(
-            lastMsg.content || "",
-            lastMsg.images || []
+            msg.content || "",
+            msg.images || []
           );
-          lastUserMessage = `
+          regularMessages += `
+              <div class="message ${roleClass}">
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
+          console.groupEnd();
+        }
+      });
+      console.groupEnd();
+
+      // Process system messages
+      console.group("Processing system messages");
+      context.forEach((msg, index) => {
+        if (msg.role === "system") {
+          console.group(`System message ${index}`);
+          const roleClass = msg.role + "-message";
+          let systemContent = msg.content.replace(
+            /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
+            "ADDITIONAL CONTEXT:"
+          );
+          const processedContent = processMessageContent(
+            systemContent,
+            msg.images || []
+          );
+          systemMessage += `
+              <div class="message ${roleClass}">
+                <strong>${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+            }:</strong>
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
+          console.groupEnd();
+        }
+      });
+      console.groupEnd();
+
+      // Process the last user message separately
+      console.group("Processing last user message");
+      if (lastMessageIndex !== -1) {
+        const lastMsg = context[lastMessageIndex];
+        const roleClass = lastMsg.role + "-message";
+        const processedContent = processMessageContent(
+          lastMsg.content || "",
+          lastMsg.images || []
+        );
+        lastUserMessage = `
             <div class="message ${roleClass}">
-              <strong>${
-                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
-              }:</strong>
+              <strong>${lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
+          }:</strong>
               <div class="chunk">${processedContent}</div>
             </div>
           `;
-        }
-        console.groupEnd();
+      }
+      console.groupEnd();
 
-        const result = `
+      const result = `
           <div class="context-container">
             <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
             <div class="context-content">
               ${regularMessages}
-              ${
-                regularMessages && systemMessage
-                  ? '<div class="source-separator"></div>'
-                  : ""
-              }
+              ${regularMessages && systemMessage
+          ? '<div class="source-separator"></div>'
+          : ""
+        }
               ${systemMessage}
-              ${
-                (regularMessages || systemMessage) && lastUserMessage
-                  ? '<div class="source-separator"></div>'
-                  : ""
-              }
+              ${(regularMessages || systemMessage) && lastUserMessage
+          ? '<div class="source-separator"></div>'
+          : ""
+        }
               ${lastUserMessage}
             </div>
           </div>
         `;
 
-        console.log("Final HTML length:", result.length);
-        console.groupEnd();
-        return result;
-      }
+      console.log("Final HTML length:", result.length);
+      console.groupEnd();
+      return result;
+    }
 
-      // Modified appendMessage to add an edit icon for user messages
-      function appendMessage(sender, content, context = null) {
-        const role =
-          sender.toLowerCase() === "user"
-            ? "user"
-            : sender.toLowerCase() === "system"
+    // Modified appendMessage to add an edit icon for user messages
+    function appendMessage(sender, content, context = null) {
+      const role =
+        sender.toLowerCase() === "user"
+          ? "user"
+          : sender.toLowerCase() === "system"
             ? "system"
             : sender.toLowerCase() === "tool"
-            ? "tool"
-            : "assistant";
+              ? "tool"
+              : "assistant";
 
-        messageHistory.push({ role: role, content: content });
+      messageHistory.push({ role: role, content: content });
 
-        const messageDiv = document.createElement("div");
-        messageDiv.className = `message ${role}-message`;
+      const messageDiv = document.createElement("div");
+      messageDiv.className = `message ${role}-message`;
 
-        // For user messages, store the original content and history index.
-        if (role === "user") {
-          messageDiv.dataset.originalContent = content;
-          messageDiv.dataset.msgIndex = messageHistory.length - 1;
-        }
-
-        const mainContent =
-          sender === "User" ? md.utils.escapeHtml(content) : content;
-        const rendered = md.render(mainContent);
-        const contextSection =
-          role === "assistant" ? createContextSection(context) : "";
-
-        messageDiv.innerHTML = rendered + contextSection;
-
-        // If this is a user message, append an edit icon.
-        if (role === "user") {
-          const editButton = document.createElement("div");
-          editButton.className = "edit-icon";
-          editButton.innerHTML = '<i class="fas fa-edit"></i>';
-          editButton.addEventListener("click", function (e) {
-            e.stopPropagation();
-            editUserMessage(messageDiv);
-          });
-          messageDiv.appendChild(editButton);
-        }
-
-        chatContainer.appendChild(messageDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-        window.scrollTo({
-          top: document.body.scrollHeight,
-          behavior: "smooth",
-        });
-
-        mermaid.init(undefined, document.querySelectorAll(".mermaid"));
+      // For user messages, store the original content and history index.
+      if (role === "user") {
+        messageDiv.dataset.originalContent = content;
+        messageDiv.dataset.msgIndex = messageHistory.length - 1;
       }
 
-      // Modified sendQuery to handle stopping
-      async function sendQuery(endpoint = "/chat", skipUserAppend = false) {
-        const queryText = queryInput.value.trim();
-        if (!queryText) return;
-        if (isGenerating) return; // Prevent sending while generating
+      const mainContent =
+        sender === "User" ? md.utils.escapeHtml(content) : content;
+      const rendered = md.render(mainContent);
+      const contextSection =
+        role === "assistant" ? createContextSection(context) : "";
 
-        // Reset any previous state and setup for new generation
-        if (currentController) {
-          currentController.abort();
+      messageDiv.innerHTML = rendered + contextSection;
+
+      // If this is a user message, append an edit icon.
+      if (role === "user") {
+        const editButton = document.createElement("div");
+        editButton.className = "edit-icon";
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.addEventListener("click", function (e) {
+          e.stopPropagation();
+          editUserMessage(messageDiv);
+        });
+        messageDiv.appendChild(editButton);
+      }
+
+      chatContainer.appendChild(messageDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: "smooth",
+      });
+
+      mermaid.init(undefined, document.querySelectorAll(".mermaid"));
+    }
+
+    // Modified sendQuery to handle stopping
+    async function sendQuery(endpoint = "/chat", skipUserAppend = false) {
+      const queryText = queryInput.value.trim();
+      if (!queryText) return;
+      if (isGenerating) return; // Prevent sending while generating
+
+      // Reset any previous state and setup for new generation
+      if (currentController) {
+        currentController.abort();
+      }
+      currentController = new AbortController();
+      isGenerating = true;
+
+      // Update button visibility
+      const stopButton = document.getElementById("stop-button");
+      const sendButton = document.querySelector(".send-button");
+      stopButton.style.display = "flex";
+      sendButton.style.display = "none";
+
+      if (!skipUserAppend) {
+        appendMessage("User", queryText);
+      }
+      queryInput.value = "";
+      resizeTextarea();
+
+      // Start thinking animation immediately for /think endpoint
+      // or create empty assistant message for /chat
+      if (endpoint === "/think") {
+        thinkingDiv = createThinkingProcessContainer();
+        chatContainer.appendChild(thinkingDiv);
+        thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
+        thinkingStartTime = Date.now();
+        const thinkingText = thinkingDiv.querySelector(".thinking-text");
+        if (thinkingText) {
+          thinkingText.classList.remove("static");
         }
-        currentController = new AbortController();
-        isGenerating = true;
+        isThinkingActive = true;
+      } else if (endpoint === "/chat") {
+        createOrUpdateAssistantMessage("");
+      }
 
-        // Update button visibility
-        const stopButton = document.getElementById("stop-button");
-        const sendButton = document.querySelector(".send-button");
-        stopButton.style.display = "flex";
-        sendButton.style.display = "none";
+      // Reset state variables
+      assistantTextBuffer = "";
+      contextSet = false;
+      latestContext = null;
+      let errorBuffer = [];
 
-        if (!skipUserAppend) {
-          appendMessage("User", queryText);
-        }
-        queryInput.value = "";
-        resizeTextarea();
+      // Get tools actors list from sidebar input
+      const toolsActorsInput = document.getElementById("tools-actors-input");
+      const toolsActorsList = toolsActorsInput.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "");
+      if (toolsEnabled && toolsActorsList.length === 0) {
+        alert("Please provide at least one tools actor.");
+        toolsEnabled = false;
+        updateToolButton();
+        resetGenerationState();
+        return;
+      }
 
-        // Start thinking animation immediately for /think endpoint
-        // or create empty assistant message for /chat
-        if (endpoint === "/think") {
-          thinkingDiv = createThinkingProcessContainer();
-          chatContainer.appendChild(thinkingDiv);
-          thinkingContentDiv = thinkingDiv.querySelector(".thinking-content");
-          thinkingStartTime = Date.now();
-          const thinkingText = thinkingDiv.querySelector(".thinking-text");
-          if (thinkingText) {
-            thinkingText.classList.remove("static");
-          }
-          isThinkingActive = true;
-        } else if (endpoint === "/chat") {
-          createOrUpdateAssistantMessage("");
-        }
+      // Get Active sources
 
-        // Reset state variables
-        assistantTextBuffer = "";
-        contextSet = false;
-        latestContext = null;
-        let errorBuffer = [];
+      let activeSources = getActiveSources().map((source) => source.path);
 
-        // Get tools actors list from sidebar input
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
-        if (toolsEnabled && toolsActorsList.length === 0) {
-          alert("Please provide at least one tools actor.");
-          toolsEnabled = false;
-          updateToolButton();
-          resetGenerationState();
-          return;
+      const queryObject = {
+        messages: messageHistory,
+        model: "llama3.2",
+        stream: true,
+        tools_actors: toolsEnabled ? toolsActorsList : [],
+        sources: activeSources ? activeSources : [],
+      };
+
+      try {
+        const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(queryObject),
+          signal: currentController.signal,
+        });
+
+        if (!response.ok) {
+          errorBuffer.push(`HTTP error! status: ${response.status}`);
         }
 
-        // Get Active sources
-
-        let activeSources = getActiveSources().map((source) => source.path);
-
-        const queryObject = {
-          messages: messageHistory,
-          model: "llama3.2",
-          stream: true,
-          tools_actors: toolsEnabled ? toolsActorsList : [],
-          sources: activeSources? activeSources : [],
-        };
-
-        try {
-          const response = await fetch(`${RAG_ENDPOINT}${endpoint}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(queryObject),
-            signal: currentController.signal,
-          });
-
-          if (!response.ok) {
-            errorBuffer.push(`HTTP error! status: ${response.status}`);
-          }
-
-          // Display error container at the start if we have errors
-          let errorDiv = null;
-          if (errorBuffer.length > 0) {
-            errorDiv = document.createElement("div");
-            errorDiv.className = "message error-message";
-            const errorContent = `
+        // Display error container at the start if we have errors
+        let errorDiv = null;
+        if (errorBuffer.length > 0) {
+          errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          const errorContent = `
               <div class="error-toggle">▶</div>
-              <div class="error-header">⚠️ ${errorBuffer.length} Error${
-              errorBuffer.length > 1 ? "s" : ""
+              <div class="error-header">⚠️ ${errorBuffer.length} Error${errorBuffer.length > 1 ? "s" : ""
             } Occurred</div>
               <div class="error-content">
                 ${errorBuffer
-                  .map(
-                    (error) => `
+              .map(
+                (error) => `
                   <div class="error-item">
                     <i class="fas fa-exclamation-circle"></i>
                     ${md.render(error)}
                   </div>
                 `
-                  )
-                  .join("")}
+              )
+              .join("")}
               </div>
             `;
-            errorDiv.innerHTML = errorContent;
-            chatContainer.appendChild(errorDiv);
-            initializeErrorToggles(errorDiv);
-          }
+          errorDiv.innerHTML = errorContent;
+          chatContainer.appendChild(errorDiv);
+          initializeErrorToggles(errorDiv);
+        }
 
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
 
-            const chunk = decoder.decode(value);
-            buffer += chunk;
+          const chunk = decoder.decode(value);
+          buffer += chunk;
 
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              try {
-                processJsonLine(line);
-              } catch (e) {
-                console.error("Error processing JSON line:", e);
-                console.error("Raw line content:", line);
-                errorBuffer.push(`Error processing response: ${e.message}`);
-                if (errorDiv) {
-                  const errorContent = createErrorContent(errorBuffer);
-                  errorDiv.innerHTML = errorContent;
-                  initializeErrorToggles(errorDiv);
-                } else {
-                  errorDiv = createErrorDiv(errorBuffer);
-                  chatContainer.appendChild(errorDiv);
-                  initializeErrorToggles(errorDiv);
-                }
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              processJsonLine(line);
+            } catch (e) {
+              console.error("Error processing JSON line:", e);
+              console.error("Raw line content:", line);
+              errorBuffer.push(`Error processing response: ${e.message}`);
+              if (errorDiv) {
+                const errorContent = createErrorContent(errorBuffer);
+                errorDiv.innerHTML = errorContent;
+                initializeErrorToggles(errorDiv);
+              } else {
+                errorDiv = createErrorDiv(errorBuffer);
+                chatContainer.appendChild(errorDiv);
+                initializeErrorToggles(errorDiv);
               }
             }
           }
+        }
 
-          // Handle any remaining text after streaming
-          if (assistantTextBuffer) {
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          }
-        } catch (error) {
-          if (error.name === "AbortError") {
-            console.log("Request was aborted");
-          } else {
-            console.error("Error:", error);
-            const errorDiv = document.createElement("div");
-            errorDiv.className = "message error-message";
-            const errorContent = `
+        // Handle any remaining text after streaming
+        if (assistantTextBuffer) {
+          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+        }
+      } catch (error) {
+        if (error.name === "AbortError") {
+          console.log("Request was aborted");
+        } else {
+          console.error("Error:", error);
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "message error-message";
+          const errorContent = `
               <div class="error-toggle">▶</div>
               <div class="error-header">⚠️ Error Occurred</div>
               <div class="error-content">
@@ -1802,163 +1747,162 @@
                 </div>
               </div>
             `;
-            errorDiv.innerHTML = errorContent;
-            chatContainer.appendChild(errorDiv);
-            initializeErrorToggles(errorDiv);
-          }
-        } finally {
-          resetGenerationState();
+          errorDiv.innerHTML = errorContent;
+          chatContainer.appendChild(errorDiv);
+          initializeErrorToggles(errorDiv);
         }
+      } finally {
+        resetGenerationState();
       }
+    }
 
-      // Helper function to create error content
-      function createErrorContent(errorBuffer) {
-        return `
+    // Helper function to create error content
+    function createErrorContent(errorBuffer) {
+      return `
           <div class="error-toggle">▶</div>
-          <div class="error-header">⚠️ ${errorBuffer.length} Error${
-          errorBuffer.length > 1 ? "s" : ""
+          <div class="error-header">⚠️ ${errorBuffer.length} Error${errorBuffer.length > 1 ? "s" : ""
         } Occurred</div>
           <div class="error-content">
             ${errorBuffer
-              .map(
-                (error) => `
+          .map(
+            (error) => `
               <div class="error-item">
                 <i class="fas fa-exclamation-circle"></i>
                 ${md.render(error)}
               </div>
             `
-              )
-              .join("")}
+          )
+          .join("")}
           </div>
         `;
-      }
+    }
 
-      // Helper function to create error div
-      function createErrorDiv(errorBuffer) {
+    // Helper function to create error div
+    function createErrorDiv(errorBuffer) {
+      const errorDiv = document.createElement("div");
+      errorDiv.className = "message error-message";
+      errorDiv.innerHTML = createErrorContent(errorBuffer);
+      return errorDiv;
+    }
+
+    // Add stop button event listener
+    stopButton.addEventListener("click", stopGeneration);
+
+    // Function to handle editing a user message.
+    function editUserMessage(messageDiv) {
+      const originalContent =
+        messageDiv.dataset.originalContent || messageDiv.innerText;
+
+      // Get container and message dimensions before clearing content
+      const containerRect = chatContainer.getBoundingClientRect();
+      const messageRect = messageDiv.getBoundingClientRect();
+      const rightOffset = containerRect.right - messageRect.right;
+
+      // Clear current message content
+      messageDiv.innerHTML = "";
+      messageDiv.style.marginRight = rightOffset + "px";
+      messageDiv.style.width = containerRect.width - rightOffset + "px";
+
+      // Create edit container
+      const editContainer = document.createElement("div");
+      editContainer.style.position = "relative";
+      editContainer.style.width = "100%";
+      editContainer.style.display = "block";
+      editContainer.style.minHeight = "150px";
+
+      const textarea = document.createElement("textarea");
+      textarea.value = originalContent;
+      textarea.style.width = "100%";
+      textarea.style.height = "150px";
+      textarea.style.boxSizing = "border-box";
+      textarea.style.padding = "10px";
+      textarea.style.border = "1px solid var(--border-color)";
+      textarea.style.borderRadius = "5px";
+      textarea.style.backgroundColor = "var(--bg-main)";
+      textarea.style.color = "var(--text-primary)";
+      textarea.style.marginBottom = "60px";
+
+      editContainer.appendChild(textarea);
+
+      const buttonContainer = document.createElement("div");
+      buttonContainer.style.position = "absolute";
+      buttonContainer.style.bottom = "10px";
+      buttonContainer.style.right = "10px";
+      buttonContainer.style.display = "flex";
+      buttonContainer.style.gap = "5px";
+
+      const cancelButton = document.createElement("button");
+      cancelButton.textContent = "Cancel";
+      cancelButton.className = "action-button";
+      cancelButton.style.margin = "0";
+
+      const saveButton = document.createElement("button");
+      saveButton.textContent = "Send";
+      saveButton.className = "action-button";
+      saveButton.style.margin = "0";
+
+      buttonContainer.appendChild(cancelButton);
+      buttonContainer.appendChild(saveButton);
+      editContainer.appendChild(buttonContainer);
+
+      messageDiv.appendChild(editContainer);
+
+      cancelButton.addEventListener("click", function () {
+        messageDiv.innerHTML = md.render(
+          md.utils.escapeHtml(originalContent)
+        );
+        messageDiv.dataset.originalContent = originalContent;
+        messageDiv.style.marginRight = "";
+        messageDiv.style.width = "";
+        const editButton = document.createElement("div");
+        editButton.className = "edit-icon";
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.addEventListener("click", function (e) {
+          e.stopPropagation();
+          editUserMessage(messageDiv);
+        });
+        messageDiv.appendChild(editButton);
+      });
+
+      saveButton.addEventListener("click", function () {
+        // Stop any ongoing generation first
+        stopGeneration();
+
+        const newContent = textarea.value.trim();
+        if (!newContent) return;
+        const indexInChat = Array.from(chatContainer.children).indexOf(
+          messageDiv
+        );
+        while (chatContainer.children.length > indexInChat + 1) {
+          chatContainer.removeChild(chatContainer.lastChild);
+        }
+        const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
+        messageHistory = messageHistory.slice(0, msgIndex + 1);
+        messageHistory[msgIndex].content = newContent;
+        messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
+        messageDiv.style.marginRight = "";
+        messageDiv.style.width = "";
+        messageDiv.dataset.originalContent = newContent;
+        const editButton = document.createElement("div");
+        editButton.className = "edit-icon";
+        editButton.innerHTML = '<i class="fas fa-edit"></i>';
+        editButton.addEventListener("click", function (e) {
+          e.stopPropagation();
+          editUserMessage(messageDiv);
+        });
+        messageDiv.appendChild(editButton);
+        queryInput.value = newContent;
+        sendQuery(thinkEnabled ? "/think" : "/chat", true);
+      });
+    }
+
+    function processJsonLine(json_line) {
+      const data = JSON.parse(json_line);
+
+      if (data.error) {
         const errorDiv = document.createElement("div");
         errorDiv.className = "message error-message";
-        errorDiv.innerHTML = createErrorContent(errorBuffer);
-        return errorDiv;
-      }
-
-      // Add stop button event listener
-      stopButton.addEventListener("click", stopGeneration);
-
-      // Function to handle editing a user message.
-      function editUserMessage(messageDiv) {
-        const originalContent =
-          messageDiv.dataset.originalContent || messageDiv.innerText;
-
-        // Get container and message dimensions before clearing content
-        const containerRect = chatContainer.getBoundingClientRect();
-        const messageRect = messageDiv.getBoundingClientRect();
-        const rightOffset = containerRect.right - messageRect.right;
-
-        // Clear current message content
-        messageDiv.innerHTML = "";
-        messageDiv.style.marginRight = rightOffset + "px";
-        messageDiv.style.width = containerRect.width - rightOffset + "px";
-
-        // Create edit container
-        const editContainer = document.createElement("div");
-        editContainer.style.position = "relative";
-        editContainer.style.width = "100%";
-        editContainer.style.display = "block";
-        editContainer.style.minHeight = "150px";
-
-        const textarea = document.createElement("textarea");
-        textarea.value = originalContent;
-        textarea.style.width = "100%";
-        textarea.style.height = "150px";
-        textarea.style.boxSizing = "border-box";
-        textarea.style.padding = "10px";
-        textarea.style.border = "1px solid var(--border-color)";
-        textarea.style.borderRadius = "5px";
-        textarea.style.backgroundColor = "var(--bg-main)";
-        textarea.style.color = "var(--text-primary)";
-        textarea.style.marginBottom = "60px";
-
-        editContainer.appendChild(textarea);
-
-        const buttonContainer = document.createElement("div");
-        buttonContainer.style.position = "absolute";
-        buttonContainer.style.bottom = "10px";
-        buttonContainer.style.right = "10px";
-        buttonContainer.style.display = "flex";
-        buttonContainer.style.gap = "5px";
-
-        const cancelButton = document.createElement("button");
-        cancelButton.textContent = "Cancel";
-        cancelButton.className = "action-button";
-        cancelButton.style.margin = "0";
-
-        const saveButton = document.createElement("button");
-        saveButton.textContent = "Send";
-        saveButton.className = "action-button";
-        saveButton.style.margin = "0";
-
-        buttonContainer.appendChild(cancelButton);
-        buttonContainer.appendChild(saveButton);
-        editContainer.appendChild(buttonContainer);
-
-        messageDiv.appendChild(editContainer);
-
-        cancelButton.addEventListener("click", function () {
-          messageDiv.innerHTML = md.render(
-            md.utils.escapeHtml(originalContent)
-          );
-          messageDiv.dataset.originalContent = originalContent;
-          messageDiv.style.marginRight = "";
-          messageDiv.style.width = "";
-          const editButton = document.createElement("div");
-          editButton.className = "edit-icon";
-          editButton.innerHTML = '<i class="fas fa-edit"></i>';
-          editButton.addEventListener("click", function (e) {
-            e.stopPropagation();
-            editUserMessage(messageDiv);
-          });
-          messageDiv.appendChild(editButton);
-        });
-
-        saveButton.addEventListener("click", function () {
-          // Stop any ongoing generation first
-          stopGeneration();
-
-          const newContent = textarea.value.trim();
-          if (!newContent) return;
-          const indexInChat = Array.from(chatContainer.children).indexOf(
-            messageDiv
-          );
-          while (chatContainer.children.length > indexInChat + 1) {
-            chatContainer.removeChild(chatContainer.lastChild);
-          }
-          const msgIndex = parseInt(messageDiv.dataset.msgIndex, 10);
-          messageHistory = messageHistory.slice(0, msgIndex + 1);
-          messageHistory[msgIndex].content = newContent;
-          messageDiv.innerHTML = md.render(md.utils.escapeHtml(newContent));
-          messageDiv.style.marginRight = "";
-          messageDiv.style.width = "";
-          messageDiv.dataset.originalContent = newContent;
-          const editButton = document.createElement("div");
-          editButton.className = "edit-icon";
-          editButton.innerHTML = '<i class="fas fa-edit"></i>';
-          editButton.addEventListener("click", function (e) {
-            e.stopPropagation();
-            editUserMessage(messageDiv);
-          });
-          messageDiv.appendChild(editButton);
-          queryInput.value = newContent;
-          sendQuery(thinkEnabled ? "/think" : "/chat", true);
-        });
-      }
-
-      function processJsonLine(json_line) {
-        const data = JSON.parse(json_line);
-
-        if (data.error) {
-          const errorDiv = document.createElement("div");
-          errorDiv.className = "message error-message";
-          const errorContent = `
+        const errorContent = `
             <div class="error-toggle">▶</div>
             <div class="error-header">⚠️ Error Occurred</div>
             <div class="error-content">
@@ -1968,122 +1912,24 @@
               </div>
             </div>
           `;
-          errorDiv.innerHTML = errorContent;
-          chatContainer.appendChild(errorDiv);
-          initializeErrorToggles(errorDiv);
-          return;
-        }
+        errorDiv.innerHTML = errorContent;
+        chatContainer.appendChild(errorDiv);
+        initializeErrorToggles(errorDiv);
+        return;
+      }
 
-        if (data.context) {
-          latestContext = data.context;
-        }
+      if (data.context) {
+        latestContext = data.context;
+      }
 
-        if (!data.message?.content) {
-          if (data.done) {
-            if (assistantTextBuffer) {
-              createOrUpdateAssistantMessage(
-                assistantTextBuffer,
-                latestContext
-              );
-              if (
-                !messageHistory.some(
-                  (msg) =>
-                    msg.role === "assistant" &&
-                    msg.content === assistantTextBuffer
-                )
-              ) {
-                messageHistory.push({
-                  role: "assistant",
-                  content: assistantTextBuffer,
-                  images: data.message?.images,
-                });
-              }
-            }
-          }
-          return;
-        }
-
-        if (data.message.role === "system" || data.message.role === "tool") {
-          handleSpecialRole(data.message);
-          return;
-        }
-
-        if (data.message.role === "assistant") {
-          let chunk = data.message.content;
-          let idx = 0;
-
-          while (idx < chunk.length) {
-            if (!isThinkingActive) {
-              const openPos = chunk.indexOf("<think>", idx);
-              if (openPos === -1) {
-                const visiblePart = chunk.substring(idx);
-                assistantTextBuffer += visiblePart;
-                idx = chunk.length;
-              } else {
-                const visiblePart = chunk.substring(idx, openPos);
-                if (visiblePart.trim()) {
-                  assistantTextBuffer += visiblePart;
-                }
-                idx = openPos + 7;
-                if (!thinkingDiv) {
-                  thinkingDiv = createThinkingProcessContainer();
-                  chatContainer.appendChild(thinkingDiv);
-                  thinkingContentDiv =
-                    thinkingDiv.querySelector(".thinking-content");
-                  thinkingStartTime = Date.now();
-                  const thinkingText =
-                    thinkingDiv.querySelector(".thinking-text");
-                  if (thinkingText) {
-                    thinkingText.classList.remove("static");
-                  }
-                }
-                isThinkingActive = true;
-              }
-            } else {
-              const closePos = chunk.indexOf("</think>", idx);
-              if (closePos === -1) {
-                const thoughtChunk = chunk.substring(idx);
-                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
-                idx = chunk.length;
-              } else {
-                const thoughtChunk = chunk.substring(idx, closePos);
-                if (thoughtChunk.trim()) {
-                  appendThinkingChunk(thoughtChunk, thinkingContentDiv);
-                }
-                idx = closePos + 8;
-                isThinkingActive = false;
-                if (assistantTextBuffer.trim().length > 0) {
-                  createOrUpdateAssistantMessage(
-                    assistantTextBuffer,
-                    latestContext
-                  );
-                }
-                if (thinkingDiv && thinkingStartTime) {
-                  const duration = (
-                    (Date.now() - thinkingStartTime) /
-                    1000
-                  ).toFixed(1);
-                  const thinkingText =
-                    thinkingDiv.querySelector(".thinking-text");
-                  if (thinkingText) {
-                    thinkingText.textContent = `Thought for ${duration}s`;
-                    thinkingText.classList.add("static");
-                  }
-                  thinkingStartTime = null;
-                }
-              }
-            }
-          }
-
-          if (!isThinkingActive && assistantTextBuffer.length > 0) {
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          }
-
-          if (data.done) {
-            const indicators = document.querySelectorAll(".typing-indicator");
-            indicators.forEach((indicator) => indicator.remove());
+      if (!data.message?.content) {
+        if (data.done) {
+          if (assistantTextBuffer) {
+            createOrUpdateAssistantMessage(
+              assistantTextBuffer,
+              latestContext
+            );
             if (
-              assistantTextBuffer &&
               !messageHistory.some(
                 (msg) =>
                   msg.role === "assistant" &&
@@ -2096,248 +1942,311 @@
                 images: data.message?.images,
               });
             }
-            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-            assistantTextBuffer = "";
           }
         }
+        return;
       }
 
-      function handleSpecialRole(msg) {
-        const lastMessageDiv = chatContainer.lastElementChild;
-        const lastMessageRole =
-          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+      if (data.message.role === "system" || data.message.role === "tool") {
+        handleSpecialRole(data.message);
+        return;
+      }
 
-        if (msg.role === "tool") {
-          if (lastMessageRole === "assistant") {
-            const assistantContent = lastMessageDiv.querySelector(
-              "div:not(.context-container):not(.thinking-process)"
-            );
-            if (assistantContent && !assistantContent.textContent.trim()) {
-              lastMessageDiv.remove();
+      if (data.message.role === "assistant") {
+        let chunk = data.message.content;
+        let idx = 0;
+
+        while (idx < chunk.length) {
+          if (!isThinkingActive) {
+            const openPos = chunk.indexOf("<think>", idx);
+            if (openPos === -1) {
+              const visiblePart = chunk.substring(idx);
+              assistantTextBuffer += visiblePart;
+              idx = chunk.length;
+            } else {
+              const visiblePart = chunk.substring(idx, openPos);
+              if (visiblePart.trim()) {
+                assistantTextBuffer += visiblePart;
+              }
+              idx = openPos + 7;
+              if (!thinkingDiv) {
+                thinkingDiv = createThinkingProcessContainer();
+                chatContainer.appendChild(thinkingDiv);
+                thinkingContentDiv =
+                  thinkingDiv.querySelector(".thinking-content");
+                thinkingStartTime = Date.now();
+                const thinkingText =
+                  thinkingDiv.querySelector(".thinking-text");
+                if (thinkingText) {
+                  thinkingText.classList.remove("static");
+                }
+              }
+              isThinkingActive = true;
+            }
+          } else {
+            const closePos = chunk.indexOf("</think>", idx);
+            if (closePos === -1) {
+              const thoughtChunk = chunk.substring(idx);
+              appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+              idx = chunk.length;
+            } else {
+              const thoughtChunk = chunk.substring(idx, closePos);
+              if (thoughtChunk.trim()) {
+                appendThinkingChunk(thoughtChunk, thinkingContentDiv);
+              }
+              idx = closePos + 8;
+              isThinkingActive = false;
+              if (assistantTextBuffer.trim().length > 0) {
+                createOrUpdateAssistantMessage(
+                  assistantTextBuffer,
+                  latestContext
+                );
+              }
+              if (thinkingDiv && thinkingStartTime) {
+                const duration = (
+                  (Date.now() - thinkingStartTime) /
+                  1000
+                ).toFixed(1);
+                const thinkingText =
+                  thinkingDiv.querySelector(".thinking-text");
+                if (thinkingText) {
+                  thinkingText.textContent = `Thought for ${duration}s`;
+                  thinkingText.classList.add("static");
+                }
+                thinkingStartTime = null;
+              }
             }
           }
-          const toolData = JSON.parse(msg.content);
-          const specialMessageDiv = document.createElement("div");
-          specialMessageDiv.className = "message tool-message";
-          const formattedContent = `
+        }
+
+        if (!isThinkingActive && assistantTextBuffer.length > 0) {
+          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+        }
+
+        if (data.done) {
+          const indicators = document.querySelectorAll(".typing-indicator");
+          indicators.forEach((indicator) => indicator.remove());
+          if (
+            assistantTextBuffer &&
+            !messageHistory.some(
+              (msg) =>
+                msg.role === "assistant" &&
+                msg.content === assistantTextBuffer
+            )
+          ) {
+            messageHistory.push({
+              role: "assistant",
+              content: assistantTextBuffer,
+              images: data.message?.images,
+            });
+          }
+          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+          assistantTextBuffer = "";
+        }
+      }
+    }
+
+    function handleSpecialRole(msg) {
+      const lastMessageDiv = chatContainer.lastElementChild;
+      const lastMessageRole =
+        lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+
+      if (msg.role === "tool") {
+        if (lastMessageRole === "assistant") {
+          const assistantContent = lastMessageDiv.querySelector(
+            "div:not(.context-container):not(.thinking-process)"
+          );
+          if (assistantContent && !assistantContent.textContent.trim()) {
+            lastMessageDiv.remove();
+          }
+        }
+        const toolData = JSON.parse(msg.content);
+        const specialMessageDiv = document.createElement("div");
+        specialMessageDiv.className = "message tool-message";
+        const formattedContent = `
             <div class="tool-toggle">▶</div>
             <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
             <div class="tool-content">
               <div class="tool-details">
                 <strong>Arguments:</strong>
                 <pre><code>${JSON.stringify(
-                  toolData.call.function.arguments,
-                  null,
-                  2
-                )}</code></pre>
+          toolData.call.function.arguments,
+          null,
+          2
+        )}</code></pre>
                 <strong>Response:</strong>
                 <pre><code>${JSON.stringify(
-                  toolData.response,
-                  null,
-                  2
-                )}</code></pre>
+          toolData.response,
+          null,
+          2
+        )}</code></pre>
               </div>
             </div>
           `;
-          specialMessageDiv.innerHTML = formattedContent;
-          chatContainer.appendChild(specialMessageDiv);
-          initializeToolToggles(specialMessageDiv);
+        specialMessageDiv.innerHTML = formattedContent;
+        chatContainer.appendChild(specialMessageDiv);
+        initializeToolToggles(specialMessageDiv);
+      } else {
+        if (lastMessageDiv && lastMessageRole === "system") {
+          lastMessageDiv.innerHTML +=
+            '<div class="source-separator"></div>' + md.render(msg.content);
         } else {
-          if (lastMessageDiv && lastMessageRole === "system") {
-            lastMessageDiv.innerHTML +=
-              '<div class="source-separator"></div>' + md.render(msg.content);
-          } else {
-            const systemDiv = document.createElement("div");
-            systemDiv.className = "message system-message";
-            systemDiv.innerHTML = md.render(msg.content);
-            chatContainer.appendChild(systemDiv);
-          }
+          const systemDiv = document.createElement("div");
+          systemDiv.className = "message system-message";
+          systemDiv.innerHTML = md.render(msg.content);
+          chatContainer.appendChild(systemDiv);
         }
       }
+    }
 
-      function createOrUpdateAssistantMessage(visibleText, context = null) {
-        const lastMessageDiv = chatContainer.lastElementChild;
-        const lastMessageRole =
-          lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
+    function createOrUpdateAssistantMessage(visibleText, context = null) {
+      const lastMessageDiv = chatContainer.lastElementChild;
+      const lastMessageRole =
+        lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
 
-        let assistantBlock;
-        let assistantContent;
+      let assistantBlock;
+      let assistantContent;
 
-        if (lastMessageRole === "assistant") {
-          assistantBlock = lastMessageDiv;
-          assistantContent = assistantBlock.querySelector(
-            "div:not(.context-container):not(.thinking-process)"
-          );
-          if (!assistantContent) {
-            assistantContent = document.createElement("div");
-            assistantBlock.appendChild(assistantContent);
-          }
-        } else {
-          assistantBlock = document.createElement("div");
-          assistantBlock.className = "message assistant-message";
+      if (lastMessageRole === "assistant") {
+        assistantBlock = lastMessageDiv;
+        assistantContent = assistantBlock.querySelector(
+          "div:not(.context-container):not(.thinking-process)"
+        );
+        if (!assistantContent) {
           assistantContent = document.createElement("div");
           assistantBlock.appendChild(assistantContent);
-          chatContainer.appendChild(assistantBlock);
         }
-
-        const existingIndicators =
-          assistantContent.querySelectorAll(".typing-indicator");
-        existingIndicators.forEach((indicator) => indicator.remove());
-
-        assistantContent.innerHTML = md.render(visibleText || "");
-        const typingIndicator = document.createElement("span");
-        typingIndicator.className = "typing-indicator";
-
-        let lastContentElement = assistantContent;
-        const walker = document.createTreeWalker(
-          assistantContent,
-          NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
-          {
-            acceptNode: function (node) {
-              if (
-                node.nodeType === Node.TEXT_NODE &&
-                !node.textContent.trim()
-              ) {
-                return NodeFilter.FILTER_SKIP;
-              }
-              if (node.classList?.contains("typing-indicator")) {
-                return NodeFilter.FILTER_SKIP;
-              }
-              return NodeFilter.FILTER_ACCEPT;
-            },
-          }
-        );
-
-        while (walker.nextNode()) {
-          lastContentElement = walker.currentNode;
-        }
-
-        if (
-          lastContentElement.nodeType === Node.TEXT_NODE ||
-          getComputedStyle(lastContentElement).display === "inline"
-        ) {
-          lastContentElement.parentNode.appendChild(typingIndicator);
-        } else {
-          lastContentElement.appendChild(typingIndicator);
-        }
-
-        if (!contextSet && context?.length) {
-          const contextSection = createContextSection(context);
-          if (contextSection) {
-            const contextDiv = document.createElement("div");
-            contextDiv.innerHTML = contextSection;
-            assistantBlock.appendChild(contextDiv);
-          }
-          contextSet = true;
-        }
-
-        chatContainer.scrollTop = chatContainer.scrollHeight;
+      } else {
+        assistantBlock = document.createElement("div");
+        assistantBlock.className = "message assistant-message";
+        assistantContent = document.createElement("div");
+        assistantBlock.appendChild(assistantContent);
+        chatContainer.appendChild(assistantBlock);
       }
 
-      function createThinkingProcessContainer() {
-        const div = document.createElement("div");
-        div.className = "thinking-process";
-        div.innerHTML = `
+      const existingIndicators =
+        assistantContent.querySelectorAll(".typing-indicator");
+      existingIndicators.forEach((indicator) => indicator.remove());
+
+      assistantContent.innerHTML = md.render(visibleText || "");
+      const typingIndicator = document.createElement("span");
+      typingIndicator.className = "typing-indicator";
+
+      let lastContentElement = assistantContent;
+      const walker = document.createTreeWalker(
+        assistantContent,
+        NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: function (node) {
+            if (
+              node.nodeType === Node.TEXT_NODE &&
+              !node.textContent.trim()
+            ) {
+              return NodeFilter.FILTER_SKIP;
+            }
+            if (node.classList?.contains("typing-indicator")) {
+              return NodeFilter.FILTER_SKIP;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          },
+        }
+      );
+
+      while (walker.nextNode()) {
+        lastContentElement = walker.currentNode;
+      }
+
+      if (
+        lastContentElement.nodeType === Node.TEXT_NODE ||
+        getComputedStyle(lastContentElement).display === "inline"
+      ) {
+        lastContentElement.parentNode.appendChild(typingIndicator);
+      } else {
+        lastContentElement.appendChild(typingIndicator);
+      }
+
+      if (!contextSet && context?.length) {
+        const contextSection = createContextSection(context);
+        if (contextSection) {
+          const contextDiv = document.createElement("div");
+          contextDiv.innerHTML = contextSection;
+          assistantBlock.appendChild(contextDiv);
+        }
+        contextSet = true;
+      }
+
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function createThinkingProcessContainer() {
+      const div = document.createElement("div");
+      div.className = "thinking-process";
+      div.innerHTML = `
           <div class="thinking-header" onclick="toggleThinking(this)">
             <span class="thinking-text">Thinking...</span>
           </div>
           <div class="thinking-content"></div>
         `;
-        return div;
-      }
+      return div;
+    }
 
-      function appendThinkingChunk(text, contentDiv) {
-        if (!contentDiv) return;
-        const cleanedText = text.replace(/<\/?think>/g, "");
-        contentDiv.textContent += cleanedText;
-      }
+    function appendThinkingChunk(text, contentDiv) {
+      if (!contentDiv) return;
+      const cleanedText = text.replace(/<\/?think>/g, "");
+      contentDiv.textContent += cleanedText;
+    }
 
-      window.toggleContext = function (toggleElement) {
-        const contextContent = toggleElement.nextElementSibling;
-        const isHidden =
-          contextContent.style.display === "none" ||
-          !contextContent.style.display;
-        contextContent.style.display = isHidden ? "block" : "none";
-        toggleElement.textContent = isHidden
-          ? "Hide Context ▼"
-          : "Show Context ◀";
-      };
+    window.toggleContext = function (toggleElement) {
+      const contextContent = toggleElement.nextElementSibling;
+      const isHidden =
+        contextContent.style.display === "none" ||
+        !contextContent.style.display;
+      contextContent.style.display = isHidden ? "block" : "none";
+      toggleElement.textContent = isHidden
+        ? "Hide Context ▼"
+        : "Show Context ◀";
+    };
 
-      window.toggleThinking = function (header) {
-        const content = header.nextElementSibling;
-        content.classList.toggle("visible");
-      };
+    window.toggleThinking = function (header) {
+      const content = header.nextElementSibling;
+      content.classList.toggle("visible");
+    };
 
-      function initializeToolToggles(container) {
-        container.querySelectorAll(".tool-toggle").forEach((toggle) => {
-          if (!toggle.hasListener) {
-            toggle.addEventListener("click", function () {
-              const content = this.parentElement.querySelector(".tool-content");
-              const isHidden =
-                content.style.display === "none" || !content.style.display;
-              content.style.display = isHidden ? "block" : "none";
-              this.textContent = isHidden ? "▼" : "▶";
-            });
-            toggle.hasListener = true;
-          }
-        });
-      }
-
-      function resizeTextarea() {
-        queryInput.style.height = "auto";
-        queryInput.style.height = queryInput.scrollHeight + "px";
-      }
-
-      queryInput.addEventListener("input", resizeTextarea);
-
-      queryInput.addEventListener("keydown", async (e) => {
-        if (e.key === "Enter") {
-          if (e.shiftKey) {
-            resizeTextarea();
-            return;
-          }
-          if (isGenerating) {
-            // Prevent sending while generating
-            e.preventDefault();
-            return;
-          }
-          if (e.ctrlKey) {
-            e.preventDefault();
-            const toolsActorsInput =
-              document.getElementById("tools-actors-input");
-            const toolsActorsList = toolsActorsInput.value
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "");
-
-            // Only toggle if we have tools
-            if (toolsActorsList.length > 0) {
-              toolsEnabled = !toolsEnabled;
-              updateToolButton();
-            }
-            return;
-          }
-          if (e.altKey) {
-            e.preventDefault();
-            thinkEnabled = !thinkEnabled;
-            updateThinkButton();
-            return;
-          }
-          e.preventDefault();
-          const endpoint = thinkEnabled ? "/think" : "/chat";
-          await sendQuery(endpoint);
-        } else if (e.key === "Escape") {
-          // Add Escape key handler
-          if (isGenerating) {
-            stopGeneration();
-          }
+    function initializeToolToggles(container) {
+      container.querySelectorAll(".tool-toggle").forEach((toggle) => {
+        if (!toggle.hasListener) {
+          toggle.addEventListener("click", function () {
+            const content = this.parentElement.querySelector(".tool-content");
+            const isHidden =
+              content.style.display === "none" || !content.style.display;
+            content.style.display = isHidden ? "block" : "none";
+            this.textContent = isHidden ? "▼" : "▶";
+          });
+          toggle.hasListener = true;
         }
       });
+    }
 
-      document
-        .getElementById("send-button")
-        .addEventListener("click", async () => {
-          // Allow toggling tools even during generation
+    function resizeTextarea() {
+      queryInput.style.height = "auto";
+      queryInput.style.height = queryInput.scrollHeight + "px";
+    }
+
+    queryInput.addEventListener("input", resizeTextarea);
+
+    queryInput.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        if (e.shiftKey) {
+          resizeTextarea();
+          return;
+        }
+        if (isGenerating) {
+          // Prevent sending while generating
+          e.preventDefault();
+          return;
+        }
+        if (e.ctrlKey) {
+          e.preventDefault();
           const toolsActorsInput =
             document.getElementById("tools-actors-input");
           const toolsActorsList = toolsActorsInput.value
@@ -2350,689 +2259,723 @@
             toolsEnabled = !toolsEnabled;
             updateToolButton();
           }
-        });
+          return;
+        }
+        if (e.altKey) {
+          e.preventDefault();
+          thinkEnabled = !thinkEnabled;
+          updateThinkButton();
+          return;
+        }
+        e.preventDefault();
+        const endpoint = thinkEnabled ? "/think" : "/chat";
+        await sendQuery(endpoint);
+      } else if (e.key === "Escape") {
+        // Add Escape key handler
+        if (isGenerating) {
+          stopGeneration();
+        }
+      }
+    });
 
-      document.getElementById("think-button").addEventListener("click", () => {
-        // Allow toggling think mode even during generation
-        thinkEnabled = !thinkEnabled;
-        updateThinkButton();
-      });
-
-      function updateToolButton() {
-        const toolButton = document.getElementById("send-button");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
+    document
+      .getElementById("send-button")
+      .addEventListener("click", async () => {
+        // Allow toggling tools even during generation
+        const toolsActorsInput =
+          document.getElementById("tools-actors-input");
         const toolsActorsList = toolsActorsInput.value
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s !== "");
 
-        // Disable tools if no actors are available
-        if (toolsActorsList.length === 0) {
-          toolsEnabled = false;
-          toolButton.classList.remove("active");
-          toolButton.style.opacity = "0.5";
-          toolButton.style.cursor = "not-allowed";
-          toolButton.title =
-            "Please add at least one tool in the sidebar to enable tools";
-        } else {
-          toolButton.style.opacity = "1";
-          toolButton.style.cursor = "pointer";
-          toolButton.classList.toggle("active", toolsEnabled);
-          toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
-        }
-
-        localStorage.setItem("toolsEnabled", toolsEnabled);
-      }
-
-      function updateThinkButton() {
-        const thinkButton = document.getElementById("think-button");
-        thinkButton.classList.toggle("active", thinkEnabled);
-        thinkButton.title = thinkEnabled
-          ? "Think mode enabled"
-          : "Think mode disabled";
-        localStorage.setItem("thinkEnabled", thinkEnabled);
-      }
-
-      // Initialize sidebar state
-      function initializeSidebar() {
-        const sidebar = document.getElementById("sidebar");
-        const mainContent = document.getElementById("main-content");
-        const inputContainer = document.getElementById("input-container");
-
-        if (sidebarVisible) {
-          sidebar.classList.remove("collapsed");
-          mainContent.classList.remove("sidebar-collapsed");
-          inputContainer.classList.remove("sidebar-collapsed");
-        } else {
-          sidebar.classList.add("collapsed");
-          mainContent.classList.add("sidebar-collapsed");
-          inputContainer.classList.add("sidebar-collapsed");
-        }
-
-        // Initialize tools management
-        initializeManagement();
-      }
-
-      // Tool Management
-      function initializeManagement() {
-        // Tools
-
-        const saveToolBtn = document.getElementById("save-tool-btn");
-        const toolActorInput = document.getElementById("tool-actor");
-
-        //Sources
-
-        const saveSourceBtn = document.getElementById("save-source-btn");
-        const sourceInput = document.getElementById("source");
-
-        // Add keypress event listener for Enter key
-        toolActorInput.addEventListener("keypress", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault(); // Prevent form submission
-            saveTool();
-          }
-        });
-
-        sourceInput.addEventListener("keypress", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault(); // Prevent form submission
-            saveSource();
-          }
-        });
-
-        // Load saved tools from localStorage
-        loadSavedTools();
-        loadActiveTools();
-
-        // Load sources from localStorage
-        loadSavedSources();
-        loadActiveSources();
-
-        // Event Listeners
-        saveToolBtn.addEventListener("click", saveTool);
-        saveSourceBtn.addEventListener("click", saveSource);
-      }
-
-      // Clear based on id of the input
-      function clearForm(input) {
-        document.getElementById(input).value = "";
-      }
-
-      function saveTool() {
-        const actor = document.getElementById("tool-actor").value.trim();
-
-        if (!actor) {
-          alert("Actor name is required!");
-          return;
-        }
-
-        // Check for duplicates in both saved and active tools
-        const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
-        const allTools = [...savedTools, ...activeTools];
-
-        if (
-          allTools.some(
-            (tool) => tool.actor.toLowerCase() === actor.toLowerCase()
-          )
-        ) {
-          alert("This tool already exists!");
-          return;
-        }
-
-        const tool = {
-          id: Date.now().toString(),
-          actor,
-          active: false,
-        };
-
-        // Save to localStorage
-        savedTools.push(tool);
-        localStorage.setItem("savedTools", JSON.stringify(savedTools));
-
-        // Add to saved tools list and automatically activate it
-        addToActive(tool);
-
-        // Clear the form input
-        clearForm("tool-actor");
-      }
-
-      function saveSource() {
-        const path = document.getElementById("source").value.trim();
-
-        if (!path) {
-          alert("Source path is required!");
-          return;
-        }
-
-        // Check for duplicates in both saved and active sources
-        const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
-        const allSources = [...savedSources, ...activeSources];
-
-        if (
-          allSources.some(
-            (source) => source.path.toLowerCase() === path.toLowerCase()
-          )
-        ) {
-          alert("This source already exists!");
-          return;
-        }
-
-        let split_path = path.split("/");
-
-        const source = {
-          id: Date.now().toString(),
-          path,
-          display_name: split_path[split_path.length - 1],
-          active: false,
-        };
-        console.log("🚀 ~ saveSource ~ source:", source);
-
-        // Save to localStorage
-        savedSources.push(source);
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
-
-        // Add to saved sources list and automatically activate it
-        addToActiveSources(source);
-
-        // Clear the form input
-        clearForm("source");
-      }
-
-      function getSavedTools() {
-        const tools = localStorage.getItem("savedTools");
-        return tools ? JSON.parse(tools) : [];
-      }
-
-      function getSavedSources() {
-        const tools = localStorage.getItem("savedSources");
-        return tools ? JSON.parse(tools) : [];
-      }
-
-      function getActiveTools() {
-        const tools = localStorage.getItem("activeTools");
-        return tools ? JSON.parse(tools) : [];
-      }
-
-      function getActiveSources() {
-        const tools = localStorage.getItem("activeSources");
-        return tools ? JSON.parse(tools) : [];
-      }
-
-      function loadSavedTools() {
-        const savedToolsList = document.getElementById("saved-tools-list");
-        savedToolsList.innerHTML = "";
-        const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
-
-        // Filter out active tools from saved tools display
-        const availableTools = savedTools.filter(
-          (saved) => !activeTools.some((active) => active.id === saved.id)
-        );
-
-        availableTools.forEach((tool) => addToolToSavedList(tool));
-      }
-
-      function loadSavedSources() {
-        const savedSourcesList = document.getElementById("saved-sources-list");
-        savedSourcesList.innerHTML = "";
-        const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
-
-        // Filter out active sources from saved sources display
-        const availableSources = savedSources.filter(
-          (saved) => !activeSources.some((active) => active.id === saved.id)
-        );
-
-        availableSources.forEach((source) => addSourceToSavedList(source));
-      }
-
-      function loadActiveTools() {
-        const activeToolsList = document.getElementById("active-tools-list");
-        activeToolsList.innerHTML = "";
-        const tools = getActiveTools();
-        tools.forEach((tool) => addToolToActiveList(tool));
-      }
-
-      function loadActiveSources() {
-        const activeSourcesList = document.getElementById(
-          "active-sources-list"
-        );
-        activeSourcesList.innerHTML = "";
-        const sources = getActiveSources();
-        sources.forEach((source) => addSourceToActiveList(source));
-      }
-
-      function addToolToActiveList(tool) {
-        const activeToolsList = document.getElementById("active-tools-list");
-        const toolElement = createToolElement(tool, true);
-        activeToolsList.appendChild(toolElement);
-      }
-
-      function addSourceToActiveList(source) {
-        const activeSourceList = document.getElementById("active-sources-list");
-        const sourceElement = createSourceElement(source, true);
-        activeSourceList.appendChild(sourceElement);
-      }
-
-      function addToActive(tool) {
-        const activeTools = getActiveTools();
-        if (!activeTools.some((t) => t.id === tool.id)) {
-          activeTools.push(tool);
-          localStorage.setItem("activeTools", JSON.stringify(activeTools));
-          addToolToActiveList(tool);
-          // Refresh saved tools list to remove the activated tool
-          loadSavedTools();
-          updateToolsActors();
+        // Only toggle if we have tools
+        if (toolsActorsList.length > 0) {
+          toolsEnabled = !toolsEnabled;
           updateToolButton();
         }
+      });
+
+    document.getElementById("think-button").addEventListener("click", () => {
+      // Allow toggling think mode even during generation
+      thinkEnabled = !thinkEnabled;
+      updateThinkButton();
+    });
+
+    function updateToolButton() {
+      const toolButton = document.getElementById("send-button");
+      const toolsActorsInput = document.getElementById("tools-actors-input");
+      const toolsActorsList = toolsActorsInput.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "");
+
+      // Disable tools if no actors are available
+      if (toolsActorsList.length === 0) {
+        toolsEnabled = false;
+        toolButton.classList.remove("active");
+        toolButton.style.opacity = "0.5";
+        toolButton.style.cursor = "not-allowed";
+        toolButton.title =
+          "Please add at least one tool in the sidebar to enable tools";
+      } else {
+        toolButton.style.opacity = "1";
+        toolButton.style.cursor = "pointer";
+        toolButton.classList.toggle("active", toolsEnabled);
+        toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
       }
 
-      function addToActiveSources(source) {
-        const activeSources = getActiveSources();
-        if (!activeSources.some((s) => s.id === source.id)) {
-          activeSources.push(source);
-          localStorage.setItem("activeSources", JSON.stringify(activeSources));
-          addSourceToActiveList(source);
-          // Refresh saved tools list to remove the activated source
-          loadSavedSources();
-          updateSources();
+      localStorage.setItem("toolsEnabled", toolsEnabled);
+    }
+
+    function updateThinkButton() {
+      const thinkButton = document.getElementById("think-button");
+      thinkButton.classList.toggle("active", thinkEnabled);
+      thinkButton.title = thinkEnabled
+        ? "Think mode enabled"
+        : "Think mode disabled";
+      localStorage.setItem("thinkEnabled", thinkEnabled);
+    }
+
+    // Initialize sidebar state
+    function initializeSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      const mainContent = document.getElementById("main-content");
+      const inputContainer = document.getElementById("input-container");
+
+      if (sidebarVisible) {
+        sidebar.classList.remove("collapsed");
+        mainContent.classList.remove("sidebar-collapsed");
+        inputContainer.classList.remove("sidebar-collapsed");
+      } else {
+        sidebar.classList.add("collapsed");
+        mainContent.classList.add("sidebar-collapsed");
+        inputContainer.classList.add("sidebar-collapsed");
+      }
+
+      // Initialize tools management
+      initializeManagement();
+    }
+
+    // Tool Management
+    function initializeManagement() {
+      // Tools
+
+      const saveToolBtn = document.getElementById("save-tool-btn");
+      const toolActorInput = document.getElementById("tool-actor");
+
+      //Sources
+
+      const saveSourceBtn = document.getElementById("save-source-btn");
+      const sourceInput = document.getElementById("source");
+
+      // Add keypress event listener for Enter key
+      toolActorInput.addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault(); // Prevent form submission
+          saveTool();
         }
+      });
+
+      sourceInput.addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault(); // Prevent form submission
+          saveSource();
+        }
+      });
+
+      // Load saved tools from localStorage
+      loadSavedTools();
+      loadActiveTools();
+
+      // Load sources from localStorage
+      loadSavedSources();
+      loadActiveSources();
+
+      // Event Listeners
+      saveToolBtn.addEventListener("click", saveTool);
+      saveSourceBtn.addEventListener("click", saveSource);
+    }
+
+    // Clear based on id of the input
+    function clearForm(input) {
+      document.getElementById(input).value = "";
+    }
+
+    function saveTool() {
+      const actor = document.getElementById("tool-actor").value.trim();
+
+      if (!actor) {
+        alert("Actor name is required!");
+        return;
       }
 
-      function createToolElement(tool, isActive = false) {
-        const toolElement = document.createElement("div");
-        toolElement.className = `tool-item${isActive ? " active" : ""}`;
-        toolElement.dataset.toolId = tool.id;
-        toolElement.dataset.tooltip = tool.actor; // Add tooltip text
-        toolElement.innerHTML = `
+      // Check for duplicates in both saved and active tools
+      const savedTools = getSavedTools();
+      const activeTools = getActiveTools();
+      const allTools = [...savedTools, ...activeTools];
+
+      if (
+        allTools.some(
+          (tool) => tool.actor.toLowerCase() === actor.toLowerCase()
+        )
+      ) {
+        alert("This tool already exists!");
+        return;
+      }
+
+      const tool = {
+        id: Date.now().toString(),
+        actor,
+        active: false,
+      };
+
+      // Save to localStorage
+      savedTools.push(tool);
+      localStorage.setItem("savedTools", JSON.stringify(savedTools));
+
+      // Add to saved tools list and automatically activate it
+      addToActive(tool);
+
+      // Clear the form input
+      clearForm("tool-actor");
+    }
+
+    function saveSource() {
+      const path = document.getElementById("source").value.trim();
+
+      if (!path) {
+        alert("Source path is required!");
+        return;
+      }
+
+      // Check for duplicates in both saved and active sources
+      const savedSources = getSavedSources();
+      const activeSources = getActiveSources();
+      const allSources = [...savedSources, ...activeSources];
+
+      if (
+        allSources.some(
+          (source) => source.path.toLowerCase() === path.toLowerCase()
+        )
+      ) {
+        alert("This source already exists!");
+        return;
+      }
+
+      let split_path = path.split("/");
+
+      const source = {
+        id: Date.now().toString(),
+        path,
+        display_name: split_path[split_path.length - 1],
+        active: false,
+      };
+      console.log("🚀 ~ saveSource ~ source:", source);
+
+      // Save to localStorage
+      savedSources.push(source);
+      localStorage.setItem("savedSources", JSON.stringify(savedSources));
+
+      // Add to saved sources list and automatically activate it
+      addToActiveSources(source);
+
+      // Clear the form input
+      clearForm("source");
+    }
+
+    function getSavedTools() {
+      const tools = localStorage.getItem("savedTools");
+      return tools ? JSON.parse(tools) : [];
+    }
+
+    function getSavedSources() {
+      const tools = localStorage.getItem("savedSources");
+      return tools ? JSON.parse(tools) : [];
+    }
+
+    function getActiveTools() {
+      const tools = localStorage.getItem("activeTools");
+      return tools ? JSON.parse(tools) : [];
+    }
+
+    function getActiveSources() {
+      const tools = localStorage.getItem("activeSources");
+      return tools ? JSON.parse(tools) : [];
+    }
+
+    function loadSavedTools() {
+      const savedToolsList = document.getElementById("saved-tools-list");
+      savedToolsList.innerHTML = "";
+      const savedTools = getSavedTools();
+      const activeTools = getActiveTools();
+
+      // Filter out active tools from saved tools display
+      const availableTools = savedTools.filter(
+        (saved) => !activeTools.some((active) => active.id === saved.id)
+      );
+
+      availableTools.forEach((tool) => addToolToSavedList(tool));
+    }
+
+    function loadSavedSources() {
+      const savedSourcesList = document.getElementById("saved-sources-list");
+      savedSourcesList.innerHTML = "";
+      const savedSources = getSavedSources();
+      const activeSources = getActiveSources();
+
+      // Filter out active sources from saved sources display
+      const availableSources = savedSources.filter(
+        (saved) => !activeSources.some((active) => active.id === saved.id)
+      );
+
+      availableSources.forEach((source) => addSourceToSavedList(source));
+    }
+
+    function loadActiveTools() {
+      const activeToolsList = document.getElementById("active-tools-list");
+      activeToolsList.innerHTML = "";
+      const tools = getActiveTools();
+      tools.forEach((tool) => addToolToActiveList(tool));
+    }
+
+    function loadActiveSources() {
+      const activeSourcesList = document.getElementById(
+        "active-sources-list"
+      );
+      activeSourcesList.innerHTML = "";
+      const sources = getActiveSources();
+      sources.forEach((source) => addSourceToActiveList(source));
+    }
+
+    function addToolToActiveList(tool) {
+      const activeToolsList = document.getElementById("active-tools-list");
+      const toolElement = createToolElement(tool, true);
+      activeToolsList.appendChild(toolElement);
+    }
+
+    function addSourceToActiveList(source) {
+      const activeSourceList = document.getElementById("active-sources-list");
+      const sourceElement = createSourceElement(source, true);
+      activeSourceList.appendChild(sourceElement);
+    }
+
+    function addToActive(tool) {
+      const activeTools = getActiveTools();
+      if (!activeTools.some((t) => t.id === tool.id)) {
+        activeTools.push(tool);
+        localStorage.setItem("activeTools", JSON.stringify(activeTools));
+        addToolToActiveList(tool);
+        // Refresh saved tools list to remove the activated tool
+        loadSavedTools();
+        updateToolsActors();
+        updateToolButton();
+      }
+    }
+
+    function addToActiveSources(source) {
+      const activeSources = getActiveSources();
+      if (!activeSources.some((s) => s.id === source.id)) {
+        activeSources.push(source);
+        localStorage.setItem("activeSources", JSON.stringify(activeSources));
+        addSourceToActiveList(source);
+        // Refresh saved tools list to remove the activated source
+        loadSavedSources();
+        updateSources();
+      }
+    }
+
+    function createToolElement(tool, isActive = false) {
+      const toolElement = document.createElement("div");
+      toolElement.className = `tool-item${isActive ? " active" : ""}`;
+      toolElement.dataset.toolId = tool.id;
+      toolElement.dataset.tooltip = tool.actor; // Add tooltip text
+      toolElement.innerHTML = `
           <div class="tool-item-header">
             <span class="tool-icon"><i class="fas fa-wrench"></i></span>
             <span class="tool-item-name">${tool.actor}</span>
             <div class="tool-actions">
-              ${
-                isActive
-                  ? `
+              ${isActive
+          ? `
                 <button class="tool-action-btn delete-tool" title="Delete">
                   <i class="fas fa-trash"></i>
                 </button>
               `
-                  : `
+          : `
                 <button class="tool-action-btn delete-tool" title="Delete">
                   <i class="fas fa-trash"></i>
                 </button>
               `
-              }
+        }
             </div>
           </div>
         `;
 
-        // Add event listeners
-        const actions = toolElement.querySelector(".tool-actions");
+      // Add event listeners
+      const actions = toolElement.querySelector(".tool-actions");
 
-        if (isActive) {
-          toolElement.addEventListener("click", () => removeFromActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        } else {
-          toolElement.addEventListener("click", () => addToActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        }
-
-        return toolElement;
+      if (isActive) {
+        toolElement.addEventListener("click", () => removeFromActive(tool));
+        actions
+          .querySelector(".delete-tool")
+          .addEventListener("click", (e) => {
+            e.stopPropagation(); // Prevent triggering the parent click
+            deleteTool(tool);
+          });
+      } else {
+        toolElement.addEventListener("click", () => addToActive(tool));
+        actions
+          .querySelector(".delete-tool")
+          .addEventListener("click", (e) => {
+            e.stopPropagation(); // Prevent triggering the parent click
+            deleteTool(tool);
+          });
       }
 
-      function createSourceElement(source, isActive = false) {
-        const sourceElement = document.createElement("div");
-        sourceElement.className = `source-item${isActive ? " active" : ""}`;
-        sourceElement.dataset.sourceId = source.id;
-        sourceElement.dataset.tooltip = source.path; // Add tooltip text
-        sourceElement.innerHTML = `
+      return toolElement;
+    }
+
+    function createSourceElement(source, isActive = false) {
+      const sourceElement = document.createElement("div");
+      sourceElement.className = `source-item${isActive ? " active" : ""}`;
+      sourceElement.dataset.sourceId = source.id;
+      sourceElement.dataset.tooltip = source.path; // Add tooltip text
+      sourceElement.innerHTML = `
 				<div class="source-item-header">
 					<span class="source-icon"><i class="fa-solid fa-book"></i></span>
 					<span class="source-item-name">${source.display_name}</span>
 					<div class="source-actions">
-					${
-            isActive
-              ? `
+					${isActive
+          ? `
 						<button class="source-action-btn delete-source" title="Delete">
 						<i class="fas fa-trash"></i>
 						</button>
 					`
-              : `
+          : `
 						<button class="source-action-btn delete-source" title="Delete">
 						<i class="fas fa-trash"></i>
 						</button>
 					`
-          }
+        }
 					</div>
 				</div>
 				`;
 
-        // Add event listeners
-        const actions = sourceElement.querySelector(".source-actions");
+      // Add event listeners
+      const actions = sourceElement.querySelector(".source-actions");
 
-        if (isActive) {
-          sourceElement.addEventListener("click", () =>
-            removeFromActiveSource(source)
-          );
-          actions
-            .querySelector(".delete-source")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteSource(source);
-            });
-        } else {
-          sourceElement.addEventListener("click", () =>
-            addToActiveSources(source)
-          );
-          actions
-            .querySelector(".delete-source")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteSource(source);
-            });
-        }
-
-        return sourceElement;
-      }
-
-      function addToolToSavedList(tool) {
-        const savedToolsList = document.getElementById("saved-tools-list");
-        const toolElement = createToolElement(tool, false);
-        savedToolsList.appendChild(toolElement);
-      }
-
-      function addSourceToSavedList(source) {
-        const savedSourcesList = document.getElementById("saved-sources-list");
-        const sourceElement = createSourceElement(source, false);
-        savedSourcesList.appendChild(sourceElement);
-      }
-
-      function removeFromActive(tool) {
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-        loadActiveTools();
-        // Refresh saved tools list to show the deactivated tool
-        loadSavedTools();
-        updateToolsActors();
-        updateToolButton();
-      }
-
-      function removeFromActiveSource(source) {
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
+      if (isActive) {
+        sourceElement.addEventListener("click", () =>
+          removeFromActiveSource(source)
         );
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
-        loadActiveSources();
-        // Refresh saved tools list to show the deactivated tool
-        loadSavedSources();
-        updateSources();
-      }
-
-      function deleteTool(tool) {
-        const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("savedTools", JSON.stringify(savedTools));
-
-        // Also remove from active if present
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-
-        loadSavedTools();
-        loadActiveTools();
-        updateToolsActors();
-        updateToolButton();
-      }
-
-      function deleteSource(source) {
-        const savedSources = getSavedSources().filter(
-          (s) => s.id !== source.id
+        actions
+          .querySelector(".delete-source")
+          .addEventListener("click", (e) => {
+            e.stopPropagation(); // Prevent triggering the parent click
+            deleteSource(source);
+          });
+      } else {
+        sourceElement.addEventListener("click", () =>
+          addToActiveSources(source)
         );
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
-
-        // Also remove from active if present
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
-        );
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
-
-        loadSavedSources();
-        loadActiveSources();
-        updateSources();
+        actions
+          .querySelector(".delete-source")
+          .addEventListener("click", (e) => {
+            e.stopPropagation(); // Prevent triggering the parent click
+            deleteSource(source);
+          });
       }
 
-      function updateToolsActors() {
-        const activeTools = getActiveTools();
-        const actors = activeTools.map((tool) => tool.actor);
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        toolsActorsInput.value = actors.join(", ");
-        localStorage.setItem("toolsActors", actors.join(", "));
+      return sourceElement;
+    }
 
-        // Update tools state based on actors
-        if (actors.length === 0) {
-          toolsEnabled = false;
-        }
-        updateToolButton();
+    function addToolToSavedList(tool) {
+      const savedToolsList = document.getElementById("saved-tools-list");
+      const toolElement = createToolElement(tool, false);
+      savedToolsList.appendChild(toolElement);
+    }
+
+    function addSourceToSavedList(source) {
+      const savedSourcesList = document.getElementById("saved-sources-list");
+      const sourceElement = createSourceElement(source, false);
+      savedSourcesList.appendChild(sourceElement);
+    }
+
+    function removeFromActive(tool) {
+      const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
+      localStorage.setItem("activeTools", JSON.stringify(activeTools));
+      loadActiveTools();
+      // Refresh saved tools list to show the deactivated tool
+      loadSavedTools();
+      updateToolsActors();
+      updateToolButton();
+    }
+
+    function removeFromActiveSource(source) {
+      const activeSources = getActiveSources().filter(
+        (s) => s.id !== source.id
+      );
+      localStorage.setItem("activeSources", JSON.stringify(activeSources));
+      loadActiveSources();
+      // Refresh saved tools list to show the deactivated tool
+      loadSavedSources();
+      updateSources();
+    }
+
+    function deleteTool(tool) {
+      const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
+      localStorage.setItem("savedTools", JSON.stringify(savedTools));
+
+      // Also remove from active if present
+      const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
+      localStorage.setItem("activeTools", JSON.stringify(activeTools));
+
+      loadSavedTools();
+      loadActiveTools();
+      updateToolsActors();
+      updateToolButton();
+    }
+
+    function deleteSource(source) {
+      const savedSources = getSavedSources().filter(
+        (s) => s.id !== source.id
+      );
+      localStorage.setItem("savedSources", JSON.stringify(savedSources));
+
+      // Also remove from active if present
+      const activeSources = getActiveSources().filter(
+        (s) => s.id !== source.id
+      );
+      localStorage.setItem("activeSources", JSON.stringify(activeSources));
+
+      loadSavedSources();
+      loadActiveSources();
+      updateSources();
+    }
+
+    function updateToolsActors() {
+      const activeTools = getActiveTools();
+      const actors = activeTools.map((tool) => tool.actor);
+      const toolsActorsInput = document.getElementById("tools-actors-input");
+      toolsActorsInput.value = actors.join(", ");
+      localStorage.setItem("toolsActors", actors.join(", "));
+
+      // Update tools state based on actors
+      if (actors.length === 0) {
+        toolsEnabled = false;
       }
+      updateToolButton();
+    }
 
-      function updateSources() {
-        const activeSources = getActiveSources();
-        const paths = activeSources.map((source) => source.path);
+    function updateSources() {
+      const activeSources = getActiveSources();
+      const paths = activeSources.map((source) => source.path);
 
-        const sourcesInput = document.getElementById("sources-input");
-        sourcesInput.value = paths.join(", ");
+      const sourcesInput = document.getElementById("sources-input");
+      sourcesInput.value = paths.join(", ");
 
-        localStorage.setItem("sources", paths.join(", "));
+      localStorage.setItem("sources", paths.join(", "));
 
-        // Update sources state based on paths
-        if (paths.length === 0) {
-          sourcesEnabled = false;
-        }
+      // Update sources state based on paths
+      if (paths.length === 0) {
+        sourcesEnabled = false;
       }
+    }
 
-      // Toggle sidebar visibility
-      function toggleSidebar() {
-        const sidebar = document.getElementById("sidebar");
-        const mainContent = document.getElementById("main-content");
-        const inputContainer = document.getElementById("input-container");
+    // Toggle sidebar visibility
+    function toggleSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      const mainContent = document.getElementById("main-content");
+      const inputContainer = document.getElementById("input-container");
 
-        sidebarVisible = !sidebarVisible;
-        localStorage.setItem("sidebarVisible", sidebarVisible);
+      sidebarVisible = !sidebarVisible;
+      localStorage.setItem("sidebarVisible", sidebarVisible);
 
-        sidebar.classList.toggle("collapsed");
-        mainContent.classList.toggle("sidebar-collapsed");
-        inputContainer.classList.toggle("sidebar-collapsed");
+      sidebar.classList.toggle("collapsed");
+      mainContent.classList.toggle("sidebar-collapsed");
+      inputContainer.classList.toggle("sidebar-collapsed");
 
-        // Force recalculation of chat container scroll
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      }
+      // Force recalculation of chat container scroll
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
 
-      // Add event listener for sidebar toggle
-      document
-        .getElementById("sidebar-toggle")
-        .addEventListener("click", toggleSidebar);
+    // Add event listener for sidebar toggle
+    document
+      .getElementById("sidebar-toggle")
+      .addEventListener("click", toggleSidebar);
 
-      // Initialize sidebar on page load
-      document.addEventListener("DOMContentLoaded", () => {
-        initializeSidebar();
+    // Initialize sidebar on page load
+    document.addEventListener("DOMContentLoaded", () => {
+      initializeSidebar();
 
-        // Initialize send button functionality
-        const sendButton = document.querySelector(".send-button");
-        sendButton.addEventListener("click", async () => {
-          if (!isGenerating) {
-            const endpoint = thinkEnabled ? "/think" : "/chat";
-            await sendQuery(endpoint);
-          }
-        });
-
-        // Load stored tools state
-        const storedToolsEnabled = localStorage.getItem("toolsEnabled");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const storedToolsActors = localStorage.getItem("toolsActors");
-
-        // Load stored sources state
-        const sourcesInput = document.getElementById("sources-input");
-        const storedSources = localStorage.getItem("sources");
-
-        // First load the tools actors and sources
-        if (storedToolsActors) {
-          toolsActorsInput.value = storedToolsActors;
+      // Initialize send button functionality
+      const sendButton = document.querySelector(".send-button");
+      sendButton.addEventListener("click", async () => {
+        if (!isGenerating) {
+          const endpoint = thinkEnabled ? "/think" : "/chat";
+          await sendQuery(endpoint);
         }
-
-        if (storedSources) {
-          sourcesInput.value = storedSources;
-        }
-
-        // Then set the tools state
-        if (storedToolsEnabled !== null) {
-          toolsEnabled = storedToolsEnabled === "true";
-
-          // Validate the state against available tools
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
-
-          if (toolsActorsList.length === 0) {
-            toolsEnabled = false;
-          }
-        }
-
-        updateToolButton();
-        updateThinkButton();
-
-        // Add change listener for tools actors
-        toolsActorsInput.addEventListener("change", function () {
-          localStorage.setItem("toolsActors", toolsActorsInput.value);
-          updateToolButton();
-        });
-
-        // Add click handler for input container
-        const inputContainer = document.getElementById("input-container");
-        const queryInput = document.getElementById("query-input");
-
-        inputContainer.addEventListener("click", (e) => {
-          // Always focus the input, but let button clicks still work
-          queryInput.focus();
-          // Place cursor at the end of the text
-          const len = queryInput.value.length;
-          queryInput.setSelectionRange(len, len);
-
-          // Don't prevent default for buttons so they still work
-          if (e.target.closest("button")) {
-            e.stopPropagation();
-          }
-        });
-
-        // Remove the utilities container click handler since we want clicks there to work
-        // ... existing code ...
       });
 
-      // Initialize styles for disabled button state
-      (function () {
-        const style = document.createElement("style");
-        style.textContent = `
+      // Load stored tools state
+      const storedToolsEnabled = localStorage.getItem("toolsEnabled");
+      const toolsActorsInput = document.getElementById("tools-actors-input");
+      const storedToolsActors = localStorage.getItem("toolsActors");
+
+      // Load stored sources state
+      const sourcesInput = document.getElementById("sources-input");
+      const storedSources = localStorage.getItem("sources");
+
+      // First load the tools actors and sources
+      if (storedToolsActors) {
+        toolsActorsInput.value = storedToolsActors;
+      }
+
+      if (storedSources) {
+        sourcesInput.value = storedSources;
+      }
+
+      // Then set the tools state
+      if (storedToolsEnabled !== null) {
+        toolsEnabled = storedToolsEnabled === "true";
+
+        // Validate the state against available tools
+        const toolsActorsList = toolsActorsInput.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s !== "");
+
+        if (toolsActorsList.length === 0) {
+          toolsEnabled = false;
+        }
+      }
+
+      updateToolButton();
+      updateThinkButton();
+
+      // Add change listener for tools actors
+      toolsActorsInput.addEventListener("change", function () {
+        localStorage.setItem("toolsActors", toolsActorsInput.value);
+        updateToolButton();
+      });
+
+      // Add click handler for input container
+      const inputContainer = document.getElementById("input-container");
+      const queryInput = document.getElementById("query-input");
+
+      inputContainer.addEventListener("click", (e) => {
+        // Always focus the input, but let button clicks still work
+        queryInput.focus();
+        // Place cursor at the end of the text
+        const len = queryInput.value.length;
+        queryInput.setSelectionRange(len, len);
+
+        // Don't prevent default for buttons so they still work
+        if (e.target.closest("button")) {
+          e.stopPropagation();
+        }
+      });
+
+      // Remove the utilities container click handler since we want clicks there to work
+      // ... existing code ...
+    });
+
+    // Initialize styles for disabled button state
+    (function () {
+      const style = document.createElement("style");
+      style.textContent = `
           .action-button[style*="cursor: not-allowed"]:hover {
             background: var(--bg-secondary) !important;
             border-color: var(--border-color) !important;
           }
         `;
-        document.head.appendChild(style);
-      })();
+      document.head.appendChild(style);
+    })();
 
-      function initializeErrorToggles(container) {
-        container.querySelectorAll(".error-toggle").forEach((toggle) => {
-          if (!toggle.hasListener) {
-            toggle.addEventListener("click", function () {
-              const content =
-                this.parentElement.querySelector(".error-content");
-              const isHidden =
-                content.style.display === "none" || !content.style.display;
-              content.style.display = isHidden ? "block" : "none";
-              this.textContent = isHidden ? "▼" : "▶";
-            });
-            toggle.hasListener = true;
-          }
-        });
-      }
-
-      // Add stop generation functionality
-      function stopGeneration() {
-        if (currentController) {
-          currentController.abort();
-          currentController = null;
+    function initializeErrorToggles(container) {
+      container.querySelectorAll(".error-toggle").forEach((toggle) => {
+        if (!toggle.hasListener) {
+          toggle.addEventListener("click", function () {
+            const content =
+              this.parentElement.querySelector(".error-content");
+            const isHidden =
+              content.style.display === "none" || !content.style.display;
+            content.style.display = isHidden ? "block" : "none";
+            this.textContent = isHidden ? "▼" : "▶";
+          });
+          toggle.hasListener = true;
         }
-        resetGenerationState();
-      }
-
-      function resetGenerationState() {
-        isGenerating = false;
-        const stopButton = document.getElementById("stop-button");
-        const sendButton = document.querySelector(".send-button");
-        stopButton.style.display = "none";
-        sendButton.style.display = "flex";
-
-        // Check input content to set correct button state
-        sendButton.disabled = !queryInput.value.trim();
-
-        // Reset thinking state if active
-        if (isThinkingActive) {
-          isThinkingActive = false;
-          if (thinkingDiv) {
-            const thinkingText = thinkingDiv.querySelector(".thinking-text");
-            if (thinkingText) {
-              const duration = (
-                (Date.now() - thinkingStartTime) /
-                1000
-              ).toFixed(1);
-              thinkingText.textContent = `Thought stopped after ${duration}s`;
-              thinkingText.classList.add("static");
-            }
-          }
-          thinkingStartTime = null;
-        }
-
-        // If we have a partial assistant message, finalize it
-        if (assistantTextBuffer) {
-          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          if (
-            !messageHistory.some(
-              (msg) =>
-                msg.role === "assistant" && msg.content === assistantTextBuffer
-            )
-          ) {
-            messageHistory.push({
-              role: "assistant",
-              content: assistantTextBuffer,
-            });
-          }
-          assistantTextBuffer = "";
-        }
-
-        const indicators = document.querySelectorAll(".typing-indicator");
-        indicators.forEach((indicator) => indicator.remove());
-
-        // Re-enable input
-        queryInput.disabled = false;
-        queryInput.focus();
-      }
-
-      // Add input validation for send button
-      queryInput.addEventListener("input", function () {
-        const sendButton = document.querySelector(".send-button");
-        sendButton.disabled = !this.value.trim();
-        resizeTextarea();
       });
-    </script>
-  </body>
+    }
+
+    // Add stop generation functionality
+    function stopGeneration() {
+      if (currentController) {
+        currentController.abort();
+        currentController = null;
+      }
+      resetGenerationState();
+    }
+
+    function resetGenerationState() {
+      isGenerating = false;
+      const stopButton = document.getElementById("stop-button");
+      const sendButton = document.querySelector(".send-button");
+      stopButton.style.display = "none";
+      sendButton.style.display = "flex";
+
+      // Check input content to set correct button state
+      sendButton.disabled = !queryInput.value.trim();
+
+      // Reset thinking state if active
+      if (isThinkingActive) {
+        isThinkingActive = false;
+        if (thinkingDiv) {
+          const thinkingText = thinkingDiv.querySelector(".thinking-text");
+          if (thinkingText) {
+            const duration = (
+              (Date.now() - thinkingStartTime) /
+              1000
+            ).toFixed(1);
+            thinkingText.textContent = `Thought stopped after ${duration}s`;
+            thinkingText.classList.add("static");
+          }
+        }
+        thinkingStartTime = null;
+      }
+
+      // If we have a partial assistant message, finalize it
+      if (assistantTextBuffer) {
+        createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+        if (
+          !messageHistory.some(
+            (msg) =>
+              msg.role === "assistant" && msg.content === assistantTextBuffer
+          )
+        ) {
+          messageHistory.push({
+            role: "assistant",
+            content: assistantTextBuffer,
+          });
+        }
+        assistantTextBuffer = "";
+      }
+
+      const indicators = document.querySelectorAll(".typing-indicator");
+      indicators.forEach((indicator) => indicator.remove());
+
+      // Re-enable input
+      queryInput.disabled = false;
+      queryInput.focus();
+    }
+
+    // Add input validation for send button
+    queryInput.addEventListener("input", function () {
+      const sendButton = document.querySelector(".send-button");
+      sendButton.disabled = !this.value.trim();
+      resizeTextarea();
+    });
+  </script>
+</body>
+
 </html>
