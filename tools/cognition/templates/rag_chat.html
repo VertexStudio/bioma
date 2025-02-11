@@ -2580,17 +2580,12 @@
       let final_array = [...notSaved, ...savedSources];
       console.log("🚀 ~ fetchAvailableSources ~ final_array:", final_array)
 
-      final_array.forEach(source => {
-        addSourceToSavedList(source);
-      });
-
-      active.forEach(source => {
-        addSourceToActiveList(source);
-      });
-
       localStorage.setItem("savedSources", JSON.stringify(final_array));
 
       localStorage.setItem("activeSources", JSON.stringify(active));
+
+      loadSavedSources();
+      loadSavedSources();
 
       return body.sources;
     }
