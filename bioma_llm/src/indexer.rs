@@ -327,7 +327,6 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             info!("Indexing glob: {}", &full_glob);
-            let full_glob_clone = full_glob.clone();
             let paths = tokio::task::spawn_blocking(move || {
                 let mut paths = Vec::new();
                 for entry in glob::glob(&full_glob).unwrap().flatten() {
@@ -354,8 +353,12 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             for pathbuf in paths {
-                let uri = pathbuf.to_string_lossy().to_string();
-                let source = ContentSource { source: full_glob_clone.clone(), uri: uri.clone() };
+                // Convert the full path to a path relative to the local store directory
+                let local_store_dir = ctx.engine().local_store_dir();
+                let relative_path = pathdiff::diff_paths(&pathbuf, local_store_dir)
+                    .ok_or_else(|| IndexerError::Other("Failed to get relative path".to_string()))?;
+                let uri = relative_path.to_string_lossy().to_string();
+                let source = ContentSource { source: glob.clone(), uri: uri.clone() };
 
                 // Check if source already exists before processing
                 let query =
@@ -510,12 +513,13 @@ impl Message<DeleteSource> for Indexer {
 
         // Process file deletions
         for source in &delete_result.deleted_sources {
-            let source_path = std::path::Path::new(&source.uri);
+            let local_store_dir = ctx.engine().local_store_dir();
+            let source_path = local_store_dir.join(&source.uri);
             if source_path.exists() {
                 if source_path.is_dir() {
-                    tokio::fs::remove_dir_all(source_path).await.ok();
+                    tokio::fs::remove_dir_all(&source_path).await.ok();
                 } else {
-                    tokio::fs::remove_file(source_path).await.ok();
+                    tokio::fs::remove_file(&source_path).await.ok();
                 }
             }
         }
