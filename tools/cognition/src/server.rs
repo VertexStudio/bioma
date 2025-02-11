@@ -553,7 +553,36 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
-            let mut context_message = ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
+
+            // Find system message and filter messages in one pass
+            let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
+                let mut sys_msg = None;
+                let filtered = body.messages[..body.messages.len() - 1]
+                    .iter()
+                    .filter(|msg| {
+                        if msg.role == MessageRole::System {
+                            sys_msg = Some((*msg).clone());
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                (sys_msg, filtered)
+            };
+
+            // Create the system message with context
+            let mut context_message = if let Some(sys_msg) = system_message {
+                // Use existing system message and append context
+                ChatMessage::system(format!(
+                    "Use the following context to answer the user's query:\n{}\n\n{}",
+                    context_content, sys_msg.content
+                ))
+            } else {
+                // Use default prompt
+                ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content))
+            };
 
             // Add image handling here
             if let Some(ctx) = context
@@ -592,17 +621,14 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let conversation = {
-                    let mut conv = Vec::with_capacity(body.messages.len() + 1);
-                    if !body.messages.is_empty() {
-                        conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
-                        conv.push(context_message.clone());
-                        conv.push(body.messages[body.messages.len() - 1].clone());
-                    } else {
-                        conv.push(context_message.clone());
-                    }
-                    conv
-                };
+                let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+                if !body.messages.is_empty() {
+                    conversation.extend(filtered_messages);
+                    conversation.push(context_message.clone());
+                    conversation.push(body.messages[body.messages.len() - 1].clone());
+                } else {
+                    conversation.push(context_message.clone());
+                }
 
                 // If caller provided tools in the request body, then we don't know how to execute them
                 // so we assume the caller knows what they are doing and we just generate tool calls
@@ -862,7 +888,29 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         retrieved.to_markdown()
     };
 
-    let system_prompt = if !body.tools.is_empty() {
+    // Find system message and filter messages in one pass
+    let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
+        let mut sys_msg = None;
+        let filtered = body.messages[..body.messages.len() - 1]
+            .iter()
+            .filter(|msg| {
+                if msg.role == MessageRole::System {
+                    sys_msg = Some((*msg).clone());
+                    false
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect();
+        (sys_msg, filtered)
+    };
+
+    // Build the system prompt based on system message or tools
+    let system_prompt = if let Some(sys_msg) = system_message {
+        // If system message exists, use it directly with context
+        format!("Use the following context to answer the user's query:\n{}\n\n{}", context_content, sys_msg.content)
+    } else if !body.tools.is_empty() {
         // If tools are provided in the request, use those directly
         let tools_str = body
             .tools
@@ -879,6 +927,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             })
             .collect::<Vec<_>>()
             .join("\n\n");
+
         format!(
             "{}\n\nADDITIONAL CONTEXT:\n{}",
             data.config.tool_prompt.replace("{tools_list}", &tools_str),
@@ -903,8 +952,11 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
                     }
                     tools.extend(tool_info);
                 }
-                Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e)),
-            };
+                Err(e) => {
+                    error!("Error fetching tools: {:?}", e);
+                    return HttpResponse::InternalServerError().body(format!("Error fetching tools: {}", e));
+                }
+            }
         }
 
         // Then build the tools string once we have all tools
@@ -934,6 +986,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             format!("{}\n\nADDITIONAL CONTEXT:\n{}", data.config.chat_prompt, context_content)
         }
     };
+
     let mut context_message = ChatMessage::system(system_prompt);
 
     if let Some(ctx) =
@@ -954,9 +1007,11 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         }
     }
 
-    let mut conversation = body.messages.clone();
-    if !conversation.is_empty() {
-        conversation.insert(conversation.len() - 1, context_message.clone());
+    let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+    if !body.messages.is_empty() {
+        conversation.extend(filtered_messages);
+        conversation.push(context_message.clone());
+        conversation.push(body.messages[body.messages.len() - 1].clone());
     } else {
         conversation.push(context_message.clone());
     }
@@ -1123,7 +1178,35 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            let mut context_message = ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content));
+            // Find system message and filter messages in one pass
+            let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
+                let mut sys_msg = None;
+                let filtered = body.messages[..body.messages.len() - 1]
+                    .iter()
+                    .filter(|msg| {
+                        if msg.role == MessageRole::System {
+                            sys_msg = Some((*msg).clone());
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                (sys_msg, filtered)
+            };
+
+            // Create the system message with context
+            let mut context_message = if let Some(sys_msg) = system_message {
+                // Use existing system message and append context
+                ChatMessage::system(format!(
+                    "Use the following context to answer the user's query:\n{}\n\n{}",
+                    context_content, sys_msg.content
+                ))
+            } else {
+                // Use default prompt
+                ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content))
+            };
 
             // Handle image context if present
             if let Some(ctx) = context
@@ -1157,9 +1240,11 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                 }
             }
 
-            let mut conversation = body.messages.clone();
-            if !conversation.is_empty() {
-                conversation.insert(conversation.len() - 1, context_message.clone());
+            let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+            if !body.messages.is_empty() {
+                conversation.extend(filtered_messages);
+                conversation.push(context_message.clone());
+                conversation.push(body.messages[body.messages.len() - 1].clone());
             } else {
                 conversation.push(context_message.clone());
             }
