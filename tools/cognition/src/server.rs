@@ -554,8 +554,23 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             // Create a system message containing the retrieved context
             let context_content = context.to_markdown();
 
-            // Find existing system message if any
-            let system_message = body.messages.iter().find(|msg| msg.role == MessageRole::System);
+            // Find system message and filter messages in one pass
+            let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
+                let mut sys_msg = None;
+                let filtered = body.messages[..body.messages.len() - 1]
+                    .iter()
+                    .filter(|msg| {
+                        if msg.role == MessageRole::System {
+                            sys_msg = Some((*msg).clone());
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                (sys_msg, filtered)
+            };
 
             // Create the system message with context
             let mut context_message = if let Some(sys_msg) = system_message {
@@ -606,14 +621,9 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let mut conversation = body.messages.clone();
-                if !conversation.is_empty() {
-                    // Filter out any existing system message to avoid duplication
-                    conversation = conversation[..conversation.len() - 1]
-                        .iter()
-                        .filter(|msg| msg.role != MessageRole::System)
-                        .cloned()
-                        .collect();
+                let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+                if !body.messages.is_empty() {
+                    conversation.extend(filtered_messages);
                     conversation.push(context_message.clone());
                     conversation.push(body.messages[body.messages.len() - 1].clone());
                 } else {
@@ -880,8 +890,23 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         retrieved.to_markdown()
     };
 
-    // Find existing system message if any
-    let system_message = body.messages.iter().find(|msg| msg.role == MessageRole::System);
+    // Find system message and filter messages in one pass
+    let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
+        let mut sys_msg = None;
+        let filtered = body.messages[..body.messages.len() - 1]
+            .iter()
+            .filter(|msg| {
+                if msg.role == MessageRole::System {
+                    sys_msg = Some((*msg).clone());
+                    false
+                } else {
+                    true
+                }
+            })
+            .cloned()
+            .collect();
+        (sys_msg, filtered)
+    };
 
     // Build the system prompt based on system message or tools
     let system_prompt = if let Some(sys_msg) = system_message {
@@ -984,14 +1009,9 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         }
     }
 
-    let mut conversation = body.messages.clone();
-    if !conversation.is_empty() {
-        // Filter out any existing system message to avoid duplication
-        conversation = conversation[..conversation.len() - 1]
-            .iter()
-            .filter(|msg| msg.role != MessageRole::System)
-            .cloned()
-            .collect();
+    let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+    if !body.messages.is_empty() {
+        conversation.extend(filtered_messages);
         conversation.push(context_message.clone());
         conversation.push(body.messages[body.messages.len() - 1].clone());
     } else {
@@ -1160,8 +1180,23 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Find existing system message if any
-            let system_message = body.messages.iter().find(|msg| msg.role == MessageRole::System);
+            // Find system message and filter messages in one pass
+            let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
+                let mut sys_msg = None;
+                let filtered = body.messages[..body.messages.len() - 1]
+                    .iter()
+                    .filter(|msg| {
+                        if msg.role == MessageRole::System {
+                            sys_msg = Some((*msg).clone());
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                    .cloned()
+                    .collect();
+                (sys_msg, filtered)
+            };
 
             // Create the system message with context
             let mut context_message = if let Some(sys_msg) = system_message {
@@ -1207,9 +1242,11 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                 }
             }
 
-            let mut conversation = body.messages.clone();
-            if !conversation.is_empty() {
-                conversation.insert(conversation.len() - 1, context_message.clone());
+            let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+            if !body.messages.is_empty() {
+                conversation.extend(filtered_messages);
+                conversation.push(context_message.clone());
+                conversation.push(body.messages[body.messages.len() - 1].clone());
             } else {
                 conversation.push(context_message.clone());
             }
