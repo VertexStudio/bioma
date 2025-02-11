@@ -185,8 +185,11 @@ impl Indexer {
     ) -> Result<IndexResult, IndexerError> {
         match content {
             Content::Image { path } => {
-                let path_clone = path.clone();
-                // let source_clone = source.clone();
+                // Get the full path by joining with local store directory
+                let local_store_dir = ctx.engine().local_store_dir();
+                let full_path = local_store_dir.join(&path);
+
+                let path_clone = full_path.to_string_lossy().into_owned();
                 let metadata = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::open(&path).ok()?;
                     let reader = std::io::BufReader::new(file);
