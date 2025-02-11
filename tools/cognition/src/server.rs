@@ -606,17 +606,21 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
-                let conversation = {
-                    let mut conv = Vec::with_capacity(body.messages.len() + 1);
-                    if !body.messages.is_empty() {
-                        conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
-                        conv.push(context_message.clone());
-                        conv.push(body.messages[body.messages.len() - 1].clone());
-                    } else {
-                        conv.push(context_message.clone());
-                    }
-                    conv
-                };
+                let mut conversation = body.messages.clone();
+                if !conversation.is_empty() {
+                    // Filter out any existing system message to avoid duplication
+                    conversation = conversation[..conversation.len() - 1]
+                        .iter()
+                        .filter(|msg| msg.role != MessageRole::System)
+                        .cloned()
+                        .collect();
+                    conversation.push(context_message.clone());
+                    conversation.push(body.messages[body.messages.len() - 1].clone());
+                } else {
+                    conversation.push(context_message.clone());
+                }
+
+                println!("conversation: {:#?}", conversation);
 
                 // If caller provided tools in the request body, then we don't know how to execute them
                 // so we assume the caller knows what they are doing and we just generate tool calls
@@ -982,7 +986,14 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
 
     let mut conversation = body.messages.clone();
     if !conversation.is_empty() {
-        conversation.insert(conversation.len() - 1, context_message.clone());
+        // Filter out any existing system message to avoid duplication
+        conversation = conversation[..conversation.len() - 1]
+            .iter()
+            .filter(|msg| msg.role != MessageRole::System)
+            .cloned()
+            .collect();
+        conversation.push(context_message.clone());
+        conversation.push(body.messages[body.messages.len() - 1].clone());
     } else {
         conversation.push(context_message.clone());
     }
