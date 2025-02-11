@@ -2429,7 +2429,7 @@
         toolActorInput.addEventListener("keypress", function (e) {
           if (e.key === "Enter") {
             e.preventDefault(); // Prevent form submission
-            saveSource();
+            saveTool();
           }
         });
 
@@ -2696,10 +2696,10 @@
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item${isActive ? " active" : ""}`;
         sourceElement.dataset.sourceId = source.id;
-        sourceElement.dataset.sourcetip = source.path; // Add tooltip text
+        sourceElement.dataset.tooltip = source.path; // Add tooltip text
         sourceElement.innerHTML = `
 				<div class="source-item-header">
-					<span class="source-icon"><i class="fas fa-wrench"></i></span>
+					<span class="source-icon"><i class="fa-solid fa-book"></i></span>
 					<span class="source-item-name">${source.display_name}</span>
 					<div class="source-actions">
 					${
