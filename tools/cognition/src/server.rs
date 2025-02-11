@@ -336,8 +336,14 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     let response =
         user_actor.send_and_wait_reply::<Indexer, IndexGlobs>(index_globs, &data.indexer, SendOptions::default()).await;
     match response {
-        Ok(_) => HttpResponse::Ok().body("OK"),
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
+        Ok(indexed) => {
+            info!("Indexed {} files, cached {} files", indexed.indexed, indexed.cached);
+            HttpResponse::Ok().json(indexed)
+        }
+        Err(e) => {
+            error!("Indexing error: {}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
     }
 }
 

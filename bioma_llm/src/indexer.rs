@@ -80,9 +80,24 @@ fn default_chunk_batch_size() -> usize {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexedSource {
+    pub source: String,
+    pub uri: String,
+    pub status: IndexStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IndexStatus {
+    Indexed,
+    Cached,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Indexed {
     pub indexed: usize,
     pub cached: usize,
+    pub sources: Vec<IndexedSource>,
 }
 
 #[derive(Display, Debug, Clone, Serialize, Deserialize)]
@@ -317,6 +332,7 @@ impl Message<IndexGlobs> for Indexer {
         let total_index_globs_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
+        let mut sources = Vec::new();
 
         for glob in message.globs.iter() {
             let local_store_dir = ctx.engine().local_store_dir();
@@ -349,6 +365,11 @@ impl Message<IndexGlobs> for Indexer {
 
             let Ok(paths) = paths else {
                 warn!("Skipping glob: {}", &glob);
+                sources.push(IndexedSource {
+                    source: glob.clone(),
+                    uri: glob.clone(),
+                    status: IndexStatus::Failed("Invalid glob pattern".to_string()),
+                });
                 continue;
             };
 
@@ -360,26 +381,28 @@ impl Message<IndexGlobs> for Indexer {
                 let uri = relative_path.to_string_lossy().to_string();
                 let source = ContentSource { source: glob.clone(), uri: uri.clone() };
 
-                // Check if source already exists before processing
+                // Check if source already exists
                 let query =
                     format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
-                let sources = ctx
-                    .engine()
-                    .db()
+                let db = ctx.engine().db();
+                let mut results = db
                     .lock()
                     .await
                     .query(&query)
                     .bind(("source", source.source.clone()))
                     .bind(("uri", source.uri.clone()))
-                    .await;
+                    .await
+                    .map_err(SystemActorError::from)?;
 
-                if let Ok(mut sources) = sources {
-                    let sources: Vec<ContentSource> = sources.take(0).map_err(SystemActorError::from)?;
-                    if !sources.is_empty() {
-                        info!("Content already indexed with URI: {} {}", source.source, source.uri);
-                        cached += 1;
-                        continue;
-                    }
+                let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
+                if !existing_sources.is_empty() {
+                    cached += 1;
+                    sources.push(IndexedSource {
+                        source: source.source.clone(),
+                        uri: source.uri.clone(),
+                        status: IndexStatus::Cached,
+                    });
+                    continue;
                 }
 
                 info!("Indexing path: {}", &pathbuf.display());
@@ -405,6 +428,11 @@ impl Message<IndexGlobs> for Indexer {
                                 Ok(content) => Content::Text { content, text_type: TextType::Pdf, chunk_config },
                                 Err(e) => {
                                     error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                                    sources.push(IndexedSource {
+                                        source: glob.clone(),
+                                        uri: uri.clone(),
+                                        status: IndexStatus::Failed(format!("PDF conversion error: {}", e)),
+                                    });
                                     continue;
                                 }
                             }
@@ -454,38 +482,57 @@ impl Message<IndexGlobs> for Indexer {
                     }
                 };
 
-                let mut embeddings_ids: Vec<RecordId> = Vec::new();
-
-                match self.index_content(ctx, source.clone(), content, embeddings_id).await? {
-                    IndexResult::Indexed(ids) => {
-                        embeddings_ids.extend(ids);
-                        if !embeddings_ids.is_empty() {
+                // Process content
+                match self.index_content(ctx, source.clone(), content, embeddings_id).await {
+                    Ok(IndexResult::Indexed(ids)) => {
+                        if !ids.is_empty() {
                             indexed += 1;
+                            sources.push(IndexedSource {
+                                source: source.source.clone(),
+                                uri: source.uri.clone(),
+                                status: IndexStatus::Indexed,
+                            });
+                            let source_query = include_str!("../sql/source.surql");
+                            ctx.engine()
+                                .db()
+                                .lock()
+                                .await
+                                .query(*&source_query)
+                                .bind(("source", source.source.clone()))
+                                .bind(("uri", source.uri.clone()))
+                                .bind(("emb_ids", ids))
+                                .bind(("prefix", self.embeddings.table_prefix()))
+                                .await
+                                .map_err(SystemActorError::from)
+                                .unwrap();
+                        } else {
+                            sources.push(IndexedSource {
+                                source: source.source.clone(),
+                                uri: source.uri.clone(),
+                                status: IndexStatus::Failed("No embeddings generated".to_string()),
+                            });
                         }
                     }
-                    IndexResult::Failed => continue,
-                }
-
-                if !embeddings_ids.is_empty() {
-                    let source_query = include_str!("../sql/source.surql");
-                    ctx.engine()
-                        .db()
-                        .lock()
-                        .await
-                        .query(*&source_query)
-                        .bind(("source", source.source.clone()))
-                        .bind(("uri", source.uri.clone()))
-                        .bind(("emb_ids", embeddings_ids))
-                        .bind(("prefix", self.embeddings.table_prefix()))
-                        .await
-                        .map_err(SystemActorError::from)
-                        .unwrap();
+                    Ok(IndexResult::Failed) => {
+                        sources.push(IndexedSource {
+                            source: source.source.clone(),
+                            uri: source.uri.clone(),
+                            status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
+                        });
+                    }
+                    Err(e) => {
+                        sources.push(IndexedSource {
+                            source: source.source.clone(),
+                            uri: source.uri.clone(),
+                            status: IndexStatus::Failed(format!("Indexing error: {}", e)),
+                        });
+                    }
                 }
             }
         }
 
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
-        ctx.reply(Indexed { indexed, cached }).await?;
+        ctx.reply(Indexed { indexed, cached, sources }).await?;
         Ok(())
     }
 }
