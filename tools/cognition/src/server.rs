@@ -2,6 +2,7 @@ use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
+    http::Method,
     middleware::Logger,
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
@@ -13,8 +14,8 @@ use api_schema::{
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
+use bioma_llm::{prelude::*, retriever::ListSources};
 use bioma_tool::client::ListTools;
 use clap::Parser;
 use cognition::{
@@ -37,6 +38,9 @@ use utoipa::{openapi::ServerBuilder, OpenApi};
 
 mod api_schema;
 mod server_config;
+
+const UPLOAD_MEMORY_LIMIT: usize = 50 * 1024 * 1024; // 50MB in bytes
+const UPLOAD_TOTAL_LIMIT: usize = 100 * 1024 * 1024; // 100MB in bytes
 
 struct AppState {
     config: ServerConfig,
@@ -140,6 +144,12 @@ struct Uploaded {
     message: String,
     paths: Vec<std::path::PathBuf>,
     size: usize,
+}
+
+impl Default for UploadConfig {
+    fn default() -> Self {
+        Self { max_file_size: UPLOAD_TOTAL_LIMIT, max_memory_buffer: UPLOAD_MEMORY_LIMIT }
+    }
 }
 
 #[utoipa::path(
@@ -275,6 +285,32 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
             }
         }
     }
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+struct UploadConfig {
+    /// Maximum total file size in bytes
+    max_file_size: usize,
+    /// Maximum memory buffer size in bytes
+    max_memory_buffer: usize,
+}
+
+#[utoipa::path(
+    options,
+    path = "/upload",
+    description = "Get upload configuration limits.",
+    responses(
+        (status = 200, description = "Upload configuration with size limits in bytes", body = UploadConfig, content_type = "application/json", examples(
+            ("default" = (summary = "Default configuration", value = json!({
+                "max_file_size": UPLOAD_TOTAL_LIMIT,
+                "max_memory_buffer": UPLOAD_MEMORY_LIMIT
+            })))
+        )),
+    )
+)]
+async fn upload_config() -> impl Responder {
+    let config = UploadConfig::default();
+    HttpResponse::Ok().append_header(("Content-Type", "application/json")).json(config)
 }
 
 #[utoipa::path(
@@ -1405,9 +1441,57 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().content_type("application/javascript").body(js_content)
 }
 
+#[utoipa::path(
+    get,
+    path = "/sources",
+    description = "List all indexed sources with their embedding counts.",
+    responses(
+        (status = 200, description = "List of sources with their embedding counts"),
+    )
+)]
+async fn list_sources(data: web::Data<AppState>) -> HttpResponse {
+    let user_actor = match data.user_actor().await {
+        Ok(actor) => actor,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    info!("Fetching list of sources");
+    let response = user_actor
+        .send_and_wait_reply::<Retriever, ListSources>(
+            ListSources,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
+
+    match response {
+        Ok(sources) => HttpResponse::Ok().json(sources),
+        Err(e) => {
+            error!("Error fetching sources: {:?}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, think, upload, delete_source, embed, rerank, dashboard),
+    paths(
+        health,
+        hello,
+        reset,
+        index,
+        retrieve,
+        ask,
+        chat,
+        think,
+        upload,
+        upload_config,
+        delete_source,
+        embed,
+        rerank,
+        dashboard,
+        list_sources
+    ),
     info(
         title = "Cognition API",
         version = "0.1.0",
@@ -1567,8 +1651,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .app_data(data.clone())
             .app_data(
                 actix_multipart::form::MultipartFormConfig::default()
-                    .memory_limit(50 * 1024 * 1024)
-                    .total_limit(100 * 1024 * 1024),
+                    .memory_limit(UPLOAD_MEMORY_LIMIT)
+                    .total_limit(UPLOAD_TOTAL_LIMIT),
             )
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
@@ -1586,9 +1670,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/chat", web::post().to(chat))
             .route("/think", web::post().to(think))
             .route("/upload", web::post().to(upload))
+            .route("/upload", web::route().method(Method::OPTIONS).to(upload_config))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            .route("/sources", web::get().to(list_sources))
             .route(
                 "/api-docs/openapi.json",
                 web::get().to(|data: web::Data<AppState>| async move {

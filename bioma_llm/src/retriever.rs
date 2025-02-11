@@ -236,6 +236,30 @@ impl Message<RetrieveContext> for Retriever {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListSources;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListedSources {
+    pub sources: Vec<ContentSource>,
+}
+
+impl Message<ListSources> for Retriever {
+    type Response = ListedSources;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListSources) -> Result<(), RetrieverError> {
+        let query = include_str!("../sql/list_sources.surql");
+        let db = ctx.engine().db();
+
+        let mut results = db.lock().await.query(query).await.map_err(SystemActorError::from)?;
+
+        let sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
+
+        ctx.reply(ListedSources { sources }).await?;
+        Ok(())
+    }
+}
+
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Retriever {
     #[builder(default)]
@@ -273,6 +297,11 @@ impl Actor for Retriever {
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
             if let Some(input) = frame.is::<RetrieveContext>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<ListSources>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
