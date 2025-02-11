@@ -14,8 +14,8 @@ use api_schema::{
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::prelude::*;
 use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
+use bioma_llm::{prelude::*, retriever::ListSources};
 use bioma_tool::client::ListTools;
 use clap::Parser;
 use cognition::{
@@ -1441,6 +1441,38 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().content_type("application/javascript").body(js_content)
 }
 
+#[utoipa::path(
+    get,
+    path = "/sources",
+    description = "List all indexed sources with their embedding counts.",
+    responses(
+        (status = 200, description = "List of sources with their embedding counts"),
+    )
+)]
+async fn list_sources(data: web::Data<AppState>) -> HttpResponse {
+    let user_actor = match data.user_actor().await {
+        Ok(actor) => actor,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
+    info!("Fetching list of sources");
+    let response = user_actor
+        .send_and_wait_reply::<Retriever, ListSources>(
+            ListSources,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await;
+
+    match response {
+        Ok(sources) => HttpResponse::Ok().json(sources),
+        Err(e) => {
+            error!("Error fetching sources: {:?}", e);
+            HttpResponse::InternalServerError().body(e.to_string())
+        }
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -1457,7 +1489,8 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
         delete_source,
         embed,
         rerank,
-        dashboard
+        dashboard,
+        list_sources
     ),
     info(
         title = "Cognition API",
@@ -1641,6 +1674,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
+            .route("/sources", web::get().to(list_sources))
             .route(
                 "/api-docs/openapi.json",
                 web::get().to(|data: web::Data<AppState>| async move {
