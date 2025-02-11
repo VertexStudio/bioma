@@ -630,8 +630,6 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     conversation.push(context_message.clone());
                 }
 
-                println!("conversation: {:#?}", conversation);
-
                 // If caller provided tools in the request body, then we don't know how to execute them
                 // so we assume the caller knows what they are doing and we just generate tool calls
                 let client_tools = body.tools.clone();
