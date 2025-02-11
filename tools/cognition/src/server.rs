@@ -146,6 +146,12 @@ struct Uploaded {
     size: usize,
 }
 
+impl Default for UploadConfig {
+    fn default() -> Self {
+        Self { max_file_size: UPLOAD_TOTAL_LIMIT, max_memory_buffer: UPLOAD_MEMORY_LIMIT }
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/upload",
@@ -279,6 +285,25 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
             }
         }
     }
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+struct UploadConfig {
+    max_file_size: usize,
+    max_memory_buffer: usize,
+}
+
+#[utoipa::path(
+    options,
+    path = "/upload",
+    description = "Get upload configuration limits.",
+    responses(
+        (status = 200, description = "Upload configuration with size limits in bytes", body = UploadConfig),
+    )
+)]
+async fn upload_config() -> impl Responder {
+    let config = UploadConfig { max_file_size: UPLOAD_TOTAL_LIMIT, max_memory_buffer: UPLOAD_MEMORY_LIMIT };
+    HttpResponse::Ok().append_header(("Content-Type", "application/json")).json(config)
 }
 
 #[utoipa::path(
@@ -1411,7 +1436,22 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, hello, reset, index, retrieve, ask, chat, think, upload, delete_source, embed, rerank, dashboard),
+    paths(
+        health,
+        hello,
+        reset,
+        index,
+        retrieve,
+        ask,
+        chat,
+        think,
+        upload,
+        upload_config,
+        delete_source,
+        embed,
+        rerank,
+        dashboard
+    ),
     info(
         title = "Cognition API",
         version = "0.1.0",
@@ -1591,19 +1631,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/chat", web::post().to(chat))
             .route("/think", web::post().to(think))
             .route("/upload", web::post().to(upload))
-            .route(
-                "/upload",
-                web::route().method(Method::OPTIONS).to(|| async {
-                    HttpResponse::Ok().append_header(("Content-Type", "application/json")).json(json!({
-                        "max_file_size": UPLOAD_TOTAL_LIMIT,
-                        "max_memory_buffer": UPLOAD_MEMORY_LIMIT,
-                        "supported_formats": {
-                            "files": ["*"],
-                            "archives": ["zip"]
-                        }
-                    }))
-                }),
-            )
+            .route("/upload", web::route().method(Method::OPTIONS).to(upload_config))
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
