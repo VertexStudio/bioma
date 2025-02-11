@@ -2,6 +2,7 @@ use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
+    http::Method,
     middleware::Logger,
     web::{self, Json},
     App, HttpResponse, HttpServer, Responder,
@@ -1586,6 +1587,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route("/chat", web::post().to(chat))
             .route("/think", web::post().to(think))
             .route("/upload", web::post().to(upload))
+            .route(
+                "/upload",
+                web::route().method(Method::OPTIONS).to(|| async {
+                    HttpResponse::Ok()
+                        .append_header(("Access-Control-Allow-Methods", "POST, OPTIONS"))
+                        .append_header(("Access-Control-Allow-Headers", "Content-Type"))
+                        .json(json!({
+                            "max_file_size": 100 * 1024 * 1024, // 100MB in bytes
+                            "max_memory_buffer": 50 * 1024 * 1024, // 50MB in bytes
+                            "supported_formats": {
+                                "files": ["*"],
+                                "archives": ["zip"]
+                            }
+                        }))
+                }),
+            )
             .route("/delete_source", web::post().to(delete_source))
             .route("/embed", web::post().to(embed))
             .route("/rerank", web::post().to(rerank))
