@@ -593,12 +593,21 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 let conversation = {
+                    let has_system_message = body.messages.iter().any(|msg| msg.role == MessageRole::System);
+
                     let mut conv = Vec::with_capacity(body.messages.len() + 1);
                     if !body.messages.is_empty() {
-                        conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
-                        conv.push(context_message.clone());
-                        conv.push(body.messages[body.messages.len() - 1].clone());
-                    } else {
+                        if has_system_message {
+                            // Use messages as-is if there's already a system message
+                            conv.extend_from_slice(&body.messages);
+                        } else {
+                            // Insert our system message before the last user message
+                            conv.extend_from_slice(&body.messages[..body.messages.len() - 1]);
+                            conv.push(context_message.clone());
+                            conv.push(body.messages[body.messages.len() - 1].clone());
+                        }
+                    } else if !has_system_message {
+                        // Only add our system message if there isn't one already
                         conv.push(context_message.clone());
                     }
                     conv
@@ -955,10 +964,14 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     }
 
     let mut conversation = body.messages.clone();
-    if !conversation.is_empty() {
-        conversation.insert(conversation.len() - 1, context_message.clone());
-    } else {
-        conversation.push(context_message.clone());
+    let has_system_message = conversation.iter().any(|msg| msg.role == MessageRole::System);
+
+    if !conversation.is_empty() && !has_system_message {
+        // Only insert our system message if there isn't one already
+        conversation.insert(conversation.len() - 1, context_message);
+    } else if conversation.is_empty() && !has_system_message {
+        // Only add our system message if there isn't one already
+        conversation.push(context_message);
     }
 
     // Set up streaming channel
