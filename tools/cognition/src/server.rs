@@ -1560,7 +1560,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rag_endpoint_port = config.rag_endpoint.port().unwrap_or(5766);
 
     let server = HttpServer::new(move || {
-        let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
+        let cors =
+            Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600).disable_preflight();
 
         App::new()
             .wrap(Logger::default())
@@ -1590,17 +1591,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .route(
                 "/upload",
                 web::route().method(Method::OPTIONS).to(|| async {
-                    HttpResponse::Ok()
-                        .append_header(("Access-Control-Allow-Methods", "POST, OPTIONS"))
-                        .append_header(("Access-Control-Allow-Headers", "Content-Type"))
-                        .json(json!({
-                            "max_file_size": 100 * 1024 * 1024, // 100MB in bytes
-                            "max_memory_buffer": 50 * 1024 * 1024, // 50MB in bytes
-                            "supported_formats": {
-                                "files": ["*"],
-                                "archives": ["zip"]
-                            }
-                        }))
+                    HttpResponse::Ok().append_header(("Content-Type", "application/json")).json(json!({
+                        "max_file_size": 100 * 1024 * 1024, // 100MB in bytes
+                        "max_memory_buffer": 50 * 1024 * 1024, // 50MB in bytes
+                        "supported_formats": {
+                            "files": ["*"],
+                            "archives": ["zip"]
+                        }
+                    }))
                 }),
             )
             .route("/delete_source", web::post().to(delete_source))
