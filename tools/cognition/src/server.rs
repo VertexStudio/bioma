@@ -259,29 +259,25 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
         }
     } else {
         // Handle regular file
-        match tokio::fs::rename(&temp_path, &temp_file_path).await {
-            Ok(_) => HttpResponse::Ok().json(Uploaded {
-                message: "File uploaded successfully".to_string(),
-                paths: vec![temp_file_path],
-                size: form.file.size,
-            }),
-            Err(e) => {
-                error!("Error moving file: {:?}", e);
-                if let Err(copy_err) = tokio::fs::copy(&temp_path, &temp_file_path).await {
-                    error!("Error copying file: {:?}", copy_err);
-                    return HttpResponse::InternalServerError().json(json!({
-                        "error": "Failed to save uploaded file",
-                        "details": copy_err.to_string()
-                    }));
-                }
+        match tokio::fs::copy(&temp_path, &temp_file_path).await {
+            Ok(_) => {
                 // Clean up source file after successful copy
-                let _ = tokio::fs::remove_file(&temp_path).await;
+                if let Err(e) = tokio::fs::remove_file(&temp_path).await {
+                    error!("Failed to clean up temporary file: {}", e);
+                }
 
                 HttpResponse::Ok().json(Uploaded {
                     message: "File uploaded successfully".to_string(),
                     paths: vec![temp_file_path],
                     size: form.file.size,
                 })
+            }
+            Err(e) => {
+                error!("Error copying file: {:?}", e);
+                HttpResponse::InternalServerError().json(json!({
+                    "error": "Failed to save uploaded file",
+                    "details": e.to_string()
+                }))
             }
         }
     }
