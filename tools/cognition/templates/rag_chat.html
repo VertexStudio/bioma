@@ -2538,9 +2538,7 @@
     async function fetchAvailableSources() {
 
       let savedSources = getSavedSources();
-      console.log("🚀 ~ fetchAvailableSources ~ savedSources:", savedSources)
       let activeSources = getActiveSources();
-      console.log("🚀 ~ fetchAvailableSources ~ activeSources:", activeSources)
 
       let endpoint = `${RAG_ENDPOINT}/sources`;
 
@@ -2565,27 +2563,23 @@
         return source;
 
       });
-      console.log("🚀 ~ fetchAvailableSources ~ maped_sources:", maped_sources)
 
-      const active = maped_sources.filter(item1 =>
+      const active = savedSources.filter(item1 =>
         activeSources.some(item2 => item2.path === item1.path)
       );
-      console.log("🚀 ~ fetchAvailableSources ~ active:", active)
 
       const notSaved = maped_sources.filter(item1 =>
         !savedSources.some(item2 => item2.path === item1.path)
       );
-      console.log("🚀 ~ fetchAvailableSources ~ notSaved:", notSaved)
 
       let final_array = [...notSaved, ...savedSources];
-      console.log("🚀 ~ fetchAvailableSources ~ final_array:", final_array)
 
       localStorage.setItem("savedSources", JSON.stringify(final_array));
 
       localStorage.setItem("activeSources", JSON.stringify(active));
 
       loadSavedSources();
-      loadSavedSources();
+      loadActiveSources();
 
       return body.sources;
     }
