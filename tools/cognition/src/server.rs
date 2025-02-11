@@ -289,7 +289,9 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct UploadConfig {
+    /// Maximum total file size in bytes
     max_file_size: usize,
+    /// Maximum memory buffer size in bytes
     max_memory_buffer: usize,
 }
 
@@ -298,11 +300,16 @@ struct UploadConfig {
     path = "/upload",
     description = "Get upload configuration limits.",
     responses(
-        (status = 200, description = "Upload configuration with size limits in bytes", body = UploadConfig),
+        (status = 200, description = "Upload configuration with size limits in bytes", body = UploadConfig, content_type = "application/json", examples(
+            ("default" = (summary = "Default configuration", value = json!({
+                "max_file_size": UPLOAD_TOTAL_LIMIT,
+                "max_memory_buffer": UPLOAD_MEMORY_LIMIT
+            })))
+        )),
     )
 )]
 async fn upload_config() -> impl Responder {
-    let config = UploadConfig { max_file_size: UPLOAD_TOTAL_LIMIT, max_memory_buffer: UPLOAD_MEMORY_LIMIT };
+    let config = UploadConfig::default();
     HttpResponse::Ok().append_header(("Content-Type", "application/json")).json(config)
 }
 
@@ -1603,8 +1610,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rag_endpoint_port = config.rag_endpoint.port().unwrap_or(5766);
 
     let server = HttpServer::new(move || {
-        let cors =
-            Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600).disable_preflight();
+        let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
             .wrap(Logger::default())

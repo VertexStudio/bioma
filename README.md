@@ -156,11 +156,9 @@ curl -X POST http://localhost:5766/upload \
     -F 'file=@./archive.zip' \
     -F 'metadata={"path": "dest/path/archive.zip"};type=application/json'
 
-# Test CORS preflight for upload endpoint
-curl -X OPTIONS http://localhost:5766/upload \
-    -H "Origin: http://localhost:5766" \
-    -H "Access-Control-Request-Method: POST" \
-    -v
+# Test upload endpoint configuration
+# Returns max file size and memory buffer limits in bytes
+curl -X 'OPTIONS' 'http://0.0.0.0:5766/upload' -H 'accept: application/json'
 ```
 
 ### Index files:
