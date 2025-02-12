@@ -356,7 +356,8 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
 #[utoipa::path(
     post,
     path = "/retrieve",
-    description = "Retrieve context in .md format.",
+    description =   "Retrieve context in .md format.<br>
+                    If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
     request_body(content = RetrieveContextRequest, examples(
         ("basic" = (summary = "Basic", value = json!({
             "type": "Text",
@@ -364,6 +365,13 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
             "threshold": 0.0,
             "limit": 10,
             "sources": ["path/to/source1", "path/to/source2"],
+            "format": "markdown"
+        }))),
+        ("without_sources" = (summary = "Without sources", value = json!({
+            "type": "Text",
+            "query": "What is Bioma?",
+            "threshold": 0.0,
+            "limit": 10,
             "format": "markdown"
         })))
     )),
@@ -407,9 +415,10 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 #[utoipa::path(
     post,
     path = "/chat",
-    description =   "For the usage of this endpoint, and more specifically, for the 'tools' and 'tools_actor' field, only send of the two.<br>
-                    If you send 'tools', the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
-                    If you send 'tools_actors', the endpoint with call the client that contains the tools and actually execute them.",
+    description =   "For the usage of this endpoint, and more specifically, for the `tools` and `tools_actor` field, <b>only send of the two</b>.<br>
+                    If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
+                    If you send `tools_actors`, the endpoint with call the client that contains the tools and actually execute them.<br>
+                    If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
     request_body(content = ChatQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
@@ -752,9 +761,10 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     post,
     path = "/think",
     description =   "Analyzes query and determines which tools to use and in what order.<br>
-                    For the usage of this endpoint, and more specifically, for the 'tools' and 'tools_actor' field, only send of the two.<br>
-                    If you send 'tools', the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
-                    If you send 'tools_actors', the endpoint with call the client that contains the tools and return the tools information from all tools_actors.",
+                    For the usage of this endpoint, and more specifically, for the `tools` and `tools_actors` fields, <b>only</b> send of the two.<br>
+                    If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, <b>without execute them</b>.<br>
+                    If you send `tools_actors`, the endpoint with call the client that contains the tools and return the tools information from all tools_actors.<br>
+                    If you send 'sources' it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
     request_body(content = ThinkQueryRequestSchema, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "messages": [
@@ -1102,7 +1112,8 @@ struct AskResponse {
 #[utoipa::path(
     post,
     path = "/ask",
-    description = "Generates a chat response. Specific response format can be specified.",
+    description =   "Generates a chat response. Specific response format can be specified.>br>
+                    If you send `sources` it will <b>only use those resources<b> to retrieve the context, if not, it will default to `/global`.",
     request_body(content = AskQueryRequestSchema, examples(
         ("Basic" = (summary = "Basic", value = json!({
             "model": "llama3.2",
