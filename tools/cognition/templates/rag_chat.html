@@ -1404,6 +1404,7 @@
         .getElementById("file-input")
         .addEventListener("change", async function (event) {
           const file = event.target.files[0];
+          const fileInput = document.getElementById("file-input");
 
           if (file) {
             let directoryPath = document.getElementById("source").value.trim();
@@ -1466,6 +1467,8 @@
 
               loadingIndicator.style.display = "none";
               formInfo.style.display = "flex";
+
+              fileInput.value = "";
             }
           }
         });
