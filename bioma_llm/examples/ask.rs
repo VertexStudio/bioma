@@ -52,14 +52,7 @@ impl Actor for MainActor {
 
         let response: ChatMessageResponse = ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
-                ChatMessages {
-                    messages: vec![chat_message],
-                    restart: false,
-                    persist: false,
-                    stream: false,
-                    format: Some(format),
-                    tools: None,
-                },
+                ChatMessages::builder().messages(vec![chat_message]).format(format).tools(vec![]).build(),
                 &ask_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
             )

@@ -197,12 +197,16 @@ pub struct TopK {
     /// The query to search for
     pub query: Query,
     /// A list of sources to filter the search
-    #[builder(default)]
+    #[builder(default = default_sources())]
     pub sources: Vec<String>,
     /// Number of similar embeddings to return
     pub k: usize,
     /// The threshold for the similarity score
     pub threshold: f32,
+}
+
+fn default_sources() -> Vec<String> {
+    vec!["/global".to_string()]
 }
 
 /// The similarity between a query and an embedding
