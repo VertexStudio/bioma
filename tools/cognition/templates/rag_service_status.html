@@ -76,7 +76,7 @@
         padding: 20px;
         text-align: center;
         transition: transform 0.3s ease;
-        height: 200px;
+        height: 230px;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -191,7 +191,7 @@
       }
 
       .ollama-model {
-        font-size: 15px;
+        font-size: 14px;
       }
     </style>
   </head>
@@ -311,7 +311,6 @@
               // Show total VRAM used if there are multiple models
               if (info.health.models.length > 1) {
                 extraInfo += `
-                      <hr>
                       <p><strong>Total VRAM Used:</strong> ${(
                         totalVram /
                         1024 /
