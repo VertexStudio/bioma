@@ -36,12 +36,18 @@ pub struct ChatMessageRequestSchema {
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobsRequestSchema {
-    pub source: Option<String>,
+    #[schema(default = default_source)]
+    #[serde(default = "default_source")]
+    pub source: String,
     pub globs: Vec<String>,
     #[schema(value_type = ChunkCapacityRequestSchema)]
     pub chunk_capacity: Option<ChunkCapacityRequestSchema>,
     pub chunk_overlap: Option<usize>,
     pub chunk_batch_size: Option<usize>,
+}
+
+fn default_source() -> String {
+    "/global".to_string()
 }
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
@@ -58,7 +64,7 @@ impl Into<IndexGlobs> for IndexGlobsRequestSchema {
         };
 
         IndexGlobs::builder()
-            .maybe_source(self.source)
+            .source(self.source)
             .globs(self.globs)
             .chunk_capacity(chunk_capacity)
             .chunk_overlap(self.chunk_overlap.unwrap_or(DEFAULT_CHUNK_OVERLAP))
@@ -101,10 +107,15 @@ pub struct RetrieveContextRequest {
     pub query: RetrieveQueryRequestSchema,
     pub limit: Option<usize>,
     pub threshold: Option<f32>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[serde(default)]
     pub format: RetrieveOutputFormat,
+}
+
+fn default_sources() -> Vec<String> {
+    vec!["/global".to_string()]
 }
 
 impl Into<RetrieveContext> for RetrieveContextRequest {
@@ -129,7 +140,8 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
@@ -141,7 +153,8 @@ pub struct AskQueryRequestSchema {
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
@@ -161,7 +174,8 @@ fn default_chat_stream() -> bool {
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,

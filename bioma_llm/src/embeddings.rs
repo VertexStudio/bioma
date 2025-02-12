@@ -286,15 +286,9 @@ impl Message<TopK> for Embeddings {
         };
 
         let db = ctx.engine().db();
-        let query_sql = if message.sources.is_empty() {
-            include_str!("../sql/search.surql")
-                .replace("{top_k}", &message.k.to_string())
-                .replace("{prefix}", &self.table_prefix())
-        } else {
-            include_str!("../sql/search_sources.surql")
-                .replace("{top_k}", &message.k.to_string())
-                .replace("{prefix}", &self.table_prefix())
-        };
+        let query_sql = include_str!("../sql/similarities.surql")
+            .replace("{top_k}", &message.k.to_string())
+            .replace("{prefix}", &self.table_prefix());
 
         let mut results = db
             .lock()
@@ -306,8 +300,7 @@ impl Message<TopK> for Embeddings {
             .bind(("prefix", self.table_prefix()))
             .await
             .map_err(SystemActorError::from)?;
-        let results: Vec<Similarity> =
-            results.take(if message.sources.is_empty() { 0 } else { 1 }).map_err(SystemActorError::from)?;
+        let results: Vec<Similarity> = results.take(1).map_err(SystemActorError::from)?;
         ctx.reply(results).await?;
         Ok(())
     }
