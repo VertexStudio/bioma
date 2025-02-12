@@ -37,6 +37,7 @@ pub struct ChatMessageRequestSchema {
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobsRequestSchema {
     #[schema(default = default_source)]
+    #[serde(default = "default_source")]
     pub source: String,
     pub globs: Vec<String>,
     #[schema(value_type = ChunkCapacityRequestSchema)]
