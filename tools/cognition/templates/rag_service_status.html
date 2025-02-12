@@ -279,34 +279,50 @@
             ) {
               let extraInfo = '<div class="health-info">';
 
-              // Iterates over the models and displays the model name and used VRAM
+              // Orders the models by name
+              info.health.models.sort((a, b) => a.model.localeCompare(b.model));
+
+              // Iterates over the models
               info.health.models.forEach((modelInfo) => {
                 extraInfo += `
-                <p><strong>Model:</strong> ${modelInfo.model}</p>
-                <p><strong>Used VRAM:</strong> ${(
-                  modelInfo.size_vram /
-                  1024 /
-                  1024
-                ).toFixed(2)} MB</p>
-              `;
+                  <p><strong>Model:</strong> ${modelInfo.model}</p>
+                  <p><strong>Used VRAM:</strong> ${(
+                    modelInfo.size_vram /
+                    1024 /
+                    1024
+                  ).toFixed(2)} MB</p>
+                `;
               });
 
               extraInfo += "</div>";
-            }
 
+              div.innerHTML = `
+                <h3>${name
+                  .replace(/_/g, " ")
+                  .toLowerCase()
+                  .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+                <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+                ${
+                  !info.is_healthy
+                    ? `<p class='error-message'>Error: ${info.error}</p>`
+                    : ""
+                }
+                ${extraInfo}
+              `;
+            }
             div.innerHTML = `
-        <h3>${name
-          .replace(/_/g, " ")
-          .toLowerCase()
-          .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
-        <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-        ${
-          !info.is_healthy
-            ? `<p class='error-message'>Error: ${info.error}</p>`
-            : ""
-        }
-        ${extraInfo}
-    `;
+              <h3>${name
+                .replace(/_/g, " ")
+                .toLowerCase()
+                .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+              <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+              ${
+                !info.is_healthy
+                  ? `<p class='error-message'>Error: ${info.error}</p>`
+                  : ""
+              }
+              ${extraInfo}
+          `;
 
             container.appendChild(div);
           }
