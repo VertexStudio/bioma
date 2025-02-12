@@ -158,7 +158,7 @@ impl Default for UploadConfig {
 /// - **file**: The file to be uploaded.
 /// - **metadata**: A JSON object with a `path` field specifying the target folder.
 ///
-/// ### Behavior
+/// ### How It Works
 ///
 /// 1. **Target Folder Determination:**
 ///    - If the metadata path ends with `.zip` (e.g. `"new.zip"`), the extension is stripped so that the
@@ -168,11 +168,14 @@ impl Default for UploadConfig {
 /// 2. **File Processing:**
 ///    - **Zip Files:**  
 ///      If the uploaded file’s original filename ends with `.zip`, it is treated as a zip archive:
-///        - The archive is extracted into the target folder, i.e. `output_dir/target_folder`.
-///        - If the archive’s contents share a common top-level directory (for example, `generated-api/`), that directory is stripped,
-///          and the files are placed directly in the target folder.
+///        - The file is first copied to a temporary location.
+///        - The zip archive is opened, and the function scans all entries to check for a common top-level
+///          folder. During extraction, that common prefix (if present) is stripped.
+///        - **Important:** Instead of using the deprecated [`ZipFile::sanitized_name`], we use
+///          [`ZipFile::mangled_name`] so that we don’t inadvertently alter the meaning of the path.
+///        - Files are extracted directly into `output_dir/target_folder`, with paths adjusted accordingly.
 ///    - **Non-Zip Files:**  
-///      The file is simply copied to the target folder.
+///      The file is simply copied into the destination folder.
 ///
 /// ### Examples
 ///
@@ -182,8 +185,8 @@ impl Default for UploadConfig {
 ///     - `generated-api/index.ts`
 ///     - `generated-api/api.ts`
 ///   - **Result:**  
-///     - The target folder is computed as `"new"` (the `.zip` extension is removed).
-///     - The files are extracted into `output_dir/new/` so that:
+///     - The target folder becomes `"new"`.
+///     - Files are extracted into `output_dir/new/` so that:
 ///       - `generated-api/index.ts` → `output_dir/new/index.ts`
 ///       - `generated-api/api.ts`   → `output_dir/new/api.ts`
 ///
@@ -192,22 +195,20 @@ impl Default for UploadConfig {
 ///   - **Uploaded File:** The same zip file as above.
 ///   - **Result:**  
 ///     - The target folder is `"new"`.
-///     - Extraction occurs in the same way, with the common top-level folder stripped.
-///     - Files end up under `output_dir/new/`.
+///     - Extraction occurs as above with the common top-level folder stripped, leaving files under `output_dir/new/`.
 ///
 /// - **Non-Zip File with Metadata `"uploads"`:**
 ///   - **Metadata:** `{"path": "uploads"}`  
 ///   - **Uploaded File:** A non-zip file (e.g. `document.txt`).
 ///   - **Result:**  
-///     - The target folder is `"uploads"`.
-///     - The file is copied as-is to `output_dir/uploads/document.txt`.
+///     - The file is copied directly into `output_dir/uploads/document.txt`.
 ///
 /// - **Non-Zip File with Metadata `"archive.zip"`:**
 ///   - **Metadata:** `{"path": "archive.zip"}`  
 ///   - **Uploaded File:** A non-zip file (e.g. `image.png`).
 ///   - **Result:**  
-///     - The target folder is computed as `"archive"` (the `.zip` extension is removed).
-///     - The file is copied to `output_dir/archive/image.png`.
+///     - The target folder becomes `"archive"` (the `.zip` extension is removed).
+///     - The file is copied into `output_dir/archive/image.png`.
 ///
 #[utoipa::path(
     post,
@@ -259,7 +260,6 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     let target_folder_clone = target_folder.clone();
     let output_dir_clone = output_dir.clone();
 
-    // Check if the uploaded file is a zip archive based on its original filename.
     if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
         // Handle zip file extraction.
         let extract_result = tokio::task::spawn_blocking(
@@ -270,11 +270,12 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                 // Define the extraction directory as output_dir/target_folder.
                 let extraction_dir = output_dir_clone.join(&target_folder_clone);
 
-                // Determine a common top-level prefix if one exists across all entries.
+                // Determine a common top-level prefix, if one exists.
                 let mut common_prefix: Option<std::path::PathBuf> = None;
                 for i in 0..archive.len() {
                     let file = archive.by_index(i)?;
-                    let path = file.sanitized_name();
+                    // Use mangled_name() instead of sanitized_name() to avoid deprecation.
+                    let path = file.mangled_name();
                     let mut comps = path.components();
                     if let Some(first) = comps.next() {
                         let first_component = std::path::PathBuf::from(first.as_os_str());
@@ -294,19 +295,20 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
 
                 let mut extracted_files = Vec::new();
 
-                // Extract each file, stripping the common prefix if it exists.
+                // Now perform extraction.
                 for i in 0..archive.len() {
                     let mut file = archive.by_index(i)?;
-                    let mut outpath = file.sanitized_name();
+                    // Again, use mangled_name() to get the file's path.
+                    let mut outpath = file.mangled_name();
 
-                    // Remove the common top-level folder if present.
+                    // If a common top-level folder exists, strip it.
                     if let Some(ref cp) = common_prefix {
                         if let Ok(stripped) = outpath.strip_prefix(cp) {
                             outpath = stripped.to_path_buf();
                         }
                     }
 
-                    // Build the final output path.
+                    // Build the final output path under the extraction directory.
                     let final_path = extraction_dir.join(&outpath);
 
                     if file.name().ends_with('/') {
@@ -319,7 +321,7 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                         std::io::copy(&mut file, &mut outfile)?;
                     }
 
-                    // Store the relative path (relative to output_dir) for the response.
+                    // Store the path relative to output_dir for the response.
                     if let Ok(relative) = final_path.strip_prefix(&output_dir_clone) {
                         extracted_files.push(relative.to_path_buf());
                     }
