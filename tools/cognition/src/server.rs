@@ -31,7 +31,7 @@ use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use serde::Serialize;
 use serde_json::json;
 use server_config::{Args, ServerConfig};
-use std::{collections::HashMap, error::Error as StdError};
+use std::{collections::HashMap, error::Error as StdError, time::Duration};
 use tracing::{debug, error, info};
 use url::Url;
 use utoipa::{openapi::ServerBuilder, OpenApi};
@@ -152,6 +152,49 @@ impl Default for UploadConfig {
     }
 }
 
+/// Uploads a file to the server and processes it based on its type and provided metadata.
+///
+/// This endpoint accepts a multipart form-data request containing:
+/// - **file**: The file to be uploaded.
+/// - **metadata**: A JSON object with a `path` field specifying the target folder.
+///
+/// ### How It Works
+///
+/// 1. **Target Folder Determination:**
+///    - If the metadata path ends with `.zip` (e.g. `"new.zip"`), the extension is stripped so that the
+///      folder name becomes `"new"`.
+///    - Otherwise, the provided path is used directly.
+///
+/// 2. **File Processing:**
+///    - **Zip Files:**  
+///      If the uploaded file’s original filename ends with `.zip`, it is treated as a zip archive:
+///        - The file is first copied to a temporary location.
+///        - The zip archive is opened, and the function scans all entries to check for a common top-level
+///          folder. During extraction, that common prefix (if present) is stripped.
+///        - Files are extracted directly into `output_dir/target_folder` (using [`ZipFile::mangled_name`]) and only file paths (not directory entries) are collected for the response.
+///    - **Non-Zip Files:**  
+///      The file is simply copied into the destination folder.
+///
+/// ### Examples
+///
+/// - **Zip File with Metadata `"new.zip"`:**
+///   - **Metadata:** `{"path": "new.zip"}`  
+///   - **Uploaded File:** A zip file whose entries are:
+///     - `generated-api/index.ts`
+///     - `generated-api/api.ts`
+///   - **Result:**  
+///     - The target folder becomes `"new"`.
+///     - Files are extracted into `output_dir/new/` so that:
+///       - `generated-api/index.ts` → `output_dir/new/index.ts`
+///       - `generated-api/api.ts`   → `output_dir/new/api.ts`
+///     - Only the file paths (e.g. `new/index.ts` and `new/api.ts`) are returned in the response.
+///
+/// - **Non-Zip File with Metadata `"uploads"`:**
+///   - **Metadata:** `{"path": "uploads"}`  
+///   - **Uploaded File:** A non-zip file (e.g. `document.txt`).
+///   - **Result:**  
+///     - The file is copied directly into `output_dir/uploads/document.txt`, and that path is returned.
+///     - Only the file path (e.g. `uploads/document.txt`) is returned in the response.
 #[utoipa::path(
     post,
     path = "/upload",
@@ -163,23 +206,20 @@ impl Default for UploadConfig {
 )]
 async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
-    let target_dir = form.metadata.path.clone();
 
-    // Determine the target path for the file
-    let temp_file_path = if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
-        if target_dir.extension().map_or(false, |ext| ext == "zip") {
-            output_dir.join(&target_dir)
-        } else {
-            let original_name =
-                form.file.file_name.as_ref().map(|name| name.to_string()).unwrap_or_else(|| "uploaded.zip".to_string());
-            output_dir.join(&target_dir).join(original_name)
-        }
+    // Determine the target folder.
+    // If the metadata path ends with ".zip", remove the extension so that "new.zip" becomes "new".
+    let target_folder = if form.metadata.path.as_path().extension().map_or(false, |ext| ext == "zip") {
+        form.metadata.path.with_extension("")
     } else {
-        output_dir.join(&target_dir)
+        form.metadata.path.clone()
     };
 
-    // Create parent directory
-    if let Some(parent) = temp_file_path.parent() {
+    // Compute the destination path using the target folder.
+    let dest_path = output_dir.join(&target_folder);
+
+    // Create the parent directory for the destination if it doesn't exist.
+    if let Some(parent) = dest_path.parent() {
         if let Err(e) = tokio::fs::create_dir_all(parent).await {
             error!("Failed to create target directory: {}", e);
             return HttpResponse::InternalServerError().json(json!({
@@ -189,10 +229,10 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
         }
     }
 
-    // Create a temporary file for the upload
+    // Create a temporary file path for the uploaded file.
     let temp_path = std::env::temp_dir().join(format!("upload_{}", uuid::Uuid::new_v4()));
 
-    // Copy the uploaded content to the temporary file using tokio
+    // Copy the uploaded file to the temporary location.
     if let Err(e) = tokio::fs::copy(&form.file.file.path(), &temp_path).await {
         error!("Failed to copy uploaded file: {}", e);
         return HttpResponse::InternalServerError().json(json!({
@@ -202,38 +242,81 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
     }
 
     let temp_path_clone = temp_path.clone();
-    let temp_file_path_clone = temp_file_path.clone();
+    let target_folder_clone = target_folder.clone();
+    let output_dir_clone = output_dir.clone();
 
-    if temp_file_path.extension().map_or(false, |ext| ext == "zip") {
-        // Handle zip file
+    if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
+        // Handle zip file extraction.
         let extract_result = tokio::task::spawn_blocking(
             move || -> Result<Vec<std::path::PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
                 let file = std::fs::File::open(&temp_path_clone)?;
                 let mut archive = zip::ZipArchive::new(file)?;
 
-                // Extract to the parent directory of the zip file
-                let extract_to = temp_file_path_clone.parent().unwrap_or(&temp_file_path_clone);
+                // Define the extraction directory as output_dir/target_folder.
+                let extraction_dir = output_dir_clone.join(&target_folder_clone);
 
-                // Get list of files that will be extracted
-                let mut extracted_files = Vec::new();
+                // Determine a common top-level prefix, if one exists.
+                let mut common_prefix: Option<std::path::PathBuf> = None;
                 for i in 0..archive.len() {
                     let file = archive.by_index(i)?;
-                    if !file.name().ends_with('/') {
-                        // Skip directories
-                        let outpath = extract_to.join(file.name());
-                        extracted_files.push(outpath);
+                    // Use mangled_name() instead of sanitized_name() to avoid deprecation.
+                    let path = file.mangled_name();
+                    let mut comps = path.components();
+                    if let Some(first) = comps.next() {
+                        let first_component = std::path::PathBuf::from(first.as_os_str());
+                        match &common_prefix {
+                            Some(cp) => {
+                                if *cp != first_component {
+                                    common_prefix = None;
+                                    break;
+                                }
+                            }
+                            None => {
+                                common_prefix = Some(first_component);
+                            }
+                        }
                     }
                 }
 
-                // Now perform the extraction
-                archive.extract(extract_to)?;
+                let mut extracted_files = Vec::new();
+
+                // Now perform extraction.
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i)?;
+                    let mut outpath = file.mangled_name();
+
+                    // If a common top-level folder exists, strip it.
+                    if let Some(ref cp) = common_prefix {
+                        if let Ok(stripped) = outpath.strip_prefix(cp) {
+                            outpath = stripped.to_path_buf();
+                        }
+                    }
+
+                    // Build the final output path under the extraction directory.
+                    let final_path = extraction_dir.join(&outpath);
+
+                    if file.name().ends_with('/') {
+                        // Create directory entries, but do NOT add to extracted_files.
+                        std::fs::create_dir_all(&final_path)?;
+                    } else {
+                        if let Some(parent) = final_path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        let mut outfile = std::fs::File::create(&final_path)?;
+                        std::io::copy(&mut file, &mut outfile)?;
+                        // Only add file paths (not directories) to the response.
+                        if let Ok(relative) = final_path.strip_prefix(&output_dir_clone) {
+                            extracted_files.push(relative.to_path_buf());
+                        }
+                    }
+                }
 
                 Ok(extracted_files)
             },
         )
         .await;
 
-        // Clean up temporary file
+        // Clean up the temporary file.
         let _ = tokio::fs::remove_file(&temp_path).await;
 
         match extract_result {
@@ -258,17 +341,17 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
             }
         }
     } else {
-        // Handle regular file
-        match tokio::fs::copy(&temp_path, &temp_file_path).await {
+        // Handle non-zip file upload by copying it to the destination folder.
+        match tokio::fs::copy(&temp_path, &dest_path).await {
             Ok(_) => {
-                // Clean up source file after successful copy
+                // Remove the temporary file after successful copy.
                 if let Err(e) = tokio::fs::remove_file(&temp_path).await {
                     error!("Failed to clean up temporary file: {}", e);
                 }
-
+                let relative_path = dest_path.strip_prefix(&output_dir).unwrap_or(&dest_path).to_path_buf();
                 HttpResponse::Ok().json(Uploaded {
                     message: "File uploaded successfully".to_string(),
-                    paths: vec![temp_file_path],
+                    paths: vec![relative_path],
                     size: form.file.size,
                 })
             }
@@ -315,6 +398,7 @@ async fn upload_config() -> impl Responder {
     description = "Receives an array of path of files to index.",
     request_body(content = IndexGlobsRequestSchema, examples(
         ("basic" = (summary = "Basic", value = json!({
+            "source": "/global",
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200
@@ -333,8 +417,13 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     let index_globs: IndexGlobs = body.clone().into();
 
     info!("Sending message to indexer actor");
-    let response =
-        user_actor.send_and_wait_reply::<Indexer, IndexGlobs>(index_globs, &data.indexer, SendOptions::default()).await;
+    let response = user_actor
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
+            index_globs,
+            &data.indexer,
+            SendOptions::builder().timeout(Duration::from_secs(600)).build(),
+        )
+        .await;
     match response {
         Ok(indexed) => {
             info!("Indexed {} files, cached {} files", indexed.indexed, indexed.cached);

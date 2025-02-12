@@ -91,6 +91,7 @@ impl RetrievedContext {
             context_content.push_str("---\n\n");
 
             if let Some(source) = &context.source {
+                context_content.push_str(&format!("[SOURCE:{}]\n\n", source.source));
                 context_content.push_str(&format!("[URI:{}]\n\n", source.uri));
             }
 

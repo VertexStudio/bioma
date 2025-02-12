@@ -1810,7 +1810,7 @@
           model: "llama3.2",
           stream: true,
           tools_actors: toolsEnabled ? toolsActorsList : [],
-          sources: activeSources ? activeSources : [],
+          ...(activeSources.length > 0 && { sources: activeSources }),
         };
 
         try {
