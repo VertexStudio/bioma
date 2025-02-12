@@ -297,6 +297,7 @@
         font-size: 14px;
         color: var(--primary);
         display: flex;
+        justify-content: center;
         align-items: center;
         gap: 5px;
       }
@@ -1400,7 +1401,10 @@
             const formInfo = document.getElementById("form-info");
 
             const metadata = {
-              path: `${directoryPath || "uploads"}/${file.name}`,
+              //   path: `${directoryPath || "uploads"}/${file.name}`,
+              path: directoryPath
+                ? `uploads/${directoryPath}/${file.name}`
+                : `uploads/${file.name}`,
             };
 
             const formData = new FormData();
