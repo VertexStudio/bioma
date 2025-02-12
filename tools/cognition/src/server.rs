@@ -312,14 +312,15 @@ async fn upload_config() -> impl Responder {
 #[utoipa::path(
     post,
     path = "/index",
-    description = "Receives an array of path of files to index.",
+    description =   "Receives an array of path of files to index.</br>
+                    If `source` is not specified, it will will default to `/global`.",
     request_body(content = IndexGlobsRequestSchema, examples(
         ("basic" = (summary = "Basic", value = json!({
             "source": "/global",
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200
-        })))
+        }))),
     )),
     responses(
         (status = 200, description = "Ok"),
@@ -1123,6 +1124,42 @@ struct AskResponse {
                     "content": "Tell me about Puerto Rico."
                 }
             ],
+            "format": {
+                "title": "PuertoRicoInfo",
+                "type": "object",
+                "required": [
+                    "name",
+                    "capital",
+                    "languages"
+                ],
+                "properties": {
+                    "name": {
+                        "description": "Name of the territory",
+                        "type": "string"
+                    },
+                    "capital": {
+                        "description": "Capital city",
+                        "type": "string"
+                    },
+                    "languages": {
+                        "description": "Official languages spoken",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }))),
+        ("With sources" = (summary = "With sources", value = json!({
+            "model": "llama3.2",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Tell me about Puerto Rico."
+                }
+            ],
+            "sources": ["/path/to/source1.pdf", "/path/to/source2.pdf"],
             "format": {
                 "title": "PuertoRicoInfo",
                 "type": "object",
