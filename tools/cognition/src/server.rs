@@ -551,10 +551,8 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             context.reverse();
             info!("Context fetched: {:#?}", context);
 
-            // Create a system message containing the retrieved context
-            let context_content = context.to_markdown();
-
-            // Find system message and filter messages in one pass
+            // Preserve user-provided system message if present, otherwise use default
+            // This ensures we respect custom system prompts while filtering them from the message history
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
                 let filtered = body.messages[..body.messages.len() - 1]
@@ -574,14 +572,15 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
 
             // Create the system message with context
             let mut context_message = if let Some(sys_msg) = system_message {
-                // Use existing system message and append context
+                // Use the request's system message and append context
                 ChatMessage::system(format!(
                     "Use the following context to answer the user's query:\n{}\n\n{}",
-                    context_content, sys_msg.content
+                    context.to_markdown(),
+                    sys_msg.content
                 ))
             } else {
-                // Use default prompt
-                ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content))
+                // Use our own system prompt
+                ChatMessage::system(format!("{}{}", data.config.chat_prompt, context.to_markdown()))
             };
 
             // Add image handling here
@@ -888,7 +887,8 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         retrieved.to_markdown()
     };
 
-    // Find system message and filter messages in one pass
+    // Preserve user-provided system message if present, otherwise use default
+    // This ensures we respect custom system prompts while filtering them from the message history
     let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
         let mut sys_msg = None;
         let filtered = body.messages[..body.messages.len() - 1]
@@ -1178,7 +1178,8 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Find system message and filter messages in one pass
+            // Preserve user-provided system message if present, otherwise use default
+            // This ensures we respect custom system prompts while filtering them from the message history
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
                 let filtered = body.messages[..body.messages.len() - 1]
