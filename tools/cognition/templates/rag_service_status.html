@@ -282,20 +282,34 @@
               info.health?.models?.length > 0
             ) {
               console.log("Models found for Ollama:", info.health.models);
+              let totalVram = 0;
 
               extraInfo += '<div class="health-info">';
               info.health.models.sort((a, b) => a.model.localeCompare(b.model));
 
               info.health.models.forEach((modelInfo) => {
+                totalVram += modelInfo.size_vram;
                 extraInfo += `
-            <p><strong>Model:</strong> ${modelInfo.model}</p>
-            <p><strong>Used VRAM:</strong> ${(
-              modelInfo.size_vram /
-              1024 /
-              1024
-            ).toFixed(2)} MB</p>
-          `;
+                  <p><strong>Model:</strong> ${modelInfo.model}</p>
+                  <p><strong>Used VRAM:</strong> ${(
+                    modelInfo.size_vram /
+                    1024 /
+                    1024
+                  ).toFixed(2)} MB</p>
+                `;
               });
+
+              // Show total VRAM used if there are multiple models
+              if (info.health.models.length > 1) {
+                extraInfo += `
+                  <hr>
+                  <p><strong>Total VRAM Used:</strong> ${(
+                    totalVram /
+                    1024 /
+                    1024
+                  ).toFixed(2)} MB</p>
+                `;
+              }
 
               extraInfo += "</div>";
             }
