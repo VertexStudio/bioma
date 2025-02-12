@@ -253,7 +253,7 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
     // Delete using the glob path
     let delete_result = relay_ctx
         .send_and_wait_reply::<Indexer, DeleteSource>(
-            DeleteSource { sources: vec![glob_path] },
+            DeleteSource { sources: vec!["/global".to_string()] },
             &indexer_id,
             SendOptions::default(),
         )
