@@ -2965,6 +2965,7 @@
       }
 
       function deleteSource(source) {
+        console.log("🚀 ~ deleteSource ~ source:", source);
         const savedSources = getSavedSources().filter(
           (s) => s.id !== source.id
         );
@@ -2976,9 +2977,24 @@
         );
         localStorage.setItem("activeSources", JSON.stringify(activeSources));
 
-        loadSavedSources();
-        loadActiveSources();
-        updateSources();
+        (async () => {
+          const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sources: [source.path],
+            }),
+          });
+          console.log("🚀 ~ deleteResponse:", await deleteResponse.json());
+
+          await fetchAvailableSources();
+
+          loadSavedSources();
+          loadActiveSources();
+          updateSources();
+        })();
       }
 
       function updateToolsActors() {
