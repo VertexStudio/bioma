@@ -26,7 +26,7 @@ reqwest = { version = "0.12", features = ["multipart"] }
 jsonrpc-core = "18.0"
 
 # Database and Storage
-surrealdb = { version = "2.1.4", features = ["kv-mem"] }
+surrealdb = { version = "2.2.0", features = ["kv-mem"] }
 object_store = { version = "0.11", features = ["serde"] }
 
 # Serialization and Schema
@@ -110,7 +110,7 @@ indexmap = "2.7"
 #     "function-calling",
 #     "stream",
 # ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "75548313bed6a14dc046ae514d74b309215b8cd8", features = [
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "e1d74d8baa0cb74f5f8672b47a96e49b3a594648", features = [
     "stream",
 ] }
 # ollama-rs = { path = "../ollama-rs", features = [

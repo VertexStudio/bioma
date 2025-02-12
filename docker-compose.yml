@@ -22,7 +22,7 @@ services:
       - bioma-network
 
   surrealdb:
-    image: surrealdb/surrealdb:v2.1.4
+    image: surrealdb/surrealdb:v2.2.0
     container_name: bioma-surrealdb
     command: start --no-banner --allow-all --bind 0.0.0.0:9123 --user root --pass root surrealkv://data/bioma.db
     user: "1000:1000"
@@ -46,7 +46,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5001:5001"
-    entrypoint: [ "gunicorn", "--bind", "0.0.0.0:5001", "markitdown_script:app" ]
+    entrypoint: ["gunicorn", "--bind", "0.0.0.0:5001", "markitdown_script:app"]
 
   pdf-analyzer:
     build:
@@ -79,7 +79,7 @@ services:
               capabilities: [gpu]
 
   surrealist:
-    image: surrealdb/surrealist:3.1.9
+    image: surrealdb/surrealist:3.2.2
     container_name: bioma-surrealist
     ports:
       - "8080:8080"
@@ -188,7 +188,6 @@ volumes:
   bioma-ollama_data:
   bioma-surreal_data:
   bioma-minio-data:
-
 
 networks:
   bioma-network:
