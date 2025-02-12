@@ -292,8 +292,12 @@ async fn test_embeddings_top_k_similarities() -> Result<(), TestError> {
 
     // Test top-k similarities
     let query = "How are you doing?";
-    let top_k =
-        embeddings::TopK::builder().query(embeddings::Query::Text(query.to_string())).threshold(-0.5).k(2).build();
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text(query.to_string()))
+        .threshold(-0.5)
+        .k(2)
+        .sources(vec![source.to_string()])
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -394,6 +398,7 @@ async fn test_embeddings_persistence() -> Result<(), TestError> {
         .query(embeddings::Query::Text("Persistent test".to_string()))
         .threshold(-0.5)
         .k(1)
+        .sources(vec![source.to_string()])
         .build();
 
     let similarities = relay_ctx
@@ -472,6 +477,7 @@ async fn test_embeddings_with_metadata() -> Result<(), TestError> {
         .query(embeddings::Query::Text("Text with metadata".to_string()))
         .threshold(-0.5)
         .k(1)
+        .sources(vec![source.to_string()])
         .build();
 
     let similarities = relay_ctx
@@ -565,6 +571,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
     }
 
     let source_query = include_str!("../sql/source.surql");
+    let mut sources = Vec::new();
 
     // Process embeddings and create sources one at a time
     for (i, embedding_future) in embedding_futures.into_iter().enumerate() {
@@ -573,6 +580,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
         {
             // Create a new scope for the query execution with owned values
             let source = format!("pool_source_{}.test", i).to_string();
+            sources.push(source.clone());
             let uri = format!("pool_uri_{}.test", i).to_string();
             let ids = embedding_result.ids.clone();
             let prefix = table_prefixes[i].clone();
@@ -602,6 +610,7 @@ async fn test_embeddings_pool() -> Result<(), TestError> {
             .query(embeddings::Query::Text("Hello, how are you?".to_string()))
             .threshold(-0.5)
             .k(2)
+            .sources(sources.clone())
             .build();
         let future =
             relay_ctx.send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, embeddings_id, SendOptions::default());
@@ -717,13 +726,15 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
 
     assert_eq!(stored.ids.len(), 1);
 
+    let source = "test_source.test";
+
     let source_query = include_str!("../sql/source.surql");
     engine
         .db()
         .lock()
         .await
         .query(source_query)
-        .bind(("source", "test_source.test"))
+        .bind(("source", source))
         .bind(("uri", "test_uri.test"))
         .bind(("emb_ids", stored.ids))
         .bind(("prefix", table_prefix.clone()))
@@ -735,6 +746,7 @@ async fn test_image_embeddings_store_and_search() -> Result<(), TestError> {
         .query(embeddings::Query::Image(ImageData::Path("../assets/images/elephant.jpg".to_string())))
         .threshold(0.5)
         .k(1)
+        .sources(vec![source.to_string()])
         .build();
 
     let similarities = relay_ctx
@@ -797,12 +809,14 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
 
     let source_query = include_str!("../sql/source.surql");
 
+    let source = "test_source.test";
+
     engine
         .db()
         .lock()
         .await
         .query(source_query)
-        .bind(("source", "test_source.test"))
+        .bind(("source", source))
         .bind(("uri", "test_uri.test"))
         .bind(("emb_ids", stored.ids))
         .bind(("prefix", table_prefix.clone()))
@@ -814,6 +828,7 @@ async fn test_embeddings_cross_modal_search() -> Result<(), TestError> {
         .query(embeddings::Query::Text("an elephant".to_string()))
         .threshold(0.2)
         .k(1)
+        .sources(vec![source.to_string()])
         .build();
 
     let similarities = relay_ctx
@@ -914,13 +929,15 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
         )
         .await?;
 
+    let image_source = "test_source_image.test";
+
     let source_query = include_str!("../sql/source.surql");
     engine
         .db()
         .lock()
         .await
         .query(source_query)
-        .bind(("source", "test_source_image.test"))
+        .bind(("source", image_source))
         .bind(("uri", "test_uri_image.test"))
         .bind(("emb_ids", stored_image.ids))
         .bind(("prefix", table_prefix.clone()))
@@ -939,12 +956,14 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
         )
         .await?;
 
+    let text_source = "test_source_text.test";
+
     engine
         .db()
         .lock()
         .await
         .query(source_query)
-        .bind(("source", "test_source_text.test"))
+        .bind(("source", text_source))
         .bind(("uri", "test_uri_text.test"))
         .bind(("emb_ids", stored_text.ids))
         .bind(("prefix", table_prefix))
@@ -958,6 +977,7 @@ async fn test_embeddings_mixed_modal_storage() -> Result<(), TestError> {
                 .query(embeddings::Query::Text("elephant".to_string()))
                 .threshold(0.2)
                 .k(2)
+                .sources(vec![image_source.to_string(), text_source.to_string()])
                 .build(),
             &embeddings_id,
             SendOptions::default(),
@@ -997,11 +1017,15 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
+    let document1 = "document1.pdf";
+    let document2 = "document2.pdf";
+    let document3 = "document3.pdf";
+
     // Store embeddings from different sources
     let sources_and_texts = vec![
-        ("document1.pdf", vec!["This is content from document 1.", "More content from doc 1."]),
-        ("document2.pdf", vec!["Content from document 2.", "Additional content from doc 2."]),
-        ("document3.pdf", vec!["Document 3 content here.", "More from document 3."]),
+        (document1, vec!["This is content from document 1.", "More content from doc 1."]),
+        (document2, vec!["Content from document 2.", "Additional content from doc 2."]),
+        (document3, vec!["Document 3 content here.", "More from document 3."]),
     ];
 
     // Store all embeddings
@@ -1037,7 +1061,7 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         .query(embeddings::Query::Text("content from document".to_string()))
         .threshold(-0.5)
         .k(4)
-        .sources(vec!["document1.pdf".to_string()])
+        .sources(vec![document1.to_string()])
         .build();
 
     let similarities = relay_ctx
@@ -1060,7 +1084,7 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         .query(embeddings::Query::Text("content".to_string()))
         .threshold(-0.5)
         .k(4)
-        .sources(vec!["document1.pdf".to_string(), "document2.pdf".to_string()])
+        .sources(vec![document1.to_string(), document2.to_string()])
         .build();
 
     let similarities = relay_ctx
@@ -1080,9 +1104,13 @@ async fn test_embeddings_source_filtering() -> Result<(), TestError> {
         );
     }
 
-    // Test 3: Query without source filter (should return all results)
-    let top_k =
-        embeddings::TopK::builder().query(embeddings::Query::Text("content".to_string())).threshold(-0.5).k(6).build();
+    // Test 3: Query all documents
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("content".to_string()))
+        .threshold(-0.5)
+        .k(6)
+        .sources(vec![document1.to_string(), document2.to_string(), document3.to_string()])
+        .build();
 
     let similarities = relay_ctx
         .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
@@ -1145,6 +1173,8 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
     // Test both raw base64 and data URL formats
     let test_cases = vec![base64_image.clone(), format!("data:image/jpeg;base64,{}", base64_image)];
 
+    let mut sources = Vec::new();
+
     for (i, base64_str) in test_cases.iter().enumerate() {
         // Store base64 image embeddings
         let stored = relay_ctx
@@ -1161,6 +1191,9 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
             )
             .await?;
 
+        let source = format!("base64_test_{}.test", i);
+        sources.push(source.clone());
+
         // Create source record
         let source_query = include_str!("../sql/source.surql");
         engine
@@ -1168,7 +1201,7 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
             .lock()
             .await
             .query(source_query)
-            .bind(("source", format!("base64_test_{}.test", i)))
+            .bind(("source", source.clone()))
             .bind(("uri", format!("base64_uri_{}.test", i)))
             .bind(("emb_ids", stored.ids))
             .bind(("prefix", table_prefix.clone()))
@@ -1180,6 +1213,7 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
             .query(embeddings::Query::Image(ImageData::Base64(base64_str.clone())))
             .threshold(0.5)
             .k(1)
+            .sources(vec![source])
             .build();
 
         let similarities = relay_ctx
@@ -1197,6 +1231,7 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
         .query(embeddings::Query::Text("an elephant".to_string()))
         .threshold(0.2)
         .k(2)
+        .sources(sources.clone())
         .build();
 
     let similarities = relay_ctx
@@ -1206,6 +1241,84 @@ async fn test_base64_image_embeddings() -> Result<(), TestError> {
     // Verify cross-modal search results
     assert_eq!(similarities.len(), 2); // Should find both stored versions
     assert!(similarities.iter().all(|s| s.metadata.as_ref().unwrap()["description"] == "Base64 elephant image"));
+
+    // Terminate the actor
+    embeddings_handle.abort();
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_without_source_embeddings() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+
+    // Spawn the embeddings actor
+    let embeddings_id = ActorId::of::<Embeddings>("/embeddings");
+    let (mut embeddings_ctx, mut embeddings_actor) =
+        Actor::spawn(engine.clone(), embeddings_id.clone(), Embeddings::default(), SpawnOptions::default()).await?;
+
+    let table_prefix = embeddings_actor.table_prefix();
+
+    let embeddings_handle = tokio::spawn(async move {
+        if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
+            error!("Embeddings actor error: {}", e);
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Store embeddings with global source
+    let texts = vec!["This is a global test.", "Another global entry.", "Third global text."];
+    let stored = relay_ctx
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                content: EmbeddingContent::Text(texts.iter().map(|t| t.to_string()).collect()),
+                metadata: Some(texts.iter().map(|_| serde_json::json!({"source": "/global"})).collect()),
+            },
+            &embeddings_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    // Create source record with "/global" source
+    let source_query = include_str!("../sql/source.surql");
+    engine
+        .db()
+        .lock()
+        .await
+        .query(source_query)
+        .bind(("source", "/global"))
+        .bind(("uri", "global_test"))
+        .bind(("emb_ids", stored.ids))
+        .bind(("prefix", table_prefix))
+        .await
+        .map_err(SystemActorError::from)?;
+
+    // Query without specifying sources
+    let top_k = embeddings::TopK::builder()
+        .query(embeddings::Query::Text("global test".to_string()))
+        .threshold(-0.5)
+        .k(3)
+        .build();
+
+    let similarities = relay_ctx
+        .send_and_wait_reply::<Embeddings, embeddings::TopK>(top_k, &embeddings_id, SendOptions::default())
+        .await?;
+
+    // Verify results
+    assert_eq!(similarities.len(), 3, "Expected all three entries to be returned");
+    assert!(similarities.iter().all(|s| s.text.is_some()), "All results should have text");
+    assert!(similarities.iter().all(|s| s.similarity >= -0.5), "All similarities should be above threshold");
+    assert!(similarities[0].similarity >= similarities[1].similarity, "Results should be sorted by similarity");
+
+    // Additional verification that we got the expected texts
+    let result_texts: Vec<_> = similarities.iter().map(|s| s.text.as_ref().unwrap()).collect();
+    assert!(result_texts.iter().any(|&t| t == "This is a global test."), "Expected to find the most relevant text");
 
     // Terminate the actor
     embeddings_handle.abort();
