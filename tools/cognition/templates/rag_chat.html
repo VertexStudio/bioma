@@ -1370,8 +1370,9 @@
           currentBranches[messageIndex]
         );
 
-        // Remove all messages after this point
         const messageElements = Array.from(chatContainer.children);
+        console.log("Message elements before removal:", messageElements.length);
+
         const targetMessageElement = messageElements.find(
           (el) =>
             el.classList.contains("user-message") &&
@@ -1387,9 +1388,8 @@
         const targetIndex = messageElements.indexOf(targetMessageElement);
         console.log("Found target element at index:", targetIndex);
 
-        // Remove messages one by one from the end
         while (messageElements.length > targetIndex + 1) {
-          const lastElement = messageElements[messageElements.length - 1];
+          const lastElement = messageElements.pop();
           if (lastElement && lastElement.parentNode === chatContainer) {
             console.log(
               "Removing message:",
@@ -1397,20 +1397,16 @@
             );
             chatContainer.removeChild(lastElement);
           }
-          messageElements.pop();
         }
 
-        // Update the message content
         const branch = messageBranches[messageIndex][branchIndex];
         console.log(
           "Loading branch content:",
           branch.content.slice(0, 50) + "..."
         );
 
-        // Clear the target message content
         targetMessageElement.innerHTML = "";
 
-        // Create and append user content
         const userContentDiv = document.createElement("div");
         userContentDiv.className = "user-message-content";
         userContentDiv.innerHTML = md.render(
@@ -1418,77 +1414,25 @@
         );
         targetMessageElement.appendChild(userContentDiv);
 
-        // Add branch navigation
         addBranchNavigation(targetMessageElement, messageIndex);
 
-        // Add edit button
-        const editButton = document.createElement("div");
-        editButton.className = "edit-icon";
-        editButton.innerHTML = '<i class="fas fa-edit"></i>';
-        editButton.addEventListener("click", function (e) {
-          e.stopPropagation();
-          editUserMessage(targetMessageElement);
-        });
-        targetMessageElement.appendChild(editButton);
-
-        // Restore branch history
-        messageHistory = messageHistory.slice(0, messageIndex + 1);
-        messageHistory[messageIndex].content = branch.content;
         console.log(
           "Restoring branch history:",
-          branch.history?.length || 0,
+          branch.history.length,
           "messages"
         );
 
-        if (branch.history && branch.history.length > 0) {
-          console.log("Branch history found:", branch.history);
-
-          // First, update messageHistory with all messages
-          branch.history.forEach((msg) => {
-            messageHistory.push(msg);
-          });
-
-          // Then, render all messages
-          branch.history.forEach((msg, idx) => {
-            console.log(
-              `Restoring message ${idx}:`,
-              msg.role,
-              msg.content.slice(0, 50) + "..."
-            );
-
-            // Create a new message div without updating messageHistory
-            const messageDiv = document.createElement("div");
-            messageDiv.className = `message ${msg.role}-message`;
-
-            if (msg.role === "user") {
-              const userContentDiv = document.createElement("div");
-              userContentDiv.className = "user-message-content";
-              userContentDiv.innerHTML = md.render(
-                md.utils.escapeHtml(msg.content)
-              );
-              messageDiv.appendChild(userContentDiv);
-            } else {
-              const mainContent =
-                msg.role === "user"
-                  ? md.utils.escapeHtml(msg.content)
-                  : msg.content;
-              const rendered = md.render(mainContent);
-              const contextSection =
-                msg.role === "assistant"
-                  ? createContextSection(msg.context)
-                  : "";
-              messageDiv.innerHTML = rendered + contextSection;
-            }
-
-            chatContainer.appendChild(messageDiv);
-          });
-        } else {
-          console.log("No branch history found");
-        }
-
-        // Update input with the branch content
-        queryInput.value = branch.content;
-        resizeTextarea();
+        branch.history.forEach((msg, idx) => {
+          console.log(
+            `Restoring message ${idx}:`,
+            msg.role,
+            msg.content.slice(0, 50) + "..."
+          );
+          const messageDiv = document.createElement("div");
+          messageDiv.className = `message ${msg.role}-message`;
+          messageDiv.innerHTML = md.render(msg.content);
+          chatContainer.appendChild(messageDiv);
+        });
 
         console.groupEnd();
       }
