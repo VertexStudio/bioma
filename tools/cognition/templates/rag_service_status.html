@@ -258,76 +258,65 @@
           }
 
           const data = await response.json();
+          console.log("Health API Response:", data);
           container.innerHTML = "";
 
-          // Orders the services by name
+          // Ordena los servicios por nombre
           const sortedEntries = Object.entries(data).sort((a, b) =>
             a[0].localeCompare(b[0])
           );
 
           for (const [name, info] of sortedEntries) {
+            console.log(`Processing service: ${name}`, info);
+
             const div = document.createElement("div");
             div.className = `service ${
               info.is_healthy ? "healthy" : "unhealthy"
             }`;
 
             let extraInfo = "";
+
             if (
               name === "ollama" &&
               info.is_healthy &&
               info.health?.models?.length > 0
             ) {
-              let extraInfo = '<div class="health-info">';
+              console.log("Models found for Ollama:", info.health.models);
 
-              // Orders the models by name
+              extraInfo += '<div class="health-info">';
               info.health.models.sort((a, b) => a.model.localeCompare(b.model));
 
-              // Iterates over the models
               info.health.models.forEach((modelInfo) => {
                 extraInfo += `
-                  <p><strong>Model:</strong> ${modelInfo.model}</p>
-                  <p><strong>Used VRAM:</strong> ${(
-                    modelInfo.size_vram /
-                    1024 /
-                    1024
-                  ).toFixed(2)} MB</p>
-                `;
+            <p><strong>Model:</strong> ${modelInfo.model}</p>
+            <p><strong>Used VRAM:</strong> ${(
+              modelInfo.size_vram /
+              1024 /
+              1024
+            ).toFixed(2)} MB</p>
+          `;
               });
 
               extraInfo += "</div>";
-
-              div.innerHTML = `
-                <h3>${name
-                  .replace(/_/g, " ")
-                  .toLowerCase()
-                  .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
-                <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-                ${
-                  !info.is_healthy
-                    ? `<p class='error-message'>Error: ${info.error}</p>`
-                    : ""
-                }
-                ${extraInfo}
-              `;
             }
+
             div.innerHTML = `
-              <h3>${name
-                .replace(/_/g, " ")
-                .toLowerCase()
-                .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
-              <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-              ${
-                !info.is_healthy
-                  ? `<p class='error-message'>Error: ${info.error}</p>`
-                  : ""
-              }
-              ${extraInfo}
-          `;
+        <h3>${name
+          .replace(/_/g, " ")
+          .toLowerCase()
+          .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+        <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+        ${
+          !info.is_healthy
+            ? `<p class='error-message'>Error: ${info.error}</p>`
+            : ""
+        }
+        ${extraInfo}
+      `;
 
             container.appendChild(div);
           }
 
-          // Moved outside the loop
           updateLastUpdated();
         } catch (error) {
           console.error("Failed to fetch health status:", error);
