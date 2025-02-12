@@ -103,11 +103,14 @@ impl Schema {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessages {
     pub messages: Vec<ChatMessage>,
+    #[builder(default)]
     pub restart: bool,
+    #[builder(default)]
     pub persist: bool,
+    #[builder(default)]
     pub stream: bool,
     pub format: Option<Schema>,
     pub tools: Option<Vec<ToolInfo>>,
