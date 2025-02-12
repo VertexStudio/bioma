@@ -293,6 +293,18 @@
         margin-top: 5px;
       }
 
+      #loading-indicator {
+        font-size: 14px;
+        color: var(--primary);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      #loading-indicator i {
+        font-size: 18px;
+      }
+
       .source-form,
       .tools-form {
         background: var(--bg-main);
@@ -1285,10 +1297,10 @@
         <div class="source-form" id="source-form">
           <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
           <div class="form-group">
-            <input type="text" id="source" placeholder="Source path" />
+            <input type="text" id="source" placeholder="Source directory" />
           </div>
           <div class="form-actions">
-            <div class="form-info">
+            <div class="form-info" id="form-info">
               <p>Select File</p>
               <button
                 id="upload-button"
@@ -1298,6 +1310,9 @@
                 <i class="fa-solid fa-file"></i>
               </button>
               <input type="file" id="file-input" style="display: none" />
+            </div>
+            <div id="loading-indicator" style="display: none; margin-top: 10px">
+              <i class="fa-solid fa-spinner fa-spin"></i> Uploading...
             </div>
           </div>
         </div>
@@ -1380,23 +1395,28 @@
 
           if (file) {
             let directoryPath = document.getElementById("source").value.trim();
+            const loadingIndicator =
+              document.getElementById("loading-indicator");
+            const formInfo = document.getElementById("form-info");
 
             const metadata = {
               path: `${directoryPath}/${file.name}`,
             };
 
-            // Create a FormData object
             const formData = new FormData();
-            formData.append("file", file); // Append the file
+            formData.append("file", file);
             formData.append(
               "metadata",
               new Blob([JSON.stringify(metadata)], { type: "application/json" })
-            ); // Ensure JSON format
+            );
 
             try {
+              loadingIndicator.style.display = "flex";
+              formInfo.style.display = "none";
+
               const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
                 method: "POST",
-                body: formData, // Send as multipart/form-data
+                body: formData,
               });
 
               if (uploadResponse.ok) {
@@ -1419,7 +1439,7 @@
                   body: JSON.stringify(indexQuery),
                 });
               } else {
-                console.error("❌ Upload failed:", await response.text());
+                console.error("❌ Upload failed:", await uploadResponse.text());
               }
             } catch (error) {
               console.error("⚠️ Error during upload:", error);
@@ -1427,6 +1447,9 @@
               await fetchAvailableSources();
               loadSavedSources();
               loadActiveSources();
+
+              loadingIndicator.style.display = "none";
+              formInfo.style.display = "flex";
             }
           }
         });
