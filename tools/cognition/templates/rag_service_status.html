@@ -271,26 +271,42 @@
               info.is_healthy ? "healthy" : "unhealthy"
             }`;
 
+            let extraInfo = "";
+            if (
+              name === "ollama" &&
+              info.is_healthy &&
+              info.health?.models?.length > 0
+            ) {
+              const modelInfo = info.health.models[0];
+              extraInfo = `
+            <div class="health-info">
+                <p><strong>Model:</strong> ${modelInfo.model}</p>
+                <p><strong>Used VRAM:</strong> ${(
+                  modelInfo.size_vram /
+                  1024 /
+                  1024
+                ).toFixed(2)} MB</p>
+            </div>
+        `;
+            }
+
             div.innerHTML = `
-                <h3>${name
-                  .replace(/_/g, " ")
-                  .toLowerCase()
-                  .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
-                <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-                ${
-                  !info.is_healthy
-                    ? `<p class='error-message'>Error: ${info.error}</p>`
-                    : ""
-                }
-                ${
-                  info.health?.info
-                    ? `<div class="health-info"><code>${info.health.info}</code></div>`
-                    : ""
-                }
-              `;
+        <h3>${name
+          .replace(/_/g, " ")
+          .toLowerCase()
+          .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+        <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+        ${
+          !info.is_healthy
+            ? `<p class='error-message'>Error: ${info.error}</p>`
+            : ""
+        }
+        ${extraInfo}
+    `;
 
             container.appendChild(div);
           }
+
           // Moved outside the loop
           updateLastUpdated();
         } catch (error) {
