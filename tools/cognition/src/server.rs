@@ -221,7 +221,10 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                     if !file.name().ends_with('/') {
                         // Skip directories
                         let outpath = extract_to.join(file.name());
-                        extracted_files.push(outpath);
+                        // Store paths relative to output_dir
+                        if let Ok(relative) = outpath.strip_prefix(&output_dir) {
+                            extracted_files.push(relative.to_path_buf());
+                        }
                     }
                 }
 
@@ -266,9 +269,12 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                     error!("Failed to clean up temporary file: {}", e);
                 }
 
+                // Get path relative to output_dir
+                let relative_path = temp_file_path.strip_prefix(&output_dir).unwrap_or(&temp_file_path).to_path_buf();
+
                 HttpResponse::Ok().json(Uploaded {
                     message: "File uploaded successfully".to_string(),
-                    paths: vec![temp_file_path],
+                    paths: vec![relative_path],
                     size: form.file.size,
                 })
             }
