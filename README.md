@@ -235,12 +235,13 @@ curl -X 'POST' \
   -H 'accept: */*' \
   -H 'Content-Type: application/json' \
   -d '{
-        "messages": [
-            {
-            "role": "user",
-            "content": "Why is the sky blue?"
-            }
-        ]
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "sources": ["/bioma"]
     }'
 ```
 
@@ -251,12 +252,14 @@ curl -X POST http://localhost:5766/chat \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",
+        "sources": ["/bioma"],
         "messages": [
             {
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
-        ]
+        ],
+        "use_tools": false
     }'
 ```
 
@@ -267,6 +270,7 @@ curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",
+        "sources": ["/bioma"],
         "messages": [
             {
                 "role": "user",
