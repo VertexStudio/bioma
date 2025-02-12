@@ -258,8 +258,7 @@ curl -X POST http://localhost:5766/chat \
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
-        ],
-        "use_tools": false
+        ]
     }'
 ```
 
