@@ -140,7 +140,8 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
@@ -152,7 +153,8 @@ pub struct AskQueryRequestSchema {
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
@@ -172,7 +174,8 @@ fn default_chat_stream() -> bool {
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[schema(default = default_sources)]
+    #[serde(default = "default_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
