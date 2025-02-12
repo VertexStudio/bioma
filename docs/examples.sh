@@ -42,7 +42,7 @@ curl -X POST http://localhost:5766/retrieve \
         "query": "What is Bioma?",
         "threshold": 0.0,
         "limit": 10,
-         "sources": ["path/to/source1", "path/to/source2"]
+        "sources": ["path/to/source1", "path/to/source2"]
     }'
 
 # Ask a question (RAG-enhanced)
@@ -50,6 +50,7 @@ curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
     -d '{
     "model": "llama3.2",
+    "sources": ["/bioma"],
     "messages": [
         {
             "role": "user",
@@ -88,13 +89,29 @@ curl -X POST http://localhost:5766/chat \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",
+        "sources": ["/bioma"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "Why is the sky blue?"
+            }
+        ]
+    }'
+
+
+# Think endpoint
+curl -X 'POST' \
+  'http://0.0.0.0:5766/think' \
+  -H 'accept: */*' \
+  -H 'Content-Type: application/json' \
+  -d '{
         "messages": [
             {
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
         ],
-        "use_tools": false
+        "sources": ["/bioma"]
     }'
 
 # Structured ask with schema (compatible with Ollama)
@@ -102,6 +119,7 @@ curl -X POST http://localhost:5766/ask \
     -H "Content-Type: application/json" \
     -d '{
         "model": "llama3.2",
+        "sources": ["/bioma"],
         "messages": [
             {
                 "role": "user",
