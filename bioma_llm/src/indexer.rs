@@ -80,9 +80,24 @@ fn default_chunk_batch_size() -> usize {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexedSource {
+    pub source: String,
+    pub uri: String,
+    pub status: IndexStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum IndexStatus {
+    Indexed,
+    Cached,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Indexed {
     pub indexed: usize,
     pub cached: usize,
+    pub sources: Vec<IndexedSource>,
 }
 
 #[derive(Display, Debug, Clone, Serialize, Deserialize)]
@@ -170,8 +185,11 @@ impl Indexer {
     ) -> Result<IndexResult, IndexerError> {
         match content {
             Content::Image { path } => {
-                let path_clone = path.clone();
-                // let source_clone = source.clone();
+                // Get the full path by joining with local store directory
+                let local_store_dir = ctx.engine().local_store_dir();
+                let full_path = local_store_dir.join(&path);
+
+                let path_clone = full_path.to_string_lossy().into_owned();
                 let metadata = tokio::task::spawn_blocking(move || {
                     let file = std::fs::File::open(&path).ok()?;
                     let reader = std::io::BufReader::new(file);
@@ -317,6 +335,7 @@ impl Message<IndexGlobs> for Indexer {
         let total_index_globs_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
+        let mut sources = Vec::new();
 
         for glob in message.globs.iter() {
             let local_store_dir = ctx.engine().local_store_dir();
@@ -327,7 +346,6 @@ impl Message<IndexGlobs> for Indexer {
             };
 
             info!("Indexing glob: {}", &full_glob);
-            let full_glob_clone = full_glob.clone();
             let paths = tokio::task::spawn_blocking(move || {
                 let mut paths = Vec::new();
                 for entry in glob::glob(&full_glob).unwrap().flatten() {
@@ -350,33 +368,44 @@ impl Message<IndexGlobs> for Indexer {
 
             let Ok(paths) = paths else {
                 warn!("Skipping glob: {}", &glob);
+                sources.push(IndexedSource {
+                    source: glob.clone(),
+                    uri: glob.clone(),
+                    status: IndexStatus::Failed("Invalid glob pattern".to_string()),
+                });
                 continue;
             };
 
             for pathbuf in paths {
-                let uri = pathbuf.to_string_lossy().to_string();
-                let source = ContentSource { source: full_glob_clone.clone(), uri: uri.clone() };
+                // Convert the full path to a path relative to the local store directory
+                let local_store_dir = ctx.engine().local_store_dir();
+                let relative_path = pathdiff::diff_paths(&pathbuf, local_store_dir)
+                    .ok_or_else(|| IndexerError::Other("Failed to get relative path".to_string()))?;
+                let uri = relative_path.to_string_lossy().to_string();
+                let source = ContentSource { source: glob.clone(), uri: uri.clone() };
 
-                // Check if source already exists before processing
+                // Check if source already exists
                 let query =
                     format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
-                let sources = ctx
-                    .engine()
-                    .db()
+                let db = ctx.engine().db();
+                let mut results = db
                     .lock()
                     .await
                     .query(&query)
                     .bind(("source", source.source.clone()))
                     .bind(("uri", source.uri.clone()))
-                    .await;
+                    .await
+                    .map_err(SystemActorError::from)?;
 
-                if let Ok(mut sources) = sources {
-                    let sources: Vec<ContentSource> = sources.take(0).map_err(SystemActorError::from)?;
-                    if !sources.is_empty() {
-                        info!("Content already indexed with URI: {} {}", source.source, source.uri);
-                        cached += 1;
-                        continue;
-                    }
+                let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
+                if !existing_sources.is_empty() {
+                    cached += 1;
+                    sources.push(IndexedSource {
+                        source: source.source.clone(),
+                        uri: source.uri.clone(),
+                        status: IndexStatus::Cached,
+                    });
+                    continue;
                 }
 
                 info!("Indexing path: {}", &pathbuf.display());
@@ -402,6 +431,11 @@ impl Message<IndexGlobs> for Indexer {
                                 Ok(content) => Content::Text { content, text_type: TextType::Pdf, chunk_config },
                                 Err(e) => {
                                     error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                                    sources.push(IndexedSource {
+                                        source: glob.clone(),
+                                        uri: uri.clone(),
+                                        status: IndexStatus::Failed(format!("PDF conversion error: {}", e)),
+                                    });
                                     continue;
                                 }
                             }
@@ -451,38 +485,57 @@ impl Message<IndexGlobs> for Indexer {
                     }
                 };
 
-                let mut embeddings_ids: Vec<RecordId> = Vec::new();
-
-                match self.index_content(ctx, source.clone(), content, embeddings_id).await? {
-                    IndexResult::Indexed(ids) => {
-                        embeddings_ids.extend(ids);
-                        if !embeddings_ids.is_empty() {
+                // Process content
+                match self.index_content(ctx, source.clone(), content, embeddings_id).await {
+                    Ok(IndexResult::Indexed(ids)) => {
+                        if !ids.is_empty() {
                             indexed += 1;
+                            sources.push(IndexedSource {
+                                source: source.source.clone(),
+                                uri: source.uri.clone(),
+                                status: IndexStatus::Indexed,
+                            });
+                            let source_query = include_str!("../sql/source.surql");
+                            ctx.engine()
+                                .db()
+                                .lock()
+                                .await
+                                .query(*&source_query)
+                                .bind(("source", source.source.clone()))
+                                .bind(("uri", source.uri.clone()))
+                                .bind(("emb_ids", ids))
+                                .bind(("prefix", self.embeddings.table_prefix()))
+                                .await
+                                .map_err(SystemActorError::from)
+                                .unwrap();
+                        } else {
+                            sources.push(IndexedSource {
+                                source: source.source.clone(),
+                                uri: source.uri.clone(),
+                                status: IndexStatus::Failed("No embeddings generated".to_string()),
+                            });
                         }
                     }
-                    IndexResult::Failed => continue,
-                }
-
-                if !embeddings_ids.is_empty() {
-                    let source_query = include_str!("../sql/source.surql");
-                    ctx.engine()
-                        .db()
-                        .lock()
-                        .await
-                        .query(*&source_query)
-                        .bind(("source", source.source.clone()))
-                        .bind(("uri", source.uri.clone()))
-                        .bind(("emb_ids", embeddings_ids))
-                        .bind(("prefix", self.embeddings.table_prefix()))
-                        .await
-                        .map_err(SystemActorError::from)
-                        .unwrap();
+                    Ok(IndexResult::Failed) => {
+                        sources.push(IndexedSource {
+                            source: source.source.clone(),
+                            uri: source.uri.clone(),
+                            status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
+                        });
+                    }
+                    Err(e) => {
+                        sources.push(IndexedSource {
+                            source: source.source.clone(),
+                            uri: source.uri.clone(),
+                            status: IndexStatus::Failed(format!("Indexing error: {}", e)),
+                        });
+                    }
                 }
             }
         }
 
         info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
-        ctx.reply(Indexed { indexed, cached }).await?;
+        ctx.reply(Indexed { indexed, cached, sources }).await?;
         Ok(())
     }
 }
@@ -510,12 +563,13 @@ impl Message<DeleteSource> for Indexer {
 
         // Process file deletions
         for source in &delete_result.deleted_sources {
-            let source_path = std::path::Path::new(&source.uri);
+            let local_store_dir = ctx.engine().local_store_dir();
+            let source_path = local_store_dir.join(&source.uri);
             if source_path.exists() {
                 if source_path.is_dir() {
-                    tokio::fs::remove_dir_all(source_path).await.ok();
+                    tokio::fs::remove_dir_all(&source_path).await.ok();
                 } else {
-                    tokio::fs::remove_file(source_path).await.ok();
+                    tokio::fs::remove_file(&source_path).await.ok();
                 }
             }
         }
