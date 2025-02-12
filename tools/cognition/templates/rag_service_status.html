@@ -277,17 +277,21 @@
               info.is_healthy &&
               info.health?.models?.length > 0
             ) {
-              const modelInfo = info.health.models[0];
-              extraInfo = `
-            <div class="health-info">
+              let extraInfo = '<div class="health-info">';
+
+              // Iterates over the models and displays the model name and used VRAM
+              info.health.models.forEach((modelInfo) => {
+                extraInfo += `
                 <p><strong>Model:</strong> ${modelInfo.model}</p>
                 <p><strong>Used VRAM:</strong> ${(
                   modelInfo.size_vram /
                   1024 /
                   1024
                 ).toFixed(2)} MB</p>
-            </div>
-        `;
+              `;
+              });
+
+              extraInfo += "</div>";
             }
 
             div.innerHTML = `
