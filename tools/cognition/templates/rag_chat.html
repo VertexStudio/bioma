@@ -2965,7 +2965,6 @@
       }
 
       function deleteSource(source) {
-        console.log("🚀 ~ deleteSource ~ source:", source);
         const savedSources = getSavedSources().filter(
           (s) => s.id !== source.id
         );
@@ -2987,7 +2986,6 @@
               sources: [source.path],
             }),
           });
-          console.log("🚀 ~ deleteResponse:", await deleteResponse.json());
 
           await fetchAvailableSources();
 
