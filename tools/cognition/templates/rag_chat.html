@@ -293,6 +293,13 @@
         margin-top: 5px;
       }
 
+      .loading-indicator {
+        width: 100% !important;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
       #loading-indicator {
         font-size: 14px;
         color: var(--primary);
@@ -1312,8 +1319,12 @@
               </button>
               <input type="file" id="file-input" style="display: none" />
             </div>
-            <div id="loading-indicator" style="display: none; margin-top: 10px">
-              <i class="fa-solid fa-spinner fa-spin"></i> Uploading...
+            <div
+              id="loading-indicator"
+              class="loading-indicator"
+              style="display: none; margin-top: 10px"
+            >
+              <i class="fa-solid fa-spinner fa-spin"></i> Processing file...
             </div>
           </div>
         </div>
@@ -2725,6 +2736,8 @@
           return source;
         });
 
+        const grouped = Object.groupBy(body.sources, (item) => item.source);
+
         const active = savedSources.filter((item1) =>
           activeSources.some((item2) => item2.path === item1.path)
         );
@@ -2857,7 +2870,7 @@
         sourceElement.innerHTML = `
 				<div class="source-item-header">
 					<span class="source-icon"><i class="fa-solid fa-book"></i></span>
-					<span class="source-item-name">${source.display_name}</span>
+					<span class="source-item-name">${source.path}</span>
 					<div class="source-actions">
 					${
             isActive
