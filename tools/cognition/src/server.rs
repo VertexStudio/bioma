@@ -171,9 +171,7 @@ impl Default for UploadConfig {
 ///        - The file is first copied to a temporary location.
 ///        - The zip archive is opened, and the function scans all entries to check for a common top-level
 ///          folder. During extraction, that common prefix (if present) is stripped.
-///        - **Important:** Instead of using the deprecated [`ZipFile::sanitized_name`], we use
-///          [`ZipFile::mangled_name`] so that we don’t inadvertently alter the meaning of the path.
-///        - Files are extracted directly into `output_dir/target_folder`, with paths adjusted accordingly.
+///        - Files are extracted directly into `output_dir/target_folder` (using [`ZipFile::mangled_name`]) and only file paths (not directory entries) are collected for the response.
 ///    - **Non-Zip Files:**  
 ///      The file is simply copied into the destination folder.
 ///
@@ -189,26 +187,19 @@ impl Default for UploadConfig {
 ///     - Files are extracted into `output_dir/new/` so that:
 ///       - `generated-api/index.ts` → `output_dir/new/index.ts`
 ///       - `generated-api/api.ts`   → `output_dir/new/api.ts`
-///
-/// - **Zip File with Metadata `"new"`:**
-///   - **Metadata:** `{"path": "new"}`  
-///   - **Uploaded File:** The same zip file as above.
-///   - **Result:**  
-///     - The target folder is `"new"`.
-///     - Extraction occurs as above with the common top-level folder stripped, leaving files under `output_dir/new/`.
+///     - Only the file paths (e.g. `new/index.ts` and `new/api.ts`) are returned in the response.
 ///
 /// - **Non-Zip File with Metadata `"uploads"`:**
 ///   - **Metadata:** `{"path": "uploads"}`  
 ///   - **Uploaded File:** A non-zip file (e.g. `document.txt`).
 ///   - **Result:**  
-///     - The file is copied directly into `output_dir/uploads/document.txt`.
+///     - The file is copied directly into `output_dir/uploads/document.txt`, and that path is returned.
 ///
 /// - **Non-Zip File with Metadata `"archive.zip"`:**
 ///   - **Metadata:** `{"path": "archive.zip"}`  
 ///   - **Uploaded File:** A non-zip file (e.g. `image.png`).
 ///   - **Result:**  
-///     - The target folder becomes `"archive"` (the `.zip` extension is removed).
-///     - The file is copied into `output_dir/archive/image.png`.
+///     - The target folder becomes `"archive"`, and the file is copied to `output_dir/archive/image.png`.
 ///
 #[utoipa::path(
     post,
@@ -298,7 +289,6 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                 // Now perform extraction.
                 for i in 0..archive.len() {
                     let mut file = archive.by_index(i)?;
-                    // Again, use mangled_name() to get the file's path.
                     let mut outpath = file.mangled_name();
 
                     // If a common top-level folder exists, strip it.
@@ -312,6 +302,7 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                     let final_path = extraction_dir.join(&outpath);
 
                     if file.name().ends_with('/') {
+                        // Create directory entries, but do NOT add to extracted_files.
                         std::fs::create_dir_all(&final_path)?;
                     } else {
                         if let Some(parent) = final_path.parent() {
@@ -319,11 +310,10 @@ async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: w
                         }
                         let mut outfile = std::fs::File::create(&final_path)?;
                         std::io::copy(&mut file, &mut outfile)?;
-                    }
-
-                    // Store the path relative to output_dir for the response.
-                    if let Ok(relative) = final_path.strip_prefix(&output_dir_clone) {
-                        extracted_files.push(relative.to_path_buf());
+                        // Only add file paths (not directories) to the response.
+                        if let Ok(relative) = final_path.strip_prefix(&output_dir_clone) {
+                            extracted_files.push(relative.to_path_buf());
+                        }
                     }
                 }
 
