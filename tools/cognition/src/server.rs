@@ -316,7 +316,7 @@ async fn upload_config() -> impl Responder {
                     If `source` is not specified, it will will default to `/global`.",
     request_body(content = IndexGlobsRequestSchema, examples(
         ("basic" = (summary = "Basic", value = json!({
-            "source": "/global",
+            "source": "/my/source",
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200
