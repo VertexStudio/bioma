@@ -194,13 +194,7 @@ impl Default for UploadConfig {
 ///   - **Uploaded File:** A non-zip file (e.g. `document.txt`).
 ///   - **Result:**  
 ///     - The file is copied directly into `output_dir/uploads/document.txt`, and that path is returned.
-///
-/// - **Non-Zip File with Metadata `"archive.zip"`:**
-///   - **Metadata:** `{"path": "archive.zip"}`  
-///   - **Uploaded File:** A non-zip file (e.g. `image.png`).
-///   - **Result:**  
-///     - The target folder becomes `"archive"`, and the file is copied to `output_dir/archive/image.png`.
-///
+///     - Only the file path (e.g. `uploads/document.txt`) is returned in the response.
 #[utoipa::path(
     post,
     path = "/upload",
