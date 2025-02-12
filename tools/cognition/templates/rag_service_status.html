@@ -265,7 +265,7 @@
           console.log("Health API Response:", data);
           container.innerHTML = "";
 
-          // Ordena los servicios por nombre
+          // Orders the services alphabetically
           const sortedEntries = Object.entries(data).sort((a, b) =>
             a[0].localeCompare(b[0])
           );
