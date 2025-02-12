@@ -1416,23 +1416,47 @@
 
         addBranchNavigation(targetMessageElement, messageIndex);
 
-        console.log(
-          "Restoring branch history:",
-          branch.history.length,
-          "messages"
-        );
+        if (branch.history && branch.history.length > 0) {
+          console.log("Branch history found:", branch.history);
 
-        branch.history.forEach((msg, idx) => {
-          console.log(
-            `Restoring message ${idx}:`,
-            msg.role,
-            msg.content.slice(0, 50) + "..."
-          );
-          const messageDiv = document.createElement("div");
-          messageDiv.className = `message ${msg.role}-message`;
-          messageDiv.innerHTML = md.render(msg.content);
-          chatContainer.appendChild(messageDiv);
-        });
+          messageHistory = messageHistory.slice(0, messageIndex + 1);
+
+          branch.history.forEach((msg) => {
+            messageHistory.push(msg);
+          });
+
+          branch.history.forEach((msg, idx) => {
+            console.log(
+              `Restoring message ${idx}: ${msg.role}, ${msg.content.slice(
+                0,
+                50
+              )}...`
+            );
+
+            const messageDiv = document.createElement("div");
+            messageDiv.className = `message ${msg.role}-message`;
+
+            if (msg.role === "user") {
+              const userContentDiv = document.createElement("div");
+              userContentDiv.className = "user-message-content";
+              userContentDiv.innerHTML = md.render(
+                md.utils.escapeHtml(msg.content)
+              );
+              messageDiv.appendChild(userContentDiv);
+            } else {
+              const rendered = md.render(msg.content);
+              const contextSection =
+                msg.role === "assistant"
+                  ? createContextSection(msg.context)
+                  : "";
+              messageDiv.innerHTML = rendered + contextSection;
+            }
+
+            chatContainer.appendChild(messageDiv);
+          });
+        } else {
+          console.log("No branch history found");
+        }
 
         console.groupEnd();
       }
