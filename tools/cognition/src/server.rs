@@ -551,8 +551,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             context.reverse();
             info!("Context fetched: {:#?}", context);
 
-            // Preserve user-provided system message if present, otherwise use default
-            // This ensures we respect custom system prompts while filtering them from the message history
+            // Preserve user-provided system message if present, otherwise use default (our own system prompt)
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
                 let filtered = body.messages[..body.messages.len() - 1]
@@ -887,8 +886,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         retrieved.to_markdown()
     };
 
-    // Preserve user-provided system message if present, otherwise use default
-    // This ensures we respect custom system prompts while filtering them from the message history
+    // Preserve user-provided system message if present, otherwise use default (our own system prompt)
     let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
         let mut sys_msg = None;
         let filtered = body.messages[..body.messages.len() - 1]
@@ -1178,8 +1176,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
-            // Preserve user-provided system message if present, otherwise use default
-            // This ensures we respect custom system prompts while filtering them from the message history
+            // Preserve user-provided system message if present, otherwise use default (our own system prompt)
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
                 let filtered = body.messages[..body.messages.len() - 1]
