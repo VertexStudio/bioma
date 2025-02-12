@@ -1337,16 +1337,20 @@
           messageBranches[messageIndex] = [];
         }
 
-        messageBranches[messageIndex].push({
-          content,
-          history: [], // Will store subsequent messages
-        });
+        const previousHistory =
+          messageBranches[messageIndex][currentBranches[messageIndex]]
+            ?.history || [];
+        const newBranch = { content, history: [...previousHistory] };
 
+        messageBranches[messageIndex].push(newBranch);
         currentBranches[messageIndex] =
           messageBranches[messageIndex].length - 1;
-        console.log("Updated branches:", messageBranches[messageIndex]);
-        console.log("Current branch index:", currentBranches[messageIndex]);
 
+        console.log(
+          "Updated branches:",
+          JSON.stringify(messageBranches[messageIndex], null, 2)
+        );
+        console.log("Current branch index:", currentBranches[messageIndex]);
         console.groupEnd();
       }
 
@@ -1455,7 +1459,16 @@
             chatContainer.appendChild(messageDiv);
           });
         } else {
-          console.log("No branch history found");
+          console.warn(
+            "No branch history found for message index:",
+            messageIndex,
+            "Current branch:",
+            branchIndex
+          );
+          console.warn(
+            "Existing branches at index:",
+            JSON.stringify(messageBranches[messageIndex], null, 2)
+          );
         }
 
         console.groupEnd();
