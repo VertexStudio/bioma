@@ -858,6 +858,15 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 }
             ]
         }))),
+        ("With sources" = (summary = "With sources", value = json!({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Why is the sky blue?"
+                }
+            ],
+            "sources": ["/bioma"]
+        }))),
         ("with_tools" = (summary = "Using the echo tool as en example", value = json!({
             "messages": [
                 {
