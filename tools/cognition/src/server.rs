@@ -31,7 +31,7 @@ use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use serde::Serialize;
 use serde_json::json;
 use server_config::{Args, ServerConfig};
-use std::{collections::HashMap, error::Error as StdError};
+use std::{collections::HashMap, error::Error as StdError, time::Duration};
 use tracing::{debug, error, info};
 use url::Url;
 use utoipa::{openapi::ServerBuilder, OpenApi};
@@ -333,8 +333,13 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
     let index_globs: IndexGlobs = body.clone().into();
 
     info!("Sending message to indexer actor");
-    let response =
-        user_actor.send_and_wait_reply::<Indexer, IndexGlobs>(index_globs, &data.indexer, SendOptions::default()).await;
+    let response = user_actor
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
+            index_globs,
+            &data.indexer,
+            SendOptions::builder().timeout(Duration::from_secs(600)).build(),
+        )
+        .await;
     match response {
         Ok(indexed) => {
             info!("Indexed {} files, cached {} files", indexed.indexed, indexed.cached);
