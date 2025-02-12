@@ -1400,7 +1400,7 @@
             const formInfo = document.getElementById("form-info");
 
             const metadata = {
-              path: `${directoryPath}/${file.name}`,
+              path: `${directoryPath || "uploads"}/${file.name}`,
             };
 
             const formData = new FormData();
@@ -1423,7 +1423,8 @@
                 const result = await uploadResponse.json();
 
                 const indexQuery = {
-                  globs: [`${directoryPath}/${file.name}`],
+                  globs: result.paths,
+                  source: directoryPath ? `/${directoryPath}` : undefined,
                   chunk_capacity: {
                     start: 500,
                     end: 2000,
