@@ -55,6 +55,9 @@ impl ActorError for IndexerError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
+    #[builder(default = default_source())]
+    #[serde(default = "default_source")]
+    pub source: String,
     pub globs: Vec<String>,
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
@@ -65,6 +68,10 @@ pub struct IndexGlobs {
     #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
+}
+
+fn default_source() -> String {
+    "/global".to_string()
 }
 
 fn default_chunk_capacity() -> std::ops::Range<usize> {
@@ -369,7 +376,7 @@ impl Message<IndexGlobs> for Indexer {
             let Ok(paths) = paths else {
                 warn!("Skipping glob: {}", &glob);
                 sources.push(IndexedSource {
-                    source: glob.clone(),
+                    source: message.source.clone(),
                     uri: glob.clone(),
                     status: IndexStatus::Failed("Invalid glob pattern".to_string()),
                 });
@@ -382,7 +389,7 @@ impl Message<IndexGlobs> for Indexer {
                 let relative_path = pathdiff::diff_paths(&pathbuf, local_store_dir)
                     .ok_or_else(|| IndexerError::Other("Failed to get relative path".to_string()))?;
                 let uri = relative_path.to_string_lossy().to_string();
-                let source = ContentSource { source: glob.clone(), uri: uri.clone() };
+                let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
 
                 // Check if source already exists
                 let query =
@@ -432,7 +439,7 @@ impl Message<IndexGlobs> for Indexer {
                                 Err(e) => {
                                     error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
                                     sources.push(IndexedSource {
-                                        source: glob.clone(),
+                                        source: message.source.clone(),
                                         uri: uri.clone(),
                                         status: IndexStatus::Failed(format!("PDF conversion error: {}", e)),
                                     });
@@ -491,7 +498,7 @@ impl Message<IndexGlobs> for Indexer {
                         if !ids.is_empty() {
                             indexed += 1;
                             sources.push(IndexedSource {
-                                source: source.source.clone(),
+                                source: message.source.clone(),
                                 uri: source.uri.clone(),
                                 status: IndexStatus::Indexed,
                             });
@@ -510,7 +517,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .unwrap();
                         } else {
                             sources.push(IndexedSource {
-                                source: source.source.clone(),
+                                source: message.source.clone(),
                                 uri: source.uri.clone(),
                                 status: IndexStatus::Failed("No embeddings generated".to_string()),
                             });
@@ -518,14 +525,14 @@ impl Message<IndexGlobs> for Indexer {
                     }
                     Ok(IndexResult::Failed) => {
                         sources.push(IndexedSource {
-                            source: source.source.clone(),
+                            source: message.source.clone(),
                             uri: source.uri.clone(),
                             status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
                         });
                     }
                     Err(e) => {
                         sources.push(IndexedSource {
-                            source: source.source.clone(),
+                            source: message.source.clone(),
                             uri: source.uri.clone(),
                             status: IndexStatus::Failed(format!("Indexing error: {}", e)),
                         });

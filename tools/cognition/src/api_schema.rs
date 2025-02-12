@@ -36,6 +36,7 @@ pub struct ChatMessageRequestSchema {
 
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobsRequestSchema {
+    pub source: Option<String>,
     pub globs: Vec<String>,
     #[schema(value_type = ChunkCapacityRequestSchema)]
     pub chunk_capacity: Option<ChunkCapacityRequestSchema>,
@@ -57,6 +58,7 @@ impl Into<IndexGlobs> for IndexGlobsRequestSchema {
         };
 
         IndexGlobs::builder()
+            .maybe_source(self.source)
             .globs(self.globs)
             .chunk_capacity(chunk_capacity)
             .chunk_overlap(self.chunk_overlap.unwrap_or(DEFAULT_CHUNK_OVERLAP))

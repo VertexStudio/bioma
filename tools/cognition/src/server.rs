@@ -315,6 +315,7 @@ async fn upload_config() -> impl Responder {
     description = "Receives an array of path of files to index.",
     request_body(content = IndexGlobsRequestSchema, examples(
         ("basic" = (summary = "Basic", value = json!({
+            "source": "/global",
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200

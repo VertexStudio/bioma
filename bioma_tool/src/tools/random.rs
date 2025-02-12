@@ -43,11 +43,7 @@ impl ToolDef for RandomNumber {
 
     fn def() -> schema::Tool {
         let input_schema = serde_json::from_str::<schema::ToolInputSchema>(RANDOM_SCHEMA).unwrap();
-        schema::Tool {
-            name: Self::NAME.to_string(),
-            description: Some(Self::DESCRIPTION.to_string()),
-            input_schema,
-        }
+        schema::Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
     async fn call<'a>(&'a self, args: Self::Args) -> Result<CallToolResult, ToolError> {
@@ -64,10 +60,7 @@ impl ToolDef for RandomNumber {
             return Ok(Self::error("Invalid value"));
         }
 
-        Ok(Self::success(format!(
-            "Generated number: {}",
-            random_number
-        )))
+        Ok(Self::success(format!("Generated number: {}", random_number)))
     }
 }
 
