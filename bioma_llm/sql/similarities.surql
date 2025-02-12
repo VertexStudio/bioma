@@ -1,11 +1,11 @@
--- First, filter the sources and store the result in a variable
-LET $filtered_ids = (
-    SELECT ->{prefix}_source_embeddings.out.id AS embeddings
+-- Get filtered sources
+LET $filtered_ids = array::flatten((
+    SELECT VALUE ->{prefix}_source_embeddings.out.id 
     FROM source
     WHERE id.source IN $sources
-);
+));
 
--- Then, use the filtered result in the main query
+-- Get the top k most similar embeddings to the query from the filtered IDs
 SELECT 
     id,
     text,
@@ -14,6 +14,6 @@ SELECT
     <-{prefix}_source_embeddings.in[0].id.{source, uri} AS source
 FROM type::table($prefix + "_embedding")
 WHERE 
-    id IN array::flatten($filtered_ids.embeddings)
+    id IN $filtered_ids
     AND embedding <|{top_k}|> $query
 ORDER BY similarity DESC;
