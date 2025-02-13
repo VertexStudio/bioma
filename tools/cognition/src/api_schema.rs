@@ -274,14 +274,14 @@ impl Into<RankTexts> for RankTextsRequestSchema {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UploadMetadata {
-    #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
+    #[schema(value_type = String)]
     pub path: std::path::PathBuf,
 }
 
 #[derive(ToSchema, Debug, MultipartForm)]
 pub struct UploadRequestSchema {
     #[multipart(limit = "100MB")]
-    #[schema(value_type = String, format = Binary, content_media_type = "application/octet-stream")]
+    #[schema(value_type = String, format = Binary)]
     pub file: TempFile,
     #[multipart(rename = "metadata")]
     #[schema(value_type = UploadMetadata)]
