@@ -1305,11 +1305,11 @@
         <div class="source-form" id="source-form">
           <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
           <div class="form-group">
-            <input type="text" id="source" placeholder="Source directory" />
+            <input type="text" id="source" placeholder="/global" />
           </div>
           <div class="form-actions">
             <div class="form-info" id="form-info">
-              <p>Select File</p>
+              <p id="form-info-text">Select File</p>
               <button
                 id="upload-button"
                 class="action-button"
@@ -1408,12 +1408,16 @@
 
           if (file) {
             let directoryPath = document.getElementById("source").value.trim();
+
+            if (directoryPath[0] == "/") {
+              directoryPath = directoryPath.slice(1);
+            }
+
             const loadingIndicator =
               document.getElementById("loading-indicator");
             const formInfo = document.getElementById("form-info");
 
             const metadata = {
-              //   path: `${directoryPath || "uploads"}/${file.name}`,
               path: directoryPath
                 ? `uploads/${directoryPath}/${file.name}`
                 : `uploads/${file.name}`,
@@ -1425,6 +1429,8 @@
               "metadata",
               new Blob([JSON.stringify(metadata)], { type: "application/json" })
             );
+
+            const formInfoText = document.getElementById("form-info-text");
 
             try {
               loadingIndicator.style.display = "flex";
@@ -1455,10 +1461,20 @@
                   },
                   body: JSON.stringify(indexQuery),
                 });
+
+                const jsonResponse = await response.json();
+
+                if (jsonResponse.sources.length > 0) {
+                  formInfoText.textContent = "Success";
+                } else {
+                  formInfoText.textContent = "Index failed";
+                }
               } else {
+                formInfoText.textContent = "Upload failed";
                 console.error("❌ Upload failed:", await uploadResponse.text());
               }
             } catch (error) {
+              formInfoText.textContent = "Error while processing";
               console.error("⚠️ Error during upload:", error);
             } finally {
               await fetchAvailableSources();
@@ -2556,13 +2572,6 @@
           if (e.key === "Enter") {
             e.preventDefault(); // Prevent form submission
             saveTool();
-          }
-        });
-
-        sourceInput.addEventListener("keypress", function (e) {
-          if (e.key === "Enter") {
-            e.preventDefault(); // Prevent form submission
-            saveSource();
           }
         });
 
