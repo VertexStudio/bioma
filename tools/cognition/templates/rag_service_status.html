@@ -233,12 +233,14 @@
       const observer = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
-            console.log("Intersection state:", entry.isIntersecting);
+            //("Intersection state:", entry.isIntersecting);
             if (entry.isIntersecting) {
-              console.log("Container is visible, starting refresh");
+              //console.log("Container is visible, starting refresh");
+
               setupHealthStatusRefresh();
             } else {
-              console.log("Container is hidden, clearing interval");
+              //console.log("Container is hidden, clearing interval");
+
               if (window.healthInterval) {
                 window.clearInterval(window.healthInterval);
                 window.healthInterval = null;
@@ -286,12 +288,12 @@
       }
 
       async function fetchHealth() {
-        console.log("Fetching health status...");
+        //console.log("Fetching health status...");
         try {
           // Verificar visibilidad antes de hacer el fetch
           const entry = await isElementVisible(container);
           if (!entry.isIntersecting) {
-            console.log("Container not visible, skipping fetch");
+            //console.log("Container not visible, skipping fetch");
             return;
           }
 
@@ -305,7 +307,7 @@
           }
 
           const data = await response.json();
-          console.log("Health API Response:", data);
+          //console.log("Health API Response:", data);
           container.innerHTML = "";
 
           // Orders the services alphabetically
@@ -314,7 +316,7 @@
           );
 
           for (const [name, info] of sortedEntries) {
-            console.log(`Processing service: ${name}`, info);
+            //console.log(`Processing service: ${name}`, info);
 
             const div = document.createElement("div");
             div.className = `service ${
@@ -328,7 +330,7 @@
               info.is_healthy &&
               info.health?.models?.length > 0
             ) {
-              console.log("Models found for Ollama:", info.health.models);
+              //console.log("Models found for Ollama:", info.health.models);
               let totalVram = 0;
 
               extraInfo += '<div class="ollama-container">';
@@ -390,10 +392,10 @@
       }
 
       function setupHealthStatusRefresh() {
-        console.log("Setting up health status refresh...");
+        //console.log("Setting up health status refresh...");
         // Clear any existing intervals to prevent multiple timers
         if (window.healthInterval) {
-          console.log("Clearing existing interval");
+          //console.log("Clearing existing interval");
           window.clearInterval(window.healthInterval);
         }
 
