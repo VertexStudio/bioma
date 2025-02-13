@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conversation Tree</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+
+      .conversation-container {
+        background-color: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .message {
+        margin: 10px 0;
+        padding: 10px;
+        border-radius: 8px;
+        position: relative;
+      }
+
+      .user-message {
+        background-color: #e3f2fd;
+        margin-left: 20px;
+      }
+
+      .assistant-message {
+        background-color: #f5f5f5;
+        margin-right: 20px;
+      }
+
+      .message-actions {
+        position: absolute;
+        right: 10px;
+        top: 10px;
+      }
+
+      .edit-button {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: #666;
+      }
+
+      .edit-button:hover {
+        color: #000;
+      }
+
+      .message-input {
+        width: 100%;
+        padding: 10px;
+        margin: 20px 0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+
+      .send-button {
+        background-color: #4caf50;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .send-button:hover {
+        background-color: #45a049;
+      }
+
+      .message-variants {
+        margin-top: 5px;
+        display: flex;
+        gap: 5px;
+      }
+
+      .variant-button {
+        background-color: #f0f0f0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 2px 8px;
+        cursor: pointer;
+        font-size: 0.8em;
+      }
+
+      .variant-button.active {
+        background-color: #4caf50;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="conversation-container">
+      <div id="conversation"></div>
+      <div class="input-container">
+        <textarea
+          id="messageInput"
+          class="message-input"
+          placeholder="Type your message..."
+        ></textarea>
+        <button id="sendButton" class="send-button">Send</button>
+      </div>
+    </div>
+
+    <script src="tree.js"></script>
+    <script>
+      // Helper to generate unique IDs for each node.
+      function generateUniqueId() {
+        return (
+          "node_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5)
+        );
+      }
+
+      // Custom renderer to show a node along with variant buttons if there are sibling branches.
+      function renderTreeWithVariants(node) {
+        let html = node.nodeData.html.join("");
+        // If there are multiple children, render variant buttons
+        if (node.children.length > 1) {
+          html += `<div class="message-variants">`;
+          node.children.forEach((child, idx) => {
+            const active = node.activeChildIndex === idx ? "active" : "";
+            // Using first 20 chars of content as label
+            let label = child.nodeData.content[0].substring(0, 20);
+            html += `<button class="variant-button ${active}" data-parent-id="${node.id}" data-child-index="${idx}">${label}</button>`;
+          });
+          html += `</div>`;
+        }
+        // Render the active child below this node
+        const activeChild = node.getActiveChild();
+        if (activeChild) {
+          html += renderTreeWithVariants(activeChild);
+        }
+        return html;
+      }
+
+      class ConversationTree {
+        constructor() {
+          this.root = null;
+          this.currentEditingMessage = null;
+        }
+
+        createMessageNode(content, isUser) {
+          const html = [
+            `<div class="message ${
+              isUser ? "user-message" : "assistant-message"
+            }">
+                ${content}
+                ${
+                  isUser
+                    ? '<div class="message-actions"><button class="edit-button">✎</button></div>'
+                    : ""
+                }
+             </div>`,
+          ];
+          const node = new TreeNode({
+            html,
+            content: [content],
+            isUser: [isUser],
+          });
+          node.id = generateUniqueId();
+          return node;
+        }
+
+        addMessage(content, isUser, parentNode = null) {
+          const messageNode = this.createMessageNode(content, isUser);
+          if (!this.root) {
+            this.root = messageNode;
+          } else if (parentNode) {
+            parentNode.addChild(messageNode);
+            console.log("Added message to parent:", {
+              parentId: parentNode.id,
+              parentContent: parentNode.nodeData.content[0],
+              childContent: content,
+              numChildren: parentNode.children.length,
+              activeChildIndex: parentNode.activeChildIndex,
+            });
+          }
+          return messageNode;
+        }
+
+        generateAssistantResponse(userMessage) {
+          const responses = [
+            "That's an interesting point! Let me elaborate...",
+            "I understand your perspective. Here's what I think...",
+            "Let me offer a different viewpoint...",
+            "I agree with you, and I'd like to add...",
+          ];
+          const randomIndex = Math.floor(Math.random() * responses.length);
+          return responses[randomIndex];
+        }
+
+        getLastActiveMessageNode() {
+          if (!this.root) return null;
+          let current = this.root;
+          while (current.getActiveChild()) {
+            current = current.getActiveChild();
+          }
+          return current;
+        }
+
+        renderConversation() {
+          const conversationDiv = document.getElementById("conversation");
+          conversationDiv.innerHTML = "";
+          if (this.root) {
+            conversationDiv.innerHTML = renderTreeWithVariants(this.root);
+            this.attachEventHandlers();
+          }
+        }
+
+        attachEventHandlers() {
+          // Attach edit handlers
+          document.querySelectorAll(".edit-button").forEach((button) => {
+            button.onclick = (e) => {
+              const messageDiv = e.target.closest(".message");
+              const content = messageDiv.textContent
+                .trim()
+                .replace("✎", "")
+                .trim();
+              document.getElementById("messageInput").value = content;
+
+              console.log("Looking for message to edit:", { content });
+              const editingNode = this.findMessageNodeByContent(content);
+
+              if (!editingNode) {
+                console.error("Could not find node for content:", content);
+                return;
+              }
+
+              console.log("Starting edit of message:", {
+                content,
+                nodeId: editingNode.id,
+                parentId: editingNode.parent?.id,
+                parentChildren: editingNode.parent?.children.length,
+                nodeChildren: editingNode.children.length,
+                activeChildIndex: editingNode.activeChildIndex,
+              });
+
+              this.currentEditingMessage = editingNode;
+              document.getElementById("sendButton").textContent =
+                "Complete Edit";
+            };
+          });
+
+          // Attach variant button handlers
+          document.querySelectorAll(".variant-button").forEach((button) => {
+            button.onclick = (e) => {
+              const parentId = e.target.dataset.parentId;
+              const childIndex = parseInt(e.target.dataset.childIndex, 10);
+              const parentNode = this.findNodeById(parentId);
+              if (parentNode && parentNode.children[childIndex]) {
+                console.log("Switching variant:", {
+                  parentId,
+                  oldActiveIndex: parentNode.activeChildIndex,
+                  newActiveIndex: childIndex,
+                  parentContent: parentNode.nodeData.content[0].trim(),
+                  childContent:
+                    parentNode.children[childIndex].nodeData.content[0].trim(),
+                });
+                parentNode.activeChildIndex = childIndex;
+                this.renderConversation();
+              }
+            };
+          });
+        }
+
+        findMessageNodeByContent(content) {
+          const findNode = (node) => {
+            // Normalize content by trimming whitespace
+            const nodeContent = node.nodeData.content[0].trim();
+            const searchContent = content.trim();
+            console.log("Comparing node content:", {
+              nodeContent,
+              searchContent,
+              nodeId: node.id,
+            });
+
+            if (nodeContent === searchContent) {
+              console.log("Found matching node:", {
+                nodeId: node.id,
+                content: nodeContent,
+                parentId: node.parent?.id,
+                numChildren: node.children.length,
+                activeChildIndex: node.activeChildIndex,
+              });
+              return node;
+            }
+
+            for (const child of node.children) {
+              const found = findNode(child);
+              if (found) return found;
+            }
+            return null;
+          };
+          return this.root ? findNode(this.root) : null;
+        }
+
+        findNodeById(id) {
+          const search = (node) => {
+            if (node.id === id) return node;
+            for (const child of node.children) {
+              const found = search(child);
+              if (found) return found;
+            }
+            return null;
+          };
+          return this.root ? search(this.root) : null;
+        }
+      }
+
+      // Initialize the conversation
+      const conversationTree = new ConversationTree();
+
+      // Set up event listeners
+      document.getElementById("sendButton").addEventListener("click", () => {
+        const messageInput = document.getElementById("messageInput");
+        const content = messageInput.value.trim();
+
+        if (content) {
+          if (conversationTree.currentEditingMessage) {
+            // Handle editing existing message
+            const editingNode = conversationTree.currentEditingMessage;
+            const parentNode = editingNode.parent;
+
+            console.log("Editing message:", {
+              editingNodeId: editingNode.id,
+              editingContent: editingNode.nodeData.content[0].trim(),
+              parentId: parentNode?.id,
+              parentContent: parentNode?.nodeData.content[0].trim(),
+              parentChildrenBefore: parentNode?.children.length,
+              newContent: content,
+            });
+
+            // Create new branch from parent
+            const newMessageNode = conversationTree.addMessage(
+              content,
+              true,
+              parentNode
+            );
+
+            if (parentNode) {
+              // Set new message as active child
+              parentNode.activeChildIndex = parentNode.children.length - 1;
+              console.log("Set new branch as active:", {
+                parentId: parentNode.id,
+                parentContent: parentNode.nodeData.content[0].trim(),
+                newActiveIndex: parentNode.activeChildIndex,
+                totalChildren: parentNode.children.length,
+                allChildren: parentNode.children.map((c) => ({
+                  id: c.id,
+                  content: c.nodeData.content[0].trim(),
+                })),
+              });
+            } else {
+              conversationTree.root = newMessageNode;
+            }
+
+            // Add assistant response
+            const response =
+              conversationTree.generateAssistantResponse(content);
+            const assistantNode = conversationTree.addMessage(
+              response,
+              false,
+              newMessageNode
+            );
+            newMessageNode.activeChildIndex = 0;
+
+            conversationTree.currentEditingMessage = null;
+            document.getElementById("sendButton").textContent = "Send";
+          } else {
+            // Handle new message
+            const parentNode = conversationTree.getLastActiveMessageNode();
+            const messageNode = conversationTree.addMessage(
+              content,
+              true,
+              parentNode
+            );
+
+            if (parentNode) {
+              parentNode.activeChildIndex = parentNode.children.length - 1;
+            } else {
+              conversationTree.root = messageNode;
+            }
+
+            // Add assistant response
+            const response =
+              conversationTree.generateAssistantResponse(content);
+            const assistantNode = conversationTree.addMessage(
+              response,
+              false,
+              messageNode
+            );
+            messageNode.activeChildIndex = 0;
+          }
+
+          messageInput.value = "";
+          conversationTree.renderConversation();
+        }
+      });
+
+      // Handle Enter key in textarea
+      document
+        .getElementById("messageInput")
+        .addEventListener("keypress", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            document.getElementById("sendButton").click();
+          }
+        });
+    </script>
+  </body>
+</html>
