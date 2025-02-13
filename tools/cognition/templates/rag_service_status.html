@@ -353,21 +353,35 @@
           window.clearInterval(window.healthInterval);
         }
 
-        // Initial fetch
-        fetchHealth();
+        async function conditionalFetchHealth() {
+          if (document.visibilityState === "visible") {
+            await fetchHealth();
+          }
+        }
+
+        // Execute the initial fetch
+        conditionalFetchHealth();
 
         // Set a new interval and store its reference
-        window.healthInterval = window.setInterval(fetchHealth, 60000);
+        window.healthInterval = window.setInterval(fetchHealth, 5000);
       }
 
       // Add refresh button click handler
       refreshButton.addEventListener("click", fetchHealth);
 
+      // Detects when the tab is visible and fetches health status
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          setupHealthStatusRefresh();
+        } else {
+          // Clear the interval when the tab is not visible
+          window.clearInterval(window.healthInterval);
+          // Mark the interval as cleared
+          window.healthInterval = null;
+      });
+
       // Initial setup
       setupHealthStatusRefresh();
-
-      // Single load event listener
-      window.addEventListener("load", setupHealthStatusRefresh);
     </script>
   </body>
 </html>
