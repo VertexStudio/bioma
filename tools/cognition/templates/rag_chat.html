@@ -24,8 +24,10 @@
         --bg-secondary: #1c1c1f;
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
-        --sidebar-width: 250px;
+        --sidebar-width: 280px;
         --sidebar-width-collapsed: 60px;
+        --slider-width: 40px;
+        --slider-height: calc(var(--slider-width) * 0.50);
         --surrealist-gradient: linear-gradient(
           135deg,
           var(--primary) 0%,
@@ -92,6 +94,55 @@
       summary {
         font-weight: bold;
         cursor: pointer;
+      }
+
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: var(--slider-width);
+        height: var(--slider-height);
+		margin-bottom: 0px !important;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: 0.4s;
+        border-radius: 24px;
+      }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: calc(var(--slider-height) * 0.8) !important;
+        width: calc(var(--slider-height) * 0.8);
+		/* Adjust left and bottom if the inner circle gets offset */
+        left: 4px;
+        bottom: 2px;
+        background-color: white;
+        transition: 0.4s;
+        border-radius: 50%;
+      }
+
+      input:checked + .slider {
+        background-color: #4caf50;
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(
+          calc(var(--slider-height) * 0.8)
+        ); 
       }
 
       #sidebar.collapsed {
@@ -201,6 +252,8 @@
 
       .source-item,
       .tool-item {
+        display: flex;
+        flex-direction: row;
         background: var(--bg-main);
         border: 1px solid var(--border-color);
         border-radius: 4px;
@@ -270,6 +323,8 @@
       .source-item-header,
       .tool-item-header {
         display: flex;
+        width: 100%;
+        flex-direction: row;
         justify-content: space-between;
         align-items: center;
         gap: 8px;
@@ -280,7 +335,6 @@
         font-size: 0.9em;
         font-weight: bold;
         color: var(--text-primary);
-        flex: 1;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1302,11 +1356,11 @@
             </div>
           </div>
 
-          <div class="sources-header">
+          <!-- <div class="sources-header">
             <h3 class="section-inner-title">
               <i class="fas fa-play-circle"></i> Active Sources
             </h3>
-          </div>
+          </div> -->
 
           <!-- Add the hidden input for sources actors -->
           <input type="hidden" id="sources-input" value="" />
@@ -1412,6 +1466,8 @@
       </div>
     </div>
 
+    <!-- Logic for uploading and indexing file -->
+
     <script>
       document
         .getElementById("upload-button")
@@ -1508,6 +1564,8 @@
           }
         });
     </script>
+
+    <!-- General Logic  -->
 
     <script>
       // Remove any trailing slashes from the endpoint
@@ -2896,53 +2954,37 @@
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item${isActive ? " active" : ""}`;
         sourceElement.dataset.sourceId = source.id;
-        sourceElement.dataset.tooltip = source.path; // Add tooltip text
+        sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-				<div class="source-item-header">
-					<span class="source-icon"><i class="fa-solid fa-book"></i></span>
-					<span class="source-item-name">${source.path}</span>
-					<div class="source-actions">
-					${
-            isActive
-              ? `
-						<button class="source-action-btn delete-source" title="Delete">
-						<i class="fas fa-trash"></i>
-						</button>
-					`
-              : `
-						<button class="source-action-btn delete-source" title="Delete">
-						<i class="fas fa-trash"></i>
-						</button>
-					`
-          }
-					</div>
-				</div>
-				`;
+                <div class="source-item-header">
+                    <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                    <span class="source-item-name">${source.path}</span>
+					<label class="switch">
+                            <input type="checkbox" class="source-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    <div class="source-actions">
+                        <button class="source-action-btn delete-source" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
 
         // Add event listeners
-        const actions = sourceElement.querySelector(".source-actions");
+        sourceElement
+          .querySelector(".source-toggle")
+          .addEventListener("change", (e) => {
+            const state = e.target.checked ? "On" : "Off";
+            console.log(`Source ${source.path} is ${state}`);
+          });
 
-        if (isActive) {
-          sourceElement.addEventListener("click", () =>
-            removeFromActiveSource(source)
-          );
-          actions
-            .querySelector(".delete-source")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteSource(source);
-            });
-        } else {
-          sourceElement.addEventListener("click", () =>
-            addToActiveSources(source)
-          );
-          actions
-            .querySelector(".delete-source")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteSource(source);
-            });
-        }
+        sourceElement
+          .querySelector(".delete-source")
+          .addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteSource(source);
+          });
 
         return sourceElement;
       }
