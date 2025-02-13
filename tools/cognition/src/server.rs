@@ -1675,9 +1675,9 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
 #[utoipa::path(
     get,
     path = "/sources",
-    description = "List all indexed sources with their embedding counts.",
+    description = "List all indexed sources.",
     responses(
-        (status = 200, description = "List of sources with their embedding counts"),
+        (status = 200, description = "List of sources"),
     )
 )]
 async fn list_sources(data: web::Data<AppState>) -> HttpResponse {
