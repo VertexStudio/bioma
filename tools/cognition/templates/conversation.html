@@ -121,7 +121,13 @@
 
       // Custom renderer to show a node along with variant buttons if there are sibling branches.
       function renderTreeWithVariants(node) {
-        let html = node.nodeData.html.join("");
+        let html = "";
+
+        // If this is not the root node, render the message first
+        if (node.parent) {
+          html += node.nodeData.html.join("");
+        }
+
         // If there are multiple children, render variant buttons
         if (node.children.length > 1) {
           html += `<div class="message-variants">`;
@@ -133,11 +139,18 @@
           });
           html += `</div>`;
         }
+
+        // For root node, render its message after variant buttons
+        if (!node.parent) {
+          html += node.nodeData.html.join("");
+        }
+
         // Render the active child below this node
         const activeChild = node.getActiveChild();
         if (activeChild) {
           html += renderTreeWithVariants(activeChild);
         }
+
         return html;
       }
 
@@ -327,39 +340,47 @@
           if (conversationTree.currentEditingMessage) {
             // Handle editing existing message
             const editingNode = conversationTree.currentEditingMessage;
-            const parentNode = editingNode.parent;
 
             console.log("Editing message:", {
               editingNodeId: editingNode.id,
               editingContent: editingNode.nodeData.content[0].trim(),
-              parentId: parentNode?.id,
-              parentContent: parentNode?.nodeData.content[0].trim(),
-              parentChildrenBefore: parentNode?.children.length,
+              isRoot: !editingNode.parent,
               newContent: content,
             });
 
-            // Create new branch from parent
-            const newMessageNode = conversationTree.addMessage(
+            // Create new message node
+            const newMessageNode = conversationTree.createMessageNode(
               content,
-              true,
-              parentNode
+              true
             );
 
-            if (parentNode) {
-              // Set new message as active child
-              parentNode.activeChildIndex = parentNode.children.length - 1;
-              console.log("Set new branch as active:", {
-                parentId: parentNode.id,
-                parentContent: parentNode.nodeData.content[0].trim(),
-                newActiveIndex: parentNode.activeChildIndex,
-                totalChildren: parentNode.children.length,
-                allChildren: parentNode.children.map((c) => ({
-                  id: c.id,
-                  content: c.nodeData.content[0].trim(),
-                })),
+            if (!editingNode.parent) {
+              // Handling root node edit
+              // Create a new root to hold variants
+              const newRoot = new TreeNode({
+                html: [""],
+                content: ["root"],
+                isUser: [false],
+              });
+              newRoot.id = generateUniqueId();
+
+              // Add both old and new messages as children
+              newRoot.addChild(editingNode);
+              newRoot.addChild(newMessageNode);
+              newRoot.activeChildIndex = 1; // Set new message as active
+
+              conversationTree.root = newRoot;
+
+              console.log("Created new root for variants:", {
+                rootId: newRoot.id,
+                children: newRoot.children.length,
+                activeChildIndex: newRoot.activeChildIndex,
               });
             } else {
-              conversationTree.root = newMessageNode;
+              // Normal case - add as sibling
+              editingNode.parent.addChild(newMessageNode);
+              editingNode.parent.activeChildIndex =
+                editingNode.parent.children.length - 1;
             }
 
             // Add assistant response
