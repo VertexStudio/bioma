@@ -1877,7 +1877,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
-            .wrap(Logger::default())
+            .wrap(Logger::default().exclude_regex("^/health"))
             .wrap(cors)
             .app_data(data.clone())
             .app_data(
