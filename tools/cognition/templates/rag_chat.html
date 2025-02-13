@@ -81,6 +81,19 @@
         z-index: 1000;
       }
 
+      details {
+        border: 1px solid var(--primary);
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 10px;
+        font-family: Arial, sans-serif;
+      }
+
+      summary {
+        font-weight: bold;
+        cursor: pointer;
+      }
+
       #sidebar.collapsed {
         width: var(--sidebar-width-collapsed);
         padding: 1rem 0.5rem;
@@ -112,6 +125,8 @@
         width: 100%;
       }
 
+      #sidebar.collapsed details,
+      #sidebar.collapsed summary,
       #sidebar.collapsed h2,
       #sidebar.collapsed h3,
       #sidebar.collapsed h4,
@@ -1251,106 +1266,110 @@
         </button>
       </div>
 
-      <h2 style="font-size: 1em">
-        <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
-      </h2>
-      <br />
+      <details>
+        <summary>
+          <i class="fa-solid fa-book" style="margin-right: 8px"></i>
+          Sources
+        </summary>
 
-      <div class="section tools-section">
-        <!-- Add New Agent form moved to top -->
-        <div class="tools-form" id="tool-form">
-          <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
-          <div class="form-group">
-            <input type="text" id="tool-actor" placeholder="Agent name" />
-          </div>
-          <div class="form-actions">
-            <button id="save-tool-btn" class="action-button">
-              <i class="fas fa-save"></i> Save
-            </button>
-          </div>
-        </div>
+        <br />
 
-        <div class="tools-header">
-          <h3 class="section-inner-title">
-            <i class="fas fa-play-circle"></i> Active Tools
-          </h3>
-        </div>
-
-        <!-- Add the hidden input for tools actors -->
-        <input type="hidden" id="tools-actors-input" value="" />
-
-        <div id="active-tools-list" class="tools-list">
-          <!-- Active tools will be listed here -->
-        </div>
-
-        <div class="saved-tools-section">
-          <h3 class="section-inner-title" style="margin-bottom: 10px">
-            <i class="fas fa-archive"></i> Available Tools
-          </h3>
-          <div id="saved-tools-list" class="tools-list">
-            <!-- Saved tools will be listed here -->
-          </div>
-        </div>
-      </div>
-
-      <!-- Sources section stars here-->
-
-      <h2 class="source-section-title" style="font-size: 1em">
-        <i class="fa-solid fa-book" style="margin-right: 8px"></i>
-        Context Sources
-      </h2>
-      <br />
-
-      <div class="section source-section">
-        <div class="source-form" id="source-form">
-          <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
-          <div class="form-group">
-            <input type="text" id="source" placeholder="/global" />
-          </div>
-          <div class="form-actions">
-            <div class="form-info" id="form-info">
-              <p id="form-info-text">Select File</p>
-              <button
-                id="upload-button"
-                class="action-button"
-                title="Upload Context"
+        <div class="section source-section">
+          <div class="source-form" id="source-form">
+            <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
+            <div class="form-group">
+              <input type="text" id="source" placeholder="/global" />
+            </div>
+            <div class="form-actions">
+              <div class="form-info" id="form-info">
+                <p id="form-info-text">Select File</p>
+                <button
+                  id="upload-button"
+                  class="action-button"
+                  title="Upload Context"
+                >
+                  <i class="fa-solid fa-file"></i>
+                </button>
+                <input type="file" id="file-input" style="display: none" />
+              </div>
+              <div
+                id="loading-indicator"
+                class="loading-indicator"
+                style="display: none; margin-top: 10px"
               >
-                <i class="fa-solid fa-file"></i>
+                <i class="fa-solid fa-spinner fa-spin"></i> Processing file...
+              </div>
+            </div>
+          </div>
+
+          <div class="sources-header">
+            <h3 class="section-inner-title">
+              <i class="fas fa-play-circle"></i> Active Sources
+            </h3>
+          </div>
+
+          <!-- Add the hidden input for sources actors -->
+          <input type="hidden" id="sources-input" value="" />
+
+          <div id="active-sources-list" class="sources-list">
+            <!-- Active sources will be listed here -->
+          </div>
+
+          <div class="saved-sources-section">
+            <h3 class="section-inner-title" style="margin-bottom: 10px">
+              <i class="fas fa-archive"></i> Available Sources
+            </h3>
+            <div id="saved-sources-list" class="sources-list">
+              <!-- Saved sources will be listed here -->
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details>
+        <summary>
+          <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
+        </summary>
+
+        <br />
+
+        <div class="section tools-section">
+          <!-- Add New Agent form moved to top -->
+          <div class="tools-form" id="tool-form">
+            <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
+            <div class="form-group">
+              <input type="text" id="tool-actor" placeholder="Agent name" />
+            </div>
+            <div class="form-actions">
+              <button id="save-tool-btn" class="action-button">
+                <i class="fas fa-save"></i> Save
               </button>
-              <input type="file" id="file-input" style="display: none" />
             </div>
-            <div
-              id="loading-indicator"
-              class="loading-indicator"
-              style="display: none; margin-top: 10px"
-            >
-              <i class="fa-solid fa-spinner fa-spin"></i> Processing file...
+          </div>
+
+          <div class="tools-header">
+            <h3 class="section-inner-title">
+              <i class="fas fa-play-circle"></i> Active Tools
+            </h3>
+          </div>
+
+          <!-- Add the hidden input for tools actors -->
+          <input type="hidden" id="tools-actors-input" value="" />
+
+          <div id="active-tools-list" class="tools-list">
+            <!-- Active tools will be listed here -->
+          </div>
+
+          <div class="saved-tools-section">
+            <h3 class="section-inner-title" style="margin-bottom: 10px">
+              <i class="fas fa-archive"></i> Available Tools
+            </h3>
+            <div id="saved-tools-list" class="tools-list">
+              <!-- Saved tools will be listed here -->
             </div>
           </div>
         </div>
-
-        <div class="sources-header">
-          <h3 class="section-inner-title">
-            <i class="fas fa-play-circle"></i> Active Sources
-          </h3>
-        </div>
-
-        <!-- Add the hidden input for sources actors -->
-        <input type="hidden" id="sources-input" value="" />
-
-        <div id="active-sources-list" class="sources-list">
-          <!-- Active sources will be listed here -->
-        </div>
-
-        <div class="saved-sources-section">
-          <h3 class="section-inner-title" style="margin-bottom: 10px">
-            <i class="fas fa-archive"></i> Available Sources
-          </h3>
-          <div id="saved-sources-list" class="sources-list">
-            <!-- Saved sources will be listed here -->
-          </div>
-        </div>
-      </div>
+      </details>
     </div>
 
     <!-- Main Content -->
