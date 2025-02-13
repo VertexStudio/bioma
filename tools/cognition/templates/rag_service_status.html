@@ -229,6 +229,31 @@
       const lastUpdatedElement = document.getElementById("last-updated");
       const refreshButton = document.getElementById("refresh-button");
 
+      // Intersection Observer to detect when the container is visible
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            console.log("Intersection state:", entry.isIntersecting);
+            if (entry.isIntersecting) {
+              console.log("Container is visible, starting refresh");
+              setupHealthStatusRefresh();
+            } else {
+              console.log("Container is hidden, clearing interval");
+              if (window.healthInterval) {
+                window.clearInterval(window.healthInterval);
+                window.healthInterval = null;
+              }
+            }
+          });
+        },
+        {
+          threshold: 0.1, // Se activará cuando al menos 10% del elemento sea visible
+        }
+      );
+
+      // Start observing the container
+      observer.observe(container);
+
       function displayError(message) {
         container.innerHTML = `
         <div class="error-container" style="grid-column: 1 / -1;">
@@ -236,6 +261,17 @@
           <p>${message}</p>
         </div>
       `;
+      }
+
+      // Helper function to check if an element is visible
+      function isElementVisible(element) {
+        return new Promise((resolve) => {
+          const observer = new IntersectionObserver((entries) => {
+            resolve(entries[0]);
+            observer.disconnect();
+          });
+          observer.observe(element);
+        });
       }
 
       function updateLastUpdated() {
@@ -252,6 +288,13 @@
       async function fetchHealth() {
         console.log("Fetching health status...");
         try {
+          // Verificar visibilidad antes de hacer el fetch
+          const entry = await isElementVisible(container);
+          if (!entry.isIntersecting) {
+            console.log("Container not visible, skipping fetch");
+            return;
+          }
+
           const response = await fetch("http://0.0.0.0:5766/health", {
             method: "GET",
             timeout: 5000,
@@ -294,47 +337,46 @@
               info.health.models.forEach((modelInfo) => {
                 totalVram += modelInfo.size_vram;
                 extraInfo += `
-                <div class="ollama-model">
-                    <p>
-                      <strong>
-                        ${modelInfo.model} - VRAM: ${(
+              <div class="ollama-model">
+                  <p>
+                    <strong>
+                      ${modelInfo.model} - VRAM: ${(
                   modelInfo.size_vram /
                   1024 /
                   1024
                 ).toFixed(2)}
-                  MB    </strong>
-                  </p>
-                </div>
-                `;
+                MB    </strong>
+                </p>
+              </div>
+              `;
               });
 
-              // Show total VRAM used if there are multiple models
               if (info.health.models.length > 1) {
                 extraInfo += `
-                      <p><strong>Total VRAM Used:</strong> ${(
-                        totalVram /
-                        1024 /
-                        1024
-                      ).toFixed(2)} MB</p>
-                    `;
+                    <p><strong>Total VRAM Used:</strong> ${(
+                      totalVram /
+                      1024 /
+                      1024
+                    ).toFixed(2)} MB</p>
+                  `;
               }
 
               extraInfo += "</div>";
             }
 
             div.innerHTML = `
-            <h3>${name
-              .replace(/_/g, " ")
-              .toLowerCase()
-              .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
-            <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-            ${
-              !info.is_healthy
-                ? `<p class='error-message'>Error: ${info.error}</p>`
-                : ""
-            }
-            ${extraInfo}
-          `;
+          <h3>${name
+            .replace(/_/g, " ")
+            .toLowerCase()
+            .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+          <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+          ${
+            !info.is_healthy
+              ? `<p class='error-message'>Error: ${info.error}</p>`
+              : ""
+          }
+          ${extraInfo}
+        `;
 
             container.appendChild(div);
           }
@@ -348,40 +390,28 @@
       }
 
       function setupHealthStatusRefresh() {
+        console.log("Setting up health status refresh...");
         // Clear any existing intervals to prevent multiple timers
         if (window.healthInterval) {
+          console.log("Clearing existing interval");
           window.clearInterval(window.healthInterval);
         }
 
-        async function conditionalFetchHealth() {
-          if (document.visibilityState === "visible") {
-            await fetchHealth();
-          }
-        }
-
-        // Execute the initial fetch
-        conditionalFetchHealth();
+        // Initial fetch
+        fetchHealth();
 
         // Set a new interval and store its reference
-        window.healthInterval = window.setInterval(fetchHealth, 5000);
+        window.healthInterval = window.setInterval(fetchHealth, 60000);
       }
 
       // Add refresh button click handler
       refreshButton.addEventListener("click", fetchHealth);
 
-      // Detects when the tab is visible and fetches health status
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") {
-          setupHealthStatusRefresh();
-        } else {
-          // Clear the interval when the tab is not visible
-          window.clearInterval(window.healthInterval);
-          // Mark the interval as cleared
-          window.healthInterval = null;
-      });
-
       // Initial setup
       setupHealthStatusRefresh();
+
+      // Single load event listener
+      window.addEventListener("load", setupHealthStatusRefresh);
     </script>
   </body>
 </html>
