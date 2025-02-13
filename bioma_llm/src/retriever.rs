@@ -40,15 +40,15 @@ pub struct RetrieveContext {
     #[serde(flatten)]
     pub query: RetrieveQuery,
     /// The number of contexts to return
-    #[builder(default = DEFAULT_RETRIEVER_LIMIT)]
+    #[builder(default = default_retriever_limit())]
     #[serde(default = "default_retriever_limit")]
     pub limit: usize,
     /// The threshold for the similarity score
-    #[builder(default = DEFAULT_RETRIEVER_THRESHOLD)]
+    #[builder(default = default_retriever_threshold())]
     #[serde(default = "default_retriever_threshold")]
     pub threshold: f32,
     /// A list of sources to filter the search
-    #[serde(default)]
+    #[serde(default = "default_retriever_sources")]
     #[builder(default)]
     pub sources: Vec<String>,
 }
@@ -59,12 +59,16 @@ pub enum RetrieveQuery {
     Text(String),
 }
 
-fn default_retriever_limit() -> usize {
+pub fn default_retriever_limit() -> usize {
     DEFAULT_RETRIEVER_LIMIT
 }
 
-fn default_retriever_threshold() -> f32 {
+pub fn default_retriever_threshold() -> f32 {
     DEFAULT_RETRIEVER_THRESHOLD
+}
+
+pub fn default_retriever_sources() -> Vec<String> {
+    vec!["/global".to_string()]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

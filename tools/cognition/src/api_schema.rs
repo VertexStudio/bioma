@@ -3,6 +3,7 @@ use bioma_llm::{
     chat,
     prelude::{ChatMessage, DeleteSource, IndexGlobs, RetrieveContext, RetrieveQuery},
     rerank::{RankTexts, TruncationDirection},
+    retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
 use ollama_rs::generation::tools::ToolInfo;
 use serde::{Deserialize, Serialize};
@@ -75,15 +76,11 @@ impl Into<IndexGlobs> for IndexGlobsRequestSchema {
 
 // /retrive Endpoint Schemas
 
-const DEFAULT_RETRIEVER_LIMIT: usize = 10;
-const DEFAULT_RETRIEVER_THRESHOLD: f32 = 0.0;
-
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-
+#[serde(tag = "type", content = "query")]
 pub enum RetrieveQueryRequestSchema {
-    #[serde(rename = "query")]
+    #[serde(rename = "Text")]
     Text(String),
-    Segundo(String),
 }
 
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
@@ -94,41 +91,53 @@ pub enum RetrieveOutputFormat {
     Json,
 }
 
-impl Default for RetrieveOutputFormat {
-    fn default() -> Self {
-        RetrieveOutputFormat::Markdown
-    }
-}
-
+/// Request schema for retrieving context
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+#[schema(example = json!({
+    "type": "Text",
+    "query": "What is Bioma?",
+    "threshold": 0.0,
+    "limit": 10,
+    "sources": ["path/to/source1", "path/to/source2"],
+    "format": "markdown"
+}))]
 pub struct RetrieveContextRequest {
-    #[schema(value_type = RetrieveQueryRequestSchema)]
+    /// The query to search for
+    #[schema(value_type = Object, example = json!({"type": "Text", "query": "What is Bioma?"}))]
     #[serde(flatten)]
     pub query: RetrieveQueryRequestSchema,
-    pub limit: Option<usize>,
-    pub threshold: Option<f32>,
-    #[schema(default = default_sources)]
-    #[serde(default = "default_sources")]
+    /// The number of contexts to return
+    #[schema(default = default_retriever_limit)]
+    #[serde(default = "default_retriever_limit")]
+    pub limit: usize,
+    /// The threshold for the similarity score
+    #[schema(default = default_retriever_threshold)]
+    #[serde(default = "default_retriever_threshold")]
+    pub threshold: f32,
+    /// A list of sources to filter the search
+    #[schema(default = default_retriever_sources)]
+    #[serde(default = "default_retriever_sources")]
     pub sources: Vec<String>,
-    #[serde(default)]
+    /// The format of the output (markdown or json)
+    #[schema(default = default_retriever_format)]
+    #[serde(default = "default_retriever_format")]
     pub format: RetrieveOutputFormat,
 }
 
-fn default_sources() -> Vec<String> {
-    vec!["/global".to_string()]
+fn default_retriever_format() -> RetrieveOutputFormat {
+    RetrieveOutputFormat::Markdown
 }
 
 impl Into<RetrieveContext> for RetrieveContextRequest {
     fn into(self) -> RetrieveContext {
         let query = match self.query {
             RetrieveQueryRequestSchema::Text(query) => RetrieveQuery::Text(query),
-            RetrieveQueryRequestSchema::Segundo(query) => RetrieveQuery::Text(query),
         };
 
         RetrieveContext::builder()
             .query(query)
-            .limit(self.limit.unwrap_or(DEFAULT_RETRIEVER_LIMIT))
-            .threshold(self.threshold.unwrap_or(DEFAULT_RETRIEVER_THRESHOLD))
+            .limit(self.limit)
+            .threshold(self.threshold)
             .sources(self.sources)
             .build()
     }
@@ -140,8 +149,8 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[schema(default = default_sources)]
-    #[serde(default = "default_sources")]
+    #[schema(default = default_retriever_sources)]
+    #[serde(default = "default_retriever_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
@@ -153,8 +162,8 @@ pub struct AskQueryRequestSchema {
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[schema(default = default_sources)]
-    #[serde(default = "default_sources")]
+    #[schema(default = default_retriever_sources)]
+    #[serde(default = "default_retriever_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
@@ -174,8 +183,8 @@ fn default_chat_stream() -> bool {
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
     pub messages: Vec<ChatMessage>,
-    #[schema(default = default_sources)]
-    #[serde(default = "default_sources")]
+    #[schema(default = default_retriever_sources)]
+    #[serde(default = "default_retriever_sources")]
     pub sources: Vec<String>,
     #[schema(value_type = Schema::Object)]
     pub format: Option<chat::Schema>,
