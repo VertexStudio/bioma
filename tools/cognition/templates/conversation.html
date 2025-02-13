@@ -89,11 +89,29 @@
         padding: 2px 8px;
         cursor: pointer;
         font-size: 0.8em;
+        min-width: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .variant-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
 
       .variant-button.active {
         background-color: #4caf50;
         color: white;
+      }
+
+      .variant-button[data-action] {
+        font-weight: bold;
+        background-color: #e0e0e0;
+      }
+
+      .variant-button[data-action]:hover:not(:disabled) {
+        background-color: #d0d0d0;
       }
     </style>
   </head>
@@ -131,12 +149,28 @@
         // If there are multiple children, render variant buttons
         if (node.children.length > 1) {
           html += `<div class="message-variants">`;
+          // Add prev button
+          const prevDisabled = node.activeChildIndex === 0;
+          html += `<button class="variant-button" data-parent-id="${
+            node.id
+          }" data-action="prev" ${prevDisabled ? "disabled" : ""}>←</button>`;
+
+          // Add numbered buttons
           node.children.forEach((child, idx) => {
             const active = node.activeChildIndex === idx ? "active" : "";
-            // Using first 20 chars of content as label
-            let label = child.nodeData.content[0].substring(0, 20);
-            html += `<button class="variant-button ${active}" data-parent-id="${node.id}" data-child-index="${idx}">${label}</button>`;
+            html += `<button class="variant-button ${active}" data-parent-id="${
+              node.id
+            }" data-child-index="${idx}"><${idx + 1}/${
+              node.children.length
+            }></button>`;
           });
+
+          // Add next button
+          const nextDisabled =
+            node.activeChildIndex === node.children.length - 1;
+          html += `<button class="variant-button" data-parent-id="${
+            node.id
+          }" data-action="next" ${nextDisabled ? "disabled" : ""}>→</button>`;
           html += `</div>`;
         }
 
@@ -266,18 +300,32 @@
           document.querySelectorAll(".variant-button").forEach((button) => {
             button.onclick = (e) => {
               const parentId = e.target.dataset.parentId;
-              const childIndex = parseInt(e.target.dataset.childIndex, 10);
+              const action = e.target.dataset.action;
               const parentNode = this.findNodeById(parentId);
-              if (parentNode && parentNode.children[childIndex]) {
+
+              if (!parentNode) return;
+
+              let newIndex;
+              if (action === "prev") {
+                newIndex = Math.max(0, parentNode.activeChildIndex - 1);
+              } else if (action === "next") {
+                newIndex = Math.min(
+                  parentNode.children.length - 1,
+                  parentNode.activeChildIndex + 1
+                );
+              } else {
+                newIndex = parseInt(e.target.dataset.childIndex, 10);
+              }
+
+              if (parentNode && newIndex !== parentNode.activeChildIndex) {
                 console.log("Switching variant:", {
                   parentId,
                   oldActiveIndex: parentNode.activeChildIndex,
-                  newActiveIndex: childIndex,
-                  parentContent: parentNode.nodeData.content[0].trim(),
-                  childContent:
-                    parentNode.children[childIndex].nodeData.content[0].trim(),
+                  newActiveIndex: newIndex,
+                  action: action || "direct",
+                  totalChildren: parentNode.children.length,
                 });
-                parentNode.activeChildIndex = childIndex;
+                parentNode.activeChildIndex = newIndex;
                 this.renderConversation();
               }
             };
