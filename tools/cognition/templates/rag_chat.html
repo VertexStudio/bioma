@@ -1554,7 +1554,6 @@
             } finally {
               await fetchAvailableSources();
               loadSavedSources();
-              loadActiveSources();
 
               loadingIndicator.style.display = "none";
               formInfo.style.display = "flex";
@@ -2659,9 +2658,6 @@
         loadSavedTools();
         loadActiveTools();
 
-        // Load sources from localStorage
-        loadActiveSources();
-
         // Event Listeners
         saveToolBtn.addEventListener("click", saveTool);
         saveSourceBtn.addEventListener("click", saveSource);
@@ -2780,8 +2776,11 @@
       }
 
       function getActiveSources() {
-        const tools = localStorage.getItem("activeSources");
-        return tools ? JSON.parse(tools) : [];
+        const sources = localStorage.getItem("savedSources");
+
+        let savedSources = JSON.parse(sources);
+
+        return savedSources.sources.filter((source) => source.active == true);
       }
 
       function loadSavedTools() {
@@ -2858,15 +2857,6 @@
         activeToolsList.innerHTML = "";
         const tools = getActiveTools();
         tools.forEach((tool) => addToolToActiveList(tool));
-      }
-
-      function loadActiveSources() {
-        const activeSourcesList = document.getElementById(
-          "active-sources-list"
-        );
-        activeSourcesList.innerHTML = "";
-        const sources = getActiveSources();
-        sources.forEach((source) => addSourceToActiveList(source));
       }
 
       function addToolToActiveList(tool) {
@@ -2982,9 +2972,10 @@
         sourceElement
           .querySelector(".source-toggle")
           .addEventListener("change", (e) => {
+            e.stopPropagation();
             const state = e.target.checked ? "On" : "Off";
             console.log(`Source ${source.path} is ${state}`);
-            setSourceAsActive(source);
+            setSourceState(source, e.target.checked);
           });
 
         sourceElement
@@ -3009,7 +3000,7 @@
         savedSourcesList.appendChild(sourceElement);
       }
 
-      function setSourceAsActive(activeSource) {
+      function setSourceState(activeSource, state) {
         let savedSourcesExpanded = getSavedSourcesExpanded();
 
         let sources = savedSourcesExpanded.sources;
@@ -3017,7 +3008,7 @@
         savedSourcesExpanded.sources = savedSourcesExpanded.sources.map(
           (source) =>
             source.path == activeSource.path
-              ? { ...source, active: true }
+              ? { ...source, active: state }
               : source
         );
 
@@ -3041,9 +3032,10 @@
         const activeSources = getActiveSources().filter(
           (s) => s.id !== source.id
         );
+
         localStorage.setItem("activeSources", JSON.stringify(activeSources));
-        loadActiveSources();
-        // Refresh saved tools list to show the deactivated tool
+
+        // Refresh saved sources list to show the deactivated tool
         loadSavedSources();
         updateSources();
       }
@@ -3088,7 +3080,6 @@
           await fetchAvailableSources();
 
           loadSavedSources();
-          loadActiveSources();
           updateSources();
         })();
       }
