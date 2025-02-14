@@ -1401,19 +1401,6 @@
             </div>
           </div>
 
-          <div class="tools-header">
-            <h3 class="section-inner-title">
-              <i class="fas fa-play-circle"></i> Active Tools
-            </h3>
-          </div>
-
-          <!-- Add the hidden input for tools actors -->
-          <input type="hidden" id="tools-actors-input" value="" />
-
-          <div id="active-tools-list" class="tools-list">
-            <!-- Active tools will be listed here -->
-          </div>
-
           <div class="saved-tools-section">
             <h3 class="section-inner-title" style="margin-bottom: 10px">
               <i class="fas fa-archive"></i> Available Tools
@@ -2656,7 +2643,6 @@
 
         // Load saved tools from localStorage
         loadSavedTools();
-        loadActiveTools();
 
         // Event Listeners
         saveToolBtn.addEventListener("click", saveTool);
@@ -2675,13 +2661,11 @@
           return;
         }
 
-        // Check for duplicates in both saved and active tools
         const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
-        const allTools = [...savedTools, ...activeTools];
+        console.log("🚀 ~ saveTool ~ savedTools:", savedTools);
 
         if (
-          allTools.some(
+          savedTools.some(
             (tool) => tool.actor.toLowerCase() === actor.toLowerCase()
           )
         ) {
@@ -2699,8 +2683,7 @@
         savedTools.push(tool);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
-        // Add to saved tools list and automatically activate it
-        addToActive(tool);
+        loadSavedTools();
 
         // Clear the form input
         clearForm("tool-actor");
@@ -2728,6 +2711,7 @@
       }
 
       function getActiveTools() {
+        console.log("TODO change");
         const tools = localStorage.getItem("activeTools");
         return tools ? JSON.parse(tools) : [];
       }
@@ -2744,14 +2728,8 @@
         const savedToolsList = document.getElementById("saved-tools-list");
         savedToolsList.innerHTML = "";
         const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
 
-        // Filter out active tools from saved tools display
-        const availableTools = savedTools.filter(
-          (saved) => !activeTools.some((active) => active.id === saved.id)
-        );
-
-        availableTools.forEach((tool) => addToolToSavedList(tool));
+        savedTools.forEach((tool) => addToolToSavedList(tool));
       }
 
       function loadSavedSources() {
@@ -2809,13 +2787,6 @@
         return body.sources;
       }
 
-      function loadActiveTools() {
-        const activeToolsList = document.getElementById("active-tools-list");
-        activeToolsList.innerHTML = "";
-        const tools = getActiveTools();
-        tools.forEach((tool) => addToolToActiveList(tool));
-      }
-
       function addToolToActiveList(tool) {
         const activeToolsList = document.getElementById("active-tools-list");
         const toolElement = createToolElement(tool, true);
@@ -2863,19 +2834,9 @@
                     <span class="tool-icon"><i class="fas fa-wrench"></i></span>
                     <span class="tool-item-name">${tool.actor}</span>
                     <div class="tool-actions">
-                      ${
-                        isActive
-                          ? `
                         <button class="tool-action-btn delete-tool" title="Delete">
                           <i class="fas fa-trash"></i>
                         </button>
-                      `
-                          : `
-                        <button class="tool-action-btn delete-tool" title="Delete">
-                          <i class="fas fa-trash"></i>
-                        </button>
-                      `
-                      }
                     </div>
                   </div>
                 `;
@@ -2883,23 +2844,10 @@
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
 
-        if (isActive) {
-          toolElement.addEventListener("click", () => removeFromActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        } else {
-          toolElement.addEventListener("click", () => addToActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        }
+        actions.querySelector(".delete-tool").addEventListener("click", (e) => {
+          e.stopPropagation(); // Prevent triggering the parent click
+          deleteTool(tool);
+        });
 
         return toolElement;
       }
@@ -2978,7 +2926,6 @@
       function removeFromActive(tool) {
         const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
         localStorage.setItem("activeTools", JSON.stringify(activeTools));
-        loadActiveTools();
         // Refresh saved tools list to show the deactivated tool
         loadSavedTools();
         updateToolsActors();
@@ -3006,7 +2953,6 @@
         localStorage.setItem("activeTools", JSON.stringify(activeTools));
 
         loadSavedTools();
-        loadActiveTools();
         updateToolsActors();
         updateToolButton();
       }
