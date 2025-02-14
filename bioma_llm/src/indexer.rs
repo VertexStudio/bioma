@@ -14,7 +14,7 @@ use walkdir::WalkDir;
 
 use crate::embeddings::EmbeddingContent;
 
-const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
+pub const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
 const DEFAULT_CHUNK_OVERLAP: usize = 200;
 const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
@@ -78,11 +78,11 @@ fn default_chunk_capacity() -> std::ops::Range<usize> {
     DEFAULT_CHUNK_CAPACITY
 }
 
-fn default_chunk_overlap() -> usize {
+pub fn default_chunk_overlap() -> usize {
     DEFAULT_CHUNK_OVERLAP
 }
 
-fn default_chunk_batch_size() -> usize {
+pub fn default_chunk_batch_size() -> usize {
     DEFAULT_CHUNK_BATCH_SIZE
 }
 

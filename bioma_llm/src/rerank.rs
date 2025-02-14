@@ -78,19 +78,19 @@ pub enum TruncationDirection {
     Right,
 }
 
-fn default_raw_scores() -> bool {
+pub fn default_raw_scores() -> bool {
     false
 }
 
-fn default_return_text() -> bool {
+pub fn default_return_text() -> bool {
     false
 }
 
-fn default_truncate() -> bool {
+pub fn default_truncate() -> bool {
     false
 }
 
-fn default_truncation_direction() -> TruncationDirection {
+pub fn default_truncation_direction() -> TruncationDirection {
     TruncationDirection::Right
 }
 
