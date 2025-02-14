@@ -2630,7 +2630,7 @@
           inputContainer.classList.add("sidebar-collapsed");
         }
 
-        // Initialize tools management
+        // Initialize management
         initializeManagement();
       }
 
@@ -2660,7 +2660,6 @@
 
         // Event Listeners
         saveToolBtn.addEventListener("click", saveTool);
-        saveSourceBtn.addEventListener("click", saveSource);
       }
 
       // Clear based on id of the input
@@ -2705,48 +2704,6 @@
 
         // Clear the form input
         clearForm("tool-actor");
-      }
-
-      function saveSource() {
-        const path = document.getElementById("source").value.trim();
-
-        if (!path) {
-          alert("Source path is required!");
-          return;
-        }
-
-        // Check for duplicates in both saved and active sources
-        const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
-        const allSources = [...savedSources, ...activeSources];
-
-        if (
-          allSources.some(
-            (source) => source.path.toLowerCase() === path.toLowerCase()
-          )
-        ) {
-          alert("This source already exists!");
-          return;
-        }
-
-        let split_path = path.split("/");
-
-        const source = {
-          id: Date.now().toString(),
-          path,
-          display_name: split_path[split_path.length - 1],
-          active: false,
-        };
-
-        // Save to localStorage
-        savedSources.push(source);
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
-
-        // Add to saved sources list and automatically activate it
-        addToActiveSources(source);
-
-        // Clear the form input
-        clearForm("source");
       }
 
       function getSavedTools() {
