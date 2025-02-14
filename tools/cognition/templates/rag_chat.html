@@ -1473,7 +1473,6 @@
 
         console.groupEnd();
       }
-
       // Add branch navigation UI to a message
       function addBranchNavigation(messageDiv, messageIndex) {
         console.group("addBranchNavigation");
@@ -1487,7 +1486,12 @@
         }
 
         const currentBranch = currentBranches[messageIndex] || 0;
-        console.log("Current branch:", currentBranch, "of", branches.length);
+        console.log(
+          "Current branch:",
+          currentBranch + 1,
+          "of",
+          branches.length
+        );
 
         const branchNav = document.createElement("div");
         branchNav.className = "branch-nav";
