@@ -134,11 +134,24 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
     }
 }
 
+pub fn non_empty_messages<'de, D>(deserializer: D) -> Result<Vec<ChatMessage>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let messages = Vec::<ChatMessage>::deserialize(deserializer)?;
+    if messages.is_empty() {
+        return Err(serde::de::Error::custom("messages cannot be empty"));
+    }
+    Ok(messages)
+}
+
 // /ask Endpoint Schemas
 
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct AskQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(min_items = 1, example = json!([{"role": "user", "content": "Hello"}]))]
+    #[serde(deserialize_with = "non_empty_messages")]
     pub messages: Vec<ChatMessage>,
     #[schema(default = default_sources)]
     #[serde(default = "default_sources")]
@@ -152,6 +165,8 @@ pub struct AskQueryRequestSchema {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ChatQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(min_items = 1, example = json!([{"role": "user", "content": "Hello"}]))]
+    #[serde(deserialize_with = "non_empty_messages")]
     pub messages: Vec<ChatMessage>,
     #[schema(default = default_sources)]
     #[serde(default = "default_sources")]
@@ -173,6 +188,8 @@ fn default_chat_stream() -> bool {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ThinkQueryRequestSchema {
     #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(min_items = 1, example = json!([{"role": "user", "content": "Hello"}]))]
+    #[serde(deserialize_with = "non_empty_messages")]
     pub messages: Vec<ChatMessage>,
     #[schema(default = default_sources)]
     #[serde(default = "default_sources")]
