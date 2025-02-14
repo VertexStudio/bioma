@@ -3055,17 +3055,6 @@
       }
 
       function deleteSource(source) {
-        const savedSources = getSavedSources().filter(
-          (s) => s.id !== source.id
-        );
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
-
-        // Also remove from active if present
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
-        );
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
-
         (async () => {
           const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
             method: "POST",
