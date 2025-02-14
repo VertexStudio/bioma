@@ -27,7 +27,7 @@
         --sidebar-width: 280px;
         --sidebar-width-collapsed: 60px;
         --slider-width: 40px;
-        --slider-height: calc(var(--slider-width) * 0.50);
+        --slider-height: calc(var(--slider-width) * 0.5);
         --surrealist-gradient: linear-gradient(
           135deg,
           var(--primary) 0%,
@@ -99,9 +99,10 @@
       .switch {
         position: relative;
         display: inline-block;
+        min-width: var(--slider-width);
         width: var(--slider-width);
         height: var(--slider-height);
-		margin-bottom: 0px !important;
+        margin-bottom: 0px !important;
       }
 
       .switch input {
@@ -127,7 +128,7 @@
         content: "";
         height: calc(var(--slider-height) * 0.8) !important;
         width: calc(var(--slider-height) * 0.8);
-		/* Adjust left and bottom if the inner circle gets offset */
+        /* Adjust left and bottom if the inner circle gets offset */
         left: 4px;
         bottom: 2px;
         background-color: white;
@@ -140,9 +141,7 @@
       }
 
       input:checked + .slider:before {
-        transform: translateX(
-          calc(var(--slider-height) * 0.8)
-        ); 
+        transform: translateX(calc(var(--slider-height) * 0.8));
       }
 
       #sidebar.collapsed {
@@ -1718,10 +1717,10 @@
               msg.images || []
             );
             regularMessages += `
-              <div class="message ${roleClass}">
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
+                      <div class="message ${roleClass}">
+                        <div class="chunk">${processedContent}</div>
+                      </div>
+                    `;
             console.groupEnd();
           }
         });
@@ -1742,13 +1741,13 @@
               msg.images || []
             );
             systemMessage += `
-              <div class="message ${roleClass}">
-                <strong>${
-                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-                }:</strong>
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
+                      <div class="message ${roleClass}">
+                        <strong>${
+                          msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                        }:</strong>
+                        <div class="chunk">${processedContent}</div>
+                      </div>
+                    `;
             console.groupEnd();
           }
         });
@@ -1764,36 +1763,37 @@
             lastMsg.images || []
           );
           lastUserMessage = `
-            <div class="message ${roleClass}">
-              <strong>${
-                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
-              }:</strong>
-              <div class="chunk">${processedContent}</div>
-            </div>
-          `;
+                    <div class="message ${roleClass}">
+                      <strong>${
+                        lastMsg.role.charAt(0).toUpperCase() +
+                        lastMsg.role.slice(1)
+                      }:</strong>
+                      <div class="chunk">${processedContent}</div>
+                    </div>
+                  `;
         }
         console.groupEnd();
 
         const result = `
-          <div class="context-container">
-            <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
-            <div class="context-content">
-              ${regularMessages}
-              ${
-                regularMessages && systemMessage
-                  ? '<div class="source-separator"></div>'
-                  : ""
-              }
-              ${systemMessage}
-              ${
-                (regularMessages || systemMessage) && lastUserMessage
-                  ? '<div class="source-separator"></div>'
-                  : ""
-              }
-              ${lastUserMessage}
-            </div>
-          </div>
-        `;
+                  <div class="context-container">
+                    <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+                    <div class="context-content">
+                      ${regularMessages}
+                      ${
+                        regularMessages && systemMessage
+                          ? '<div class="source-separator"></div>'
+                          : ""
+                      }
+                      ${systemMessage}
+                      ${
+                        (regularMessages || systemMessage) && lastUserMessage
+                          ? '<div class="source-separator"></div>'
+                          : ""
+                      }
+                      ${lastUserMessage}
+                    </div>
+                  </div>
+                `;
 
         console.log("Final HTML length:", result.length);
         console.groupEnd();
@@ -1943,23 +1943,23 @@
             errorDiv = document.createElement("div");
             errorDiv.className = "message error-message";
             const errorContent = `
-              <div class="error-toggle">▶</div>
-              <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                      <div class="error-toggle">▶</div>
+                      <div class="error-header">⚠️ ${errorBuffer.length} Error${
               errorBuffer.length > 1 ? "s" : ""
             } Occurred</div>
-              <div class="error-content">
-                ${errorBuffer
-                  .map(
-                    (error) => `
-                  <div class="error-item">
-                    <i class="fas fa-exclamation-circle"></i>
-                    ${md.render(error)}
-                  </div>
-                `
-                  )
-                  .join("")}
-              </div>
-            `;
+                      <div class="error-content">
+                        ${errorBuffer
+                          .map(
+                            (error) => `
+                          <div class="error-item">
+                            <i class="fas fa-exclamation-circle"></i>
+                            ${md.render(error)}
+                          </div>
+                        `
+                          )
+                          .join("")}
+                      </div>
+                    `;
             errorDiv.innerHTML = errorContent;
             chatContainer.appendChild(errorDiv);
             initializeErrorToggles(errorDiv);
@@ -2012,15 +2012,15 @@
             const errorDiv = document.createElement("div");
             errorDiv.className = "message error-message";
             const errorContent = `
-              <div class="error-toggle">▶</div>
-              <div class="error-header">⚠️ Error Occurred</div>
-              <div class="error-content">
-                <div class="error-item">
-                  <i class="fas fa-exclamation-circle"></i>
-                  ${md.render(error.toString())}
-                </div>
-              </div>
-            `;
+                      <div class="error-toggle">▶</div>
+                      <div class="error-header">⚠️ Error Occurred</div>
+                      <div class="error-content">
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(error.toString())}
+                        </div>
+                      </div>
+                    `;
             errorDiv.innerHTML = errorContent;
             chatContainer.appendChild(errorDiv);
             initializeErrorToggles(errorDiv);
@@ -2033,23 +2033,23 @@
       // Helper function to create error content
       function createErrorContent(errorBuffer) {
         return `
-          <div class="error-toggle">▶</div>
-          <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                  <div class="error-toggle">▶</div>
+                  <div class="error-header">⚠️ ${errorBuffer.length} Error${
           errorBuffer.length > 1 ? "s" : ""
         } Occurred</div>
-          <div class="error-content">
-            ${errorBuffer
-              .map(
-                (error) => `
-              <div class="error-item">
-                <i class="fas fa-exclamation-circle"></i>
-                ${md.render(error)}
-              </div>
-            `
-              )
-              .join("")}
-          </div>
-        `;
+                  <div class="error-content">
+                    ${errorBuffer
+                      .map(
+                        (error) => `
+                      <div class="error-item">
+                        <i class="fas fa-exclamation-circle"></i>
+                        ${md.render(error)}
+                      </div>
+                    `
+                      )
+                      .join("")}
+                  </div>
+                `;
       }
 
       // Helper function to create error div
@@ -2178,15 +2178,15 @@
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
-            <div class="error-toggle">▶</div>
-            <div class="error-header">⚠️ Error Occurred</div>
-            <div class="error-content">
-              <div class="error-item">
-                <i class="fas fa-exclamation-circle"></i>
-                ${md.render(data.error)}
-              </div>
-            </div>
-          `;
+                    <div class="error-toggle">▶</div>
+                    <div class="error-header">⚠️ Error Occurred</div>
+                    <div class="error-content">
+                      <div class="error-item">
+                        <i class="fas fa-exclamation-circle"></i>
+                        ${md.render(data.error)}
+                      </div>
+                    </div>
+                  `;
           errorDiv.innerHTML = errorContent;
           chatContainer.appendChild(errorDiv);
           initializeErrorToggles(errorDiv);
@@ -2339,25 +2339,27 @@
           const specialMessageDiv = document.createElement("div");
           specialMessageDiv.className = "message tool-message";
           const formattedContent = `
-            <div class="tool-toggle">▶</div>
-            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-            <div class="tool-content">
-              <div class="tool-details">
-                <strong>Arguments:</strong>
-                <pre><code>${JSON.stringify(
-                  toolData.call.function.arguments,
-                  null,
-                  2
-                )}</code></pre>
-                <strong>Response:</strong>
-                <pre><code>${JSON.stringify(
-                  toolData.response,
-                  null,
-                  2
-                )}</code></pre>
-              </div>
-            </div>
-          `;
+                    <div class="tool-toggle">▶</div>
+                    <div class="tool-header">🔧 Tool Call: ${
+                      toolData.tool
+                    }</div>
+                    <div class="tool-content">
+                      <div class="tool-details">
+                        <strong>Arguments:</strong>
+                        <pre><code>${JSON.stringify(
+                          toolData.call.function.arguments,
+                          null,
+                          2
+                        )}</code></pre>
+                        <strong>Response:</strong>
+                        <pre><code>${JSON.stringify(
+                          toolData.response,
+                          null,
+                          2
+                        )}</code></pre>
+                      </div>
+                    </div>
+                  `;
           specialMessageDiv.innerHTML = formattedContent;
           chatContainer.appendChild(specialMessageDiv);
           initializeToolToggles(specialMessageDiv);
@@ -2457,11 +2459,11 @@
         const div = document.createElement("div");
         div.className = "thinking-process";
         div.innerHTML = `
-          <div class="thinking-header" onclick="toggleThinking(this)">
-            <span class="thinking-text">Thinking...</span>
-          </div>
-          <div class="thinking-content"></div>
-        `;
+                  <div class="thinking-header" onclick="toggleThinking(this)">
+                    <span class="thinking-text">Thinking...</span>
+                  </div>
+                  <div class="thinking-content"></div>
+                `;
         return div;
       }
 
@@ -2757,7 +2759,18 @@
 
       function getSavedSources() {
         const tools = localStorage.getItem("savedSources");
-        return tools ? JSON.parse(tools) : [];
+
+        const parsed_json = JSON.parse(tools);
+
+        return parsed_json.sources;
+      }
+
+      function getSavedSourcesExpanded() {
+        const source = localStorage.getItem("savedSources");
+
+        const parsed_json = JSON.parse(source);
+
+        return parsed_json;
       }
 
       function getActiveTools() {
@@ -2788,19 +2801,12 @@
         const savedSourcesList = document.getElementById("saved-sources-list");
         savedSourcesList.innerHTML = "";
         const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
 
-        // Filter out active sources from saved sources display
-        const availableSources = savedSources.filter(
-          (saved) => !activeSources.some((active) => active.id === saved.id)
-        );
-
-        availableSources.forEach((source) => addSourceToSavedList(source));
+        savedSources.forEach((source) => addSourceToSavedList(source));
       }
 
       async function fetchAvailableSources() {
-        let savedSources = getSavedSources();
-        let activeSources = getActiveSources();
+        // let savedSources = getSavedSources();
 
         let endpoint = `${RAG_ENDPOINT}/sources`;
 
@@ -2824,24 +2830,24 @@
           return source;
         });
 
-        const grouped = Object.groupBy(body.sources, (item) => item.source);
+        const grouped = Object.groupBy(maped_sources, (item) => item.path);
 
-        const active = savedSources.filter((item1) =>
-          activeSources.some((item2) => item2.path === item1.path)
+        let keys = Object.keys(grouped).map((sourceLabel) => {
+          return {
+            active: false,
+            path: sourceLabel,
+          };
+        });
+
+        localStorage.setItem(
+          "savedSources",
+          JSON.stringify({
+            sources: keys,
+            sourcesExpanded: maped_sources,
+          })
         );
-
-        const notSaved = maped_sources.filter(
-          (item1) => !savedSources.some((item2) => item2.path === item1.path)
-        );
-
-        let final_array = [...notSaved, ...savedSources];
-
-        localStorage.setItem("savedSources", JSON.stringify(final_array));
-
-        localStorage.setItem("activeSources", JSON.stringify(active));
 
         loadSavedSources();
-        loadActiveSources();
 
         return body.sources;
       }
@@ -2905,26 +2911,26 @@
         toolElement.dataset.toolId = tool.id;
         toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
-          <div class="tool-item-header">
-            <span class="tool-icon"><i class="fas fa-wrench"></i></span>
-            <span class="tool-item-name">${tool.actor}</span>
-            <div class="tool-actions">
-              ${
-                isActive
-                  ? `
-                <button class="tool-action-btn delete-tool" title="Delete">
-                  <i class="fas fa-trash"></i>
-                </button>
-              `
-                  : `
-                <button class="tool-action-btn delete-tool" title="Delete">
-                  <i class="fas fa-trash"></i>
-                </button>
-              `
-              }
-            </div>
-          </div>
-        `;
+                  <div class="tool-item-header">
+                    <span class="tool-icon"><i class="fas fa-wrench"></i></span>
+                    <span class="tool-item-name">${tool.actor}</span>
+                    <div class="tool-actions">
+                      ${
+                        isActive
+                          ? `
+                        <button class="tool-action-btn delete-tool" title="Delete">
+                          <i class="fas fa-trash"></i>
+                        </button>
+                      `
+                          : `
+                        <button class="tool-action-btn delete-tool" title="Delete">
+                          <i class="fas fa-trash"></i>
+                        </button>
+                      `
+                      }
+                    </div>
+                  </div>
+                `;
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
@@ -2956,20 +2962,20 @@
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-                <div class="source-item-header">
-                    <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                    <span class="source-item-name">${source.path}</span>
-					<label class="switch">
-                            <input type="checkbox" class="source-toggle">
-                            <span class="slider"></span>
-                        </label>
-                    <div class="source-actions">
-                        <button class="source-action-btn delete-source" title="Delete">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
+                        <div class="source-item-header">
+                            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                            <span class="source-item-name">${source.path}</span>
+          			<label class="switch">
+                                    <input type="checkbox" class="source-toggle">
+                                    <span class="slider"></span>
+                                </label>
+                            <div class="source-actions">
+                                <button class="source-action-btn delete-source" title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
 
         // Add event listeners
         sourceElement
@@ -2977,6 +2983,7 @@
           .addEventListener("change", (e) => {
             const state = e.target.checked ? "On" : "Off";
             console.log(`Source ${source.path} is ${state}`);
+            setSourceAsActive(source);
           });
 
         sourceElement
@@ -2999,6 +3006,24 @@
         const savedSourcesList = document.getElementById("saved-sources-list");
         const sourceElement = createSourceElement(source, false);
         savedSourcesList.appendChild(sourceElement);
+      }
+
+      function setSourceAsActive(activeSource) {
+        let savedSourcesExpanded = getSavedSourcesExpanded();
+
+        let sources = savedSourcesExpanded.sources;
+
+        savedSourcesExpanded.sources = savedSourcesExpanded.sources.map(
+          (source) =>
+            source.path == activeSource.path
+              ? { ...source, active: true }
+              : source
+        );
+
+        localStorage.setItem(
+          "savedSources",
+          JSON.stringify(savedSourcesExpanded)
+        );
       }
 
       function removeFromActive(tool) {
@@ -3198,11 +3223,11 @@
       (function () {
         const style = document.createElement("style");
         style.textContent = `
-          .action-button[style*="cursor: not-allowed"]:hover {
-            background: var(--bg-secondary) !important;
-            border-color: var(--border-color) !important;
-          }
-        `;
+                  .action-button[style*="cursor: not-allowed"]:hover {
+                    background: var(--bg-secondary) !important;
+                    border-color: var(--border-color) !important;
+                  }
+                `;
         document.head.appendChild(style);
       })();
 
