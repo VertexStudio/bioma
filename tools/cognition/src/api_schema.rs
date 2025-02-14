@@ -222,10 +222,30 @@ impl Into<IndexGlobs> for IndexGlobsRequestSchema {
 // Retriever Module Schemas
 //------------------------------------------------------------------------------
 
+fn query_schema() -> utoipa::openapi::schema::Object {
+    use utoipa::openapi::schema::{ObjectBuilder, Type};
+
+    ObjectBuilder::new()
+        .schema_type(Type::Object)
+        .property(
+            "type",
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .enum_values(Some(["Text"]))
+                .description(Some("Type of query"))
+                .build(),
+        )
+        .required("type")
+        .property("query", ObjectBuilder::new().schema_type(Type::String).description(Some("The query text")).build())
+        .required("query")
+        .build()
+}
+
 /// Query types for retrieval
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "query")]
 pub enum RetrieveQueryRequestSchema {
+    /// Text-based query
     #[serde(rename = "Text")]
     Text(String),
 }
@@ -251,7 +271,7 @@ pub enum RetrieveOutputFormat {
 }))]
 pub struct RetrieveContextRequest {
     /// The query to search for
-    #[schema(value_type = Object, example = json!({"type": "Text", "query": "What is Bioma?"}))]
+    #[schema(schema_with = query_schema)]
     #[serde(flatten)]
     pub query: RetrieveQueryRequestSchema,
 
