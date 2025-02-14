@@ -1401,6 +1401,9 @@
             </div>
           </div>
 
+          <!-- Add the hidden input for tools actors -->
+          <input type="hidden" id="tools-actors-input" value="" />
+
           <div class="saved-tools-section">
             <h3 class="section-inner-title" style="margin-bottom: 10px">
               <i class="fas fa-archive"></i> Available Tools
@@ -1899,6 +1902,8 @@
           resetGenerationState();
           return;
         }
+
+        console.log("🚀 ~ sendQuery ~ toolsActorsList:", toolsActorsList)
 
         // Get Active sources
 
@@ -2741,8 +2746,6 @@
       }
 
       async function fetchAvailableSources() {
-        // let savedSources = getSavedSources();
-
         let endpoint = `${RAG_ENDPOINT}/sources`;
 
         const response = await fetch(endpoint, {
@@ -2833,6 +2836,10 @@
                   <div class="tool-item-header">
                     <span class="tool-icon"><i class="fas fa-wrench"></i></span>
                     <span class="tool-item-name">${tool.actor}</span>
+                    <label class="switch">
+                        <input type="checkbox" class="tool-toggle">
+                        <span class="slider"></span>
+                    </label>
                     <div class="tool-actions">
                         <button class="tool-action-btn delete-tool" title="Delete">
                           <i class="fas fa-trash"></i>
@@ -2843,6 +2850,14 @@
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
+
+        // Add event listeners
+        toolElement
+          .querySelector(".tool-toggle")
+          .addEventListener("change", (e) => {
+            e.stopPropagation();
+            // setSourceState(source, e.target.checked);
+          });
 
         actions.querySelector(".delete-tool").addEventListener("click", (e) => {
           e.stopPropagation(); // Prevent triggering the parent click
@@ -2861,7 +2876,7 @@
                         <div class="source-item-header">
                             <span class="source-icon"><i class="fa-solid fa-book"></i></span>
                             <span class="source-item-name">${source.path}</span>
-          			<label class="switch">
+          			                <label class="switch">
                                     <input type="checkbox" class="source-toggle">
                                     <span class="slider"></span>
                                 </label>
@@ -2878,8 +2893,6 @@
           .querySelector(".source-toggle")
           .addEventListener("change", (e) => {
             e.stopPropagation();
-            const state = e.target.checked ? "On" : "Off";
-            console.log(`Source ${source.path} is ${state}`);
             setSourceState(source, e.target.checked);
           });
 
