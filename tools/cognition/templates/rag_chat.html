@@ -2517,13 +2517,8 @@
           }
           if (e.ctrlKey) {
             e.preventDefault();
-            console.log("TODO aqui se obtienen los activos");
-            const toolsActorsInput =
-              document.getElementById("tools-actors-input");
-            const toolsActorsList = toolsActorsInput.value
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "");
+
+            const toolsActorsList = getActiveTools();
 
             // Only toggle if we have tools
             if (toolsActorsList.length > 0) {
@@ -2552,14 +2547,7 @@
       document
         .getElementById("send-button")
         .addEventListener("click", async () => {
-          // Allow toggling tools even during generation
-          console.log("TODO aqui se obtienen los activos");
-          const toolsActorsInput =
-            document.getElementById("tools-actors-input");
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
+          const toolsActorsList = getActiveTools();
 
           // Only toggle if we have tools
           if (toolsActorsList.length > 0) {
@@ -2576,12 +2564,12 @@
 
       function updateToolButton() {
         const toolButton = document.getElementById("send-button");
-        console.log("TODO aqui se obtienen los activos");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
+
+        const toolsActorsList = getActiveTools();
+        console.log(
+          "🚀 ~ updateToolButton ~ toolsActorsList:",
+          toolsActorsList
+        );
 
         // Disable tools if no actors are available
         if (toolsActorsList.length === 0) {
@@ -2720,10 +2708,11 @@
       }
 
       function getActiveTools() {
-        console.log("TODO change");
-        const tools = localStorage.getItem("activeTools");
-        console.log("🚀 ~ getActiveTools ~ tools:", tools);
-        return tools ? JSON.parse(tools) : [];
+        const tools = localStorage.getItem("savedTools");
+
+        let savedTools = JSON.parse(tools);
+
+        return savedTools.filter((tool) => tool.active == true);
       }
 
       function getActiveSources() {
@@ -3040,17 +3029,7 @@
         if (storedToolsEnabled !== null) {
           toolsEnabled = storedToolsEnabled === "true";
 
-          // Validate the state against available tools
-          console.log("TODO aqui se obtienen los activos");
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
-
-          console.log(
-            "🚀 ~ document.addEventListener ~ toolsActorsList:",
-            toolsActorsList
-          );
+          const toolsActorsList = getActiveTools();
 
           if (toolsActorsList.length === 0) {
             toolsEnabled = false;
