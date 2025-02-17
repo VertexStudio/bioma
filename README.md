@@ -166,7 +166,7 @@ curl -X 'OPTIONS' 'http://0.0.0.0:5766/upload' -H 'accept: application/json'
 ```bash
 curl -X POST http://localhost:5766/index \
     -H "Content-Type: application/json" \
-    -d '{"globs": ["/path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200, "summarize": true}'
+    -d '{"globs": ["/path/to/files/**/*.rs"], "chunk_capacity": {"start": 500, "end": 2000}, "chunk_overlap": 200, "summarize": false}'
 ```
 
 ### Retrieve context:

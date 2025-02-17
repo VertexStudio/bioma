@@ -403,7 +403,7 @@ async fn upload_config() -> impl Responder {
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200,
-            "summarize": true
+            "summarize": false
         }))),
     )),
     responses(
