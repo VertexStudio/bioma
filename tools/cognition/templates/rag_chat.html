@@ -84,11 +84,15 @@
       }
 
       details {
-        border: 1px solid var(--primary);
+        background: var(--surrealist-gradient);
         border-radius: 5px;
         padding: 10px;
         margin-bottom: 10px;
         font-family: Arial, sans-serif;
+      }
+
+      details[open] {
+        background: #121214;
       }
 
       summary {
@@ -168,6 +172,8 @@
 
       .delete-all:hover {
         color: var(--primary-hover) !important;
+        cursor: pointer;
+        user-select: none;
       }
 
       .sidebar-header {
@@ -279,7 +285,7 @@
         /* For tooltip positioning */
       }
 
-      .source-item:hover,
+      /* .source-item:hover,
       .tool-item:hover {
         border-color: var(--primary);
         background: linear-gradient(
@@ -287,7 +293,7 @@
           rgba(255, 0, 160, 0.1) 0%,
           rgba(150, 0, 255, 0.1) 100%
         );
-      }
+      } */
 
       .source-item.active,
       .tool-item.active {
@@ -2987,12 +2993,11 @@
       }
 
       async function deleteAllSources() {
-		let savedSources = getSavedSources().map((source) => source.path);
+        let savedSources = getSavedSources().map((source) => source.path);
 
-		await deleteSources(savedSources);
+        await deleteSources(savedSources);
 
         localStorage.removeItem("savedSources");
-		
       }
 
       function updateToolsActors() {
