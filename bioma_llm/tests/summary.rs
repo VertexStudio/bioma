@@ -213,6 +213,7 @@ async fn test_summary_error_handling() -> Result<(), TestError> {
     Ok(())
 }
 
+// TODO: This one takes a long time to run, it's a lot of text for the LLM
 #[test(tokio::test)]
 async fn test_long_text_truncation() -> Result<(), TestError> {
     let engine = Engine::test().await?;
