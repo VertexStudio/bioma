@@ -3,7 +3,9 @@ use crate::{
     markitdown::{AnalyzeMCFile, MarkitDown, MarkitDownError},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
     prelude::{SummarizeText, Summary, SummaryError},
+    summary::SummarizeContent,
 };
+use base64::Engine;
 use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -167,7 +169,7 @@ pub enum Metadata {
 
 #[derive(Debug)]
 enum IndexResult {
-    Indexed(Vec<RecordId>),
+    Indexed(Vec<RecordId>, Option<String>),
     Failed,
 }
 
@@ -202,32 +204,6 @@ pub enum Content {
 }
 
 impl Indexer {
-    /// Generate a summary path for a given URI
-    ///
-    /// Creates a path for the summary file by:
-    /// 1. Keeping the same directory as the original file
-    /// 2. Using the original filename without extension
-    /// 3. Appending `.summary.md` extension
-    ///
-    /// Returns None if:
-    /// - The URI doesn't exist
-    /// - Can't determine parent directory
-    /// - Can't determine file stem
-    fn generate_summary_path(&self, ctx: &ActorContext<Self>, uri: &str) -> Option<String> {
-        let local_store_dir = ctx.engine().local_store_dir();
-        if !local_store_dir.join(uri).exists() {
-            return None;
-        }
-
-        let uri_path = std::path::Path::new(uri);
-        uri_path.parent().and_then(|parent| {
-            uri_path.file_stem().map(|stem| {
-                let summary_name = format!("{}.summary.md", stem.to_string_lossy());
-                parent.join(summary_name).to_string_lossy().into_owned()
-            })
-        })
-    }
-
     /// Process summary generation and indexing for a text
     ///
     /// This function:
@@ -240,32 +216,38 @@ impl Indexer {
         &self,
         ctx: &ActorContext<Self>,
         source: &ContentSource,
-        content: &str,
+        content: &Content,
         summary_id: &ActorId,
         embeddings_id: &ActorId,
-        summary_path: &str,
-    ) -> Result<Vec<RecordId>, IndexerError> {
+    ) -> Result<(String, Vec<RecordId>), IndexerError> {
+        // Generate summary based on content type
+        let summarize_content = match content {
+            Content::Text { content, .. } => SummarizeContent::Text(content.to_string()),
+            Content::Image { path } => {
+                let local_store_dir = ctx.engine().local_store_dir();
+                let full_path = local_store_dir.join(path);
+
+                // Read image file and convert to base64
+                let image_data = tokio::fs::read(&full_path).await?;
+                let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                SummarizeContent::Image(base64_data)
+            }
+        };
+
         // Generate summary
         let response = ctx
             .send_and_wait_reply::<Summary, SummarizeText>(
-                SummarizeText { text: content.to_string(), uri: source.uri.clone() },
+                SummarizeText { content: summarize_content, uri: source.uri.clone() },
                 summary_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
             )
             .await?;
 
-        // Save summary to file
-        let summary_full_path = ctx.engine().local_store_dir().join(summary_path);
-        if let Some(parent) = summary_full_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        tokio::fs::write(&summary_full_path, &response.summary).await?;
-
         // Generate embeddings for the summary
         let result = ctx
             .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                 StoreEmbeddings {
-                    content: EmbeddingContent::Text(vec![response.summary]),
+                    content: EmbeddingContent::Text(vec![response.summary.clone()]),
                     metadata: Some(vec![serde_json::to_value(Metadata::Text(TextMetadata {
                         content: TextType::Markdown,
                         chunk_number: 0,
@@ -278,10 +260,10 @@ impl Indexer {
             .await;
 
         match result {
-            Ok(stored_embeddings) => Ok(stored_embeddings.ids),
+            Ok(stored_embeddings) => Ok((response.summary, stored_embeddings.ids)),
             Err(e) => {
                 error!("Failed to generate summary embeddings: {} {}", e, source.source);
-                Ok(vec![])
+                Ok((response.summary, vec![]))
             }
         }
     }
@@ -343,7 +325,7 @@ impl Indexer {
                 match result {
                     Ok(stored_embeddings) => {
                         embeddings_ids.extend(stored_embeddings.ids);
-                        Ok(IndexResult::Indexed(embeddings_ids))
+                        Ok(IndexResult::Indexed(embeddings_ids, None))
                     }
                     Err(e) => {
                         error!("Failed to generate image embedding: {}", e);
@@ -405,20 +387,27 @@ impl Indexer {
                 // Start summary generation in parallel only if summarize is enabled
                 let summary_future = async {
                     let mut summary_embeddings_ids = Vec::new();
+                    let mut summary_text = None;
                     if summarize {
-                        if let Some(summary_path) = self.generate_summary_path(ctx, &source.uri) {
-                            if let Some(summary_id) = &self.summary_id {
-                                match self
-                                    .process_summary(ctx, &source, &content, summary_id, embeddings_id, &summary_path)
-                                    .await
-                                {
-                                    Ok(ids) => summary_embeddings_ids.extend(ids),
-                                    Err(e) => error!("Failed to process summary: {}", e),
+                        if let Some(summary_id) = &self.summary_id {
+                            let content_for_summary = Content::Text {
+                                content: content.clone(),
+                                text_type: text_type.clone(),
+                                chunk_config: (chunk_capacity.clone(), chunk_overlap, chunk_batch_size),
+                            };
+                            match self
+                                .process_summary(ctx, &source, &content_for_summary, summary_id, embeddings_id)
+                                .await
+                            {
+                                Ok((summary, ids)) => {
+                                    summary_text = Some(summary);
+                                    summary_embeddings_ids.extend(ids);
                                 }
+                                Err(e) => error!("Failed to process summary: {}", e),
                             }
                         }
                     }
-                    summary_embeddings_ids
+                    (summary_text, summary_embeddings_ids)
                 };
 
                 // Process embeddings in parallel with summary generation
@@ -447,11 +436,11 @@ impl Indexer {
                 };
 
                 // Wait for both operations to complete
-                let (summary_ids, mut embeddings_ids) = tokio::join!(summary_future, embeddings_future);
+                let ((summary_text, summary_ids), mut embeddings_ids) = tokio::join!(summary_future, embeddings_future);
 
                 // Combine original embeddings with summary embeddings
                 embeddings_ids.extend(summary_ids);
-                Ok(IndexResult::Indexed(embeddings_ids))
+                Ok(IndexResult::Indexed(embeddings_ids, summary_text))
             }
         }
     }
@@ -626,7 +615,7 @@ impl Message<IndexGlobs> for Indexer {
 
                 // Process content
                 match self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await {
-                    Ok(IndexResult::Indexed(ids)) => {
+                    Ok(IndexResult::Indexed(ids, summary_text)) => {
                         if !ids.is_empty() {
                             indexed += 1;
                             sources.push(IndexedSource {
@@ -634,10 +623,6 @@ impl Message<IndexGlobs> for Indexer {
                                 uri: source.uri.clone(),
                                 status: IndexStatus::Indexed,
                             });
-
-                            // Calculate summary path if summarize is enabled
-                            let summary =
-                                if message.summarize { self.generate_summary_path(ctx, &source.uri) } else { None };
 
                             let source_query = include_str!("../sql/source.surql");
                             ctx.engine()
@@ -647,7 +632,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .query(*&source_query)
                                 .bind(("source", source.source.clone()))
                                 .bind(("uri", source.uri.clone()))
-                                .bind(("summary", summary))
+                                .bind(("summary", summary_text))
                                 .bind(("emb_ids", ids))
                                 .bind(("prefix", self.embeddings.table_prefix()))
                                 .await

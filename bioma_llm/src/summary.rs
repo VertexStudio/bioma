@@ -1,5 +1,5 @@
 use bioma_actor::prelude::*;
-use ollama_rs::generation::chat::ChatMessage;
+use ollama_rs::generation::{chat::ChatMessage, images::Image};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 
@@ -20,15 +20,27 @@ pub enum SummaryError {
     /// Error when chat actor is not properly initialized
     #[error("Chat actor not initialized")]
     ChatActorNotInitialized,
+    /// Error when processing image data
+    #[error("Image error: {0}")]
+    Image(String),
 }
 
 impl ActorError for SummaryError {}
 
-/// Request to generate a summary for a given text
+/// Content to be summarized
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum SummarizeContent {
+    /// Text content to summarize
+    Text(String),
+    /// Image content to summarize (base64 encoded)
+    Image(String),
+}
+
+/// Request to generate a summary
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SummarizeText {
-    /// The text content to summarize
-    pub text: String,
+    /// The content to summarize
+    pub content: SummarizeContent,
     /// The URI/path of the source document
     pub uri: String,
 }
@@ -64,6 +76,9 @@ pub struct SummaryResponse {
 pub struct Summary {
     /// The chat actor configuration
     pub chat: Chat,
+    /// The prompt template for text summarization
+    #[builder(default = default_text_prompt())]
+    pub text_prompt: std::borrow::Cow<'static, str>,
     /// ID of the spawned chat actor
     chat_id: Option<ActorId>,
     /// Handle to the chat actor's task
@@ -72,10 +87,15 @@ pub struct Summary {
     chat_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+fn default_text_prompt() -> std::borrow::Cow<'static, str> {
+    "Provide a concise summary of the following text. Focus on the key points and main ideas:\n\n".into()
+}
+
 impl Default for Summary {
     fn default() -> Self {
         Self {
             chat: Chat::builder().model(std::borrow::Cow::Borrowed("llama3.2:3b")).build(),
+            text_prompt: default_text_prompt(),
             chat_id: None,
             chat_handle: None,
         }
@@ -84,7 +104,12 @@ impl Default for Summary {
 
 impl Clone for Summary {
     fn clone(&self) -> Self {
-        Self { chat: self.chat.clone(), chat_id: self.chat_id.clone(), chat_handle: None }
+        Self {
+            chat: self.chat.clone(),
+            text_prompt: self.text_prompt.clone(),
+            chat_id: self.chat_id.clone(),
+            chat_handle: None,
+        }
     }
 }
 
@@ -153,21 +178,31 @@ impl Summary {
         Ok(())
     }
 
-    /// Generate a summary for the given text using the chat actor
+    /// Generate a summary for the given content using the chat actor
     async fn generate_summary(
         &self,
         ctx: &ActorContext<Self>,
         message: &SummarizeText,
         chat_id: &ActorId,
     ) -> Result<SummaryResponse, SummaryError> {
-        // Prepare text by truncating if needed
-        let truncated_text = truncate_text(&message.text, MAX_TEXT_LENGTH);
-        let prompt = create_summary_prompt(&truncated_text);
+        let (prompt, images) = match &message.content {
+            SummarizeContent::Text(text) => {
+                let truncated_text = truncate_text(text, MAX_TEXT_LENGTH);
+                (create_text_summary_prompt(&self.text_prompt, &truncated_text), None)
+            }
+            SummarizeContent::Image(base64_data) => {
+                (create_image_summary_prompt(), Some(vec![Image::from_base64(base64_data.clone())]))
+            }
+        };
+
+        // Create chat message with image if present
+        let mut chat_message = ChatMessage::user(prompt);
+        chat_message.images = images;
 
         // Get summary from chat actor
         let response = ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
-                ChatMessages::builder().messages(vec![ChatMessage::user(prompt)]).build(),
+                ChatMessages::builder().messages(vec![chat_message]).build(),
                 chat_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
             )
@@ -190,9 +225,15 @@ fn truncate_text(text: &str, max_length: usize) -> String {
     }
 }
 
-/// Create a prompt for the chat model to generate a summary
-fn create_summary_prompt(text: &str) -> String {
-    format!("Provide a concise summary of the following. Focus on the key points and main ideas:\n\n{}", text)
+/// Create a prompt for text summarization
+fn create_text_summary_prompt(prompt_template: &str, text: &str) -> String {
+    format!("{}{}", prompt_template, text)
+}
+
+/// Create a prompt for image summarization
+fn create_image_summary_prompt() -> String {
+    "Provide a concise description of this image. Focus on the key visual elements, subjects, and overall composition."
+        .to_string()
 }
 
 /// Format the summary in markdown with the URI

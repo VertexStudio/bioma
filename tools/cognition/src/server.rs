@@ -1768,10 +1768,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Indexer setup
     let indexer_id = ActorId::of::<Indexer>("/rag/indexer");
+    let mut indexer = Indexer::default();
+    indexer.summary = Summary::builder()
+        .chat(Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build())
+        .text_prompt(config.summary_text_prompt.clone())
+        .build();
+
     let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
         engine.clone(),
         indexer_id.clone(),
-        Indexer::default(),
+        indexer,
         SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
     )
     .await?;

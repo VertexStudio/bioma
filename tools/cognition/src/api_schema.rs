@@ -219,6 +219,7 @@ impl Into<IndexGlobs> for IndexGlobsRequestSchema {
             .chunk_capacity(chunk_capacity)
             .chunk_overlap(self.chunk_overlap)
             .chunk_batch_size(self.chunk_batch_size)
+            .summarize(self.summarize)
             .build()
     }
 }

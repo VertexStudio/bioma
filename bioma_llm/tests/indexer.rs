@@ -329,12 +329,18 @@ It provides practical examples and use cases.
 
     assert_eq!(index_result.indexed, 1, "Expected 1 file to be indexed");
 
-    // Verify summary file was created
-    let summary_path = temp_dir.path().join("document.summary.md");
-    assert!(summary_path.exists(), "Summary file should exist");
-    let summary_content = fs::read_to_string(summary_path)?;
-    assert!(summary_content.contains("**URI**:"), "Summary should contain URI");
-    assert!(summary_content.contains("**Summary**:"), "Summary should contain summary section");
+    // Verify summary was stored in the database
+    let db = engine.db();
+    let query = "SELECT summary FROM source WHERE uri = $uri";
+    let mut results =
+        db.lock().await.query(query).bind(("uri", "document.md")).await.map_err(SystemActorError::from)?;
+
+    let summary: Option<String> =
+        results.take::<Vec<Option<String>>>(0).map_err(SystemActorError::from)?.pop().flatten();
+    assert!(summary.is_some(), "Summary should be stored in the database");
+    let summary = summary.unwrap();
+    assert!(summary.contains("**URI**:"), "Summary should contain URI");
+    assert!(summary.contains("**Summary**:"), "Summary should contain summary section");
 
     // Cleanup
     indexer_handle.abort();
@@ -383,9 +389,93 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
 
     assert_eq!(index_result.indexed, 1, "Expected 1 file to be indexed");
 
-    // Verify no summary file was created
-    let summary_path = temp_dir.path().join("no_summary.summary.md");
-    assert!(!summary_path.exists(), "Summary file should not exist when summarize is false");
+    // Verify no summary was stored in the database
+    let db = engine.db();
+    let query = "SELECT summary FROM source WHERE uri = $uri";
+    let mut results =
+        db.lock().await.query(query).bind(("uri", "no_summary.md")).await.map_err(SystemActorError::from)?;
+
+    let summary: Option<String> =
+        results.take::<Vec<Option<String>>>(0).map_err(SystemActorError::from)?.pop().flatten();
+    assert!(summary.is_none(), "Summary should not be stored when summarize is false");
+
+    // Cleanup
+    indexer_handle.abort();
+    temp_dir.close()?;
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_indexer_with_images() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+    let temp_dir = tempfile::tempdir()?;
+
+    // Copy test images to temp directory
+    let test_images =
+        vec![("../assets/images/elephant.jpg", "elephant.jpg"), ("../assets/images/rust-pet.png", "rust-pet.png")];
+
+    for (src, dest) in test_images.iter() {
+        let dest_path = temp_dir.path().join(dest);
+        fs::copy(src, &dest_path)?;
+    }
+
+    // Spawn the indexer actor with explicit summary configuration
+    let mut indexer = Indexer::default();
+    indexer.summary =
+        Summary::builder().chat(Chat::builder().model(std::borrow::Cow::Borrowed("llama2")).build()).build();
+
+    let indexer_id = ActorId::of::<Indexer>("/indexer");
+    let (mut indexer_ctx, mut indexer_actor) =
+        Actor::spawn(engine.clone(), indexer_id.clone(), indexer, SpawnOptions::default()).await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
+        }
+    });
+
+    // Give actors time to initialize
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Index with summary generation enabled
+    let globs = vec![
+        temp_dir.path().join("*.jpg").to_string_lossy().into_owned(),
+        temp_dir.path().join("*.png").to_string_lossy().into_owned(),
+    ];
+
+    let index_result = relay_ctx
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
+            IndexGlobs::builder().globs(globs).summarize(true).build(),
+            &indexer_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await?;
+
+    assert_eq!(index_result.indexed, 2, "Expected 2 images to be indexed");
+    assert_eq!(index_result.cached, 0, "Expected no cached images");
+
+    // Verify summaries were stored in the database
+    let db = engine.db();
+    let query = "SELECT uri, summary FROM source WHERE uri LIKE $pattern";
+    let mut results = db.lock().await.query(query).bind(("pattern", "%.jpg")).await.map_err(SystemActorError::from)?;
+
+    let summaries: Vec<(String, Option<String>)> =
+        results.take::<Vec<(String, Option<String>)>>(0).map_err(SystemActorError::from)?;
+    assert!(!summaries.is_empty(), "Should find at least one image summary");
+
+    for (uri, summary) in summaries {
+        assert!(summary.is_some(), "Summary should be stored for {}", uri);
+        let summary = summary.unwrap();
+        assert!(summary.contains("**URI**:"), "Summary should contain URI");
+        assert!(summary.contains("**Summary**:"), "Summary should contain summary section");
+        println!("Summary content for {}: {}", uri, summary);
+    }
 
     // Cleanup
     indexer_handle.abort();
