@@ -137,7 +137,7 @@
       }
 
       input:checked + .slider {
-        background-color: #4caf50;
+        background-color: var(--primary);
       }
 
       input:checked + .slider:before {
@@ -1401,18 +1401,8 @@
             </div>
           </div>
 
-          <div class="tools-header">
-            <h3 class="section-inner-title">
-              <i class="fas fa-play-circle"></i> Active Tools
-            </h3>
-          </div>
-
           <!-- Add the hidden input for tools actors -->
           <input type="hidden" id="tools-actors-input" value="" />
-
-          <div id="active-tools-list" class="tools-list">
-            <!-- Active tools will be listed here -->
-          </div>
 
           <div class="saved-tools-section">
             <h3 class="section-inner-title" style="margin-bottom: 10px">
@@ -1899,12 +1889,8 @@
         latestContext = null;
         let errorBuffer = [];
 
-        // Get tools actors list from sidebar input
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
+        const toolsActorsList = getActiveTools();
+
         if (toolsEnabled && toolsActorsList.length === 0) {
           alert("Please provide at least one tools actor.");
           toolsEnabled = false;
@@ -1921,7 +1907,9 @@
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
-          tools_actors: toolsEnabled ? toolsActorsList : [],
+          tools_actors: toolsEnabled
+            ? toolsActorsList.map((tool) => tool.actor)
+            : [],
           ...(activeSources.length > 0 && { sources: activeSources }),
         };
 
@@ -2524,12 +2512,8 @@
           }
           if (e.ctrlKey) {
             e.preventDefault();
-            const toolsActorsInput =
-              document.getElementById("tools-actors-input");
-            const toolsActorsList = toolsActorsInput.value
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "");
+
+            const toolsActorsList = getActiveTools();
 
             // Only toggle if we have tools
             if (toolsActorsList.length > 0) {
@@ -2558,13 +2542,7 @@
       document
         .getElementById("send-button")
         .addEventListener("click", async () => {
-          // Allow toggling tools even during generation
-          const toolsActorsInput =
-            document.getElementById("tools-actors-input");
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
+          const toolsActorsList = getActiveTools();
 
           // Only toggle if we have tools
           if (toolsActorsList.length > 0) {
@@ -2581,11 +2559,8 @@
 
       function updateToolButton() {
         const toolButton = document.getElementById("send-button");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
+
+        const toolsActorsList = getActiveTools();
 
         // Disable tools if no actors are available
         if (toolsActorsList.length === 0) {
@@ -2630,7 +2605,7 @@
           inputContainer.classList.add("sidebar-collapsed");
         }
 
-        // Initialize tools management
+        // Initialize management
         initializeManagement();
       }
 
@@ -2656,11 +2631,9 @@
 
         // Load saved tools from localStorage
         loadSavedTools();
-        loadActiveTools();
 
         // Event Listeners
         saveToolBtn.addEventListener("click", saveTool);
-        saveSourceBtn.addEventListener("click", saveSource);
       }
 
       // Clear based on id of the input
@@ -2676,13 +2649,10 @@
           return;
         }
 
-        // Check for duplicates in both saved and active tools
         const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
-        const allTools = [...savedTools, ...activeTools];
 
         if (
-          allTools.some(
+          savedTools.some(
             (tool) => tool.actor.toLowerCase() === actor.toLowerCase()
           )
         ) {
@@ -2700,53 +2670,10 @@
         savedTools.push(tool);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
-        // Add to saved tools list and automatically activate it
-        addToActive(tool);
+        loadSavedTools();
 
         // Clear the form input
         clearForm("tool-actor");
-      }
-
-      function saveSource() {
-        const path = document.getElementById("source").value.trim();
-
-        if (!path) {
-          alert("Source path is required!");
-          return;
-        }
-
-        // Check for duplicates in both saved and active sources
-        const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
-        const allSources = [...savedSources, ...activeSources];
-
-        if (
-          allSources.some(
-            (source) => source.path.toLowerCase() === path.toLowerCase()
-          )
-        ) {
-          alert("This source already exists!");
-          return;
-        }
-
-        let split_path = path.split("/");
-
-        const source = {
-          id: Date.now().toString(),
-          path,
-          display_name: split_path[split_path.length - 1],
-          active: false,
-        };
-
-        // Save to localStorage
-        savedSources.push(source);
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
-
-        // Add to saved sources list and automatically activate it
-        addToActiveSources(source);
-
-        // Clear the form input
-        clearForm("source");
       }
 
       function getSavedTools() {
@@ -2771,8 +2698,13 @@
       }
 
       function getActiveTools() {
-        const tools = localStorage.getItem("activeTools");
-        return tools ? JSON.parse(tools) : [];
+        const tools = localStorage.getItem("savedTools");
+
+        let savedTools = JSON.parse(tools);
+
+        return savedTools
+          ? savedTools.filter((tool) => tool.active == true)
+          : [];
       }
 
       function getActiveSources() {
@@ -2787,14 +2719,8 @@
         const savedToolsList = document.getElementById("saved-tools-list");
         savedToolsList.innerHTML = "";
         const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
 
-        // Filter out active tools from saved tools display
-        const availableTools = savedTools.filter(
-          (saved) => !activeTools.some((active) => active.id === saved.id)
-        );
-
-        availableTools.forEach((tool) => addToolToSavedList(tool));
+        savedTools.forEach((tool) => addToolToSavedList(tool));
       }
 
       function loadSavedSources() {
@@ -2806,8 +2732,6 @@
       }
 
       async function fetchAvailableSources() {
-        // let savedSources = getSavedSources();
-
         let endpoint = `${RAG_ENDPOINT}/sources`;
 
         const response = await fetch(endpoint, {
@@ -2816,6 +2740,8 @@
         });
 
         let body = await response.json();
+
+        let saved = getSavedSources();
 
         let maped_sources = body.sources.map((source_element) => {
           let split_path = source_element.source.split("/");
@@ -2833,10 +2759,16 @@
         const grouped = Object.groupBy(maped_sources, (item) => item.path);
 
         let keys = Object.keys(grouped).map((sourceLabel) => {
-          return {
-            active: false,
-            path: sourceLabel,
-          };
+          let exist = saved.find((element) => element.path == sourceLabel);
+
+          if (exist) {
+            return exist;
+          } else {
+            return {
+              active: false,
+              path: sourceLabel,
+            };
+          }
         });
 
         localStorage.setItem(
@@ -2852,97 +2784,45 @@
         return body.sources;
       }
 
-      function loadActiveTools() {
-        const activeToolsList = document.getElementById("active-tools-list");
-        activeToolsList.innerHTML = "";
-        const tools = getActiveTools();
-        tools.forEach((tool) => addToolToActiveList(tool));
-      }
-
-      function addToolToActiveList(tool) {
-        const activeToolsList = document.getElementById("active-tools-list");
-        const toolElement = createToolElement(tool, true);
-        activeToolsList.appendChild(toolElement);
-      }
-
-      function addSourceToActiveList(source) {
-        const activeSourceList = document.getElementById("active-sources-list");
-        const sourceElement = createSourceElement(source, true);
-        activeSourceList.appendChild(sourceElement);
-      }
-
-      function addToActive(tool) {
-        const activeTools = getActiveTools();
-        if (!activeTools.some((t) => t.id === tool.id)) {
-          activeTools.push(tool);
-          localStorage.setItem("activeTools", JSON.stringify(activeTools));
-          addToolToActiveList(tool);
-          // Refresh saved tools list to remove the activated tool
-          loadSavedTools();
-          updateToolsActors();
-          updateToolButton();
-        }
-      }
-
-      function addToActiveSources(source) {
-        const activeSources = getActiveSources();
-        if (!activeSources.some((s) => s.id === source.id)) {
-          activeSources.push(source);
-          localStorage.setItem("activeSources", JSON.stringify(activeSources));
-          addSourceToActiveList(source);
-          // Refresh saved sources list to remove the activated source
-          loadSavedSources();
-          updateSources();
-        }
-      }
-
       function createToolElement(tool, isActive = false) {
         const toolElement = document.createElement("div");
         toolElement.className = `tool-item${isActive ? " active" : ""}`;
         toolElement.dataset.toolId = tool.id;
         toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
-                  <div class="tool-item-header">
-                    <span class="tool-icon"><i class="fas fa-wrench"></i></span>
-                    <span class="tool-item-name">${tool.actor}</span>
-                    <div class="tool-actions">
-                      ${
-                        isActive
-                          ? `
-                        <button class="tool-action-btn delete-tool" title="Delete">
-                          <i class="fas fa-trash"></i>
-                        </button>
-                      `
-                          : `
-                        <button class="tool-action-btn delete-tool" title="Delete">
-                          <i class="fas fa-trash"></i>
-                        </button>
-                      `
-                      }
-                    </div>
-                  </div>
-                `;
+              <div class="tool-item-header">
+                <span class="tool-icon"><i class="fas fa-wrench"></i></span>
+                <span class="tool-item-name">${tool.actor}</span>
+                <label class="switch">
+                    <input type="checkbox" class="tool-toggle" ${
+                      isActive ? "checked" : ""
+                    }>
+                    <span class="slider"></span>
+                </label>
+                <div class="tool-actions">
+                    <button class="tool-action-btn delete-tool" title="Delete">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+              </div>
+            `;
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
 
-        if (isActive) {
-          toolElement.addEventListener("click", () => removeFromActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        } else {
-          toolElement.addEventListener("click", () => addToActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        }
+        toolElement
+          .querySelector(".tool-toggle")
+          .addEventListener("change", (e) => {
+            e.stopPropagation();
+            setToolState(tool, e.target.checked);
+            updateToolsActors();
+          });
+
+        actions.querySelector(".delete-tool").addEventListener("click", (e) => {
+          e.stopPropagation(); // Prevent triggering the parent click
+          deleteTool(tool);
+          updateToolsActors();
+        });
 
         return toolElement;
       }
@@ -2953,28 +2833,28 @@
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-                        <div class="source-item-header">
-                            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                            <span class="source-item-name">${source.path}</span>
-          			<label class="switch">
-                                    <input type="checkbox" class="source-toggle">
-                                    <span class="slider"></span>
-                                </label>
-                            <div class="source-actions">
-                                <button class="source-action-btn delete-source" title="Delete">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                    `;
+              <div class="source-item-header">
+                  <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                  <span class="source-item-name">${source.path}</span>
+                  <label class="switch">
+                      <input type="checkbox" class="source-toggle" ${
+                        isActive ? "checked" : ""
+                      }>
+                      <span class="slider"></span>
+                  </label>
+                  <div class="source-actions">
+                      <button class="source-action-btn delete-source" title="Delete">
+                          <i class="fas fa-trash"></i>
+                      </button>
+                  </div>
+              </div>
+          `;
 
         // Add event listeners
         sourceElement
           .querySelector(".source-toggle")
           .addEventListener("change", (e) => {
             e.stopPropagation();
-            const state = e.target.checked ? "On" : "Off";
-            console.log(`Source ${source.path} is ${state}`);
             setSourceState(source, e.target.checked);
           });
 
@@ -2990,13 +2870,13 @@
 
       function addToolToSavedList(tool) {
         const savedToolsList = document.getElementById("saved-tools-list");
-        const toolElement = createToolElement(tool, false);
+        const toolElement = createToolElement(tool, tool.active);
         savedToolsList.appendChild(toolElement);
       }
 
       function addSourceToSavedList(source) {
         const savedSourcesList = document.getElementById("saved-sources-list");
-        const sourceElement = createSourceElement(source, false);
+        const sourceElement = createSourceElement(source, source.active);
         savedSourcesList.appendChild(sourceElement);
       }
 
@@ -3018,38 +2898,21 @@
         );
       }
 
-      function removeFromActive(tool) {
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-        loadActiveTools();
-        // Refresh saved tools list to show the deactivated tool
-        loadSavedTools();
-        updateToolsActors();
-        updateToolButton();
-      }
+      function setToolState(activeTool, state) {
+        let savedTools = getSavedTools();
 
-      function removeFromActiveSource(source) {
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
+        savedTools = savedTools.map((tool) =>
+          tool.id == activeTool.id ? { ...tool, active: state } : tool
         );
 
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
-
-        // Refresh saved sources list to show the deactivated tool
-        loadSavedSources();
-        updateSources();
+        localStorage.setItem("savedTools", JSON.stringify(savedTools));
       }
 
       function deleteTool(tool) {
         const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
-        // Also remove from active if present
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-
         loadSavedTools();
-        loadActiveTools();
         updateToolsActors();
         updateToolButton();
       }
@@ -3075,13 +2938,9 @@
 
       function updateToolsActors() {
         const activeTools = getActiveTools();
-        const actors = activeTools.map((tool) => tool.actor);
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        toolsActorsInput.value = actors.join(", ");
-        localStorage.setItem("toolsActors", actors.join(", "));
 
         // Update tools state based on actors
-        if (actors.length === 0) {
+        if (activeTools.length === 0) {
           toolsEnabled = false;
         }
         updateToolButton();
@@ -3139,17 +2998,10 @@
 
         // Load stored tools state
         const storedToolsEnabled = localStorage.getItem("toolsEnabled");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const storedToolsActors = localStorage.getItem("toolsActors");
 
         // Load stored sources state
         const sourcesInput = document.getElementById("sources-input");
         const storedSources = localStorage.getItem("sources");
-
-        // First load the tools actors and sources
-        if (storedToolsActors) {
-          toolsActorsInput.value = storedToolsActors;
-        }
 
         if (storedSources) {
           sourcesInput.value = storedSources;
@@ -3159,11 +3011,7 @@
         if (storedToolsEnabled !== null) {
           toolsEnabled = storedToolsEnabled === "true";
 
-          // Validate the state against available tools
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
+          const toolsActorsList = getActiveTools();
 
           if (toolsActorsList.length === 0) {
             toolsEnabled = false;
@@ -3172,12 +3020,6 @@
 
         updateToolButton();
         updateThinkButton();
-
-        // Add change listener for tools actors
-        toolsActorsInput.addEventListener("change", function () {
-          localStorage.setItem("toolsActors", toolsActorsInput.value);
-          updateToolButton();
-        });
 
         // Add click handler for input container
         const inputContainer = document.getElementById("input-container");
