@@ -360,7 +360,7 @@ impl Indexer {
                     if let Some(summary_id) = &self.summary_id {
                         match ctx
                             .send_and_wait_reply::<Summary, SummarizeText>(
-                                SummarizeText { text: content.clone() },
+                                SummarizeText { text: content.clone(), uri: source.uri.clone() },
                                 summary_id,
                                 SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
                             )

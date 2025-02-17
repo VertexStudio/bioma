@@ -20,6 +20,7 @@ impl ActorError for SummaryError {}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SummarizeText {
     pub text: String,
+    pub uri: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,8 +92,11 @@ impl Message<SummarizeText> for Summary {
             )
             .await?;
 
+        // Format the summary in markdown with the URI
+        let formatted_summary = format!("**URI**: {}\n**Summary**: {}\n", message.uri, response.message.content);
+
         // Extract summary from chat response
-        ctx.reply(SummaryResponse { summary: response.message.content }).await?;
+        ctx.reply(SummaryResponse { summary: formatted_summary }).await?;
         Ok(())
     }
 }
