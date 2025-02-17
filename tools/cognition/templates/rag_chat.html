@@ -1890,6 +1890,7 @@
         let errorBuffer = [];
 
         // Get tools actors list from sidebar input
+        console.log("TODO: aqui se obtienen los activos");
         const toolsActorsInput = document.getElementById("tools-actors-input");
         const toolsActorsList = toolsActorsInput.value
           .split(",")
@@ -1903,7 +1904,7 @@
           return;
         }
 
-        console.log("🚀 ~ sendQuery ~ toolsActorsList:", toolsActorsList)
+        console.log("🚀 ~ sendQuery ~ toolsActorsList:", toolsActorsList);
 
         // Get Active sources
 
@@ -2516,6 +2517,7 @@
           }
           if (e.ctrlKey) {
             e.preventDefault();
+            console.log("TODO aqui se obtienen los activos");
             const toolsActorsInput =
               document.getElementById("tools-actors-input");
             const toolsActorsList = toolsActorsInput.value
@@ -2551,6 +2553,7 @@
         .getElementById("send-button")
         .addEventListener("click", async () => {
           // Allow toggling tools even during generation
+          console.log("TODO aqui se obtienen los activos");
           const toolsActorsInput =
             document.getElementById("tools-actors-input");
           const toolsActorsList = toolsActorsInput.value
@@ -2573,6 +2576,7 @@
 
       function updateToolButton() {
         const toolButton = document.getElementById("send-button");
+        console.log("TODO aqui se obtienen los activos");
         const toolsActorsInput = document.getElementById("tools-actors-input");
         const toolsActorsList = toolsActorsInput.value
           .split(",")
@@ -2718,6 +2722,7 @@
       function getActiveTools() {
         console.log("TODO change");
         const tools = localStorage.getItem("activeTools");
+        console.log("🚀 ~ getActiveTools ~ tools:", tools);
         return tools ? JSON.parse(tools) : [];
       }
 
@@ -2790,43 +2795,6 @@
         return body.sources;
       }
 
-      function addToolToActiveList(tool) {
-        const activeToolsList = document.getElementById("active-tools-list");
-        const toolElement = createToolElement(tool, true);
-        activeToolsList.appendChild(toolElement);
-      }
-
-      function addSourceToActiveList(source) {
-        const activeSourceList = document.getElementById("active-sources-list");
-        const sourceElement = createSourceElement(source, true);
-        activeSourceList.appendChild(sourceElement);
-      }
-
-      function addToActive(tool) {
-        const activeTools = getActiveTools();
-        if (!activeTools.some((t) => t.id === tool.id)) {
-          activeTools.push(tool);
-          localStorage.setItem("activeTools", JSON.stringify(activeTools));
-          addToolToActiveList(tool);
-          // Refresh saved tools list to remove the activated tool
-          loadSavedTools();
-          updateToolsActors();
-          updateToolButton();
-        }
-      }
-
-      function addToActiveSources(source) {
-        const activeSources = getActiveSources();
-        if (!activeSources.some((s) => s.id === source.id)) {
-          activeSources.push(source);
-          localStorage.setItem("activeSources", JSON.stringify(activeSources));
-          addSourceToActiveList(source);
-          // Refresh saved sources list to remove the activated source
-          loadSavedSources();
-          updateSources();
-        }
-      }
-
       function createToolElement(tool, isActive = false) {
         const toolElement = document.createElement("div");
         toolElement.className = `tool-item${isActive ? " active" : ""}`;
@@ -2856,7 +2824,7 @@
           .querySelector(".tool-toggle")
           .addEventListener("change", (e) => {
             e.stopPropagation();
-            // setSourceState(source, e.target.checked);
+            setToolState(tool, e.target.checked);
           });
 
         actions.querySelector(".delete-tool").addEventListener("click", (e) => {
@@ -2936,25 +2904,16 @@
         );
       }
 
-      function removeFromActive(tool) {
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-        // Refresh saved tools list to show the deactivated tool
-        loadSavedTools();
-        updateToolsActors();
-        updateToolButton();
-      }
+      function setToolState(activeTool, state) {
+        let savedTools = getSavedTools();
 
-      function removeFromActiveSource(source) {
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
+        savedTools = savedTools.map((tool) =>
+          tool.id == activeTool.id ? { ...tool, active: state } : tool
         );
 
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
+        console.log("🚀 ~ setToolState ~ savedTools:", savedTools);
 
-        // Refresh saved sources list to show the deactivated tool
-        loadSavedSources();
-        updateSources();
+        localStorage.setItem("savedTools", JSON.stringify(savedTools));
       }
 
       function deleteTool(tool) {
@@ -2992,6 +2951,7 @@
       function updateToolsActors() {
         const activeTools = getActiveTools();
         const actors = activeTools.map((tool) => tool.actor);
+        console.log("TODO: aqui se obtienen los activos");
         const toolsActorsInput = document.getElementById("tools-actors-input");
         toolsActorsInput.value = actors.join(", ");
         localStorage.setItem("toolsActors", actors.join(", "));
@@ -3055,7 +3015,12 @@
 
         // Load stored tools state
         const storedToolsEnabled = localStorage.getItem("toolsEnabled");
+        console.log("TODO aqui se obtienen los activos");
         const toolsActorsInput = document.getElementById("tools-actors-input");
+        console.log(
+          "🚀 ~ document.addEventListener ~ toolsActorsInput:",
+          toolsActorsInput
+        );
         const storedToolsActors = localStorage.getItem("toolsActors");
 
         // Load stored sources state
@@ -3076,10 +3041,16 @@
           toolsEnabled = storedToolsEnabled === "true";
 
           // Validate the state against available tools
+          console.log("TODO aqui se obtienen los activos");
           const toolsActorsList = toolsActorsInput.value
             .split(",")
             .map((s) => s.trim())
             .filter((s) => s !== "");
+
+          console.log(
+            "🚀 ~ document.addEventListener ~ toolsActorsList:",
+            toolsActorsList
+          );
 
           if (toolsActorsList.length === 0) {
             toolsEnabled = false;
