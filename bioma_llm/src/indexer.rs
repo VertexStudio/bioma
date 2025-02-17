@@ -651,8 +651,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .bind(("emb_ids", ids))
                                 .bind(("prefix", self.embeddings.table_prefix()))
                                 .await
-                                .map_err(SystemActorError::from)
-                                .unwrap();
+                                .map_err(SystemActorError::from)?;
                         } else {
                             sources.push(IndexedSource {
                                 source: message.source.clone(),
