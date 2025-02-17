@@ -2746,6 +2746,9 @@
 
         let body = await response.json();
 
+        let saved = getSavedSources();
+        console.log("🚀 ~ fetchAvailableSources ~ saved:", saved);
+
         let maped_sources = body.sources.map((source_element) => {
           let split_path = source_element.source.split("/");
 
@@ -2762,10 +2765,17 @@
         const grouped = Object.groupBy(maped_sources, (item) => item.path);
 
         let keys = Object.keys(grouped).map((sourceLabel) => {
-          return {
-            active: false,
-            path: sourceLabel,
-          };
+          let exist = saved.find((element) => element.path == sourceLabel);
+          console.log("🚀 ~ keys ~ exist:", exist);
+
+          if (exist) {
+            return exist;
+          } else {
+            return {
+              active: false,
+              path: sourceLabel,
+            };
+          }
         });
 
         localStorage.setItem(
@@ -2828,20 +2838,22 @@
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-                        <div class="source-item-header">
-                            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                            <span class="source-item-name">${source.path}</span>
-          			                <label class="switch">
-                                    <input type="checkbox" class="source-toggle">
-                                    <span class="slider"></span>
-                                </label>
-                            <div class="source-actions">
-                                <button class="source-action-btn delete-source" title="Delete">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                    `;
+              <div class="source-item-header">
+                  <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                  <span class="source-item-name">${source.path}</span>
+                  <label class="switch">
+                      <input type="checkbox" class="source-toggle" ${
+                        isActive ? "checked" : ""
+                      }>
+                      <span class="slider"></span>
+                  </label>
+                  <div class="source-actions">
+                      <button class="source-action-btn delete-source" title="Delete">
+                          <i class="fas fa-trash"></i>
+                      </button>
+                  </div>
+              </div>
+          `;
 
         // Add event listeners
         sourceElement
