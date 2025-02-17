@@ -2815,11 +2815,13 @@
           .addEventListener("change", (e) => {
             e.stopPropagation();
             setToolState(tool, e.target.checked);
+            updateToolsActors();
           });
 
         actions.querySelector(".delete-tool").addEventListener("click", (e) => {
           e.stopPropagation(); // Prevent triggering the parent click
           deleteTool(tool);
+          updateToolsActors();
         });
 
         return toolElement;
@@ -2909,10 +2911,6 @@
       function deleteTool(tool) {
         const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
-
-        // Also remove from active if present
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
 
         loadSavedTools();
         updateToolsActors();
