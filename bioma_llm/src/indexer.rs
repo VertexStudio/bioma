@@ -2,6 +2,7 @@ use crate::{
     embeddings::{Embeddings, EmbeddingsError, ImageData, StoreEmbeddings},
     markitdown::{AnalyzeMCFile, MarkitDown, MarkitDownError},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
+    prelude::{SummarizeText, Summary, SummaryError},
 };
 use bioma_actor::prelude::*;
 use derive_more::Display;
@@ -49,25 +50,43 @@ pub enum IndexerError {
     SurrealDB(#[from] surrealdb::Error),
     #[error("Other error: {0}")]
     Other(String),
+    #[error("Summary error: {0}")]
+    Summary(#[from] SummaryError),
+    #[error("Summary actor not initialized")]
+    SummaryActorNotInitialized,
 }
 
 impl ActorError for IndexerError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
+    /// The source identifier for the indexed content
     #[builder(default = default_source())]
     #[serde(default = "default_source")]
     pub source: String,
+
+    /// List of glob patterns to match files for indexing
     pub globs: Vec<String>,
+
+    /// Configuration for text chunk size limits
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
     pub chunk_capacity: std::ops::Range<usize>,
+
+    /// The chunk overlap
     #[builder(default = default_chunk_overlap())]
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+
+    /// The chunk batch size
     #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
+
+    /// Whether to summarize each file
+    #[builder(default)]
+    #[serde(default)]
+    pub summarize: bool,
 }
 
 fn default_source() -> String {
@@ -319,6 +338,46 @@ impl Indexer {
                     }
                 }
 
+                // Generate summary if enabled
+                let summary_path = if ctx.engine().local_store_dir().join(&source.uri).exists() {
+                    let uri_path = std::path::Path::new(&source.uri);
+                    if let Some(parent) = uri_path.parent() {
+                        if let Some(stem) = uri_path.file_stem() {
+                            let summary_name = format!("{}.summary.md", stem.to_string_lossy());
+                            Some(parent.join(summary_name).to_string_lossy().into_owned())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(summary_path) = summary_path {
+                    if let Some(summary_id) = &self.summary_id {
+                        match ctx
+                            .send_and_wait_reply::<Summary, SummarizeText>(
+                                SummarizeText { text: content.clone() },
+                                summary_id,
+                                SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
+                            )
+                            .await
+                        {
+                            Ok(response) => {
+                                // Write summary to file
+                                let summary_full_path = ctx.engine().local_store_dir().join(&summary_path);
+                                if let Some(parent) = summary_full_path.parent() {
+                                    tokio::fs::create_dir_all(parent).await?;
+                                }
+                                tokio::fs::write(summary_full_path, response.summary).await?;
+                            }
+                            Err(e) => error!("Failed to generate summary: {}", e),
+                        }
+                    }
+                }
+
                 Ok(IndexResult::Indexed(embeddings_ids))
             }
         }
@@ -502,6 +561,24 @@ impl Message<IndexGlobs> for Indexer {
                                 uri: source.uri.clone(),
                                 status: IndexStatus::Indexed,
                             });
+
+                            // Calculate summary path if summarize is enabled
+                            let summary = if message.summarize {
+                                let uri_path = std::path::Path::new(&source.uri);
+                                if let Some(parent) = uri_path.parent() {
+                                    if let Some(stem) = uri_path.file_stem() {
+                                        let summary_name = format!("{}.summary.md", stem.to_string_lossy());
+                                        Some(parent.join(summary_name).to_string_lossy().into_owned())
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+
                             let source_query = include_str!("../sql/source.surql");
                             ctx.engine()
                                 .db()
@@ -510,6 +587,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .query(*&source_query)
                                 .bind(("source", source.source.clone()))
                                 .bind(("uri", source.uri.clone()))
+                                .bind(("summary", summary))
                                 .bind(("emb_ids", ids))
                                 .bind(("prefix", self.embeddings.table_prefix()))
                                 .await
@@ -591,15 +669,19 @@ pub struct Indexer {
     pub embeddings: Embeddings,
     pub pdf_analyzer: PdfAnalyzer,
     pub markitdown: MarkitDown,
+    pub summary: Summary,
     embeddings_id: Option<ActorId>,
     pdf_analyzer_id: Option<ActorId>,
     markitdown_id: Option<ActorId>,
+    summary_id: Option<ActorId>,
     #[serde(skip)]
     pdf_analyzer_handle: Option<tokio::task::JoinHandle<()>>,
     #[serde(skip)]
     embeddings_handle: Option<tokio::task::JoinHandle<()>>,
     #[serde(skip)]
     markitdown_handle: Option<tokio::task::JoinHandle<()>>,
+    #[serde(skip)]
+    summary_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for Indexer {
@@ -608,12 +690,15 @@ impl Default for Indexer {
             embeddings: Embeddings::default(),
             pdf_analyzer: PdfAnalyzer::default(),
             markitdown: MarkitDown::default(),
+            summary: Summary::default(),
             embeddings_id: None,
             pdf_analyzer_id: None,
             markitdown_id: None,
+            summary_id: None,
             pdf_analyzer_handle: None,
             embeddings_handle: None,
             markitdown_handle: None,
+            summary_handle: None,
         }
     }
 }
@@ -707,9 +792,30 @@ impl Indexer {
             }
         });
 
+        // Generate child id for summary
+        let summary_id = ActorId::of::<Summary>(format!("{}/summary", self_id.name()));
+        self.summary_id = Some(summary_id.clone());
+
+        // Spawn the summary actor
+        let (mut summary_ctx, mut summary_actor) = Actor::spawn(
+            ctx.engine().clone(),
+            summary_id.clone(),
+            self.summary.clone(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
+
+        // Start the summary actor
+        let summary_handle = tokio::spawn(async move {
+            if let Err(e) = summary_actor.start(&mut summary_ctx).await {
+                error!("Summary actor error: {}", e);
+            }
+        });
+
         self.pdf_analyzer_handle = Some(pdf_analyzer_handle);
         self.embeddings_handle = Some(embeddings_handle);
         self.markitdown_handle = Some(markitdown_handle);
+        self.summary_handle = Some(summary_handle);
 
         info!("Indexer ready");
 
