@@ -77,10 +77,19 @@ impl Message<SummarizeText> for Summary {
             return Err(SummaryError::ChatActorNotInitialized);
         };
 
+        // Truncate text to 10k characters if longer
+        let truncated_text = if message.text.len() > 10_000 {
+            let mut truncated = message.text.chars().take(10_000).collect::<String>();
+            truncated.push_str("\n... (text truncated)");
+            truncated
+        } else {
+            message.text.clone()
+        };
+
         // Create a prompt for summarization
         let prompt = format!(
             "Provide a concise summary of the following. Focus on the key points and main ideas:\n\n{}",
-            message.text
+            truncated_text
         );
 
         // Send message to chat actor
