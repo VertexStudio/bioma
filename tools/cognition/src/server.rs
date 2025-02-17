@@ -653,18 +653,22 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             // Preserve user-provided system message if present, otherwise use default (our own system prompt)
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
-                let filtered = body.messages[..body.messages.len() - 1]
-                    .iter()
-                    .filter(|msg| {
-                        if msg.role == MessageRole::System {
-                            sys_msg = Some((*msg).clone());
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
+                let filtered = if !body.messages.is_empty() {
+                    body.messages[..body.messages.len() - 1]
+                        .iter()
+                        .filter(|msg| {
+                            if msg.role == MessageRole::System {
+                                sys_msg = Some((*msg).clone());
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 (sys_msg, filtered)
             };
 
@@ -719,11 +723,17 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+
+                // Build conversation with messages if present
                 if !body.messages.is_empty() {
                     conversation.extend(filtered_messages);
                     conversation.push(context_message.clone());
-                    conversation.push(body.messages[body.messages.len() - 1].clone());
+                    // Only add last message if it exists
+                    if let Some(last_message) = body.messages.last() {
+                        conversation.push(last_message.clone());
+                    }
                 } else {
+                    // If no messages, just use the context message
                     conversation.push(context_message.clone());
                 }
 
@@ -998,18 +1008,22 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     // Preserve user-provided system message if present, otherwise use default (our own system prompt)
     let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
         let mut sys_msg = None;
-        let filtered = body.messages[..body.messages.len() - 1]
-            .iter()
-            .filter(|msg| {
-                if msg.role == MessageRole::System {
-                    sys_msg = Some((*msg).clone());
-                    false
-                } else {
-                    true
-                }
-            })
-            .cloned()
-            .collect();
+        let filtered = if !body.messages.is_empty() {
+            body.messages[..body.messages.len() - 1]
+                .iter()
+                .filter(|msg| {
+                    if msg.role == MessageRole::System {
+                        sys_msg = Some((*msg).clone());
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
         (sys_msg, filtered)
     };
 
@@ -1325,18 +1339,22 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
             // Preserve user-provided system message if present, otherwise use default (our own system prompt)
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
-                let filtered = body.messages[..body.messages.len() - 1]
-                    .iter()
-                    .filter(|msg| {
-                        if msg.role == MessageRole::System {
-                            sys_msg = Some((*msg).clone());
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
+                let filtered = if !body.messages.is_empty() {
+                    body.messages[..body.messages.len() - 1]
+                        .iter()
+                        .filter(|msg| {
+                            if msg.role == MessageRole::System {
+                                sys_msg = Some((*msg).clone());
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 (sys_msg, filtered)
             };
 
