@@ -154,6 +154,22 @@
         /* Allow tooltips to overflow */
       }
 
+      .available-header {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .delete-all {
+        margin-top: 0px !important;
+        font-size: 0.7em !important;
+      }
+
+      .delete-all:hover {
+        color: var(--primary-hover) !important;
+      }
+
       .sidebar-header {
         display: flex;
         align-items: center;
@@ -1405,9 +1421,18 @@
           <input type="hidden" id="tools-actors-input" value="" />
 
           <div class="saved-tools-section">
-            <h3 class="section-inner-title" style="margin-bottom: 10px">
-              <i class="fas fa-archive"></i> Available Tools
-            </h3>
+            <div class="available-header">
+              <h3 class="section-inner-title" style="margin-bottom: 10px">
+                <i class="fas fa-archive"></i> Available Tools
+              </h3>
+              <h4
+                id="delete-all"
+                class="delete-all"
+                style="margin-bottom: 10px"
+              >
+                <i class="fa-solid fa-trash"></i> Delete all
+              </h4>
+            </div>
             <div id="saved-tools-list" class="tools-list">
               <!-- Saved tools will be listed here -->
             </div>
@@ -2609,12 +2634,13 @@
         initializeManagement();
       }
 
-      // Tool Management
+      // Management
       function initializeManagement() {
         // Tools
 
         const saveToolBtn = document.getElementById("save-tool-btn");
         const toolActorInput = document.getElementById("tool-actor");
+        const deleteAll = document.getElementById("delete-all");
 
         //Sources
 
@@ -2627,6 +2653,12 @@
             e.preventDefault(); // Prevent form submission
             saveTool();
           }
+        });
+
+        deleteAll.addEventListener("click", function (e) {
+          deleteAllTools();
+		  loadSavedTools();
+          updateToolsActors();
         });
 
         // Load saved tools from localStorage
@@ -2915,6 +2947,11 @@
         loadSavedTools();
         updateToolsActors();
         updateToolButton();
+      }
+
+      function deleteAllTools() {
+        const remove = localStorage.removeItem("savedTools");
+        console.log("🚀 ~ deleteAllTools ~ remove:", remove);
       }
 
       function deleteSource(source) {
