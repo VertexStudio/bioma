@@ -1889,13 +1889,8 @@
         latestContext = null;
         let errorBuffer = [];
 
-        // Get tools actors list from sidebar input
-        console.log("TODO: aqui se obtienen los activos");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
+        const toolsActorsList = getActiveTools();
+
         if (toolsEnabled && toolsActorsList.length === 0) {
           alert("Please provide at least one tools actor.");
           toolsEnabled = false;
@@ -1903,8 +1898,6 @@
           resetGenerationState();
           return;
         }
-
-        console.log("🚀 ~ sendQuery ~ toolsActorsList:", toolsActorsList);
 
         // Get Active sources
 
@@ -1914,7 +1907,9 @@
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
-          tools_actors: toolsEnabled ? toolsActorsList : [],
+          tools_actors: toolsEnabled
+            ? toolsActorsList.map((tool) => tool.actor)
+            : [],
           ...(activeSources.length > 0 && { sources: activeSources }),
         };
 
@@ -2712,7 +2707,9 @@
 
         let savedTools = JSON.parse(tools);
 
-        return savedTools.filter((tool) => tool.active == true);
+        return savedTools
+          ? savedTools.filter((tool) => tool.active == true)
+          : [];
       }
 
       function getActiveSources() {
@@ -2939,14 +2936,9 @@
 
       function updateToolsActors() {
         const activeTools = getActiveTools();
-        const actors = activeTools.map((tool) => tool.actor);
-        console.log("TODO: aqui se obtienen los activos");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        toolsActorsInput.value = actors.join(", ");
-        localStorage.setItem("toolsActors", actors.join(", "));
 
         // Update tools state based on actors
-        if (actors.length === 0) {
+        if (activeTools.length === 0) {
           toolsEnabled = false;
         }
         updateToolButton();
@@ -3004,22 +2996,10 @@
 
         // Load stored tools state
         const storedToolsEnabled = localStorage.getItem("toolsEnabled");
-        console.log("TODO aqui se obtienen los activos");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        console.log(
-          "🚀 ~ document.addEventListener ~ toolsActorsInput:",
-          toolsActorsInput
-        );
-        const storedToolsActors = localStorage.getItem("toolsActors");
 
         // Load stored sources state
         const sourcesInput = document.getElementById("sources-input");
         const storedSources = localStorage.getItem("sources");
-
-        // First load the tools actors and sources
-        if (storedToolsActors) {
-          toolsActorsInput.value = storedToolsActors;
-        }
 
         if (storedSources) {
           sourcesInput.value = storedSources;
@@ -3038,12 +3018,6 @@
 
         updateToolButton();
         updateThinkButton();
-
-        // Add change listener for tools actors
-        toolsActorsInput.addEventListener("change", function () {
-          localStorage.setItem("toolsActors", toolsActorsInput.value);
-          updateToolButton();
-        });
 
         // Add click handler for input container
         const inputContainer = document.getElementById("input-container");
