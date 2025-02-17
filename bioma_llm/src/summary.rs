@@ -74,7 +74,11 @@ pub struct Summary {
 
 impl Default for Summary {
     fn default() -> Self {
-        Self { chat: Chat::default(), chat_id: None, chat_handle: None }
+        Self {
+            chat: Chat::builder().model(std::borrow::Cow::Borrowed("llama3.2:3b")).build(),
+            chat_id: None,
+            chat_handle: None,
+        }
     }
 }
 

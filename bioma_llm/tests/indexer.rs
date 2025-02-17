@@ -276,3 +276,120 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
 
     Ok(())
 }
+
+#[test(tokio::test)]
+async fn test_indexer_with_summary() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+    let temp_dir = tempfile::tempdir()?;
+
+    // Create a test file with content that warrants summarization
+    let content = r#"# Important Document
+    
+This is a detailed document about a complex topic.
+It contains multiple paragraphs of information.
+
+## First Section
+The first section discusses key concepts and ideas.
+These concepts are fundamental to understanding the topic.
+
+## Second Section
+The second section builds upon the first section.
+It provides practical examples and use cases.
+"#;
+    let file_path = temp_dir.path().join("document.md");
+    fs::write(&file_path, content)?;
+
+    // Spawn the indexer actor
+    let indexer_id = ActorId::of::<Indexer>("/indexer");
+    let (mut indexer_ctx, mut indexer_actor) =
+        Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Index with summary generation enabled
+    let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
+    let index_result = relay_ctx
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
+            IndexGlobs::builder().globs(globs).summarize(true).build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    assert_eq!(index_result.indexed, 1, "Expected 1 file to be indexed");
+
+    // Verify summary file was created
+    let summary_path = temp_dir.path().join("document.summary.md");
+    assert!(summary_path.exists(), "Summary file should exist");
+    let summary_content = fs::read_to_string(summary_path)?;
+    assert!(summary_content.contains("**URI**:"), "Summary should contain URI");
+    assert!(summary_content.contains("**Summary**:"), "Summary should contain summary section");
+
+    // Cleanup
+    indexer_handle.abort();
+    temp_dir.close()?;
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_indexer_without_summary() -> Result<(), TestError> {
+    let engine = Engine::test().await?;
+    let temp_dir = tempfile::tempdir()?;
+
+    // Create a test file
+    let content = "This is a test document that should not be summarized.";
+    let file_path = temp_dir.path().join("no_summary.md");
+    fs::write(&file_path, content)?;
+
+    // Spawn the indexer actor
+    let indexer_id = ActorId::of::<Indexer>("/indexer");
+    let (mut indexer_ctx, mut indexer_actor) =
+        Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Index with summary generation disabled
+    let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
+    let index_result = relay_ctx
+        .send_and_wait_reply::<Indexer, IndexGlobs>(
+            IndexGlobs::builder().globs(globs).summarize(false).build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    assert_eq!(index_result.indexed, 1, "Expected 1 file to be indexed");
+
+    // Verify no summary file was created
+    let summary_path = temp_dir.path().join("no_summary.summary.md");
+    assert!(!summary_path.exists(), "Summary file should not exist when summarize is false");
+
+    // Cleanup
+    indexer_handle.abort();
+    temp_dir.close()?;
+
+    Ok(())
+}
