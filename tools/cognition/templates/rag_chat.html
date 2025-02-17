@@ -1372,12 +1372,6 @@
             </div>
           </div>
 
-          <!-- <div class="sources-header">
-            <h3 class="section-inner-title">
-              <i class="fas fa-play-circle"></i> Active Sources
-            </h3>
-          </div> -->
-
           <!-- Add the hidden input for sources actors -->
           <input type="hidden" id="sources-input" value="" />
 
@@ -1386,9 +1380,18 @@
           </div>
 
           <div class="saved-sources-section">
-            <h3 class="section-inner-title" style="margin-bottom: 10px">
-              <i class="fas fa-archive"></i> Available Sources
-            </h3>
+            <div class="available-header">
+              <h3 class="section-inner-title" style="margin-bottom: 10px">
+                <i class="fas fa-archive"></i> Available Tools
+              </h3>
+              <h4
+                id="delete-all-sources"
+                class="delete-all"
+                style="margin-bottom: 10px"
+              >
+                <i class="fa-solid fa-trash"></i> Delete all
+              </h4>
+            </div>
             <div id="saved-sources-list" class="sources-list">
               <!-- Saved sources will be listed here -->
             </div>
@@ -1426,7 +1429,7 @@
                 <i class="fas fa-archive"></i> Available Tools
               </h3>
               <h4
-                id="delete-all"
+                id="delete-all-tools"
                 class="delete-all"
                 style="margin-bottom: 10px"
               >
@@ -2640,12 +2643,14 @@
 
         const saveToolBtn = document.getElementById("save-tool-btn");
         const toolActorInput = document.getElementById("tool-actor");
-        const deleteAll = document.getElementById("delete-all");
+        const deleteAllToolsBtn = document.getElementById("delete-all-tools");
 
         //Sources
 
         const saveSourceBtn = document.getElementById("save-source-btn");
         const sourceInput = document.getElementById("source");
+        const deleteAllSourcesBtn =
+          document.getElementById("delete-all-sources");
 
         // Add keypress event listener for Enter key
         toolActorInput.addEventListener("keypress", function (e) {
@@ -2655,10 +2660,15 @@
           }
         });
 
-        deleteAll.addEventListener("click", function (e) {
+        deleteAllToolsBtn.addEventListener("click", function (e) {
           deleteAllTools();
-		  loadSavedTools();
+          loadSavedTools();
           updateToolsActors();
+        });
+
+        deleteAllSourcesBtn.addEventListener("click", function (e) {
+          deleteAllSources();
+          loadSavedSources();
         });
 
         // Load saved tools from localStorage
@@ -2714,9 +2724,13 @@
       }
 
       function getSavedSources() {
-        const tools = localStorage.getItem("savedSources");
+        const sources = localStorage.getItem("savedSources");
 
-        const parsed_json = JSON.parse(tools);
+        if (!sources) {
+          return [];
+        }
+
+        const parsed_json = JSON.parse(sources);
 
         return parsed_json.sources;
       }
@@ -2894,7 +2908,7 @@
           .querySelector(".delete-source")
           .addEventListener("click", (e) => {
             e.stopPropagation();
-            deleteSource(source);
+            deleteSources([source.path]);
           });
 
         return sourceElement;
@@ -2950,11 +2964,10 @@
       }
 
       function deleteAllTools() {
-        const remove = localStorage.removeItem("savedTools");
-        console.log("🚀 ~ deleteAllTools ~ remove:", remove);
+        localStorage.removeItem("savedTools");
       }
 
-      function deleteSource(source) {
+      function deleteSources(sources) {
         (async () => {
           const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
             method: "POST",
@@ -2962,7 +2975,7 @@
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              sources: [source.path],
+              sources: sources,
             }),
           });
 
@@ -2971,6 +2984,15 @@
           loadSavedSources();
           updateSources();
         })();
+      }
+
+      async function deleteAllSources() {
+		let savedSources = getSavedSources().map((source) => source.path);
+
+		await deleteSources(savedSources);
+
+        localStorage.removeItem("savedSources");
+		
       }
 
       function updateToolsActors() {
