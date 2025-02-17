@@ -317,11 +317,13 @@ It provides practical examples and use cases.
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
+    let source = "/test/indexer/with/summary".to_string();
+
     // Index with summary generation enabled
     let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).summarize(true).build(),
+            IndexGlobs::builder().globs(globs).summarize(true).source(source.clone()).build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -331,9 +333,9 @@ It provides practical examples and use cases.
 
     // Verify summary was stored in the database
     let db = engine.db();
-    let query = "SELECT summary FROM source WHERE uri = $uri";
+    let query = "SELECT VALUE summary FROM source WHERE id.source = $source";
     let mut results =
-        db.lock().await.query(query).bind(("uri", "document.md")).await.map_err(SystemActorError::from)?;
+        db.lock().await.query(query).bind(("source", source.clone())).await.map_err(SystemActorError::from)?;
 
     let summary: Option<String> =
         results.take::<Vec<Option<String>>>(0).map_err(SystemActorError::from)?.pop().flatten();
@@ -377,11 +379,13 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
+    let source = "/test/indexer/without/summary".to_string();
+
     // Index with summary generation disabled
     let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).summarize(false).build(),
+            IndexGlobs::builder().globs(globs).summarize(false).source(source.clone()).build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -391,9 +395,9 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
 
     // Verify no summary was stored in the database
     let db = engine.db();
-    let query = "SELECT summary FROM source WHERE uri = $uri";
+    let query = "SELECT VALUE summary FROM source WHERE id.source = $source";
     let mut results =
-        db.lock().await.query(query).bind(("uri", "no_summary.md")).await.map_err(SystemActorError::from)?;
+        db.lock().await.query(query).bind(("source", source.clone())).await.map_err(SystemActorError::from)?;
 
     let summary: Option<String> =
         results.take::<Vec<Option<String>>>(0).map_err(SystemActorError::from)?.pop().flatten();
@@ -406,6 +410,7 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
     Ok(())
 }
 
+// TODO: Add support for image summaries in the indexer
 #[test(tokio::test)]
 async fn test_indexer_with_images() -> Result<(), TestError> {
     let engine = Engine::test().await?;
@@ -423,7 +428,7 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     // Spawn the indexer actor with explicit summary configuration
     let mut indexer = Indexer::default();
     indexer.summary =
-        Summary::builder().chat(Chat::builder().model(std::borrow::Cow::Borrowed("llama2")).build()).build();
+        Summary::builder().chat(Chat::builder().model(std::borrow::Cow::Borrowed("llama3.2:3b")).build()).build();
 
     let indexer_id = ActorId::of::<Indexer>("/indexer");
     let (mut indexer_ctx, mut indexer_actor) =
@@ -443,6 +448,8 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
+    let source = "/test/indexer/with/images".to_string();
+
     // Index with summary generation enabled
     let globs = vec![
         temp_dir.path().join("*.jpg").to_string_lossy().into_owned(),
@@ -451,7 +458,7 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
 
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).summarize(true).build(),
+            IndexGlobs::builder().globs(globs).summarize(true).source(source.clone()).build(),
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
@@ -462,19 +469,22 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
 
     // Verify summaries were stored in the database
     let db = engine.db();
-    let query = "SELECT uri, summary FROM source WHERE uri LIKE $pattern";
-    let mut results = db.lock().await.query(query).bind(("pattern", "%.jpg")).await.map_err(SystemActorError::from)?;
+    let query = "SELECT VALUE summary FROM source WHERE id.source = $source";
+    let mut results = db.lock().await.query(query).bind(("source", source)).await.map_err(SystemActorError::from)?;
 
-    let summaries: Vec<(String, Option<String>)> =
-        results.take::<Vec<(String, Option<String>)>>(0).map_err(SystemActorError::from)?;
+    println!("Results: {:?}", results);
+
+    let summaries: Vec<Option<String>> = results.take(0).map_err(SystemActorError::from)?;
     assert!(!summaries.is_empty(), "Should find at least one image summary");
 
-    for (uri, summary) in summaries {
-        assert!(summary.is_some(), "Summary should be stored for {}", uri);
-        let summary = summary.unwrap();
+    // Count how many actual summaries we have (not None)
+    let valid_summaries: Vec<_> = summaries.into_iter().flatten().collect();
+    assert_eq!(valid_summaries.len(), 2, "Expected summaries for both images");
+
+    for summary in valid_summaries {
         assert!(summary.contains("**URI**:"), "Summary should contain URI");
         assert!(summary.contains("**Summary**:"), "Summary should contain summary section");
-        println!("Summary content for {}: {}", uri, summary);
+        println!("Summary content: {}", summary);
     }
 
     // Cleanup

@@ -5,9 +5,6 @@ use tracing::{debug, error};
 
 use crate::chat::{Chat, ChatError, ChatMessages};
 
-/// Maximum number of characters to process in a text for summarization
-const MAX_TEXT_LENGTH: usize = 10_000;
-
 /// Errors that can occur during summarization
 #[derive(thiserror::Error, Debug)]
 pub enum SummaryError {
@@ -79,6 +76,9 @@ pub struct Summary {
     /// The prompt template for text summarization
     #[builder(default = default_text_prompt())]
     pub text_prompt: std::borrow::Cow<'static, str>,
+    /// Maximum number of characters to process in a text for summarization
+    #[builder(default = default_max_text_length())]
+    pub max_text_length: usize,
     /// ID of the spawned chat actor
     chat_id: Option<ActorId>,
     /// Handle to the chat actor's task
@@ -91,11 +91,16 @@ fn default_text_prompt() -> std::borrow::Cow<'static, str> {
     "Provide a concise summary of the following text. Focus on the key points and main ideas:\n\n".into()
 }
 
+fn default_max_text_length() -> usize {
+    10_000
+}
+
 impl Default for Summary {
     fn default() -> Self {
         Self {
             chat: Chat::builder().model(std::borrow::Cow::Borrowed("llama3.2:3b")).build(),
             text_prompt: default_text_prompt(),
+            max_text_length: default_max_text_length(),
             chat_id: None,
             chat_handle: None,
         }
@@ -107,6 +112,7 @@ impl Clone for Summary {
         Self {
             chat: self.chat.clone(),
             text_prompt: self.text_prompt.clone(),
+            max_text_length: self.max_text_length,
             chat_id: self.chat_id.clone(),
             chat_handle: None,
         }
@@ -187,7 +193,7 @@ impl Summary {
     ) -> Result<SummaryResponse, SummaryError> {
         let (prompt, images) = match &message.content {
             SummarizeContent::Text(text) => {
-                let truncated_text = truncate_text(text, MAX_TEXT_LENGTH);
+                let truncated_text = truncate_text(text, self.max_text_length);
                 (create_text_summary_prompt(&self.text_prompt, &truncated_text), None)
             }
             SummarizeContent::Image(base64_data) => {
