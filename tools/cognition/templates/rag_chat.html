@@ -273,6 +273,7 @@
 
       .source-item,
       .tool-item {
+        margin-top: 10px;
         display: flex;
         flex-direction: row;
         background: var(--bg-main);
@@ -284,16 +285,6 @@
         position: relative;
         /* For tooltip positioning */
       }
-
-      /* .source-item:hover,
-      .tool-item:hover {
-        border-color: var(--primary);
-        background: linear-gradient(
-          135deg,
-          rgba(255, 0, 160, 0.1) 0%,
-          rgba(150, 0, 255, 0.1) 100%
-        );
-      } */
 
       .source-item.active,
       .tool-item.active {
@@ -2838,7 +2829,7 @@
 
       function createToolElement(tool, isActive = false) {
         const toolElement = document.createElement("div");
-        toolElement.className = `tool-item${isActive ? " active" : ""}`;
+        toolElement.className = `tool-item`;
         toolElement.dataset.toolId = tool.id;
         toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
@@ -2881,7 +2872,7 @@
 
       function createSourceElement(source, isActive = false) {
         const sourceElement = document.createElement("div");
-        sourceElement.className = `source-item${isActive ? " active" : ""}`;
+        sourceElement.className = `source-item`;
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
