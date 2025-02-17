@@ -2787,25 +2787,26 @@
         toolElement.dataset.toolId = tool.id;
         toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
-                  <div class="tool-item-header">
-                    <span class="tool-icon"><i class="fas fa-wrench"></i></span>
-                    <span class="tool-item-name">${tool.actor}</span>
-                    <label class="switch">
-                        <input type="checkbox" class="tool-toggle">
-                        <span class="slider"></span>
-                    </label>
-                    <div class="tool-actions">
-                        <button class="tool-action-btn delete-tool" title="Delete">
-                          <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                  </div>
-                `;
+              <div class="tool-item-header">
+                <span class="tool-icon"><i class="fas fa-wrench"></i></span>
+                <span class="tool-item-name">${tool.actor}</span>
+                <label class="switch">
+                    <input type="checkbox" class="tool-toggle" ${
+                      isActive ? "checked" : ""
+                    }>
+                    <span class="slider"></span>
+                </label>
+                <div class="tool-actions">
+                    <button class="tool-action-btn delete-tool" title="Delete">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+              </div>
+            `;
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
 
-        // Add event listeners
         toolElement
           .querySelector(".tool-toggle")
           .addEventListener("change", (e) => {
@@ -2862,13 +2863,14 @@
 
       function addToolToSavedList(tool) {
         const savedToolsList = document.getElementById("saved-tools-list");
-        const toolElement = createToolElement(tool, false);
+        const toolElement = createToolElement(tool, tool.active);
         savedToolsList.appendChild(toolElement);
       }
 
       function addSourceToSavedList(source) {
+        console.log("🚀 ~ addSourceToSavedList ~ source:", source);
         const savedSourcesList = document.getElementById("saved-sources-list");
-        const sourceElement = createSourceElement(source, false);
+        const sourceElement = createSourceElement(source, source.active);
         savedSourcesList.appendChild(sourceElement);
       }
 
