@@ -2561,10 +2561,6 @@
         const toolButton = document.getElementById("send-button");
 
         const toolsActorsList = getActiveTools();
-        console.log(
-          "🚀 ~ updateToolButton ~ toolsActorsList:",
-          toolsActorsList
-        );
 
         // Disable tools if no actors are available
         if (toolsActorsList.length === 0) {
@@ -2654,7 +2650,6 @@
         }
 
         const savedTools = getSavedTools();
-        console.log("🚀 ~ saveTool ~ savedTools:", savedTools);
 
         if (
           savedTools.some(
@@ -2747,7 +2742,6 @@
         let body = await response.json();
 
         let saved = getSavedSources();
-        console.log("🚀 ~ fetchAvailableSources ~ saved:", saved);
 
         let maped_sources = body.sources.map((source_element) => {
           let split_path = source_element.source.split("/");
@@ -2766,7 +2760,6 @@
 
         let keys = Object.keys(grouped).map((sourceLabel) => {
           let exist = saved.find((element) => element.path == sourceLabel);
-          console.log("🚀 ~ keys ~ exist:", exist);
 
           if (exist) {
             return exist;
@@ -2880,7 +2873,6 @@
       }
 
       function addSourceToSavedList(source) {
-        console.log("🚀 ~ addSourceToSavedList ~ source:", source);
         const savedSourcesList = document.getElementById("saved-sources-list");
         const sourceElement = createSourceElement(source, source.active);
         savedSourcesList.appendChild(sourceElement);
@@ -2910,8 +2902,6 @@
         savedTools = savedTools.map((tool) =>
           tool.id == activeTool.id ? { ...tool, active: state } : tool
         );
-
-        console.log("🚀 ~ setToolState ~ savedTools:", savedTools);
 
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
       }
