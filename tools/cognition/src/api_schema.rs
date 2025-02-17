@@ -182,6 +182,11 @@ pub struct IndexGlobsRequestSchema {
     #[schema(default = default_chunk_batch_size, minimum = 0)]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
+
+    /// Whether to summarize each file
+    #[schema(default = false)]
+    #[serde(default)]
+    pub summarize: bool,
 }
 
 fn default_source() -> String {
@@ -214,6 +219,7 @@ impl Into<IndexGlobs> for IndexGlobsRequestSchema {
             .chunk_capacity(chunk_capacity)
             .chunk_overlap(self.chunk_overlap)
             .chunk_batch_size(self.chunk_batch_size)
+            .summarize(self.summarize)
             .build()
     }
 }

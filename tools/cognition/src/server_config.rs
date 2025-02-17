@@ -23,6 +23,8 @@ pub struct ServerConfig {
     pub tool_prompt: Cow<'static, str>,
     #[serde(default = "default_think_model")]
     pub think_model: Cow<'static, str>,
+    #[serde(default = "default_summary_text_prompt")]
+    pub summary_text_prompt: Cow<'static, str>,
     #[serde(default = "default_chat_messages_limit")]
     pub chat_messages_limit: usize,
     #[serde(default = "default_chat_context_length")]
@@ -88,6 +90,10 @@ fn default_think_model() -> Cow<'static, str> {
     "deepseek-r1:1.5b".into()
 }
 
+fn default_summary_text_prompt() -> Cow<'static, str> {
+    "Provide a concise summary of the following text. Focus on the key points and main ideas:\n\n".into()
+}
+
 fn default_chat_messages_limit() -> usize {
     10
 }
@@ -114,6 +120,7 @@ impl Default for ServerConfig {
             chat_prompt: default_chat_prompt(),
             tool_prompt: default_tool_prompt(),
             think_model: default_think_model(),
+            summary_text_prompt: default_summary_text_prompt(),
             chat_messages_limit: default_chat_messages_limit(),
             chat_context_length: default_chat_context_length(),
             think_messages_limit: default_think_messages_limit(),
@@ -156,10 +163,11 @@ impl Args {
         info!("├─ Chat Prompt: {}...", config.chat_prompt.chars().take(50).collect::<String>());
         info!("├─ Tool Prompt: {}...", config.tool_prompt.chars().take(50).collect::<String>());
         info!("├─ Think Model: {}", config.think_model);
+        info!("├─ Summary Text Prompt: {}...", config.summary_text_prompt.chars().take(50).collect::<String>());
         info!("├─ Chat Messages Limit: {}", config.chat_messages_limit);
         info!("├─ Chat Context Length: {}", config.chat_context_length);
         info!("├─ Think Messages Limit: {}", config.think_messages_limit);
-        info!("├─ Think Context Length: {}", config.think_context_length);
+        info!("└─ Think Context Length: {}", config.think_context_length);
 
         Ok(config)
     }
