@@ -201,6 +201,88 @@ pub enum Content {
     Image { path: String },
 }
 
+/// Generate a summary path for a given URI
+///
+/// Creates a path for the summary file by:
+/// 1. Keeping the same directory as the original file
+/// 2. Using the original filename without extension
+/// 3. Appending `.summary.md` extension
+///
+/// Returns None if:
+/// - The URI doesn't exist
+/// - Can't determine parent directory
+/// - Can't determine file stem
+fn generate_summary_path(uri: &str, local_store_dir: &std::path::Path) -> Option<String> {
+    if !local_store_dir.join(uri).exists() {
+        return None;
+    }
+
+    let uri_path = std::path::Path::new(uri);
+    uri_path.parent().and_then(|parent| {
+        uri_path.file_stem().map(|stem| {
+            let summary_name = format!("{}.summary.md", stem.to_string_lossy());
+            parent.join(summary_name).to_string_lossy().into_owned()
+        })
+    })
+}
+
+/// Process summary generation and indexing for a text
+///
+/// This function:
+/// 1. Generates a summary using the Summary actor
+/// 2. Saves the summary to a file
+/// 3. Generates embeddings for the summary
+///
+/// Returns the IDs of the generated summary embeddings
+async fn process_summary(
+    ctx: &ActorContext<Indexer>,
+    source: &ContentSource,
+    content: &str,
+    summary_id: &ActorId,
+    embeddings_id: &ActorId,
+    summary_path: &str,
+) -> Result<Vec<RecordId>, IndexerError> {
+    // Generate summary
+    let response = ctx
+        .send_and_wait_reply::<Summary, SummarizeText>(
+            SummarizeText { text: content.to_string(), uri: source.uri.clone() },
+            summary_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
+        )
+        .await?;
+
+    // Save summary to file
+    let summary_full_path = ctx.engine().local_store_dir().join(summary_path);
+    if let Some(parent) = summary_full_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(&summary_full_path, &response.summary).await?;
+
+    // Generate embeddings for the summary
+    let result = ctx
+        .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+            StoreEmbeddings {
+                content: EmbeddingContent::Text(vec![response.summary]),
+                metadata: Some(vec![serde_json::to_value(Metadata::Text(TextMetadata {
+                    content: TextType::Markdown,
+                    chunk_number: 0,
+                }))
+                .unwrap_or_default()]),
+            },
+            embeddings_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+        )
+        .await;
+
+    match result {
+        Ok(stored_embeddings) => Ok(stored_embeddings.ids),
+        Err(e) => {
+            error!("Failed to generate summary embeddings: {} {}", e, source.source);
+            Ok(vec![])
+        }
+    }
+}
+
 impl Indexer {
     async fn index_content(
         &self,
@@ -340,64 +422,11 @@ impl Indexer {
 
                 // Generate summary if enabled
                 let mut summary_embeddings_ids = Vec::new();
-                let summary_path = if ctx.engine().local_store_dir().join(&source.uri).exists() {
-                    let uri_path = std::path::Path::new(&source.uri);
-                    if let Some(parent) = uri_path.parent() {
-                        if let Some(stem) = uri_path.file_stem() {
-                            let summary_name = format!("{}.summary.md", stem.to_string_lossy());
-                            Some(parent.join(summary_name).to_string_lossy().into_owned())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(summary_path) = summary_path {
+                if let Some(summary_path) = generate_summary_path(&source.uri, ctx.engine().local_store_dir()) {
                     if let Some(summary_id) = &self.summary_id {
-                        match ctx
-                            .send_and_wait_reply::<Summary, SummarizeText>(
-                                SummarizeText { text: content.clone(), uri: source.uri.clone() },
-                                summary_id,
-                                SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
-                            )
-                            .await
-                        {
-                            Ok(response) => {
-                                // Write summary to file
-                                let summary_full_path = ctx.engine().local_store_dir().join(&summary_path);
-                                if let Some(parent) = summary_full_path.parent() {
-                                    tokio::fs::create_dir_all(parent).await?;
-                                }
-                                tokio::fs::write(&summary_full_path, &response.summary).await?;
-
-                                // Generate embeddings for the summary
-                                let result = ctx
-                                    .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-                                        StoreEmbeddings {
-                                            content: EmbeddingContent::Text(vec![response.summary]),
-                                            metadata: Some(vec![serde_json::to_value(Metadata::Text(TextMetadata {
-                                                content: TextType::Markdown,
-                                                chunk_number: 0,
-                                            }))
-                                            .unwrap_or_default()]),
-                                        },
-                                        embeddings_id,
-                                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                                    )
-                                    .await;
-
-                                match result {
-                                    Ok(stored_embeddings) => {
-                                        summary_embeddings_ids.extend(stored_embeddings.ids);
-                                    }
-                                    Err(e) => error!("Failed to generate summary embeddings: {} {}", e, source.source),
-                                }
-                            }
-                            Err(e) => error!("Failed to generate summary: {}", e),
+                        match process_summary(ctx, &source, &content, summary_id, embeddings_id, &summary_path).await {
+                            Ok(ids) => summary_embeddings_ids.extend(ids),
+                            Err(e) => error!("Failed to process summary: {}", e),
                         }
                     }
                 }
