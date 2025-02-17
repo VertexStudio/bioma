@@ -339,6 +339,7 @@ impl Indexer {
                 }
 
                 // Generate summary if enabled
+                let mut summary_embeddings_ids = Vec::new();
                 let summary_path = if ctx.engine().local_store_dir().join(&source.uri).exists() {
                     let uri_path = std::path::Path::new(&source.uri);
                     if let Some(parent) = uri_path.parent() {
@@ -371,13 +372,38 @@ impl Indexer {
                                 if let Some(parent) = summary_full_path.parent() {
                                     tokio::fs::create_dir_all(parent).await?;
                                 }
-                                tokio::fs::write(summary_full_path, response.summary).await?;
+                                tokio::fs::write(&summary_full_path, &response.summary).await?;
+
+                                // Generate embeddings for the summary
+                                let result = ctx
+                                    .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+                                        StoreEmbeddings {
+                                            content: EmbeddingContent::Text(vec![response.summary]),
+                                            metadata: Some(vec![serde_json::to_value(Metadata::Text(TextMetadata {
+                                                content: TextType::Markdown,
+                                                chunk_number: 0,
+                                            }))
+                                            .unwrap_or_default()]),
+                                        },
+                                        embeddings_id,
+                                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                    )
+                                    .await;
+
+                                match result {
+                                    Ok(stored_embeddings) => {
+                                        summary_embeddings_ids.extend(stored_embeddings.ids);
+                                    }
+                                    Err(e) => error!("Failed to generate summary embeddings: {} {}", e, source.source),
+                                }
                             }
                             Err(e) => error!("Failed to generate summary: {}", e),
                         }
                     }
                 }
 
+                // Combine original embeddings with summary embeddings
+                embeddings_ids.extend(summary_embeddings_ids);
                 Ok(IndexResult::Indexed(embeddings_ids))
             }
         }
