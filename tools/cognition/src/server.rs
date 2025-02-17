@@ -167,7 +167,7 @@ impl Default for UploadConfig {
 ///
 /// 2. **File Processing:**
 ///    - **Zip Files:**  
-///      If the uploaded file’s original filename ends with `.zip`, it is treated as a zip archive:
+///      If the uploaded file's original filename ends with `.zip`, it is treated as a zip archive:
 ///        - The file is first copied to a temporary location.
 ///        - The zip archive is opened, and the function scans all entries to check for a common top-level
 ///          folder. During extraction, that common prefix (if present) is stripped.
