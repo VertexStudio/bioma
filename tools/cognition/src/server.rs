@@ -1323,7 +1323,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
