@@ -252,6 +252,35 @@ pub enum Content {
 }
 
 impl Indexer {
+    /// Checks if a source already exists in the database
+    async fn check_source_exists(
+        &self,
+        ctx: &ActorContext<Self>,
+        source: &ContentSource,
+    ) -> Result<Option<IndexedSource>, IndexerError> {
+        let query = format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
+        let db = ctx.engine().db();
+        let mut results = db
+            .lock()
+            .await
+            .query(&query)
+            .bind(("source", source.source.clone()))
+            .bind(("uri", source.uri.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
+
+        let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
+        if !existing_sources.is_empty() {
+            Ok(Some(IndexedSource {
+                source: source.source.clone(),
+                uri: source.uri.clone(),
+                status: IndexStatus::Cached,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Process summary generation and indexing for a text
     ///
     /// This function:
@@ -583,27 +612,9 @@ impl Message<Index> for Indexer {
                         let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
 
                         // Check if source already exists
-                        let query = format!(
-                            "SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}"
-                        );
-                        let db = ctx.engine().db();
-                        let mut results = db
-                            .lock()
-                            .await
-                            .query(&query)
-                            .bind(("source", source.source.clone()))
-                            .bind(("uri", source.uri.clone()))
-                            .await
-                            .map_err(SystemActorError::from)?;
-
-                        let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
-                        if !existing_sources.is_empty() {
+                        if let Some(indexed_source) = self.check_source_exists(ctx, &source).await? {
                             cached += 1;
-                            sources.push(IndexedSource {
-                                source: source.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Cached,
-                            });
+                            sources.push(indexed_source);
                             continue;
                         }
 
@@ -747,26 +758,9 @@ impl Message<Index> for Indexer {
                     let source = ContentSource { source: message.source.clone(), uri: text.clone() };
 
                     // Check if source already exists
-                    let query =
-                        format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
-                    let db = ctx.engine().db();
-                    let mut results = db
-                        .lock()
-                        .await
-                        .query(&query)
-                        .bind(("source", source.source.clone()))
-                        .bind(("uri", source.uri.clone()))
-                        .await
-                        .map_err(SystemActorError::from)?;
-
-                    let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
-                    if !existing_sources.is_empty() {
+                    if let Some(indexed_source) = self.check_source_exists(ctx, &source).await? {
                         cached += 1;
-                        sources.push(IndexedSource {
-                            source: source.source.clone(),
-                            uri: source.uri.clone(),
-                            status: IndexStatus::Cached,
-                        });
+                        sources.push(indexed_source);
                         continue;
                     }
 
@@ -831,26 +825,9 @@ impl Message<Index> for Indexer {
                     let source = ContentSource { source: message.source.clone(), uri: image.clone() };
 
                     // Check if source already exists
-                    let query =
-                        format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
-                    let db = ctx.engine().db();
-                    let mut results = db
-                        .lock()
-                        .await
-                        .query(&query)
-                        .bind(("source", source.source.clone()))
-                        .bind(("uri", source.uri.clone()))
-                        .await
-                        .map_err(SystemActorError::from)?;
-
-                    let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
-                    if !existing_sources.is_empty() {
+                    if let Some(indexed_source) = self.check_source_exists(ctx, &source).await? {
                         cached += 1;
-                        sources.push(IndexedSource {
-                            source: source.source.clone(),
-                            uri: source.uri.clone(),
-                            status: IndexStatus::Cached,
-                        });
+                        sources.push(indexed_source);
                         continue;
                     }
 

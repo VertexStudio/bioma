@@ -14,7 +14,7 @@ pub mod prelude {
         StoreEmbeddings,
     };
     pub use crate::indexer::{
-        self, DeleteSource, DeletedSource, Index, IndexContent, Indexer, IndexerError, TextChunkConfig,
+        self, DeleteSource, DeletedSource, GlobsContent, Index, IndexContent, Indexer, IndexerError, TextChunkConfig,
     };
     pub use crate::rerank::{self, RankTexts, RankedText, RankedTexts, Rerank, RerankError};
     pub use crate::retriever::{self, RetrieveContext, RetrieveQuery, Retriever, RetrieverError};
