@@ -237,7 +237,7 @@ pub struct ImageDimensions {
 #[derive(Debug, Clone)]
 pub enum Content {
     Text { content: String, text_type: TextType, chunk_config: (std::ops::Range<usize>, usize, usize) },
-    Image { path: String },
+    Image { data: ImageData },
 }
 
 impl Indexer {
@@ -260,14 +260,19 @@ impl Indexer {
         // Generate summary based on content type
         let summarize_content = match content {
             Content::Text { content, .. } => SummarizeContent::Text(content.to_string()),
-            Content::Image { path } => {
-                let local_store_dir = ctx.engine().local_store_dir();
-                let full_path = local_store_dir.join(path);
+            Content::Image { data } => {
+                match data {
+                    ImageData::Path(path) => {
+                        let local_store_dir = ctx.engine().local_store_dir();
+                        let full_path = local_store_dir.join(path);
 
-                // Read image file and convert to base64
-                let image_data = tokio::fs::read(&full_path).await?;
-                let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-                SummarizeContent::Image(base64_data)
+                        // Read image file and convert to base64
+                        let image_data = tokio::fs::read(&full_path).await?;
+                        let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+                        SummarizeContent::Image(base64_data)
+                    }
+                    ImageData::Base64(base64_data) => SummarizeContent::Image(base64_data.clone()),
+                }
             }
         };
 
@@ -314,42 +319,57 @@ impl Indexer {
         summarize: bool,
     ) -> Result<IndexResult, IndexerError> {
         match content {
-            Content::Image { path } => {
-                // Get the full path by joining with local store directory
-                let local_store_dir = ctx.engine().local_store_dir();
-                let full_path = local_store_dir.join(&path);
+            Content::Image { data } => {
+                let metadata = match &data {
+                    ImageData::Path(path) => {
+                        // Get the full path by joining with local store directory
+                        let local_store_dir = ctx.engine().local_store_dir();
+                        let full_path = local_store_dir.join(path);
+                        let path_clone = full_path.to_string_lossy().into_owned();
 
-                let path_clone = full_path.to_string_lossy().into_owned();
-                let metadata = tokio::task::spawn_blocking(move || {
-                    let file = std::fs::File::open(&path).ok()?;
-                    let reader = std::io::BufReader::new(file);
+                        tokio::task::spawn_blocking(move || {
+                            let file = std::fs::File::open(&path_clone).ok()?;
+                            let reader = std::io::BufReader::new(file);
 
-                    let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
-                    let format_type = format.format();
-                    let dimensions = match format_type {
-                        Some(_) => format.into_dimensions().ok()?,
-                        None => return None,
-                    };
+                            let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
+                            let format_type = format.format();
+                            let dimensions = match format_type {
+                                Some(_) => format.into_dimensions().ok()?,
+                                None => return None,
+                            };
 
-                    let file_metadata = std::fs::metadata(&path).ok()?;
+                            let file_metadata = std::fs::metadata(&path_clone).ok()?;
 
-                    let image_metadata = Metadata::Image(ImageMetadata {
-                        format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
-                        dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
-                        size_bytes: file_metadata.len(),
-                        modified: file_metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-                        created: file_metadata.created().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs(),
-                    });
+                            let image_metadata = Metadata::Image(ImageMetadata {
+                                format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
+                                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+                                size_bytes: file_metadata.len(),
+                                modified: file_metadata
+                                    .modified()
+                                    .ok()?
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .ok()?
+                                    .as_secs(),
+                                created: file_metadata
+                                    .created()
+                                    .ok()?
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .ok()?
+                                    .as_secs(),
+                            });
 
-                    Some(serde_json::to_value(image_metadata).ok()?)
-                })
-                .await
-                .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+                            Some(serde_json::to_value(image_metadata).ok()?)
+                        })
+                        .await
+                        .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+                    }
+                    ImageData::Base64(_) => None, // Base64 images don't have file metadata
+                };
 
                 let result = ctx
                     .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
                         StoreEmbeddings {
-                            content: EmbeddingContent::Image(vec![ImageData::Path(path_clone)]),
+                            content: EmbeddingContent::Image(vec![data.clone()]),
                             metadata: metadata.map(|m| vec![m]),
                         },
                         embeddings_id,
@@ -581,7 +601,7 @@ impl Message<Index> for Indexer {
 
                         let content = if let Some(ext) = ext {
                             if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
-                                Content::Image { path: uri.clone() }
+                                Content::Image { data: ImageData::Path(uri.clone()) }
                             } else {
                                 let chunk_config =
                                     (config.chunk_capacity.clone(), config.chunk_overlap, config.chunk_batch_size);
@@ -823,8 +843,7 @@ impl Message<Index> for Indexer {
                         continue;
                     }
 
-                    info!("Indexing image: {}", &image);
-                    let content = Content::Image { path: image.clone() };
+                    let content = Content::Image { data: ImageData::Base64(image.clone()) };
 
                     // Process content
                     match self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await {
