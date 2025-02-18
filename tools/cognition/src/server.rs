@@ -409,17 +409,17 @@ async fn upload_config() -> impl Responder {
         ("texts" = (summary = "Index text content directly", value = json!({
             "source": "/bioma",
             "texts": ["This is some text to index", "Here is another text"],
-            "mime_type": "text/markdown",
+            "mime_type": "text/plain",
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200,
             "chunk_batch_size": 50,
-            "summarize": true
+            "summarize": false
         }))),
         ("images" = (summary = "Index base64 encoded images", value = json!({
             "source": "/bioma",
             "images": ["base64_encoded_image_data"],
             "mime_type": "image/jpeg",
-            "summarize": true
+            "summarize": false
         })))
     )),
     responses(

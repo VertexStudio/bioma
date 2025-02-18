@@ -332,16 +332,19 @@ impl Into<Index> for IndexRequestSchema {
                     .summarize(texts.summarize)
                     .build()
             }
-            IndexRequestSchema::Images(images) => Index::builder()
-                .source(images.source)
-                .content(IndexContent::Images(
-                    ImagesContent::builder()
-                        .images(images.images)
-                        .mime_type(images.mime_type.unwrap_or_default())
-                        .build(),
-                ))
-                .summarize(images.summarize)
-                .build(),
+            IndexRequestSchema::Images(images) => {
+                let content = if let Some(mime) = images.mime_type {
+                    ImagesContent::builder().images(images.images).mime_type(mime).build()
+                } else {
+                    ImagesContent::builder().images(images.images).build()
+                };
+
+                Index::builder()
+                    .source(images.source)
+                    .content(IndexContent::Images(content))
+                    .summarize(images.summarize)
+                    .build()
+            }
         }
     }
 }
