@@ -33,6 +33,8 @@ pub struct ServerConfig {
     pub think_messages_limit: usize,
     #[serde(default = "default_think_context_length")]
     pub think_context_length: u32,
+    #[serde(default = "default_retrieve_limit")]
+    pub retrieve_limit: usize,
 }
 
 fn default_engine() -> EngineOptions {
@@ -110,6 +112,10 @@ fn default_think_context_length() -> u32 {
     4096
 }
 
+fn default_retrieve_limit() -> usize {
+    5
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -125,6 +131,7 @@ impl Default for ServerConfig {
             chat_context_length: default_chat_context_length(),
             think_messages_limit: default_think_messages_limit(),
             think_context_length: default_think_context_length(),
+            retrieve_limit: default_retrieve_limit(),
         }
     }
 }
@@ -167,7 +174,8 @@ impl Args {
         info!("├─ Chat Messages Limit: {}", config.chat_messages_limit);
         info!("├─ Chat Context Length: {}", config.chat_context_length);
         info!("├─ Think Messages Limit: {}", config.think_messages_limit);
-        info!("└─ Think Context Length: {}", config.think_context_length);
+        info!("├─ Think Context Length: {}", config.think_context_length);
+        info!("└─ Retrieve Limit: {}", config.retrieve_limit);
 
         Ok(config)
     }
