@@ -660,47 +660,68 @@ async fn test_indexer_direct_images() -> Result<(), TestError> {
 
 #[test]
 fn test_index_json_structure() -> Result<(), TestError> {
-    // Test Globs content
-    let globs_index = Index::builder()
+    // Raw JSON strings representing each content type
+    let raw_globs_json = r#"{
+        "type": "globs",
+        "data": {
+            "patterns": ["*.txt", "*.md"],
+            "chunk_capacity": {"start": 500, "end": 2000},
+            "chunk_overlap": 200,
+            "chunk_batch_size": 50
+        },
+        "source": "/test/source",
+        "summarize": true
+    }"#;
+
+    let raw_texts_json = r#"{
+        "type": "texts",
+        "data": {
+            "texts": ["Test content 1", "Test content 2"],
+            "mime_type": "text/markdown",
+            "chunk_capacity": {"start": 500, "end": 2000},
+            "chunk_overlap": 200,
+            "chunk_batch_size": 50
+        },
+        "source": "/test/source",
+        "summarize": false
+    }"#;
+
+    let raw_images_json = r#"{
+        "type": "images",
+        "data": {
+            "images": ["base64_image_data"],
+            "mime_type": "image/jpeg"
+        },
+        "source": "/test/source",
+        "summarize": true
+    }"#;
+
+    // Deserialize raw JSON into structs
+    let globs_from_json: Index = serde_json::from_str(raw_globs_json)?;
+    let texts_from_json: Index = serde_json::from_str(raw_texts_json)?;
+    let images_from_json: Index = serde_json::from_str(raw_images_json)?;
+
+    // Create equivalent structs using builders
+    let globs_from_builder = Index::builder()
         .content(IndexContent::Globs(GlobsContent {
             patterns: vec!["*.txt".to_string(), "*.md".to_string()],
-            config: TextChunkConfig::default(),
+            config: TextChunkConfig { chunk_capacity: 500..2000, chunk_overlap: 200, chunk_batch_size: 50 },
         }))
         .source("/test/source".to_string())
         .summarize(true)
         .build();
 
-    let globs_json = serde_json::to_string_pretty(&globs_index)?;
-    let globs_parsed: Index = serde_json::from_str(&globs_json)?;
-
-    assert_eq!(
-        serde_json::to_string(&globs_index)?,
-        serde_json::to_string(&globs_parsed)?,
-        "Globs JSON structure should match after serialization/deserialization"
-    );
-
-    // Test Texts content
-    let texts_index = Index::builder()
+    let texts_from_builder = Index::builder()
         .content(IndexContent::Texts(TextsContent {
             texts: vec!["Test content 1".to_string(), "Test content 2".to_string()],
             mime_type: "text/markdown".to_string(),
-            config: TextChunkConfig::default(),
+            config: TextChunkConfig { chunk_capacity: 500..2000, chunk_overlap: 200, chunk_batch_size: 50 },
         }))
         .source("/test/source".to_string())
         .summarize(false)
         .build();
 
-    let texts_json = serde_json::to_string_pretty(&texts_index)?;
-    let texts_parsed: Index = serde_json::from_str(&texts_json)?;
-
-    assert_eq!(
-        serde_json::to_string(&texts_index)?,
-        serde_json::to_string(&texts_parsed)?,
-        "Texts JSON structure should match after serialization/deserialization"
-    );
-
-    // Test Images content
-    let images_index = Index::builder()
+    let images_from_builder = Index::builder()
         .content(IndexContent::Images(ImagesContent {
             images: vec!["base64_image_data".to_string()],
             mime_type: Some("image/jpeg".to_string()),
@@ -709,38 +730,52 @@ fn test_index_json_structure() -> Result<(), TestError> {
         .summarize(true)
         .build();
 
-    let images_json = serde_json::to_string_pretty(&images_index)?;
-    let images_parsed: Index = serde_json::from_str(&images_json)?;
-
+    // Compare deserialized JSON with builder-created structs
     assert_eq!(
-        serde_json::to_string(&images_index)?,
-        serde_json::to_string(&images_parsed)?,
-        "Images JSON structure should match after serialization/deserialization"
+        serde_json::to_string(&globs_from_json)?,
+        serde_json::to_string(&globs_from_builder)?,
+        "Globs JSON structure should match builder-created struct"
     );
 
-    // Verify expected JSON structure
-    let globs_value: serde_json::Value = serde_json::from_str(&globs_json)?;
+    assert_eq!(
+        serde_json::to_string(&texts_from_json)?,
+        serde_json::to_string(&texts_from_builder)?,
+        "Texts JSON structure should match builder-created struct"
+    );
+
+    assert_eq!(
+        serde_json::to_string(&images_from_json)?,
+        serde_json::to_string(&images_from_builder)?,
+        "Images JSON structure should match builder-created struct"
+    );
+
+    // Verify JSON structure details
+    let globs_value: serde_json::Value = serde_json::from_str(raw_globs_json)?;
     assert_eq!(globs_value["type"], "globs", "Content type should be 'globs'");
     assert!(globs_value["data"]["patterns"].is_array(), "Patterns should be an array");
-    assert!(globs_value["data"]["config"].is_object(), "Config should be an object");
+    assert!(globs_value["data"]["chunk_capacity"].is_object(), "chunk_capacity should be an object");
+    assert!(globs_value["data"]["chunk_overlap"].is_number(), "chunk_overlap should be a number");
+    assert!(globs_value["data"]["chunk_batch_size"].is_number(), "chunk_batch_size should be a number");
     assert_eq!(globs_value["source"], "/test/source", "Source should match");
     assert_eq!(globs_value["summarize"], true, "Summarize should match");
 
-    let texts_value: serde_json::Value = serde_json::from_str(&texts_json)?;
+    let texts_value: serde_json::Value = serde_json::from_str(raw_texts_json)?;
     assert_eq!(texts_value["type"], "texts", "Content type should be 'texts'");
     assert!(texts_value["data"]["texts"].is_array(), "Texts should be an array");
     assert_eq!(texts_value["data"]["mime_type"], "text/markdown", "MIME type should match");
-    assert!(texts_value["data"]["config"].is_object(), "Config should be an object");
+    assert!(texts_value["data"]["chunk_capacity"].is_object(), "chunk_capacity should be an object");
+    assert!(texts_value["data"]["chunk_overlap"].is_number(), "chunk_overlap should be a number");
+    assert!(texts_value["data"]["chunk_batch_size"].is_number(), "chunk_batch_size should be a number");
 
-    let images_value: serde_json::Value = serde_json::from_str(&images_json)?;
+    let images_value: serde_json::Value = serde_json::from_str(raw_images_json)?;
     assert_eq!(images_value["type"], "images", "Content type should be 'images'");
     assert!(images_value["data"]["images"].is_array(), "Images should be an array");
     assert_eq!(images_value["data"]["mime_type"], "image/jpeg", "MIME type should match");
 
     // Print example JSON structures for documentation
-    println!("Example Globs JSON structure:\n{}", globs_json);
-    println!("\nExample Texts JSON structure:\n{}", texts_json);
-    println!("\nExample Images JSON structure:\n{}", images_json);
+    println!("Example Globs JSON structure:\n{}", raw_globs_json);
+    println!("\nExample Texts JSON structure:\n{}", raw_texts_json);
+    println!("\nExample Images JSON structure:\n{}", raw_images_json);
 
     Ok(())
 }
