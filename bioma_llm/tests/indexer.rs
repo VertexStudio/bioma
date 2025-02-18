@@ -1,3 +1,5 @@
+use base64::Engine as _;
+use bioma_actor::prelude::Engine as ActorEngine;
 use bioma_actor::prelude::*;
 use bioma_llm::{prelude::*, retriever::ListSources};
 use std::fs;
@@ -19,7 +21,7 @@ enum TestError {
 
 #[test(tokio::test)]
 async fn test_indexer_basic_text() -> Result<(), TestError> {
-    let engine = Engine::test().await?;
+    let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
     // Create test files
@@ -71,8 +73,10 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
     ];
 
     let index_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs.clone()).build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs { patterns: globs.clone(), config: TextChunkConfig::default() })
+                .build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -94,8 +98,10 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
 
     // Test caching behavior by reindexing
     let reindex_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -114,7 +120,7 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
 
 #[test(tokio::test)]
 async fn test_indexer_chunking() -> Result<(), TestError> {
-    let engine = Engine::test().await?;
+    let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
     // Create a large test file that will be chunked
@@ -153,18 +159,15 @@ async fn test_indexer_chunking() -> Result<(), TestError> {
 
     // Index with custom chunking parameters
     let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
-    let chunk_capacity = 100..200; // Small chunks for testing
-    let chunk_overlap = 50;
-    let chunk_batch_size = 10;
+    let chunk_config = TextChunkConfig {
+        chunk_capacity: 100..200, // Small chunks for testing
+        chunk_overlap: 50,
+        chunk_batch_size: 10,
+    };
 
     let index_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder()
-                .globs(globs)
-                .chunk_capacity(chunk_capacity)
-                .chunk_overlap(chunk_overlap)
-                .chunk_batch_size(chunk_batch_size)
-                .build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder().content(IndexContent::Globs { patterns: globs, config: chunk_config }).build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -190,7 +193,7 @@ async fn test_indexer_chunking() -> Result<(), TestError> {
 
 #[test(tokio::test)]
 async fn test_indexer_delete_source() -> Result<(), TestError> {
-    let engine = Engine::test().await?;
+    let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
     // Create test files
@@ -234,8 +237,10 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
     // Index the files
     let glob_path = temp_dir.path().join("*.txt").to_string_lossy().into_owned();
     let index_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(vec![glob_path.clone()]).build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs { patterns: vec![glob_path.clone()], config: TextChunkConfig::default() })
+                .build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -279,7 +284,7 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
 
 #[test(tokio::test)]
 async fn test_indexer_with_summary() -> Result<(), TestError> {
-    let engine = Engine::test().await?;
+    let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
     // Create a test file with content that warrants summarization
@@ -322,8 +327,12 @@ It provides practical examples and use cases.
     // Index with summary generation enabled
     let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
     let index_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).summarize(true).source(source.clone()).build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .summarize(true)
+                .source(source.clone())
+                .build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -353,7 +362,7 @@ It provides practical examples and use cases.
 
 #[test(tokio::test)]
 async fn test_indexer_without_summary() -> Result<(), TestError> {
-    let engine = Engine::test().await?;
+    let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
     // Create a test file
@@ -384,8 +393,12 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
     // Index with summary generation disabled
     let globs = vec![temp_dir.path().join("*.md").to_string_lossy().into_owned()];
     let index_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).summarize(false).source(source.clone()).build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .summarize(false)
+                .source(source.clone())
+                .build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -413,7 +426,7 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
 // TODO: Add support for image summaries in the indexer
 #[test(tokio::test)]
 async fn test_indexer_with_images() -> Result<(), TestError> {
-    let engine = Engine::test().await?;
+    let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
     // Copy test images to temp directory
@@ -457,8 +470,12 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     ];
 
     let index_result = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            IndexGlobs::builder().globs(globs).summarize(true).source(source.clone()).build(),
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .summarize(true)
+                .source(source.clone())
+                .build(),
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
@@ -490,6 +507,135 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     // Cleanup
     indexer_handle.abort();
     temp_dir.close()?;
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_indexer_direct_texts() -> Result<(), TestError> {
+    let engine = ActorEngine::test().await?;
+
+    // Spawn the indexer actor
+    let indexer_id = ActorId::of::<Indexer>("/indexer");
+    let (mut indexer_ctx, mut indexer_actor) =
+        Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
+        }
+    });
+
+    // Spawn the retriever actor
+    let retriever_id = ActorId::of::<Retriever>("/retriever");
+    let (mut retriever_ctx, mut retriever_actor) =
+        Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
+
+    let retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    let source = "/test/indexer/direct/texts".to_string();
+
+    // Create test texts with different content types
+    let texts: Vec<String> = vec![
+        "# Markdown Content\n\nThis is a test markdown document.".to_string(),
+        "fn main() {\n    println!(\"Hello from Rust!\");\n}".to_string(),
+        "This is plain text content for testing.".to_string(),
+    ];
+
+    // Index with custom chunk configuration
+    let chunk_config = TextChunkConfig {
+        chunk_capacity: 100..200, // Small chunks for testing
+        chunk_overlap: 50,
+        chunk_batch_size: 10,
+    };
+
+    let index_result = relay_ctx
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Texts { texts: texts.clone(), config: chunk_config })
+                .source(source.clone())
+                .build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
+        .await?;
+
+    assert_eq!(index_result.indexed, 3, "Expected 3 texts to be indexed");
+    assert_eq!(index_result.cached, 0, "Expected no cached texts");
+
+    // List sources to verify
+    let sources = relay_ctx
+        .send_and_wait_reply::<Retriever, ListSources>(ListSources, &retriever_id, SendOptions::default())
+        .await?;
+
+    assert_eq!(sources.sources.len(), 3, "Expected 3 sources");
+
+    // Cleanup
+    indexer_handle.abort();
+    retriever_handle.abort();
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_indexer_direct_images() -> Result<(), TestError> {
+    let engine = ActorEngine::test().await?;
+
+    // Spawn the indexer actor
+    let indexer_id = ActorId::of::<Indexer>("/indexer");
+    let (mut indexer_ctx, mut indexer_actor) =
+        Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
+        }
+    });
+
+    // Give actors time to initialize
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    let source = "/test/indexer/direct/images".to_string();
+
+    // Read test images and convert to base64
+    let test_images = vec!["../assets/images/elephant.jpg".to_string(), "../assets/images/rust-pet.png".to_string()];
+    let base64_images: Vec<String> = test_images
+        .iter()
+        .map(|path| {
+            let image_data = fs::read(path).unwrap();
+            base64::engine::general_purpose::STANDARD.encode(&image_data)
+        })
+        .collect();
+
+    let index_result = relay_ctx
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder().content(IndexContent::Images { images: base64_images }).source(source.clone()).build(),
+            &indexer_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+        )
+        .await?;
+
+    assert_eq!(index_result.indexed, 2, "Expected 2 images to be indexed");
+    assert_eq!(index_result.cached, 0, "Expected no cached images");
+
+    // Cleanup
+    indexer_handle.abort();
 
     Ok(())
 }
