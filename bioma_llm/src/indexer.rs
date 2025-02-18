@@ -10,8 +10,9 @@ use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
 use surrealdb::RecordId;
-use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
+use text_splitter::{ChunkConfig as TextSplitterChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{error, info, warn};
 use walkdir::WalkDir;
 
@@ -60,16 +61,24 @@ pub enum IndexerError {
 
 impl ActorError for IndexerError {}
 
+fn default_source() -> String {
+    "/global".to_string()
+}
+
+fn default_chunk_capacity() -> std::ops::Range<usize> {
+    DEFAULT_CHUNK_CAPACITY
+}
+
+fn default_chunk_overlap() -> usize {
+    DEFAULT_CHUNK_OVERLAP
+}
+
+fn default_chunk_batch_size() -> usize {
+    DEFAULT_CHUNK_BATCH_SIZE
+}
+
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
-pub struct IndexGlobs {
-    /// The source identifier for the indexed content
-    #[builder(default = default_source())]
-    #[serde(default = "default_source")]
-    pub source: String,
-
-    /// List of glob patterns to match files for indexing
-    pub globs: Vec<String>,
-
+pub struct ChunkConfig {
     /// Configuration for text chunk size limits
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
@@ -84,27 +93,75 @@ pub struct IndexGlobs {
     #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
+}
+
+impl Default for ChunkConfig {
+    fn default() -> Self {
+        Self {
+            chunk_capacity: default_chunk_capacity(),
+            chunk_overlap: default_chunk_overlap(),
+            chunk_batch_size: default_chunk_batch_size(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexTextsConfig {
+    /// List of glob patterns to match files for indexing
+    pub content: IndexTextsContent,
+    /// Chunk configuration for text processing
+    #[serde(default)]
+    pub chunk_config: ChunkConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum IndexTextsContent {
+    /// List of glob patterns to match files for indexing
+    Globs(Vec<String>),
+    /// List of texts to index directly
+    Texts(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum IndexImages {
+    /// List of base64 encoded images
+    Base64(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum IndexContent {
+    /// Text content to index
+    Text {
+        #[serde(flatten)]
+        content: IndexTextsContent,
+        #[serde(default)]
+        chunk_config: ChunkConfig,
+    },
+    /// Image content to index
+    Image {
+        #[serde(flatten)]
+        content: IndexImages,
+    },
+}
+
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct Index {
+    /// The source identifier for the indexed content
+    #[builder(default = default_source())]
+    #[serde(default = "default_source")]
+    pub source: String,
+
+    /// The content to index
+    #[serde(flatten)]
+    pub content: IndexContent,
 
     /// Whether to summarize each file
     #[builder(default)]
     #[serde(default)]
     pub summarize: bool,
-}
-
-fn default_source() -> String {
-    "/global".to_string()
-}
-
-fn default_chunk_capacity() -> std::ops::Range<usize> {
-    DEFAULT_CHUNK_CAPACITY
-}
-
-pub fn default_chunk_overlap() -> usize {
-    DEFAULT_CHUNK_OVERLAP
-}
-
-pub fn default_chunk_batch_size() -> usize {
-    DEFAULT_CHUNK_BATCH_SIZE
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,13 +402,17 @@ impl Indexer {
                 let chunks = match &text_type {
                     TextType::Text => {
                         let splitter = TextSplitter::new(
-                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                            TextSplitterChunkConfig::new(chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(chunk_overlap)?,
                         );
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
                     TextType::Markdown => {
                         let splitter = MarkdownSplitter::new(
-                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                            TextSplitterChunkConfig::new(chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(chunk_overlap)?,
                         );
                         splitter.chunks(&content).collect::<Vec<&str>>()
                     }
@@ -365,7 +426,9 @@ impl Indexer {
                         };
                         let splitter = CodeSplitter::new(
                             language,
-                            ChunkConfig::new(chunk_capacity.clone()).with_trim(false).with_overlap(chunk_overlap)?,
+                            TextSplitterChunkConfig::new(chunk_capacity.clone())
+                                .with_trim(false)
+                                .with_overlap(chunk_overlap)?,
                         )
                         .expect("Invalid tree-sitter language");
                         splitter.chunks(&content).collect::<Vec<&str>>()
@@ -446,10 +509,36 @@ impl Indexer {
     }
 }
 
-impl Message<IndexGlobs> for Indexer {
+impl Actor for Indexer {
+    type Error = IndexerError;
+
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
+        self.init(ctx).await?;
+
+        // Start the message stream
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(input) = frame.is::<Index>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<DeleteSource>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Message<Index> for Indexer {
     type Response = Indexed;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &IndexGlobs) -> Result<(), IndexerError> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &Index) -> Result<(), IndexerError> {
         let Some(embeddings_id) = &self.embeddings_id else {
             return Err(IndexerError::EmbeddingsActorNotInitialized);
         };
@@ -460,210 +549,242 @@ impl Message<IndexGlobs> for Indexer {
             return Err(IndexerError::MarkitdownActorNotInitialized);
         };
 
-        let total_index_globs_time = std::time::Instant::now();
+        let total_index_time = std::time::Instant::now();
         let mut indexed = 0;
         let mut cached = 0;
         let mut sources = Vec::new();
 
-        for glob in message.globs.iter() {
-            let local_store_dir = ctx.engine().local_store_dir();
-            let full_glob = if std::path::Path::new(glob).is_absolute() {
-                glob.clone()
-            } else {
-                local_store_dir.join(glob).to_string_lossy().into_owned()
-            };
+        match &message.content {
+            IndexContent::Text { content, chunk_config } => match content {
+                IndexTextsContent::Globs(globs) => {
+                    for glob in globs {
+                        let local_store_dir = ctx.engine().local_store_dir();
+                        let full_glob = if std::path::Path::new(glob).is_absolute() {
+                            glob.clone()
+                        } else {
+                            local_store_dir.join(glob).to_string_lossy().into_owned()
+                        };
 
-            info!("Indexing glob: {}", &full_glob);
-            let paths = tokio::task::spawn_blocking(move || {
-                let mut paths = Vec::new();
-                for entry in glob::glob(&full_glob).unwrap().flatten() {
-                    if entry.is_file() {
-                        paths.push(entry);
-                    } else if entry.is_dir() {
-                        for entry in WalkDir::new(entry)
-                            .follow_links(true)
-                            .into_iter()
-                            .filter_map(|e| e.ok())
-                            .filter(|e| e.file_type().is_file())
-                        {
-                            paths.push(entry.path().to_path_buf());
+                        info!("Indexing glob: {}", &full_glob);
+                        let paths = tokio::task::spawn_blocking(move || {
+                            let mut paths = Vec::new();
+                            for entry in glob::glob(&full_glob).unwrap().flatten() {
+                                if entry.is_file() {
+                                    paths.push(entry);
+                                } else if entry.is_dir() {
+                                    for entry in WalkDir::new(entry)
+                                        .follow_links(true)
+                                        .into_iter()
+                                        .filter_map(|e| e.ok())
+                                        .filter(|e| e.file_type().is_file())
+                                    {
+                                        paths.push(entry.path().to_path_buf());
+                                    }
+                                }
+                            }
+                            paths
+                        })
+                        .await;
+
+                        let Ok(paths) = paths else {
+                            warn!("Skipping glob: {}", &glob);
+                            sources.push(IndexedSource {
+                                source: message.source.clone(),
+                                uri: glob.clone(),
+                                status: IndexStatus::Failed("Invalid glob pattern".to_string()),
+                            });
+                            continue;
+                        };
+
+                        for pathbuf in paths {
+                            let (indexed_source, content) = self
+                                .process_file_path(
+                                    ctx,
+                                    &message.source,
+                                    pathbuf,
+                                    chunk_config,
+                                    pdf_analyzer_id,
+                                    markitdown_id,
+                                )
+                                .await?;
+
+                            if let Some(content) = content {
+                                let result = self
+                                    .index_content(
+                                        ctx,
+                                        indexed_source.clone(),
+                                        content,
+                                        embeddings_id,
+                                        message.summarize,
+                                    )
+                                    .await?;
+
+                                match result {
+                                    IndexResult::Indexed(ids, summary_text) => {
+                                        if !ids.is_empty() {
+                                            indexed += 1;
+                                            sources.push(IndexedSource {
+                                                source: message.source.clone(),
+                                                uri: indexed_source.uri.clone(),
+                                                status: IndexStatus::Indexed,
+                                            });
+
+                                            let source_query = include_str!("../sql/source.surql");
+                                            ctx.engine()
+                                                .db()
+                                                .lock()
+                                                .await
+                                                .query(*&source_query)
+                                                .bind(("source", indexed_source.source))
+                                                .bind(("uri", indexed_source.uri))
+                                                .bind(("summary", summary_text))
+                                                .bind(("emb_ids", ids))
+                                                .bind(("prefix", self.embeddings.table_prefix()))
+                                                .await
+                                                .map_err(SystemActorError::from)?;
+                                        } else {
+                                            sources.push(IndexedSource {
+                                                source: message.source.clone(),
+                                                uri: indexed_source.uri,
+                                                status: IndexStatus::Failed("No embeddings generated".to_string()),
+                                            });
+                                        }
+                                    }
+                                    IndexResult::Failed => {
+                                        sources.push(IndexedSource {
+                                            source: message.source.clone(),
+                                            uri: indexed_source.uri,
+                                            status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
+                                        });
+                                    }
+                                }
+                            } else {
+                                cached += 1;
+                                sources.push(IndexedSource {
+                                    source: message.source.clone(),
+                                    uri: indexed_source.uri,
+                                    status: IndexStatus::Cached,
+                                });
+                            }
                         }
                     }
                 }
-                paths
-            })
-            .await;
+                IndexTextsContent::Texts(texts) => {
+                    for (i, text) in texts.iter().enumerate() {
+                        let uri = format!("text_{}", i);
+                        let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
 
-            let Ok(paths) = paths else {
-                warn!("Skipping glob: {}", &glob);
-                sources.push(IndexedSource {
-                    source: message.source.clone(),
-                    uri: glob.clone(),
-                    status: IndexStatus::Failed("Invalid glob pattern".to_string()),
-                });
-                continue;
-            };
+                        let content = Content::Text {
+                            content: text.clone(),
+                            text_type: TextType::Text,
+                            chunk_config: (
+                                chunk_config.chunk_capacity.clone(),
+                                chunk_config.chunk_overlap,
+                                chunk_config.chunk_batch_size,
+                            ),
+                        };
 
-            for pathbuf in paths {
-                // Convert the full path to a path relative to the local store directory
-                let local_store_dir = ctx.engine().local_store_dir();
-                let relative_path = pathdiff::diff_paths(&pathbuf, local_store_dir)
-                    .ok_or_else(|| IndexerError::Other("Failed to get relative path".to_string()))?;
-                let uri = relative_path.to_string_lossy().to_string();
-                let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
+                        let result =
+                            self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await?;
 
-                // Check if source already exists
-                let query =
-                    format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
-                let db = ctx.engine().db();
-                let mut results = db
-                    .lock()
-                    .await
-                    .query(&query)
-                    .bind(("source", source.source.clone()))
-                    .bind(("uri", source.uri.clone()))
-                    .await
-                    .map_err(SystemActorError::from)?;
-
-                let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
-                if !existing_sources.is_empty() {
-                    cached += 1;
-                    sources.push(IndexedSource {
-                        source: source.source.clone(),
-                        uri: source.uri.clone(),
-                        status: IndexStatus::Cached,
-                    });
-                    continue;
-                }
-
-                info!("Indexing path: {}", &pathbuf.display());
-                let ext = pathbuf.extension().and_then(|ext| ext.to_str());
-
-                let content = if let Some(ext) = ext {
-                    if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
-                        Content::Image { path: uri.clone() }
-                    } else {
-                        let chunk_config =
-                            (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size);
-
-                        // Special handling for PDF
-                        if ext == "pdf" {
-                            match ctx
-                                .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
-                                    AnalyzePdf { file_path: pathbuf.clone() },
-                                    pdf_analyzer_id,
-                                    SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
-                                )
-                                .await
-                            {
-                                Ok(content) => Content::Text { content, text_type: TextType::Pdf, chunk_config },
-                                Err(e) => {
-                                    error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                        match result {
+                            IndexResult::Indexed(ids, summary_text) => {
+                                if !ids.is_empty() {
+                                    indexed += 1;
                                     sources.push(IndexedSource {
                                         source: message.source.clone(),
-                                        uri: uri.clone(),
-                                        status: IndexStatus::Failed(format!("PDF conversion error: {}", e)),
+                                        uri: source.uri.clone(),
+                                        status: IndexStatus::Indexed,
                                     });
-                                    continue;
+
+                                    let source_query = include_str!("../sql/source.surql");
+                                    ctx.engine()
+                                        .db()
+                                        .lock()
+                                        .await
+                                        .query(*&source_query)
+                                        .bind(("source", source.source))
+                                        .bind(("uri", source.uri))
+                                        .bind(("summary", summary_text))
+                                        .bind(("emb_ids", ids))
+                                        .bind(("prefix", self.embeddings.table_prefix()))
+                                        .await
+                                        .map_err(SystemActorError::from)?;
+                                } else {
+                                    sources.push(IndexedSource {
+                                        source: message.source.clone(),
+                                        uri: source.uri,
+                                        status: IndexStatus::Failed("No embeddings generated".to_string()),
+                                    });
                                 }
                             }
-                        }
-                        // Special handling for MC files
-                        else if ext == "docx" || ext == "pptx" || ext == "xlsx" {
-                            match ctx
-                                .send_and_wait_reply::<MarkitDown, AnalyzeMCFile>(
-                                    AnalyzeMCFile { file_path: pathbuf.clone() },
-                                    markitdown_id,
-                                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
-                                )
-                                .await
-                            {
-                                Ok(content) => Content::Text { content, text_type: TextType::MCFile, chunk_config },
-                                Err(e) => {
-                                    error!("Failed to convert MC file to md: {}. Error: {}", pathbuf.display(), e);
-                                    continue;
-                                }
-                            }
-                        } else {
-                            // Handle all other text-based files
-                            let text_type = match ext {
-                                "md" => TextType::Markdown,
-                                "rs" => TextType::Code(CodeLanguage::Rust),
-                                "py" => TextType::Code(CodeLanguage::Python),
-                                "cue" => TextType::Code(CodeLanguage::Cue),
-                                "html" => TextType::Code(CodeLanguage::Html),
-                                "cpp" => TextType::Code(CodeLanguage::Cpp),
-                                "h" => TextType::Code(CodeLanguage::Cpp),
-                                _ => TextType::Text,
-                            };
-
-                            match tokio::fs::read_to_string(&pathbuf).await {
-                                Ok(content) => Content::Text { content, text_type, chunk_config },
-                                Err(_) => continue,
+                            IndexResult::Failed => {
+                                sources.push(IndexedSource {
+                                    source: message.source.clone(),
+                                    uri: source.uri,
+                                    status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
+                                });
                             }
                         }
-                    }
-                } else {
-                    // Handle files without extensions as text
-                    let chunk_config =
-                        (message.chunk_capacity.clone(), message.chunk_overlap, message.chunk_batch_size);
-                    match tokio::fs::read_to_string(&pathbuf).await {
-                        Ok(content) => Content::Text { content, text_type: TextType::Text, chunk_config },
-                        Err(_) => continue,
-                    }
-                };
-
-                // Process content
-                match self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await {
-                    Ok(IndexResult::Indexed(ids, summary_text)) => {
-                        if !ids.is_empty() {
-                            indexed += 1;
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Indexed,
-                            });
-
-                            let source_query = include_str!("../sql/source.surql");
-                            ctx.engine()
-                                .db()
-                                .lock()
-                                .await
-                                .query(*&source_query)
-                                .bind(("source", source.source.clone()))
-                                .bind(("uri", source.uri.clone()))
-                                .bind(("summary", summary_text))
-                                .bind(("emb_ids", ids))
-                                .bind(("prefix", self.embeddings.table_prefix()))
-                                .await
-                                .map_err(SystemActorError::from)?;
-                        } else {
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Failed("No embeddings generated".to_string()),
-                            });
-                        }
-                    }
-                    Ok(IndexResult::Failed) => {
-                        sources.push(IndexedSource {
-                            source: message.source.clone(),
-                            uri: source.uri.clone(),
-                            status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
-                        });
-                    }
-                    Err(e) => {
-                        sources.push(IndexedSource {
-                            source: message.source.clone(),
-                            uri: source.uri.clone(),
-                            status: IndexStatus::Failed(format!("Indexing error: {}", e)),
-                        });
                     }
                 }
-            }
+            },
+            IndexContent::Image { content } => match content {
+                IndexImages::Base64(images) => {
+                    for (i, image) in images.iter().enumerate() {
+                        let uri = format!("image_{}", i);
+                        let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
+
+                        let content = Content::Image { path: image.clone() };
+
+                        let result =
+                            self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await?;
+
+                        match result {
+                            IndexResult::Indexed(ids, summary_text) => {
+                                if !ids.is_empty() {
+                                    indexed += 1;
+                                    sources.push(IndexedSource {
+                                        source: message.source.clone(),
+                                        uri: source.uri.clone(),
+                                        status: IndexStatus::Indexed,
+                                    });
+
+                                    let source_query = include_str!("../sql/source.surql");
+                                    ctx.engine()
+                                        .db()
+                                        .lock()
+                                        .await
+                                        .query(*&source_query)
+                                        .bind(("source", source.source))
+                                        .bind(("uri", source.uri))
+                                        .bind(("summary", summary_text))
+                                        .bind(("emb_ids", ids))
+                                        .bind(("prefix", self.embeddings.table_prefix()))
+                                        .await
+                                        .map_err(SystemActorError::from)?;
+                                } else {
+                                    sources.push(IndexedSource {
+                                        source: message.source.clone(),
+                                        uri: source.uri,
+                                        status: IndexStatus::Failed("No embeddings generated".to_string()),
+                                    });
+                                }
+                            }
+                            IndexResult::Failed => {
+                                sources.push(IndexedSource {
+                                    source: message.source.clone(),
+                                    uri: source.uri,
+                                    status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
+                                });
+                            }
+                        }
+                    }
+                }
+            },
         }
 
-        info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_globs_time.elapsed());
+        info!("Indexed {} paths, cached {} paths, in {:?}", indexed, cached, total_index_time.elapsed());
         ctx.reply(Indexed { indexed, cached, sources }).await?;
         Ok(())
     }
@@ -744,32 +865,6 @@ impl Default for Indexer {
             markitdown_handle: None,
             summary_handle: None,
         }
-    }
-}
-
-impl Actor for Indexer {
-    type Error = IndexerError;
-
-    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), IndexerError> {
-        self.init(ctx).await?;
-
-        // Start the message stream
-        let mut stream = ctx.recv().await?;
-        while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<IndexGlobs>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            } else if let Some(input) = frame.is::<DeleteSource>() {
-                let response = self.reply(ctx, &input, &frame).await;
-                if let Err(err) = response {
-                    error!("{} {:?}", ctx.id(), err);
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -864,5 +959,113 @@ impl Indexer {
         info!("Indexer ready");
 
         Ok(())
+    }
+
+    async fn process_file_path(
+        &self,
+        ctx: &ActorContext<Self>,
+        source: &str,
+        pathbuf: PathBuf,
+        chunk_config: &ChunkConfig,
+        pdf_analyzer_id: &ActorId,
+        markitdown_id: &ActorId,
+    ) -> Result<(ContentSource, Option<Content>), IndexerError> {
+        // Convert the full path to a path relative to the local store directory
+        let local_store_dir = ctx.engine().local_store_dir();
+        let relative_path = pathdiff::diff_paths(&pathbuf, local_store_dir)
+            .ok_or_else(|| IndexerError::Other("Failed to get relative path".to_string()))?;
+        let uri = relative_path.to_string_lossy().to_string();
+        let source = ContentSource { source: source.to_string(), uri: uri.clone() };
+
+        // Check if source already exists
+        let query = format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
+        let db = ctx.engine().db();
+        let mut results = db
+            .lock()
+            .await
+            .query(&query)
+            .bind(("source", source.source.clone()))
+            .bind(("uri", source.uri.clone()))
+            .await
+            .map_err(SystemActorError::from)?;
+
+        let existing_sources: Vec<ContentSource> = results.take(0).map_err(SystemActorError::from)?;
+        if !existing_sources.is_empty() {
+            return Ok((source, None));
+        }
+
+        info!("Indexing path: {}", &pathbuf.display());
+        let ext = pathbuf.extension().and_then(|ext| ext.to_str());
+
+        let content = if let Some(ext) = ext {
+            if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
+                Content::Image { path: uri.clone() }
+            } else {
+                let chunk_config =
+                    (chunk_config.chunk_capacity.clone(), chunk_config.chunk_overlap, chunk_config.chunk_batch_size);
+
+                // Special handling for PDF
+                if ext == "pdf" {
+                    match ctx
+                        .send_and_wait_reply::<PdfAnalyzer, AnalyzePdf>(
+                            AnalyzePdf { file_path: pathbuf.clone() },
+                            pdf_analyzer_id,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
+                        )
+                        .await
+                    {
+                        Ok(content) => Content::Text { content, text_type: TextType::Pdf, chunk_config },
+                        Err(e) => {
+                            error!("Failed to convert pdf to md: {}. Error: {}", pathbuf.display(), e);
+                            return Ok((source, None));
+                        }
+                    }
+                }
+                // Special handling for MC files
+                else if ext == "docx" || ext == "pptx" || ext == "xlsx" {
+                    match ctx
+                        .send_and_wait_reply::<MarkitDown, AnalyzeMCFile>(
+                            AnalyzeMCFile { file_path: pathbuf.clone() },
+                            markitdown_id,
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        )
+                        .await
+                    {
+                        Ok(content) => Content::Text { content, text_type: TextType::MCFile, chunk_config },
+                        Err(e) => {
+                            error!("Failed to convert MC file to md: {}. Error: {}", pathbuf.display(), e);
+                            return Ok((source, None));
+                        }
+                    }
+                } else {
+                    // Handle all other text-based files
+                    let text_type = match ext {
+                        "md" => TextType::Markdown,
+                        "rs" => TextType::Code(CodeLanguage::Rust),
+                        "py" => TextType::Code(CodeLanguage::Python),
+                        "cue" => TextType::Code(CodeLanguage::Cue),
+                        "html" => TextType::Code(CodeLanguage::Html),
+                        "cpp" => TextType::Code(CodeLanguage::Cpp),
+                        "h" => TextType::Code(CodeLanguage::Cpp),
+                        _ => TextType::Text,
+                    };
+
+                    match tokio::fs::read_to_string(&pathbuf).await {
+                        Ok(content) => Content::Text { content, text_type, chunk_config },
+                        Err(_) => return Ok((source, None)),
+                    }
+                }
+            }
+        } else {
+            // Handle files without extensions as text
+            let chunk_config =
+                (chunk_config.chunk_capacity.clone(), chunk_config.chunk_overlap, chunk_config.chunk_batch_size);
+            match tokio::fs::read_to_string(&pathbuf).await {
+                Ok(content) => Content::Text { content, text_type: TextType::Text, chunk_config },
+                Err(_) => return Ok((source, None)),
+            }
+        };
+
+        Ok((source, Some(content)))
     }
 }
