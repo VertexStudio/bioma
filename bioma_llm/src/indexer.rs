@@ -352,7 +352,7 @@ impl Indexer {
                     .unwrap_or_default()]),
                 },
                 embeddings_id,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
             )
             .await;
 
@@ -428,7 +428,7 @@ impl Indexer {
                             metadata: metadata.map(|m| vec![m]),
                         },
                         embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                     )
                     .await;
 
@@ -533,7 +533,7 @@ impl Indexer {
                                     metadata: Some(metadata_batch.to_vec()),
                                 },
                                 embeddings_id,
-                                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                             )
                             .await;
 

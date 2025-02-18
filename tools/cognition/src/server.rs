@@ -493,7 +493,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -657,7 +657,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -770,7 +770,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                                 tools: Some(client_tools.into_iter().map(Into::into).collect()),
                             },
                             &data.chat,
-                            SendOptions::default(),
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                         )
                         .await;
 
@@ -794,11 +794,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 for actor_id in &body.tools_actors {
                     let actor_id = ActorId::of::<ToolsHub>(actor_id.clone());
                     let tool_info = user_actor
-                        .send_and_wait_reply::<ToolsHub, ListTools>(
-                            ListTools(None),
-                            &actor_id,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-                        )
+                        .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
                         .await;
                     match tool_info {
                         Ok(tool_info) => {
@@ -1008,7 +1004,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await
     {
@@ -1168,12 +1164,11 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             tools: None,
         };
 
-        // Use send() to get a stream instead of send_and_wait_reply()
         let mut chat_response = match user_actor
             .send::<Chat, ChatMessages>(
                 chat_request,
                 &data.think_chat,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )
             .await
         {
@@ -1344,7 +1339,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -1440,7 +1435,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                         tools: None,
                     },
                     &data.chat,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                 )
                 .await;
 
@@ -1486,7 +1481,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
         .send_and_wait_reply::<Indexer, DeleteSource>(
             delete_source,
             &data.indexer,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -1578,7 +1573,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
                     .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                         GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
                         &data.embeddings,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                     )
                     .await
                 {
@@ -1596,7 +1591,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
                 .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                     GenerateEmbeddings { content: embedding_content },
                     &data.embeddings,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                 )
                 .await
             {
@@ -1650,7 +1645,7 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
         .send_and_wait_reply::<Rerank, RankTexts>(
             rank_texts,
             &data.rerank,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await
     {
@@ -1723,11 +1718,7 @@ async fn list_sources(data: web::Data<AppState>) -> HttpResponse {
 
     info!("Fetching list of sources");
     let response = user_actor
-        .send_and_wait_reply::<Retriever, ListSources>(
-            ListSources,
-            &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-        )
+        .send_and_wait_reply::<Retriever, ListSources>(ListSources, &data.retriever, SendOptions::default())
         .await;
 
     match response {
