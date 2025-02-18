@@ -85,10 +85,12 @@ pub struct TextChunkConfig {
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
     pub chunk_capacity: std::ops::Range<usize>,
+
     /// The chunk overlap
     #[builder(default = default_chunk_overlap())]
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+
     /// The chunk batch size
     #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
@@ -105,6 +107,7 @@ impl Default for TextChunkConfig {
 pub struct GlobsContent {
     /// List of glob patterns
     pub globs: Vec<String>,
+
     /// Chunk configuration
     #[builder(default)]
     #[serde(default)]
@@ -116,10 +119,12 @@ pub struct GlobsContent {
 pub struct TextsContent {
     /// The texts to index
     pub texts: Vec<String>,
+
     /// MIME type for the texts
     #[builder(default = default_text_mime_type())]
     #[serde(default = "default_text_mime_type")]
     pub mime_type: String,
+
     /// Chunk configuration
     #[builder(default)]
     #[serde(default)]
@@ -135,6 +140,7 @@ fn default_text_mime_type() -> String {
 pub struct ImagesContent {
     /// The base64 encoded images
     pub images: Vec<String>,
+
     /// Optional MIME type for the images
     #[serde(default)]
     pub mime_type: Option<String>,
@@ -146,9 +152,11 @@ pub enum IndexContent {
     /// List of glob patterns to match files for indexing
     #[serde(rename = "globs")]
     Globs(GlobsContent),
+
     /// List of texts to index
     #[serde(rename = "texts")]
     Texts(TextsContent),
+
     /// List of base64 encoded images to index
     #[serde(rename = "images")]
     Images(ImagesContent),
