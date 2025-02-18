@@ -365,6 +365,10 @@
         text-overflow: ellipsis;
       }
 
+      .upload-icon {
+      }
+
+      .upload-icon,
       .source-icon,
       .tool-icon {
         color: var(--text-muted);
@@ -1359,26 +1363,6 @@
             <div class="form-group">
               <input type="text" id="source" placeholder="/global" />
             </div>
-            <div class="form-actions">
-              <div class="form-info" id="form-info">
-                <p id="form-info-text">Select File</p>
-                <button
-                  id="upload-button"
-                  class="action-button"
-                  title="Upload Context"
-                >
-                  <i class="fa-solid fa-file"></i>
-                </button>
-                <input type="file" id="file-input" style="display: none" />
-              </div>
-              <div
-                id="loading-indicator"
-                class="loading-indicator"
-                style="display: none; margin-top: 10px"
-              >
-                <i class="fa-solid fa-spinner fa-spin"></i> Processing file...
-              </div>
-            </div>
           </div>
 
           <!-- Add the hidden input for sources actors -->
@@ -1532,99 +1516,83 @@
     <!-- Logic for uploading and indexing file -->
 
     <script>
-      document
-        .getElementById("upload-button")
-        .addEventListener("click", function () {
-          document.getElementById("file-input").click();
-        });
+      async function uploadAndIndexSource(file, source) {
+        console.log("🚀 ~ uploadAndIndexSource ~ source:", source);
+        console.log("🚀 ~ uploadAndIndexSource ~ file:", file);
+        const fileInput = document.getElementById("file-input");
 
-      document
-        .getElementById("file-input")
-        .addEventListener("change", async function (event) {
-          const file = event.target.files[0];
-          const fileInput = document.getElementById("file-input");
+        if (file) {
+          let directoryPath = document.getElementById("source").value.trim();
 
-          if (file) {
-            let directoryPath = document.getElementById("source").value.trim();
+          if (directoryPath[0] == "/") {
+            directoryPath = directoryPath.slice(1);
+          }
 
-            if (directoryPath[0] == "/") {
-              directoryPath = directoryPath.slice(1);
-            }
+          const metadata = {
+            path: directoryPath
+              ? `uploads/${directoryPath}/${file.name}`
+              : `uploads/${file.name}`,
+          };
 
-            const loadingIndicator =
-              document.getElementById("loading-indicator");
-            const formInfo = document.getElementById("form-info");
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append(
+            "metadata",
+            new Blob([JSON.stringify(metadata)], {
+              type: "application/json",
+            })
+          );
 
-            const metadata = {
-              path: directoryPath
-                ? `uploads/${directoryPath}/${file.name}`
-                : `uploads/${file.name}`,
-            };
+          try {
+            const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
+              method: "POST",
+              body: formData,
+            });
 
-            const formData = new FormData();
-            formData.append("file", file);
-            formData.append(
-              "metadata",
-              new Blob([JSON.stringify(metadata)], { type: "application/json" })
+            console.log(
+              "🚀 ~ uploadAndIndexSource ~ uploadResponse:",
+              uploadResponse
             );
 
-            const formInfoText = document.getElementById("form-info-text");
+            if (uploadResponse.ok) {
+              const result = await uploadResponse.json();
 
-            try {
-              loadingIndicator.style.display = "flex";
-              formInfo.style.display = "none";
+              const indexQuery = {
+                globs: result.paths,
+                source: directoryPath ? `/${directoryPath}` : undefined,
+                chunk_capacity: {
+                  start: 500,
+                  end: 2000,
+                },
+                chunk_overlap: 200,
+              };
 
-              const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
+              const response = await fetch(`${RAG_ENDPOINT}/index`, {
                 method: "POST",
-                body: formData,
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(indexQuery),
               });
 
-              if (uploadResponse.ok) {
-                const result = await uploadResponse.json();
-
-                const indexQuery = {
-                  globs: result.paths,
-                  source: directoryPath ? `/${directoryPath}` : undefined,
-                  chunk_capacity: {
-                    start: 500,
-                    end: 2000,
-                  },
-                  chunk_overlap: 200,
-                };
-
-                const response = await fetch(`${RAG_ENDPOINT}/index`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify(indexQuery),
-                });
-
-                const jsonResponse = await response.json();
-
-                if (jsonResponse.sources.length > 0) {
-                  formInfoText.textContent = "Success";
-                } else {
-                  formInfoText.textContent = "Index failed";
-                }
-              } else {
-                formInfoText.textContent = "Upload failed";
-                console.error("❌ Upload failed:", await uploadResponse.text());
-              }
-            } catch (error) {
-              formInfoText.textContent = "Error while processing";
-              console.error("⚠️ Error during upload:", error);
-            } finally {
-              await fetchAvailableSources();
-              loadSavedSources();
-
-              loadingIndicator.style.display = "none";
-              formInfo.style.display = "flex";
-
-              fileInput.value = "";
+              const jsonResponse = await response.json();
+              console.log(
+                "🚀 ~ uploadAndIndexSource ~ jsonResponse:",
+                jsonResponse
+              );
+            } else {
+              console.error("❌ Upload failed:", await uploadResponse.text());
             }
+          } catch (error) {
+            console.error("⚠️ Error during upload:", error);
+          } finally {
+            await fetchAvailableSources();
+            loadSavedSources();
+
+            fileInput.value = "";
           }
-        });
+        }
+      }
     </script>
 
     <!-- General Logic  -->
@@ -2927,7 +2895,7 @@
               <div class="source-item-header">
                   <span class="source-icon"><i class="fa-solid fa-book"></i></span>
                   <span class="source-item-name">${source.path}</span>
-                  <span class="source-icon"><i class="fa-solid fa-paperclip"></i></span>
+                  <span id="upload-button" class="upload-icon upload-button" title="Upload file to source"><i class="fa-solid fa-paperclip"></i><input type="file" id="file-input" class="file-input" style="display: none" /></span>
                   <label class="switch">
                       <input type="checkbox" class="source-toggle" ${
                         isActive ? "checked" : ""
@@ -2955,6 +2923,20 @@
           .addEventListener("click", (e) => {
             e.stopPropagation();
             deleteSources([source.path]);
+          });
+
+        sourceElement
+          .querySelector(".upload-button")
+          .addEventListener("click", function () {
+            document.getElementById("file-input").click();
+          });
+
+        sourceElement
+          .querySelector(".file-input")
+          .addEventListener("change", async function (event) {
+            const file = event.target.files[0];
+
+            let upload = await uploadAndIndexSource(file, source);
           });
 
         return sourceElement;
