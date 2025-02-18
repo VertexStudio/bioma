@@ -58,7 +58,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, CallTool>(
                 CallTool(request),
                 &self.client_id,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+                SendOptions::default(),
             )
             .await?;
         Ok(response)
@@ -73,7 +73,7 @@ impl ToolClient {
             .send_and_wait_reply::<ModelContextProtocolClientActor, ListTools>(
                 ListTools(None),
                 tools_actor,
-                SendOptions::builder().timeout(Duration::from_secs(30)).build(),
+                SendOptions::default(),
             )
             .await?;
         info!("Tools from {} ({})", self.server.name, list_tools.tools.len());

@@ -477,7 +477,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -641,7 +641,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -988,7 +988,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await
     {
@@ -1465,7 +1465,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
         .send_and_wait_reply::<Indexer, DeleteSource>(
             delete_source,
             &data.indexer,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -1557,7 +1557,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
                     .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                         GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
                         &data.embeddings,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                     )
                     .await
                 {
@@ -1575,7 +1575,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
                 .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                     GenerateEmbeddings { content: embedding_content },
                     &data.embeddings,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                 )
                 .await
             {
@@ -1629,7 +1629,7 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
         .send_and_wait_reply::<Rerank, RankTexts>(
             rank_texts,
             &data.rerank,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await
     {
