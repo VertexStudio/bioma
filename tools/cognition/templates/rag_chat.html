@@ -83,6 +83,18 @@
         z-index: 1000;
       }
 
+      .resizer {
+        width: 5px;
+        cursor: ew-resize;
+        background-color: var(--border-color);
+        position: absolute;
+        left: 0;
+        /* Adjust if your sidebar is on the right */
+        top: 0;
+        height: 100%;
+        z-index: 1001;
+      }
+
       details {
         background: var(--surrealist-gradient);
         border-radius: 5px;
@@ -1439,6 +1451,8 @@
           </div>
         </div>
       </details>
+
+      <div id="resizer" class="resizer"></div>
     </div>
 
     <!-- Main Content -->
@@ -1480,6 +1494,40 @@
         </div>
       </div>
     </div>
+
+    <!-- Resizer logic -->
+
+    <script>
+      const resizer = document.querySelector(".resizer");
+      const sidebar = document.getElementById("sidebar");
+      let isResizing = false;
+
+      resizer.addEventListener("mousedown", (e) => {
+        isResizing = true;
+        document.body.style.userSelect = "none"; // Prevent text selection while resizing
+        document.addEventListener("mousemove", resizeSidebar);
+        document.addEventListener("mouseup", stopResizing);
+      });
+
+      function resizeSidebar(e) {
+        if (!isResizing) return;
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth >= 250 && newWidth <= 500) {
+          sidebar.style.width = `${newWidth}px`;
+        }
+      }
+
+      function stopResizing() {
+        if (!isResizing) return;
+        isResizing = false;
+        document.body.style.userSelect = "";
+        document.removeEventListener("mousemove", resizeSidebar);
+        document.removeEventListener("mouseup", stopResizing);
+
+        // Force recalculation of chat container scroll
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+    </script>
 
     <!-- Logic for uploading and indexing file -->
 
@@ -3016,11 +3064,14 @@
         }
       }
 
-      // Toggle sidebar visibility
       function toggleSidebar() {
         const sidebar = document.getElementById("sidebar");
         const mainContent = document.getElementById("main-content");
         const inputContainer = document.getElementById("input-container");
+        const resizer = document.getElementById("resizer");
+
+        // Remove inline width set by resizing
+        sidebar.style.width = "";
 
         sidebarVisible = !sidebarVisible;
         localStorage.setItem("sidebarVisible", sidebarVisible);
