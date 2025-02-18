@@ -113,7 +113,7 @@ fn default_think_context_length() -> u32 {
 }
 
 fn default_retrieve_limit() -> usize {
-    10
+    5
 }
 
 impl Default for ServerConfig {

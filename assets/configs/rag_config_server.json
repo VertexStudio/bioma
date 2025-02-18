@@ -19,5 +19,5 @@
   "chat_context_length": 4096,
   "think_messages_limit": 10,
   "think_context_length": 4096,
-  "retrieve_limit": 10
+  "retrieve_limit": 5
 }
