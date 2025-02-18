@@ -159,7 +159,7 @@ async fn chat_tool_call(
         .send_and_wait_reply::<ToolsHub, ToolCall>(
             tool_call.clone(),
             hub_id,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::default(),
         )
         .await
         .map_err(|e| ChatToolError::StreamResponseError(e.to_string()))?;

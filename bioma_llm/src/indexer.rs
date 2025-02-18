@@ -255,7 +255,7 @@ impl Indexer {
                     .unwrap_or_default()]),
                 },
                 embeddings_id,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
             )
             .await;
 
@@ -316,7 +316,7 @@ impl Indexer {
                             metadata: metadata.map(|m| vec![m]),
                         },
                         embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                     )
                     .await;
 
@@ -421,7 +421,7 @@ impl Indexer {
                                     metadata: Some(metadata_batch.to_vec()),
                                 },
                                 embeddings_id,
-                                SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                             )
                             .await;
 
@@ -574,7 +574,7 @@ impl Message<IndexGlobs> for Indexer {
                                 .send_and_wait_reply::<MarkitDown, AnalyzeMCFile>(
                                     AnalyzeMCFile { file_path: pathbuf.clone() },
                                     markitdown_id,
-                                    SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                                    SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                                 )
                                 .await
                             {

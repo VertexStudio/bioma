@@ -150,7 +150,7 @@ impl Message<RetrieveContext> for Retriever {
                     .send_and_wait_reply::<Embeddings, embeddings::TopK>(
                         embeddings_req,
                         embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                     )
                     .await
                 {
@@ -187,7 +187,7 @@ impl Message<RetrieveContext> for Retriever {
                         .send_and_wait_reply::<Rerank, RankTexts>(
                             rerank_req,
                             rerank_id,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                         )
                         .await?;
 
