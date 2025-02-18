@@ -474,7 +474,11 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
 
     info!("Sending message to retriever actor");
     let response = user_actor
-        .send_and_wait_reply::<Retriever, RetrieveContext>(retrieve_context, &data.retriever, SendOptions::default())
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+        )
         .await;
 
     match response {
@@ -634,7 +638,11 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     };
 
     let context = user_actor
-        .send_and_wait_reply::<Retriever, RetrieveContext>(retrieve_context, &data.retriever, SendOptions::default())
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+        )
         .await;
 
     match context {
@@ -977,7 +985,11 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     };
 
     let retrieved = match user_actor
-        .send_and_wait_reply::<Retriever, RetrieveContext>(retrieve_context, &data.retriever, SendOptions::default())
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+        )
         .await
     {
         Ok(context) => context,
@@ -1308,7 +1320,11 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     };
 
     let retrieved = user_actor
-        .send_and_wait_reply::<Retriever, RetrieveContext>(retrieve_context, &data.retriever, SendOptions::default())
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &data.retriever,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+        )
         .await;
 
     match retrieved {
@@ -1446,7 +1462,11 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
 
     info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
     let response = user_actor
-        .send_and_wait_reply::<Indexer, DeleteSource>(delete_source, &data.indexer, SendOptions::default())
+        .send_and_wait_reply::<Indexer, DeleteSource>(
+            delete_source,
+            &data.indexer,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+        )
         .await;
 
     match response {
