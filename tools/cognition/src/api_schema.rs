@@ -1,8 +1,8 @@
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
-    indexer::{default_chunk_batch_size, default_chunk_overlap, DEFAULT_CHUNK_CAPACITY},
-    prelude::{ChatMessage, DeleteSource, IndexGlobs, RetrieveContext, RetrieveQuery},
+    indexer::{default_chunk_batch_size, default_chunk_overlap, GlobsContent, DEFAULT_CHUNK_CAPACITY},
+    prelude::{ChatMessage, DeleteSource, Index, IndexContent, RetrieveContext, RetrieveQuery, TextChunkConfig},
     rerank::{default_raw_scores, default_return_text, default_truncate, RankTexts, TruncationDirection},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
@@ -209,16 +209,24 @@ pub struct ChunkCapacityRequestSchema {
     pub end: usize,
 }
 
-impl Into<IndexGlobs> for IndexGlobsRequestSchema {
-    fn into(self) -> IndexGlobs {
+impl Into<Index> for IndexGlobsRequestSchema {
+    fn into(self) -> Index {
         let chunk_capacity = std::ops::Range { start: self.chunk_capacity.start, end: self.chunk_capacity.end };
 
-        IndexGlobs::builder()
+        Index::builder()
             .source(self.source)
-            .globs(self.globs)
-            .chunk_capacity(chunk_capacity)
-            .chunk_overlap(self.chunk_overlap)
-            .chunk_batch_size(self.chunk_batch_size)
+            .content(IndexContent::Globs(
+                GlobsContent::builder()
+                    .patterns(self.globs)
+                    .config(
+                        TextChunkConfig::builder()
+                            .chunk_capacity(chunk_capacity)
+                            .chunk_overlap(self.chunk_overlap)
+                            .chunk_batch_size(self.chunk_batch_size)
+                            .build(),
+                    )
+                    .build(),
+            ))
             .summarize(self.summarize)
             .build()
     }

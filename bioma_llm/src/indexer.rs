@@ -62,13 +62,14 @@ impl ActorError for IndexerError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Index {
+    /// The content to index - can be globs, texts, or images
+    #[serde(flatten)]
+    pub content: IndexContent,
+
     /// The source identifier for the indexed content
     #[builder(default = default_source())]
     #[serde(default = "default_source")]
     pub source: String,
-
-    /// The content to index - can be globs, texts, or images
-    pub content: IndexContent,
 
     /// Whether to summarize each file or text
     #[builder(default)]

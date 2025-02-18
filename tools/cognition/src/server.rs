@@ -416,11 +416,11 @@ async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppStat
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_globs: IndexGlobs = body.clone().into();
+    let index_globs: Index = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response = user_actor
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
+        .send_and_wait_reply::<Indexer, Index>(
             index_globs,
             &data.indexer,
             SendOptions::builder().timeout(Duration::from_secs(600)).build(),
