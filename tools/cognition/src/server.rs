@@ -9,8 +9,8 @@ use actix_web::{
 };
 use api_schema::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
-    ThinkQueryRequestSchema, UploadRequestSchema,
+    IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema,
+    UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -395,33 +395,49 @@ async fn upload_config() -> impl Responder {
 #[utoipa::path(
     post,
     path = "/index",
-    description =   "Receives an array of path of files to index.</br>
-                    If `source` is not specified, it will will default to `/global`.",
-    request_body(content = IndexGlobsRequestSchema, examples(
-        ("basic" = (summary = "Basic", value = json!({
+    description =   "Index content from various sources (files, texts, or images).</br>
+                    If `source` is not specified, it will default to `/global`.",
+    request_body(content = IndexRequestSchema, examples(
+        ("globs" = (summary = "Index files using glob patterns", value = json!({
             "source": "/bioma",
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
             "chunk_overlap": 200,
+            "chunk_batch_size": 50,
             "summarize": false
         }))),
+        ("texts" = (summary = "Index text content directly", value = json!({
+            "source": "/bioma",
+            "texts": ["This is some text to index", "Here is another text"],
+            "mime_type": "text/plain",
+            "chunk_capacity": {"start": 500, "end": 2000},
+            "chunk_overlap": 200,
+            "chunk_batch_size": 50,
+            "summarize": false
+        }))),
+        ("images" = (summary = "Index base64 encoded images", value = json!({
+            "source": "/bioma",
+            "images": ["base64_encoded_image_data"],
+            "mime_type": "image/jpeg",
+            "summarize": false
+        })))
     )),
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_globs: IndexGlobs = body.clone().into();
+    let index_request: Index = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response = user_actor
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            index_globs,
+        .send_and_wait_reply::<Indexer, Index>(
+            index_request,
             &data.indexer,
             SendOptions::builder().timeout(Duration::from_secs(600)).build(),
         )
