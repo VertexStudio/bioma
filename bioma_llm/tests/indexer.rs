@@ -1,7 +1,11 @@
 use base64::Engine as _;
 use bioma_actor::prelude::Engine as ActorEngine;
 use bioma_actor::prelude::*;
-use bioma_llm::{prelude::*, retriever::ListSources};
+use bioma_llm::{
+    indexer::{GlobsContent, ImagesContent, TextsContent},
+    prelude::*,
+    retriever::ListSources,
+};
 use std::fs;
 use tempfile;
 use test_log::test;
@@ -75,7 +79,10 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs { patterns: globs.clone(), config: TextChunkConfig::default() })
+                .content(IndexContent::Globs(GlobsContent {
+                    patterns: globs.clone(),
+                    config: TextChunkConfig::default(),
+                }))
                 .build(),
             &indexer_id,
             SendOptions::default(),
@@ -100,7 +107,7 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
     let reindex_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
                 .build(),
             &indexer_id,
             SendOptions::default(),
@@ -167,7 +174,9 @@ async fn test_indexer_chunking() -> Result<(), TestError> {
 
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
-            Index::builder().content(IndexContent::Globs { patterns: globs, config: chunk_config }).build(),
+            Index::builder()
+                .content(IndexContent::Globs(GlobsContent::builder().patterns(globs).config(chunk_config).build()))
+                .build(),
             &indexer_id,
             SendOptions::default(),
         )
@@ -239,7 +248,10 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs { patterns: vec![glob_path.clone()], config: TextChunkConfig::default() })
+                .content(IndexContent::Globs(GlobsContent {
+                    patterns: vec![glob_path.clone()],
+                    config: TextChunkConfig::default(),
+                }))
                 .build(),
             &indexer_id,
             SendOptions::default(),
@@ -329,7 +341,7 @@ It provides practical examples and use cases.
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
                 .summarize(true)
                 .source(source.clone())
                 .build(),
@@ -395,7 +407,7 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
                 .summarize(false)
                 .source(source.clone())
                 .build(),
@@ -472,7 +484,7 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs { patterns: globs, config: TextChunkConfig::default() })
+                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
                 .summarize(true)
                 .source(source.clone())
                 .build(),
@@ -563,7 +575,7 @@ async fn test_indexer_direct_texts() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Texts { texts: texts.clone(), config: chunk_config })
+                .content(IndexContent::Texts(TextsContent::builder().texts(texts).config(chunk_config).build()))
                 .source(source.clone())
                 .build(),
             &indexer_id,
@@ -625,7 +637,10 @@ async fn test_indexer_direct_images() -> Result<(), TestError> {
 
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
-            Index::builder().content(IndexContent::Images { images: base64_images }).source(source.clone()).build(),
+            Index::builder()
+                .content(IndexContent::Images(ImagesContent { images: base64_images }))
+                .source(source.clone())
+                .build(),
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )

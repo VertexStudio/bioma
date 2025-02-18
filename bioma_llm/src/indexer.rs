@@ -76,27 +76,52 @@ pub struct Index {
     pub summarize: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextChunkConfig {
     /// Configuration for text chunk size limits
+    #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
     pub chunk_capacity: std::ops::Range<usize>,
     /// The chunk overlap
+    #[builder(default = default_chunk_overlap())]
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
     /// The chunk batch size
+    #[builder(default = default_chunk_batch_size())]
     #[serde(default = "default_chunk_batch_size")]
     pub chunk_batch_size: usize,
 }
 
 impl Default for TextChunkConfig {
     fn default() -> Self {
-        Self {
-            chunk_capacity: default_chunk_capacity(),
-            chunk_overlap: default_chunk_overlap(),
-            chunk_batch_size: default_chunk_batch_size(),
-        }
+        Self::builder().build()
     }
+}
+
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct GlobsContent {
+    /// List of glob patterns
+    pub patterns: Vec<String>,
+    /// Chunk configuration
+    #[builder(default)]
+    #[serde(default)]
+    pub config: TextChunkConfig,
+}
+
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct TextsContent {
+    /// The texts to index
+    pub texts: Vec<String>,
+    /// Chunk configuration
+    #[builder(default)]
+    #[serde(default)]
+    pub config: TextChunkConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImagesContent {
+    /// The base64 encoded images
+    pub images: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,28 +129,13 @@ impl Default for TextChunkConfig {
 pub enum IndexContent {
     /// List of glob patterns to match files for indexing
     #[serde(rename = "globs")]
-    Globs {
-        /// List of glob patterns
-        patterns: Vec<String>,
-        /// Chunk configuration
-        #[serde(default)]
-        config: TextChunkConfig,
-    },
+    Globs(GlobsContent),
     /// List of texts to index directly
     #[serde(rename = "texts")]
-    Texts {
-        /// The texts to index
-        texts: Vec<String>,
-        /// Chunk configuration
-        #[serde(default)]
-        config: TextChunkConfig,
-    },
+    Texts(TextsContent),
     /// List of base64 encoded images to index
     #[serde(rename = "images")]
-    Images {
-        /// The base64 encoded images
-        images: Vec<String>,
-    },
+    Images(ImagesContent),
 }
 
 fn default_source() -> String {
@@ -523,7 +533,7 @@ impl Message<Index> for Indexer {
         let mut sources = Vec::new();
 
         match &message.content {
-            IndexContent::Globs { patterns, config } => {
+            IndexContent::Globs(GlobsContent { patterns, config }) => {
                 for pattern in patterns {
                     let local_store_dir = ctx.engine().local_store_dir();
                     let full_pattern = if std::path::Path::new(pattern).is_absolute() {
@@ -731,7 +741,7 @@ impl Message<Index> for Indexer {
                     }
                 }
             }
-            IndexContent::Texts { texts, config } => {
+            IndexContent::Texts(TextsContent { texts, config }) => {
                 for text in texts {
                     let source = ContentSource { source: message.source.clone(), uri: text.clone() };
 
@@ -815,7 +825,7 @@ impl Message<Index> for Indexer {
                     }
                 }
             }
-            IndexContent::Images { images } => {
+            IndexContent::Images(ImagesContent { images }) => {
                 for image in images {
                     let source = ContentSource { source: message.source.clone(), uri: image.clone() };
 
