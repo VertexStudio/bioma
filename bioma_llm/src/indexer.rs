@@ -541,6 +541,65 @@ impl Indexer {
             }
         }
     }
+
+    /// Handles the result of indexing a source, updating the sources vector and storing the source in the database if needed
+    async fn handle_index_result(
+        &self,
+        ctx: &ActorContext<Self>,
+        source: &ContentSource,
+        result: Result<IndexResult, IndexerError>,
+        sources: &mut Vec<IndexedSource>,
+    ) -> Result<bool, IndexerError> {
+        match result {
+            Ok(IndexResult::Indexed(ids, summary_text)) => {
+                if !ids.is_empty() {
+                    sources.push(IndexedSource {
+                        source: source.source.clone(),
+                        uri: source.uri.clone(),
+                        status: IndexStatus::Indexed,
+                    });
+
+                    let source_query = include_str!("../sql/source.surql");
+                    ctx.engine()
+                        .db()
+                        .lock()
+                        .await
+                        .query(*&source_query)
+                        .bind(("source", source.source.clone()))
+                        .bind(("uri", source.uri.clone()))
+                        .bind(("summary", summary_text))
+                        .bind(("emb_ids", ids))
+                        .bind(("prefix", self.embeddings.table_prefix()))
+                        .await
+                        .map_err(SystemActorError::from)?;
+                    Ok(true)
+                } else {
+                    sources.push(IndexedSource {
+                        source: source.source.clone(),
+                        uri: source.uri.clone(),
+                        status: IndexStatus::Failed("No embeddings generated".to_string()),
+                    });
+                    Ok(false)
+                }
+            }
+            Ok(IndexResult::Failed) => {
+                sources.push(IndexedSource {
+                    source: source.source.clone(),
+                    uri: source.uri.clone(),
+                    status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
+                });
+                Ok(false)
+            }
+            Err(e) => {
+                sources.push(IndexedSource {
+                    source: source.source.clone(),
+                    uri: source.uri.clone(),
+                    status: IndexStatus::Failed(format!("Indexing error: {}", e)),
+                });
+                Ok(false)
+            }
+        }
+    }
 }
 
 impl Message<Index> for Indexer {
@@ -704,51 +763,10 @@ impl Message<Index> for Indexer {
                         };
 
                         // Process content
-                        match self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await {
-                            Ok(IndexResult::Indexed(ids, summary_text)) => {
-                                if !ids.is_empty() {
-                                    indexed += 1;
-                                    sources.push(IndexedSource {
-                                        source: message.source.clone(),
-                                        uri: source.uri.clone(),
-                                        status: IndexStatus::Indexed,
-                                    });
-
-                                    let source_query = include_str!("../sql/source.surql");
-                                    ctx.engine()
-                                        .db()
-                                        .lock()
-                                        .await
-                                        .query(*&source_query)
-                                        .bind(("source", source.source.clone()))
-                                        .bind(("uri", source.uri.clone()))
-                                        .bind(("summary", summary_text))
-                                        .bind(("emb_ids", ids))
-                                        .bind(("prefix", self.embeddings.table_prefix()))
-                                        .await
-                                        .map_err(SystemActorError::from)?;
-                                } else {
-                                    sources.push(IndexedSource {
-                                        source: message.source.clone(),
-                                        uri: source.uri.clone(),
-                                        status: IndexStatus::Failed("No embeddings generated".to_string()),
-                                    });
-                                }
-                            }
-                            Ok(IndexResult::Failed) => {
-                                sources.push(IndexedSource {
-                                    source: message.source.clone(),
-                                    uri: source.uri.clone(),
-                                    status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
-                                });
-                            }
-                            Err(e) => {
-                                sources.push(IndexedSource {
-                                    source: message.source.clone(),
-                                    uri: source.uri.clone(),
-                                    status: IndexStatus::Failed(format!("Indexing error: {}", e)),
-                                });
-                            }
+                        let result =
+                            self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await;
+                        if self.handle_index_result(ctx, &source, result, &mut sources).await? {
+                            indexed += 1;
                         }
                     }
                 }
@@ -772,51 +790,10 @@ impl Message<Index> for Indexer {
                     };
 
                     // Process content
-                    match self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await {
-                        Ok(IndexResult::Indexed(ids, summary_text)) => {
-                            if !ids.is_empty() {
-                                indexed += 1;
-                                sources.push(IndexedSource {
-                                    source: message.source.clone(),
-                                    uri: source.uri.clone(),
-                                    status: IndexStatus::Indexed,
-                                });
-
-                                let source_query = include_str!("../sql/source.surql");
-                                ctx.engine()
-                                    .db()
-                                    .lock()
-                                    .await
-                                    .query(*&source_query)
-                                    .bind(("source", source.source.clone()))
-                                    .bind(("uri", source.uri.clone()))
-                                    .bind(("summary", summary_text))
-                                    .bind(("emb_ids", ids))
-                                    .bind(("prefix", self.embeddings.table_prefix()))
-                                    .await
-                                    .map_err(SystemActorError::from)?;
-                            } else {
-                                sources.push(IndexedSource {
-                                    source: message.source.clone(),
-                                    uri: source.uri.clone(),
-                                    status: IndexStatus::Failed("No embeddings generated".to_string()),
-                                });
-                            }
-                        }
-                        Ok(IndexResult::Failed) => {
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
-                            });
-                        }
-                        Err(e) => {
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Failed(format!("Indexing error: {}", e)),
-                            });
-                        }
+                    let result =
+                        self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await;
+                    if self.handle_index_result(ctx, &source, result, &mut sources).await? {
+                        indexed += 1;
                     }
                 }
             }
@@ -834,51 +811,10 @@ impl Message<Index> for Indexer {
                     let content = Content::Image { data: ImageData::Base64(image.clone()) };
 
                     // Process content
-                    match self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await {
-                        Ok(IndexResult::Indexed(ids, summary_text)) => {
-                            if !ids.is_empty() {
-                                indexed += 1;
-                                sources.push(IndexedSource {
-                                    source: message.source.clone(),
-                                    uri: source.uri.clone(),
-                                    status: IndexStatus::Indexed,
-                                });
-
-                                let source_query = include_str!("../sql/source.surql");
-                                ctx.engine()
-                                    .db()
-                                    .lock()
-                                    .await
-                                    .query(*&source_query)
-                                    .bind(("source", source.source.clone()))
-                                    .bind(("uri", source.uri.clone()))
-                                    .bind(("summary", summary_text))
-                                    .bind(("emb_ids", ids))
-                                    .bind(("prefix", self.embeddings.table_prefix()))
-                                    .await
-                                    .map_err(SystemActorError::from)?;
-                            } else {
-                                sources.push(IndexedSource {
-                                    source: message.source.clone(),
-                                    uri: source.uri.clone(),
-                                    status: IndexStatus::Failed("No embeddings generated".to_string()),
-                                });
-                            }
-                        }
-                        Ok(IndexResult::Failed) => {
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
-                            });
-                        }
-                        Err(e) => {
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: source.uri.clone(),
-                                status: IndexStatus::Failed(format!("Indexing error: {}", e)),
-                            });
-                        }
+                    let result =
+                        self.index_content(ctx, source.clone(), content, embeddings_id, message.summarize).await;
+                    if self.handle_index_result(ctx, &source, result, &mut sources).await? {
+                        indexed += 1;
                     }
                 }
             }
