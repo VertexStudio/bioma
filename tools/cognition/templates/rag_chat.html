@@ -1512,7 +1512,7 @@
       function resizeSidebar(e) {
         if (!isResizing) return;
         const newWidth = window.innerWidth - e.clientX;
-        if (newWidth >= 250 && newWidth <= 500) {
+        if (newWidth >= 280 && newWidth <= 500) {
           sidebar.style.width = `${newWidth}px`;
         }
       }
@@ -3070,7 +3070,6 @@
         const inputContainer = document.getElementById("input-container");
         const resizer = document.getElementById("resizer");
 
-        // Remove inline width set by resizing
         sidebar.style.width = "";
 
         sidebarVisible = !sidebarVisible;
@@ -3080,7 +3079,6 @@
         mainContent.classList.toggle("sidebar-collapsed");
         inputContainer.classList.toggle("sidebar-collapsed");
 
-        // Force recalculation of chat container scroll
         chatContainer.scrollTop = chatContainer.scrollHeight;
       }
 
