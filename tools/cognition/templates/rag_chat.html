@@ -365,9 +365,6 @@
         text-overflow: ellipsis;
       }
 
-      .upload-icon {
-      }
-
       .upload-icon,
       .source-icon,
       .tool-icon {
@@ -1365,6 +1362,16 @@
             </div>
           </div>
 
+          <div class="form-actions">
+            <button
+              id="new-source"
+              class="new-source action-button"
+              onclick="addNewSource()"
+            >
+              Add new source
+            </button>
+          </div>
+
           <!-- Add the hidden input for sources actors -->
           <input type="hidden" id="sources-input" value="" />
 
@@ -1518,79 +1525,72 @@
     <script>
       async function uploadAndIndexSource(file, source) {
         console.log("🚀 ~ uploadAndIndexSource ~ source:", source);
-        console.log("🚀 ~ uploadAndIndexSource ~ file:", file);
         const fileInput = document.getElementById("file-input");
 
-        if (file) {
-          let directoryPath = document.getElementById("source").value.trim();
+        if (!file) {
+          console.log("No file provided");
+        }
 
-          if (directoryPath[0] == "/") {
-            directoryPath = directoryPath.slice(1);
-          }
+        let directoryPath = source.path;
 
-          const metadata = {
-            path: directoryPath
-              ? `uploads/${directoryPath}/${file.name}`
-              : `uploads/${file.name}`,
-          };
+        if (directoryPath[0] == "/") {
+          directoryPath = directoryPath.slice(1);
+        }
 
-          const formData = new FormData();
-          formData.append("file", file);
-          formData.append(
-            "metadata",
-            new Blob([JSON.stringify(metadata)], {
-              type: "application/json",
-            })
-          );
+        const metadata = {
+          path: directoryPath
+            ? `uploads/${directoryPath}/${file.name}`
+            : `uploads/${file.name}`,
+        };
 
-          try {
-            const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append(
+          "metadata",
+          new Blob([JSON.stringify(metadata)], {
+            type: "application/json",
+          })
+        );
+
+        try {
+          const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (uploadResponse.ok) {
+            const result = await uploadResponse.json();
+
+            const indexQuery = {
+              globs: result.paths,
+              source: directoryPath ? `/${directoryPath}` : undefined,
+              chunk_capacity: {
+                start: 500,
+                end: 2000,
+              },
+              chunk_overlap: 200,
+            };
+
+            const response = await fetch(`${RAG_ENDPOINT}/index`, {
               method: "POST",
-              body: formData,
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(indexQuery),
             });
 
-            console.log(
-              "🚀 ~ uploadAndIndexSource ~ uploadResponse:",
-              uploadResponse
-            );
-
-            if (uploadResponse.ok) {
-              const result = await uploadResponse.json();
-
-              const indexQuery = {
-                globs: result.paths,
-                source: directoryPath ? `/${directoryPath}` : undefined,
-                chunk_capacity: {
-                  start: 500,
-                  end: 2000,
-                },
-                chunk_overlap: 200,
-              };
-
-              const response = await fetch(`${RAG_ENDPOINT}/index`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify(indexQuery),
-              });
-
-              const jsonResponse = await response.json();
-              console.log(
-                "🚀 ~ uploadAndIndexSource ~ jsonResponse:",
-                jsonResponse
-              );
-            } else {
-              console.error("❌ Upload failed:", await uploadResponse.text());
-            }
-          } catch (error) {
-            console.error("⚠️ Error during upload:", error);
-          } finally {
-            await fetchAvailableSources();
-            loadSavedSources();
-
-            fileInput.value = "";
+            const jsonResponse = await response.json();
+          } else {
+            console.error("❌ Upload failed:", await uploadResponse.text());
           }
+        } catch (error) {
+          console.error("⚠️ Error during upload:", error);
+        } finally {
+          deleteFromLocalSources(source);
+          await fetchAvailableSources();
+          loadSavedSources();
+
+          fileInput.value = "";
         }
       }
     </script>
@@ -1748,10 +1748,10 @@
               msg.images || []
             );
             regularMessages += `
-                      <div class="message ${roleClass}">
-                        <div class="chunk">${processedContent}</div>
-                      </div>
-                    `;
+                        <div class="message ${roleClass}">
+                          <div class="chunk">${processedContent}</div>
+                        </div>
+                      `;
             console.groupEnd();
           }
         });
@@ -1772,13 +1772,13 @@
               msg.images || []
             );
             systemMessage += `
-                      <div class="message ${roleClass}">
-                        <strong>${
-                          msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-                        }:</strong>
-                        <div class="chunk">${processedContent}</div>
-                      </div>
-                    `;
+                        <div class="message ${roleClass}">
+                          <strong>${
+                            msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                          }:</strong>
+                          <div class="chunk">${processedContent}</div>
+                        </div>
+                      `;
             console.groupEnd();
           }
         });
@@ -1794,37 +1794,37 @@
             lastMsg.images || []
           );
           lastUserMessage = `
-                    <div class="message ${roleClass}">
-                      <strong>${
-                        lastMsg.role.charAt(0).toUpperCase() +
-                        lastMsg.role.slice(1)
-                      }:</strong>
-                      <div class="chunk">${processedContent}</div>
-                    </div>
-                  `;
+                      <div class="message ${roleClass}">
+                        <strong>${
+                          lastMsg.role.charAt(0).toUpperCase() +
+                          lastMsg.role.slice(1)
+                        }:</strong>
+                        <div class="chunk">${processedContent}</div>
+                      </div>
+                    `;
         }
         console.groupEnd();
 
         const result = `
-                  <div class="context-container">
-                    <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
-                    <div class="context-content">
-                      ${regularMessages}
-                      ${
-                        regularMessages && systemMessage
-                          ? '<div class="source-separator"></div>'
-                          : ""
-                      }
-                      ${systemMessage}
-                      ${
-                        (regularMessages || systemMessage) && lastUserMessage
-                          ? '<div class="source-separator"></div>'
-                          : ""
-                      }
-                      ${lastUserMessage}
+                    <div class="context-container">
+                      <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+                      <div class="context-content">
+                        ${regularMessages}
+                        ${
+                          regularMessages && systemMessage
+                            ? '<div class="source-separator"></div>'
+                            : ""
+                        }
+                        ${systemMessage}
+                        ${
+                          (regularMessages || systemMessage) && lastUserMessage
+                            ? '<div class="source-separator"></div>'
+                            : ""
+                        }
+                        ${lastUserMessage}
+                      </div>
                     </div>
-                  </div>
-                `;
+                  `;
 
         console.log("Final HTML length:", result.length);
         console.groupEnd();
@@ -1972,23 +1972,25 @@
             errorDiv = document.createElement("div");
             errorDiv.className = "message error-message";
             const errorContent = `
-                      <div class="error-toggle">▶</div>
-                      <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                        <div class="error-toggle">▶</div>
+                        <div class="error-header">⚠️ ${
+                          errorBuffer.length
+                        } Error${
               errorBuffer.length > 1 ? "s" : ""
             } Occurred</div>
-                      <div class="error-content">
-                        ${errorBuffer
-                          .map(
-                            (error) => `
-                          <div class="error-item">
-                            <i class="fas fa-exclamation-circle"></i>
-                            ${md.render(error)}
-                          </div>
-                        `
-                          )
-                          .join("")}
-                      </div>
-                    `;
+                        <div class="error-content">
+                          ${errorBuffer
+                            .map(
+                              (error) => `
+                            <div class="error-item">
+                              <i class="fas fa-exclamation-circle"></i>
+                              ${md.render(error)}
+                            </div>
+                          `
+                            )
+                            .join("")}
+                        </div>
+                      `;
             errorDiv.innerHTML = errorContent;
             chatContainer.appendChild(errorDiv);
             initializeErrorToggles(errorDiv);
@@ -2041,15 +2043,15 @@
             const errorDiv = document.createElement("div");
             errorDiv.className = "message error-message";
             const errorContent = `
-                      <div class="error-toggle">▶</div>
-                      <div class="error-header">⚠️ Error Occurred</div>
-                      <div class="error-content">
-                        <div class="error-item">
-                          <i class="fas fa-exclamation-circle"></i>
-                          ${md.render(error.toString())}
+                        <div class="error-toggle">▶</div>
+                        <div class="error-header">⚠️ Error Occurred</div>
+                        <div class="error-content">
+                          <div class="error-item">
+                            <i class="fas fa-exclamation-circle"></i>
+                            ${md.render(error.toString())}
+                          </div>
                         </div>
-                      </div>
-                    `;
+                      `;
             errorDiv.innerHTML = errorContent;
             chatContainer.appendChild(errorDiv);
             initializeErrorToggles(errorDiv);
@@ -2062,23 +2064,23 @@
       // Helper function to create error content
       function createErrorContent(errorBuffer) {
         return `
-                  <div class="error-toggle">▶</div>
-                  <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                    <div class="error-toggle">▶</div>
+                    <div class="error-header">⚠️ ${errorBuffer.length} Error${
           errorBuffer.length > 1 ? "s" : ""
         } Occurred</div>
-                  <div class="error-content">
-                    ${errorBuffer
-                      .map(
-                        (error) => `
-                      <div class="error-item">
-                        <i class="fas fa-exclamation-circle"></i>
-                        ${md.render(error)}
-                      </div>
-                    `
-                      )
-                      .join("")}
-                  </div>
-                `;
+                    <div class="error-content">
+                      ${errorBuffer
+                        .map(
+                          (error) => `
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(error)}
+                        </div>
+                      `
+                        )
+                        .join("")}
+                    </div>
+                  `;
       }
 
       // Helper function to create error div
@@ -2207,15 +2209,15 @@
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
-                    <div class="error-toggle">▶</div>
-                    <div class="error-header">⚠️ Error Occurred</div>
-                    <div class="error-content">
-                      <div class="error-item">
-                        <i class="fas fa-exclamation-circle"></i>
-                        ${md.render(data.error)}
+                      <div class="error-toggle">▶</div>
+                      <div class="error-header">⚠️ Error Occurred</div>
+                      <div class="error-content">
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(data.error)}
+                        </div>
                       </div>
-                    </div>
-                  `;
+                    `;
           errorDiv.innerHTML = errorContent;
           chatContainer.appendChild(errorDiv);
           initializeErrorToggles(errorDiv);
@@ -2368,27 +2370,27 @@
           const specialMessageDiv = document.createElement("div");
           specialMessageDiv.className = "message tool-message";
           const formattedContent = `
-                    <div class="tool-toggle">▶</div>
-                    <div class="tool-header">🔧 Tool Call: ${
-                      toolData.tool
-                    }</div>
-                    <div class="tool-content">
-                      <div class="tool-details">
-                        <strong>Arguments:</strong>
-                        <pre><code>${JSON.stringify(
-                          toolData.call.function.arguments,
-                          null,
-                          2
-                        )}</code></pre>
-                        <strong>Response:</strong>
-                        <pre><code>${JSON.stringify(
-                          toolData.response,
-                          null,
-                          2
-                        )}</code></pre>
+                      <div class="tool-toggle">▶</div>
+                      <div class="tool-header">🔧 Tool Call: ${
+                        toolData.tool
+                      }</div>
+                      <div class="tool-content">
+                        <div class="tool-details">
+                          <strong>Arguments:</strong>
+                          <pre><code>${JSON.stringify(
+                            toolData.call.function.arguments,
+                            null,
+                            2
+                          )}</code></pre>
+                          <strong>Response:</strong>
+                          <pre><code>${JSON.stringify(
+                            toolData.response,
+                            null,
+                            2
+                          )}</code></pre>
+                        </div>
                       </div>
-                    </div>
-                  `;
+                    `;
           specialMessageDiv.innerHTML = formattedContent;
           chatContainer.appendChild(specialMessageDiv);
           initializeToolToggles(specialMessageDiv);
@@ -2488,11 +2490,11 @@
         const div = document.createElement("div");
         div.className = "thinking-process";
         div.innerHTML = `
-                  <div class="thinking-header" onclick="toggleThinking(this)">
-                    <span class="thinking-text">Thinking...</span>
-                  </div>
-                  <div class="thinking-content"></div>
-                `;
+                    <div class="thinking-header" onclick="toggleThinking(this)">
+                      <span class="thinking-text">Thinking...</span>
+                    </div>
+                    <div class="thinking-content"></div>
+                  `;
         return div;
       }
 
@@ -2661,7 +2663,6 @@
         //Sources
 
         const saveSourceBtn = document.getElementById("save-source-btn");
-        const sourceInput = document.getElementById("source");
         const deleteAllSourcesBtn =
           document.getElementById("delete-all-sources");
 
@@ -2748,6 +2749,16 @@
         return parsed_json.sources;
       }
 
+      function getLocalOnlySources() {
+        const localSources = localStorage.getItem("localSources");
+
+        if (!localSources) {
+          return [];
+        }
+
+        return JSON.parse(localSources);
+      }
+
       function getSavedSourcesExpanded() {
         const source = localStorage.getItem("savedSources");
 
@@ -2786,8 +2797,11 @@
         const savedSourcesList = document.getElementById("saved-sources-list");
         savedSourcesList.innerHTML = "";
         const savedSources = getSavedSources();
+        const localOnlySources = getLocalOnlySources();
 
-        savedSources.forEach((source) => addSourceToSavedList(source));
+        const allSources = [...savedSources, ...localOnlySources];
+
+        allSources.forEach((source) => addSourceToSavedList(source));
       }
 
       async function fetchAvailableSources() {
@@ -2830,10 +2844,12 @@
           }
         });
 
+        // let localSources = getLocalOnlySources();
+
         localStorage.setItem(
           "savedSources",
           JSON.stringify({
-            sources: keys,
+            sources: [...keys],
             sourcesExpanded: maped_sources,
           })
         );
@@ -2849,22 +2865,22 @@
         toolElement.dataset.toolId = tool.id;
         toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
-              <div class="tool-item-header">
-                <span class="tool-icon"><i class="fas fa-wrench"></i></span>
-                <span class="tool-item-name">${tool.actor}</span>
-                <label class="switch">
-                    <input type="checkbox" class="tool-toggle" ${
-                      isActive ? "checked" : ""
-                    }>
-                    <span class="slider"></span>
-                </label>
-                <div class="tool-actions">
-                    <button class="tool-action-btn delete-tool" title="Delete">
-                      <i class="fas fa-trash"></i>
-                    </button>
+                <div class="tool-item-header">
+                  <span class="tool-icon"><i class="fas fa-wrench"></i></span>
+                  <span class="tool-item-name">${tool.actor}</span>
+                  <label class="switch">
+                      <input type="checkbox" class="tool-toggle" ${
+                        isActive ? "checked" : ""
+                      }>
+                      <span class="slider"></span>
+                  </label>
+                  <div class="tool-actions">
+                      <button class="tool-action-btn delete-tool" title="Delete">
+                        <i class="fas fa-trash"></i>
+                      </button>
+                  </div>
                 </div>
-              </div>
-            `;
+              `;
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
@@ -2887,59 +2903,107 @@
       }
 
       function createSourceElement(source, isActive = false) {
+        console.log("🚀 ~ createSourceElement ~ source:", source);
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item`;
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-              <div class="source-item-header">
-                  <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                  <span class="source-item-name">${source.path}</span>
-                  <span id="upload-button" class="upload-icon upload-button" title="Upload file to source"><i class="fa-solid fa-paperclip"></i><input type="file" id="file-input" class="file-input" style="display: none" /></span>
-                  <label class="switch">
-                      <input type="checkbox" class="source-toggle" ${
-                        isActive ? "checked" : ""
-                      }>
-                      <span class="slider"></span>
-                  </label>
-                  <div class="source-actions">
-                      <button class="source-action-btn delete-source" title="Delete">
-                          <i class="fas fa-trash"></i>
-                      </button>
-                  </div>
-              </div>
-          `;
+                <div class="source-item-header">
+                    <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                    <span class="source-item-name">${source.path}</span>
+                    ${
+                      source.isLocal
+                        ? ""
+                        : `<label class="switch">
+                        <input type="checkbox" class="source-toggle" ${
+                          isActive ? "checked" : ""
+                        }>
+                        <span class="slider"></span>
+                    </label>`
+                    }
+                    <span id="upload-button" class="upload-icon upload-button" title="Upload file to source"><i class="fa-solid fa-paperclip"></i><input type="file" id="file-input" class="file-input" style="display: none" /></span>
+                    <div class="source-actions">
+                        <button class="source-action-btn delete-source" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
 
-        // Add event listeners
-        sourceElement
-          .querySelector(".source-toggle")
-          .addEventListener("change", (e) => {
-            e.stopPropagation();
-            setSourceState(source, e.target.checked);
-          });
+        if (!source.isLocal) {
+          sourceElement
+            .querySelector(".source-toggle")
+            .addEventListener("change", (e) => {
+              e.stopPropagation();
+              setSourceState(source, e.target.checked);
+            });
+        }
 
         sourceElement
           .querySelector(".delete-source")
           .addEventListener("click", (e) => {
             e.stopPropagation();
-            deleteSources([source.path]);
+            if (source.isLocal) {
+              deleteFromLocalSources(source);
+            } else {
+              deleteSources([source.path]);
+            }
           });
 
         sourceElement
           .querySelector(".upload-button")
           .addEventListener("click", function () {
-            document.getElementById("file-input").click();
+            sourceElement.querySelector(".file-input").click();
           });
 
         sourceElement
           .querySelector(".file-input")
           .addEventListener("change", async function (event) {
             const file = event.target.files[0];
+            console.log("🚀 ~ file:", file, source);
 
             let upload = await uploadAndIndexSource(file, source);
           });
 
         return sourceElement;
+      }
+
+      function addNewSource() {
+        let sourceValue = document.getElementById("source").value;
+
+        if (!sourceValue) {
+          alert("Please type a valid source.");
+          return;
+        }
+
+        if (sourceValue[0] != "/") {
+          sourceValue = `/${sourceValue}`;
+        }
+
+        const savedSources = getSavedSources();
+        const localOnlySources = getLocalOnlySources();
+
+        const allSources = [...savedSources, ...localOnlySources];
+
+        if (allSources.some((element) => element.path == sourceValue)) {
+          alert("Source already exists.");
+          return;
+        }
+
+        const source = {
+          path: sourceValue,
+          active: false,
+          isLocal: true,
+        };
+
+        localOnlySources.push(source);
+
+        localStorage.setItem("localSources", JSON.stringify(localOnlySources));
+
+        document.getElementById("source").value = "";
+
+        loadSavedSources();
       }
 
       function addToolToSavedList(tool) {
@@ -3014,12 +3078,26 @@
         })();
       }
 
+      function deleteFromLocalSources(source) {
+        const localSources = getLocalOnlySources();
+
+        localStorage.setItem(
+          "localSources",
+          JSON.stringify(
+            localSources.filter((element) => element.path != source.path)
+          )
+        );
+
+        loadSavedSources();
+      }
+
       async function deleteAllSources() {
         let savedSources = getSavedSources().map((source) => source.path);
 
         await deleteSources(savedSources);
 
         localStorage.removeItem("savedSources");
+        localStorage.removeItem("localSources");
       }
 
       function updateToolsActors() {
@@ -3133,11 +3211,11 @@
       (function () {
         const style = document.createElement("style");
         style.textContent = `
-                  .action-button[style*="cursor: not-allowed"]:hover {
-                    background: var(--bg-secondary) !important;
-                    border-color: var(--border-color) !important;
-                  }
-                `;
+                    .action-button[style*="cursor: not-allowed"]:hover {
+                      background: var(--bg-secondary) !important;
+                      border-color: var(--border-color) !important;
+                    }
+                  `;
         document.head.appendChild(style);
       })();
 
