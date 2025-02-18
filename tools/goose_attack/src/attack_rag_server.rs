@@ -1,4 +1,4 @@
-use bioma_llm::indexer::{DeleteSource, IndexGlobs};
+use bioma_llm::indexer::DeleteSource;
 use bioma_llm::prelude::*;
 use bioma_llm::rerank::RankTexts;
 use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
@@ -18,10 +18,6 @@ use tracing::info;
 static VARIATIONS_COUNT: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(1));
 static VARIATION_STATE: Lazy<Mutex<TestVariation>> =
     Lazy::new(|| Mutex::new(TestVariation { index: 0, file_path: "".to_string() }));
-
-const DEFAULT_CHUNK_CAPACITY: std::ops::Range<usize> = 500..2000;
-const DEFAULT_CHUNK_OVERLAP: usize = 200;
-const DEFAULT_CHUNK_BATCH_SIZE: usize = 50;
 
 #[derive(Debug, Clone)]
 struct TestVariation {
@@ -270,11 +266,8 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::Index, &mut variation_state, variations, &mut ordering_state).await;
 
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
-    let payload = IndexGlobs::builder()
-        .globs(vec![file_name])
-        .chunk_capacity(DEFAULT_CHUNK_CAPACITY)
-        .chunk_overlap(DEFAULT_CHUNK_OVERLAP)
-        .chunk_batch_size(DEFAULT_CHUNK_BATCH_SIZE)
+    let payload = Index::builder()
+        .content(IndexContent::Globs(GlobsContent::builder().patterns(vec![file_name]).build()))
         .build();
 
     make_request(user, GooseMethod::Post, "/index", "Index Files", TestType::Index, Some(payload), &mut ordering_state)

@@ -10,9 +10,11 @@ use bioma_actor::prelude::*;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::Path;
 use surrealdb::RecordId;
 use text_splitter::{ChunkConfig, CodeSplitter, MarkdownSplitter, TextSplitter};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::embeddings::EmbeddingContent;
@@ -113,16 +115,27 @@ pub struct GlobsContent {
 pub struct TextsContent {
     /// The texts to index
     pub texts: Vec<String>,
+    /// MIME type for the texts
+    #[builder(default = default_text_mime_type())]
+    #[serde(default = "default_text_mime_type")]
+    pub mime_type: String,
     /// Chunk configuration
     #[builder(default)]
     #[serde(default)]
     pub config: TextChunkConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn default_text_mime_type() -> String {
+    "text/plain".to_string()
+}
+
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ImagesContent {
     /// The base64 encoded images
     pub images: Vec<String>,
+    /// Optional MIME type for the images
+    #[serde(default)]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -600,6 +613,128 @@ impl Indexer {
             }
         }
     }
+
+    /// Helper function to create a directory for a group of files and return its prefix
+    async fn create_group_directory(&self, ctx: &ActorContext<Self>) -> Result<String, IndexerError> {
+        let uuid = Uuid::new_v4();
+        let uuid_str = uuid.to_string();
+        let prefix = &uuid_str[..2];
+
+        let local_store_dir = ctx.engine().local_store_dir();
+        let directory = local_store_dir.join("assets").join(prefix);
+        tokio::fs::create_dir_all(&directory).await?;
+
+        Ok(prefix.to_string())
+    }
+
+    /// Helper function to generate a file path using a shared UUID prefix
+    async fn generate_file_path(
+        &self,
+        ctx: &ActorContext<Self>,
+        prefix: &str,
+        extension: &str,
+    ) -> Result<(String, std::path::PathBuf, std::path::PathBuf), IndexerError> {
+        let uuid = Uuid::new_v4();
+        let filename = format!("{}.{}", uuid, extension);
+
+        let local_store_dir = ctx.engine().local_store_dir();
+        let directory = local_store_dir.join("assets").join(prefix);
+        let filepath = directory.join(&filename);
+        let uri = format!("assets/{}/{}", prefix, filename);
+        let absolute_path = local_store_dir.join(&uri);
+
+        Ok((uri, filepath, absolute_path))
+    }
+
+    /// Helper function to determine file extension from MIME type or content
+    fn determine_extension(
+        &self,
+        mime_type: Option<&str>,
+        is_image: bool,
+        content: Option<&str>,
+    ) -> Result<String, IndexerError> {
+        if let Some(mime) = mime_type {
+            if is_image {
+                match mime.split('/').last() {
+                    Some("jpeg") => Ok("jpg".to_string()),
+                    Some(ext) if !ext.is_empty() => Ok(ext.to_string()),
+                    _ => Err(IndexerError::Other("Invalid or unsupported image MIME type".to_string())),
+                }
+            } else {
+                // For text content, we always have a MIME type
+                match mime.split('/').last() {
+                    Some("plain") => Ok("txt".to_string()),
+                    Some("markdown") | Some("md") => Ok("md".to_string()),
+                    Some("html") => Ok("html".to_string()),
+                    Some(ext) if !ext.is_empty() => Ok(ext.to_string()),
+                    _ => Err(IndexerError::Other("Invalid or unsupported text MIME type".to_string())),
+                }
+            }
+        } else if is_image {
+            // Try to determine image type from base64 content
+            if let Some(content) = content {
+                // First try to find data URL format
+                if let Some(idx) = content.find("data:image/") {
+                    let format_end = content[idx + 11..]
+                        .find(';')
+                        .map(|i| idx + 11 + i)
+                        .ok_or_else(|| IndexerError::Other("Invalid data URL format".to_string()))?;
+
+                    let format = &content[idx + 11..format_end];
+                    match format {
+                        "jpeg" | "jpg" => Ok("jpg".to_string()),
+                        "png" => Ok("png".to_string()),
+                        "gif" => Ok("gif".to_string()),
+                        "webp" => Ok("webp".to_string()),
+                        _ => Err(IndexerError::Other(format!("Unsupported image format: {}", format))),
+                    }
+                } else {
+                    // Try to detect format from raw base64 data
+                    let data = base64::engine::general_purpose::STANDARD
+                        .decode(content)
+                        .map_err(|_| IndexerError::Other("Invalid base64 data".to_string()))?;
+
+                    // Check file signatures
+                    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                        Ok("jpg".to_string())
+                    } else if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                        Ok("png".to_string())
+                    } else if data.starts_with(&[0x47, 0x49, 0x46]) {
+                        Ok("gif".to_string())
+                    } else if data.starts_with(&[0x52, 0x49, 0x46, 0x46]) && data.len() > 11 && &data[8..12] == b"WEBP"
+                    {
+                        Ok("webp".to_string())
+                    } else {
+                        Err(IndexerError::Other("Unable to determine image format from base64 content".to_string()))
+                    }
+                }
+            } else {
+                Err(IndexerError::Other("No MIME type or content provided to determine image format".to_string()))
+            }
+        } else {
+            Ok("txt".to_string())
+        }
+    }
+
+    /// Helper function to save content to file
+    async fn save_content_to_file(&self, content: &str, filepath: &Path) -> Result<(), IndexerError> {
+        tokio::fs::write(filepath, content).await?;
+        Ok(())
+    }
+
+    /// Helper function to save base64 image to file
+    async fn save_base64_to_file(&self, base64_data: &str, filepath: &Path) -> Result<(), IndexerError> {
+        let data = if base64_data.contains(";base64,") {
+            base64::engine::general_purpose::STANDARD
+                .decode(base64_data.split(";base64,").last().unwrap_or(base64_data))
+        } else {
+            base64::engine::general_purpose::STANDARD.decode(base64_data)
+        }
+        .map_err(|e| IndexerError::Other(format!("Base64 decode error: {}", e)))?;
+
+        tokio::fs::write(filepath, data).await?;
+        Ok(())
+    }
 }
 
 impl Message<Index> for Indexer {
@@ -771,9 +906,26 @@ impl Message<Index> for Indexer {
                     }
                 }
             }
-            IndexContent::Texts(TextsContent { texts, config }) => {
+            IndexContent::Texts(TextsContent { texts, mime_type, config }) => {
+                // Create a shared directory for all texts in this message
+                let prefix = self.create_group_directory(ctx).await?;
+
                 for text in texts {
-                    let source = ContentSource { source: message.source.clone(), uri: text.clone() };
+                    // Generate file path with appropriate extension
+                    let extension = match self.determine_extension(Some(&mime_type), false, None) {
+                        Ok(ext) => ext,
+                        Err(e) => {
+                            error!("Failed to determine text extension: {}", e);
+                            sources.push(IndexedSource {
+                                source: message.source.clone(),
+                                uri: "unknown".to_string(),
+                                status: IndexStatus::Failed(format!("Failed to determine text format: {}", e)),
+                            });
+                            continue;
+                        }
+                    };
+                    let (uri, filepath, _) = self.generate_file_path(ctx, &prefix, &extension).await?;
+                    let source = ContentSource { source: message.source.clone(), uri };
 
                     // Check if source already exists
                     if let Some(indexed_source) = self.check_source_exists(ctx, &source).await? {
@@ -782,7 +934,10 @@ impl Message<Index> for Indexer {
                         continue;
                     }
 
-                    info!("Indexing text: {}", &text);
+                    // Save the text content to file
+                    self.save_content_to_file(&text, &filepath).await?;
+
+                    info!("Indexing text: {}", &filepath.display());
                     let content = Content::Text {
                         content: text.clone(),
                         text_type: TextType::Text,
@@ -797,9 +952,26 @@ impl Message<Index> for Indexer {
                     }
                 }
             }
-            IndexContent::Images(ImagesContent { images }) => {
+            IndexContent::Images(ImagesContent { images, mime_type }) => {
+                // Create a shared directory for all images in this message
+                let prefix = self.create_group_directory(ctx).await?;
+
                 for image in images {
-                    let source = ContentSource { source: message.source.clone(), uri: image.clone() };
+                    // Generate file path with appropriate extension
+                    let extension = match self.determine_extension(mime_type.as_deref(), true, Some(&image)) {
+                        Ok(ext) => ext,
+                        Err(e) => {
+                            error!("Failed to determine image extension: {}", e);
+                            sources.push(IndexedSource {
+                                source: message.source.clone(),
+                                uri: "unknown".to_string(),
+                                status: IndexStatus::Failed(format!("Failed to determine image format: {}", e)),
+                            });
+                            continue;
+                        }
+                    };
+                    let (uri, filepath, absolute_path) = self.generate_file_path(ctx, &prefix, &extension).await?;
+                    let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
 
                     // Check if source already exists
                     if let Some(indexed_source) = self.check_source_exists(ctx, &source).await? {
@@ -808,7 +980,12 @@ impl Message<Index> for Indexer {
                         continue;
                     }
 
-                    let content = Content::Image { data: ImageData::Base64(image.clone()) };
+                    // Save the image content to file
+                    self.save_base64_to_file(&image, &filepath).await?;
+
+                    info!("Indexing image: {}", &filepath.display());
+                    let content =
+                        Content::Image { data: ImageData::Path(absolute_path.to_string_lossy().into_owned()) };
 
                     // Process content
                     let result =
