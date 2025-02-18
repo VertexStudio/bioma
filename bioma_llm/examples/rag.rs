@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .source(workspace_root.clone())
         .content(IndexContent::Globs(
             GlobsContent::builder()
-                .patterns(vec![
+                .globs(vec![
                     // workspace_root.clone() + "/**/*.surql",
                     workspace_root.clone() + "/**/*.toml",
                 ])

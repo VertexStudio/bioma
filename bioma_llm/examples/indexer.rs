@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send globs to the indexer actor
     info!("Indexing");
     let index_globs =
-        Index::builder().content(IndexContent::Globs(GlobsContent::builder().patterns(globs).build())).build();
+        Index::builder().content(IndexContent::Globs(GlobsContent::builder().globs(globs).build())).build();
 
     let _indexer = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(

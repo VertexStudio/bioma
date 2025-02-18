@@ -104,10 +104,11 @@ impl Default for TextChunkConfig {
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct GlobsContent {
     /// List of glob patterns
-    pub patterns: Vec<String>,
+    pub globs: Vec<String>,
     /// Chunk configuration
     #[builder(default)]
     #[serde(default)]
+    #[serde(flatten)]
     pub config: TextChunkConfig,
 }
 
@@ -122,6 +123,7 @@ pub struct TextsContent {
     /// Chunk configuration
     #[builder(default)]
     #[serde(default)]
+    #[serde(flatten)]
     pub config: TextChunkConfig,
 }
 
@@ -139,12 +141,12 @@ pub struct ImagesContent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
+#[serde(untagged)]
 pub enum IndexContent {
     /// List of glob patterns to match files for indexing
     #[serde(rename = "globs")]
     Globs(GlobsContent),
-    /// List of texts to index directly
+    /// List of texts to index
     #[serde(rename = "texts")]
     Texts(TextsContent),
     /// List of base64 encoded images to index
@@ -621,7 +623,7 @@ impl Indexer {
         let prefix = &uuid_str[..2];
 
         let local_store_dir = ctx.engine().local_store_dir();
-        let directory = local_store_dir.join("assets").join(prefix);
+        let directory = local_store_dir.join("blob").join(prefix);
         tokio::fs::create_dir_all(&directory).await?;
 
         Ok(prefix.to_string())
@@ -638,9 +640,9 @@ impl Indexer {
         let filename = format!("{}.{}", uuid, extension);
 
         let local_store_dir = ctx.engine().local_store_dir();
-        let directory = local_store_dir.join("assets").join(prefix);
+        let directory = local_store_dir.join("blob").join(prefix);
         let filepath = directory.join(&filename);
-        let uri = format!("assets/{}/{}", prefix, filename);
+        let uri = format!("blob/{}/{}", prefix, filename);
         let absolute_path = local_store_dir.join(&uri);
 
         Ok((uri, filepath, absolute_path))
@@ -757,8 +759,8 @@ impl Message<Index> for Indexer {
         let mut sources = Vec::new();
 
         match &message.content {
-            IndexContent::Globs(GlobsContent { patterns, config }) => {
-                for pattern in patterns {
+            IndexContent::Globs(GlobsContent { globs, config }) => {
+                for pattern in globs {
                     let local_store_dir = ctx.engine().local_store_dir();
                     let full_pattern = if std::path::Path::new(pattern).is_absolute() {
                         pattern.clone()

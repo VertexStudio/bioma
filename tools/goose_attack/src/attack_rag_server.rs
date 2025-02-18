@@ -266,9 +266,8 @@ pub async fn load_test_index(user: &mut GooseUser) -> TransactionResult {
     let variation = get_next_variation(TestType::Index, &mut variation_state, variations, &mut ordering_state).await;
 
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
-    let payload = Index::builder()
-        .content(IndexContent::Globs(GlobsContent::builder().patterns(vec![file_name]).build()))
-        .build();
+    let payload =
+        Index::builder().content(IndexContent::Globs(GlobsContent::builder().globs(vec![file_name]).build())).build();
 
     make_request(user, GooseMethod::Post, "/index", "Index Files", TestType::Index, Some(payload), &mut ordering_state)
         .await

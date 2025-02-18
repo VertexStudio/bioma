@@ -82,10 +82,7 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent {
-                    patterns: globs.clone(),
-                    config: TextChunkConfig::default(),
-                }))
+                .content(IndexContent::Globs(GlobsContent { globs: globs.clone(), config: TextChunkConfig::default() }))
                 .build(),
             &indexer_id,
             SendOptions::default(),
@@ -110,7 +107,7 @@ async fn test_indexer_basic_text() -> Result<(), TestError> {
     let reindex_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
+                .content(IndexContent::Globs(GlobsContent { globs: globs.clone(), config: TextChunkConfig::default() }))
                 .build(),
             &indexer_id,
             SendOptions::default(),
@@ -178,7 +175,7 @@ async fn test_indexer_chunking() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent::builder().patterns(globs).config(chunk_config).build()))
+                .content(IndexContent::Globs(GlobsContent::builder().globs(globs).config(chunk_config).build()))
                 .build(),
             &indexer_id,
             SendOptions::default(),
@@ -252,7 +249,7 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
                 .content(IndexContent::Globs(GlobsContent {
-                    patterns: vec![glob_path.clone()],
+                    globs: vec![glob_path.clone()],
                     config: TextChunkConfig::default(),
                 }))
                 .build(),
@@ -344,7 +341,7 @@ It provides practical examples and use cases.
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
+                .content(IndexContent::Globs(GlobsContent { globs: globs.clone(), config: TextChunkConfig::default() }))
                 .summarize(true)
                 .source(source.clone())
                 .build(),
@@ -410,7 +407,7 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
+                .content(IndexContent::Globs(GlobsContent { globs: globs.clone(), config: TextChunkConfig::default() }))
                 .summarize(false)
                 .source(source.clone())
                 .build(),
@@ -487,7 +484,7 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     let index_result = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent { patterns: globs, config: TextChunkConfig::default() }))
+                .content(IndexContent::Globs(GlobsContent { globs: globs.clone(), config: TextChunkConfig::default() }))
                 .summarize(true)
                 .source(source.clone())
                 .build(),
@@ -662,36 +659,27 @@ async fn test_indexer_direct_images() -> Result<(), TestError> {
 fn test_index_json_structure() -> Result<(), TestError> {
     // Raw JSON strings representing each content type
     let raw_globs_json = r#"{
-        "type": "globs",
-        "data": {
-            "patterns": ["*.txt", "*.md"],
-            "chunk_capacity": {"start": 500, "end": 2000},
-            "chunk_overlap": 200,
-            "chunk_batch_size": 50
-        },
+        "globs": ["*.txt", "*.md"],
+        "chunk_capacity": {"start": 500, "end": 2000},
+        "chunk_overlap": 200,
+        "chunk_batch_size": 50,
         "source": "/test/source",
         "summarize": true
     }"#;
 
     let raw_texts_json = r#"{
-        "type": "texts",
-        "data": {
-            "texts": ["Test content 1", "Test content 2"],
-            "mime_type": "text/markdown",
-            "chunk_capacity": {"start": 500, "end": 2000},
-            "chunk_overlap": 200,
-            "chunk_batch_size": 50
-        },
+        "texts": ["Test content 1", "Test content 2"],
+        "mime_type": "text/markdown",
+        "chunk_capacity": {"start": 500, "end": 2000},
+        "chunk_overlap": 200,
+        "chunk_batch_size": 50,
         "source": "/test/source",
         "summarize": false
     }"#;
 
     let raw_images_json = r#"{
-        "type": "images",
-        "data": {
-            "images": ["base64_image_data"],
-            "mime_type": "image/jpeg"
-        },
+        "images": ["base64_image_data"],
+        "mime_type": "image/jpeg",
         "source": "/test/source",
         "summarize": true
     }"#;
@@ -704,7 +692,7 @@ fn test_index_json_structure() -> Result<(), TestError> {
     // Create equivalent structs using builders
     let globs_from_builder = Index::builder()
         .content(IndexContent::Globs(GlobsContent {
-            patterns: vec!["*.txt".to_string(), "*.md".to_string()],
+            globs: vec!["*.txt".to_string(), "*.md".to_string()],
             config: TextChunkConfig { chunk_capacity: 500..2000, chunk_overlap: 200, chunk_batch_size: 50 },
         }))
         .source("/test/source".to_string())
@@ -751,26 +739,23 @@ fn test_index_json_structure() -> Result<(), TestError> {
 
     // Verify JSON structure details
     let globs_value: serde_json::Value = serde_json::from_str(raw_globs_json)?;
-    assert_eq!(globs_value["type"], "globs", "Content type should be 'globs'");
-    assert!(globs_value["data"]["patterns"].is_array(), "Patterns should be an array");
-    assert!(globs_value["data"]["chunk_capacity"].is_object(), "chunk_capacity should be an object");
-    assert!(globs_value["data"]["chunk_overlap"].is_number(), "chunk_overlap should be a number");
-    assert!(globs_value["data"]["chunk_batch_size"].is_number(), "chunk_batch_size should be a number");
+    assert!(globs_value["globs"].is_array(), "Globs should be an array");
+    assert!(globs_value["chunk_capacity"].is_object(), "chunk_capacity should be an object");
+    assert!(globs_value["chunk_overlap"].is_number(), "chunk_overlap should be a number");
+    assert!(globs_value["chunk_batch_size"].is_number(), "chunk_batch_size should be a number");
     assert_eq!(globs_value["source"], "/test/source", "Source should match");
     assert_eq!(globs_value["summarize"], true, "Summarize should match");
 
     let texts_value: serde_json::Value = serde_json::from_str(raw_texts_json)?;
-    assert_eq!(texts_value["type"], "texts", "Content type should be 'texts'");
-    assert!(texts_value["data"]["texts"].is_array(), "Texts should be an array");
-    assert_eq!(texts_value["data"]["mime_type"], "text/markdown", "MIME type should match");
-    assert!(texts_value["data"]["chunk_capacity"].is_object(), "chunk_capacity should be an object");
-    assert!(texts_value["data"]["chunk_overlap"].is_number(), "chunk_overlap should be a number");
-    assert!(texts_value["data"]["chunk_batch_size"].is_number(), "chunk_batch_size should be a number");
+    assert!(texts_value["texts"].is_array(), "Texts should be an array");
+    assert_eq!(texts_value["mime_type"], "text/markdown", "MIME type should match");
+    assert!(texts_value["chunk_capacity"].is_object(), "chunk_capacity should be an object");
+    assert!(texts_value["chunk_overlap"].is_number(), "chunk_overlap should be a number");
+    assert!(texts_value["chunk_batch_size"].is_number(), "chunk_batch_size should be a number");
 
     let images_value: serde_json::Value = serde_json::from_str(raw_images_json)?;
-    assert_eq!(images_value["type"], "images", "Content type should be 'images'");
-    assert!(images_value["data"]["images"].is_array(), "Images should be an array");
-    assert_eq!(images_value["data"]["mime_type"], "image/jpeg", "MIME type should match");
+    assert!(images_value["images"].is_array(), "Images should be an array");
+    assert_eq!(images_value["mime_type"], "image/jpeg", "MIME type should match");
 
     // Print example JSON structures for documentation
     println!("Example Globs JSON structure:\n{}", raw_globs_json);
