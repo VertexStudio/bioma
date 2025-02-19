@@ -180,6 +180,8 @@
       .delete-all {
         margin-top: 0px !important;
         font-size: 0.7em !important;
+        display: flex;
+        flex-direction: row;
       }
 
       .delete-all:hover {
@@ -1389,7 +1391,8 @@
                 class="delete-all"
                 style="margin-bottom: 10px"
               >
-                <i class="fa-solid fa-trash"></i> Delete all
+                <i class="fa-solid fa-trash"></i>
+                <div id="delete-all-text" style="margin-left: 5px">Delete all</div>
               </h4>
             </div>
             <div id="saved-sources-list" class="sources-list">
@@ -1433,7 +1436,7 @@
                 class="delete-all"
                 style="margin-bottom: 10px"
               >
-                <i class="fa-solid fa-trash"></i> Delete all
+                <i class="fa-solid fa-trash"></i> <div style="margin-left: 5px">Delete all</div>
               </h4>
             </div>
             <div id="saved-tools-list" class="tools-list">
@@ -2993,12 +2996,14 @@
 
             let uploadButton = sourceElement.querySelector(".upload-button");
             let uploadStatus = sourceElement.querySelector(".upload-status");
+            let newSourceButton = document.getElementById("new-source");
             let switchElement = sourceElement.querySelector(".switch");
 
             uploadButton.style.pointerEvents = "none";
             uploadButton.style.display = "none";
             uploadStatus.style.display = "inline";
             uploadStatus.innerText = "Processing...";
+            newSourceButton.disabled = true;
 
             if (switchElement) {
               switchElement.style.display = "none";
@@ -3010,6 +3015,7 @@
             } catch (error) {
               uploadStatus.innerText = "Upload Failed!";
             } finally {
+              newSourceButton.disabled = false;
               setTimeout(() => {
                 uploadButton.style.display = "block";
                 uploadButton.style.pointerEvents = "auto";
@@ -3147,10 +3153,16 @@
       async function deleteAllSources() {
         let savedSources = getSavedSources().map((source) => source.path);
 
-        await deleteSources(savedSources);
-
-        localStorage.removeItem("savedSources");
-        localStorage.removeItem("localSources");
+        const deleteAllElemenet = document.getElementById("delete-all-text");
+        try {
+          deleteAllElemenet.innerText = "Deleting...";
+          await deleteSources(savedSources);
+        } catch {
+        } finally {
+          localStorage.removeItem("savedSources");
+          localStorage.removeItem("localSources");
+          deleteAllElemenet.innerText = "Delete all";
+        }
       }
 
       function updateToolsActors() {
