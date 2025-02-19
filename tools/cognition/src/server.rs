@@ -516,8 +516,7 @@ async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -
 #[utoipa::path(
     post,
     path = "/retrieve",
-    description =   "Retrieve context in .md format.<br>
-                    If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
+    description = "Retrieve context in .md format. If you send `sources` it will only use those resources to retrieve the context, if not, it will default to `/global`.",
     request_body(content = RetrieveContextRequest, examples(
         ("basic" = (summary = "Basic", value = json!({
             "type": "Text",
@@ -536,7 +535,8 @@ async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Retrieved context in the requested format (markdown or JSON)", body = String, content_type = "application/json"),
+        (status = 500, description = "Internal server error")
     )
 )]
 async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppState>) -> HttpResponse {
