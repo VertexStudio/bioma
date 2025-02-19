@@ -139,10 +139,19 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize)]
+#[response(example = json!({
+    "message": "File uploaded successfully",
+    "paths": ["/path/to/file.txt"],
+    "size": 1024
+}))]
 struct Uploaded {
+    /// A message describing the result of the upload operation
     message: String,
+    /// List of paths where files were saved, relative to the workspace root
+    #[schema(value_type = Vec<String>)]
     paths: Vec<std::path::PathBuf>,
+    /// Total size of uploaded files in bytes
     size: usize,
 }
 
@@ -201,7 +210,19 @@ impl Default for UploadConfig {
     description = "Upload files to the server.",
     request_body(content = UploadRequestSchema, content_type = "multipart/form-data"),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "File uploaded successfully", body = Uploaded, content_type = "application/json", examples(
+            ("single_file" = (summary = "Single file upload", value = json!({
+                "message": "File uploaded successfully",
+                "paths": ["/path/to/file.txt"],
+                "size": 1024
+            }))),
+            ("zip_file" = (summary = "Zip file extraction", value = json!({
+                "message": "Zip file extracted 3 files successfully",
+                "paths": ["/path/to/extracted/file1.txt", "/path/to/extracted/file2.txt", "/path/to/extracted/file3.txt"],
+                "size": 5120
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
 async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
