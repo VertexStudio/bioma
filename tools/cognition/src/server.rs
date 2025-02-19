@@ -1062,7 +1062,31 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Chat response with tool analysis", body = ChatResponseSchema, content_type = "application/json", examples(
+            ("basic_response" = (summary = "Basic response", value = json!({
+                "model": "llama2",
+                "created_at": "2024-03-14T10:30:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": "Based on your request, I'll help you analyze and determine the tools needed. Here's what we need to do:\n\n1. Use the `random` tool to generate a number between 15 and 1566\n2. Use the `echo` tool to display the generated number\n3. Use the `write_file` tool to save the number to the specified file"
+                },
+                "done": true,
+                "final_data": {
+                    "total_duration": 1200000000,
+                    "prompt_eval_count": 24,
+                    "prompt_eval_duration": 500000000,
+                    "eval_count": 150,
+                    "eval_duration": 700000000
+                },
+                "context": [
+                    {
+                        "role": "user",
+                        "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
 async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
