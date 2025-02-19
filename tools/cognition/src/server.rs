@@ -14,7 +14,7 @@ use api_schema::{
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
+use bioma_llm::{indexer::Indexed, markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
 use bioma_llm::{prelude::*, retriever::ListSources};
 use bioma_tool::client::ListTools;
 use clap::Parser;
@@ -444,7 +444,45 @@ async fn upload_config() -> impl Responder {
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Content indexed successfully", body = Indexed, content_type = "application/json", examples(
+            ("globs_success" = (summary = "Successfully indexed files", value = json!({
+                "indexed": 5,
+                "cached": 2,
+                "sources": [
+                    {
+                        "source": "/bioma",
+                        "uri": "./path/to/files/main.rs",
+                        "status": "Indexed"
+                    },
+                    {
+                        "source": "/bioma",
+                        "uri": "./path/to/files/lib.rs",
+                        "status": "Cached"
+                    },
+                    {
+                        "source": "/bioma",
+                        "uri": "./path/to/files/error.rs",
+                        "status": { "Failed": "File not found" }
+                    }
+                ]
+            }))),
+            ("texts_success" = (summary = "Successfully indexed texts", value = json!({
+                "indexed": 2,
+                "cached": 0,
+                "sources": [
+                    {
+                        "source": "/bioma",
+                        "uri": "text_1",
+                        "status": "Indexed"
+                    },
+                    {
+                        "source": "/bioma",
+                        "uri": "text_2",
+                        "status": "Indexed"
+                    }
+                ]
+            })))
+        )),
     )
 )]
 async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -> HttpResponse {

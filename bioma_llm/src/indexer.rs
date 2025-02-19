@@ -178,21 +178,29 @@ pub fn default_chunk_batch_size() -> usize {
     DEFAULT_CHUNK_BATCH_SIZE
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct IndexedSource {
     pub source: String,
     pub uri: String,
     pub status: IndexStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub enum IndexStatus {
+    /// Content has been successfully indexed
+    #[schema(title = "IndexedContent")]
     Indexed,
+
+    /// Content was already cached
+    #[schema(title = "CachedContent")]
     Cached,
+
+    /// Content failed to be indexed with error message
+    #[schema(title = "FailedContent")]
     Failed(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct Indexed {
     pub indexed: usize,
     pub cached: usize,

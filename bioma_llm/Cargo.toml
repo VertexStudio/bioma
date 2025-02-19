@@ -26,6 +26,7 @@ walkdir = { workspace = true }
 zip = { workspace = true }
 tempfile = { workspace = true }
 ollama-rs = { workspace = true }
+utoipa = { workspace = true }
 pathdiff = "0.2"
 
 hf-hub = "0.3.2"

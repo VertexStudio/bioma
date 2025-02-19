@@ -1015,6 +1015,7 @@ dependencies = [
  "tree-sitter-rust",
  "ulid",
  "url",
+ "utoipa",
  "uuid",
  "walkdir",
  "zip",
