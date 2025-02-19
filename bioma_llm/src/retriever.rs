@@ -34,7 +34,7 @@ pub enum RetrieverError {
 
 impl ActorError for RetrieverError {}
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveContext {
     /// The query to search for
     #[serde(flatten)]
@@ -53,7 +53,7 @@ pub struct RetrieveContext {
     pub sources: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "query")]
 pub enum RetrieveQuery {
     Text(String),

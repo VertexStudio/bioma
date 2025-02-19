@@ -1,8 +1,8 @@
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
-    prelude::{ChatMessage, ChatMessageResponse, RetrieveContext, RetrieveQuery},
-    retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
+    prelude::{ChatMessage, ChatMessageResponse, RetrieveContext},
+    retriever::default_retriever_sources,
 };
 use ollama_rs::generation::{
     chat::ChatMessageFinalResponseData,
@@ -255,15 +255,6 @@ fn query_schema() -> utoipa::openapi::schema::Object {
         .build()
 }
 
-/// Query types for retrieval
-#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "query")]
-pub enum RetrieveQueryRequestSchema {
-    /// Text-based query
-    #[serde(rename = "Text")]
-    Text(String),
-}
-
 /// Output format for retrieval results
 #[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub enum RetrieveOutputFormat {
@@ -284,25 +275,9 @@ pub enum RetrieveOutputFormat {
     "format": "markdown"
 }))]
 pub struct RetrieveContextRequest {
-    /// The query to search for
-    #[schema(schema_with = query_schema)]
     #[serde(flatten)]
-    pub query: RetrieveQueryRequestSchema,
-
-    /// The number of contexts to return
-    #[schema(default = default_retriever_limit)]
-    #[serde(default = "default_retriever_limit")]
-    pub limit: usize,
-
-    /// The threshold for the similarity score
-    #[schema(default = default_retriever_threshold)]
-    #[serde(default = "default_retriever_threshold")]
-    pub threshold: f32,
-
-    /// A list of sources to filter the search
-    #[schema(default = default_retriever_sources)]
-    #[serde(default = "default_retriever_sources")]
-    pub sources: Vec<String>,
+    #[schema(schema_with = query_schema)]
+    pub retrieve_context: RetrieveContext,
 
     /// The format of the output (markdown or json)
     #[schema(default = default_retriever_format)]
@@ -312,21 +287,6 @@ pub struct RetrieveContextRequest {
 
 fn default_retriever_format() -> RetrieveOutputFormat {
     RetrieveOutputFormat::Markdown
-}
-
-impl Into<RetrieveContext> for RetrieveContextRequest {
-    fn into(self) -> RetrieveContext {
-        let query = match self.query {
-            RetrieveQueryRequestSchema::Text(query) => RetrieveQuery::Text(query),
-        };
-
-        RetrieveContext::builder()
-            .query(query)
-            .limit(self.limit)
-            .threshold(self.threshold)
-            .sources(self.sources)
-            .build()
-    }
 }
 
 //------------------------------------------------------------------------------
