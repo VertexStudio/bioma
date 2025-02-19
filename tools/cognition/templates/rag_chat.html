@@ -1574,6 +1574,8 @@
                 end: 2000,
               },
               chunk_overlap: 200,
+              mime_type: file.type,
+              summarize: true,
             };
 
             const response = await fetch(`${RAG_ENDPOINT}/index`, {
