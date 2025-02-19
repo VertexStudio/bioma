@@ -3040,7 +3040,7 @@
       }
 
       function addNewSource() {
-        let sourceValue = document.getElementById("source").value;
+        let sourceValue = document.getElementById("source").value.trim();
 
         if (!sourceValue) {
           alert("Please type a valid source.");
