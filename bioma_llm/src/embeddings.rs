@@ -173,7 +173,7 @@ pub struct GenerateEmbeddings {
 }
 
 /// The generated embeddings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct GeneratedEmbeddings {
     pub embeddings: Vec<Vec<f32>>,
 }

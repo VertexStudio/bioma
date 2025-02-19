@@ -4,7 +4,7 @@ use std::time::Duration;
 use tracing::error;
 use url::Url;
 
-#[derive(thiserror::Error, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, thiserror::Error, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum HealthCheckError {
     #[error("Reqwest error: {0}")]
@@ -15,7 +15,7 @@ pub enum HealthCheckError {
     OllamaError(String),
 }
 
-#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Service {
     #[serde(rename = "surrealdb")]
     SurrealDB,
@@ -29,7 +29,7 @@ pub enum Service {
     Minio,
 }
 
-#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Status {
     pub is_healthy: bool,
     pub error: Option<HealthCheckError>,
@@ -45,7 +45,7 @@ impl Status {
     }
 }
 
-#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Responses {
     SurrealDb {
@@ -72,18 +72,18 @@ pub enum Responses {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 struct OllamaRunningModel {
     size_vram: u64,
     model: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct OllamaHealth {
     models: Vec<OllamaRunningModel>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct PdfAnalyzerHealth {
     info: String,
 }

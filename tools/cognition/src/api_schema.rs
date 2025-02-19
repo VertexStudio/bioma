@@ -5,17 +5,37 @@ use bioma_llm::{
         default_chunk_batch_size, default_chunk_overlap, GlobsContent, ImagesContent,
         TextChunkConfig as BiomaTextChunkConfig, TextsContent, DEFAULT_CHUNK_CAPACITY,
     },
-    prelude::{ChatMessage, DeleteSource, Index, IndexContent, RetrieveContext, RetrieveQuery},
+    prelude::{ChatMessage, ChatMessageResponse, DeleteSource, Index, IndexContent, RetrieveContext, RetrieveQuery},
     rerank::{default_raw_scores, default_return_text, default_truncate, RankTexts, TruncationDirection},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
-use ollama_rs::generation::tools::{ToolCall, ToolInfo};
+use ollama_rs::generation::{
+    chat::ChatMessageFinalResponseData,
+    tools::{ToolCall, ToolInfo},
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 //------------------------------------------------------------------------------
 // Common Types
 //------------------------------------------------------------------------------
+
+#[derive(ToSchema, Debug, Serialize)]
+pub struct ChatMessageResponseSchema {
+    /// The name of the model used for the completion.
+    pub model: String,
+    /// The creation time of the completion, in such format: `2023-08-04T08:52:19.385406455-07:00`.
+    pub created_at: String,
+    /// The generated chat message.
+    #[schema(value_type = ChatMessageSchema)]
+    pub message: ChatMessage,
+    /// Whether the response is complete
+    pub done: bool,
+    #[serde(flatten)]
+    /// The final data of the completion. This is only present if the completion is done.
+    #[schema(value_type = Option<ChatMessageFinalResponseDataSchema>)]
+    pub final_data: Option<ChatMessageFinalResponseData>,
+}
 
 /// Role of a message in a chat conversation
 #[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
@@ -86,22 +106,9 @@ pub struct ChatQuery {
 /// Response schema for chat completion
 #[derive(ToSchema, Debug, Serialize)]
 pub struct ChatResponseSchema {
-    /// The name of the model used for the completion
-    pub model: String,
-
-    /// The creation time of the completion
-    pub created_at: String,
-
-    /// The generated chat message
-    #[schema(value_type = ChatMessageSchema)]
-    pub message: ChatMessage,
-
-    /// Whether the response is complete
-    pub done: bool,
-
-    /// Final statistics about the completion (only present when done is true)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub final_data: Option<ChatMessageFinalResponseDataSchema>,
+    #[schema(value_type = ChatMessageResponseSchema)]
+    #[serde(flatten)]
+    pub response: ChatMessageResponse,
 
     /// The conversation context used to generate the response
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -180,6 +187,19 @@ pub struct AskQueryRequestSchema {
     /// Optional schema for structured output format
     #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
+}
+
+/// Response schema for ask operation
+#[derive(ToSchema, Debug, Serialize)]
+pub struct AskResponseSchema {
+    #[schema(value_type = ChatMessageResponseSchema)]
+    #[serde(flatten)]
+    pub response: ChatMessageResponse,
+
+    /// The conversation context used to generate the response
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<ChatMessageSchema>)]
+    pub context: Vec<ChatMessage>,
 }
 
 //------------------------------------------------------------------------------

@@ -253,7 +253,7 @@ enum IndexResult {
 }
 
 /// The source of the embeddings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct ContentSource {
     pub source: String,
     pub uri: String,
@@ -264,7 +264,7 @@ pub struct DeleteSource {
     pub sources: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
     pub deleted_sources: Vec<ContentSource>,

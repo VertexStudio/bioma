@@ -244,7 +244,7 @@ impl Message<RetrieveContext> for Retriever {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSources;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct ListedSources {
     pub sources: Vec<ContentSource>,
 }

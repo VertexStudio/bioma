@@ -94,7 +94,7 @@ pub fn default_truncation_direction() -> TruncationDirection {
     TruncationDirection::Right
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct RankedText {
     pub index: usize,
     pub score: f32,
@@ -102,7 +102,7 @@ pub struct RankedText {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct RankedTexts {
     pub texts: Vec<RankedText>,
 }
