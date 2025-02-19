@@ -115,7 +115,7 @@
       }
 
       .new-source-input-summary h4 {
-        transition: color 0.3s ease-in-out; 
+        transition: color 0.3s ease-in-out;
       }
 
       .new-source-input-summary:hover h4 {
@@ -1449,18 +1449,24 @@
         <br />
 
         <div class="section tools-section">
-          <!-- Add New Agent form moved to top -->
-          <div class="tools-form" id="tool-form">
-            <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
-            <div class="form-group">
-              <input type="text" id="tool-actor" placeholder="Agent name" />
+          <details class="new-source-input-detail">
+            <summary class="new-source-input-summary">
+              <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
+            </summary>
+
+            <div class="source-content">
+              <div class="tools-form" id="tool-form">
+                <div class="form-group">
+                  <input type="text" id="tool-actor" placeholder="Agent name" />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button id="save-tool-btn" class="action-button">
+                  <i class="fas fa-save"></i> Save
+                </button>
+              </div>
             </div>
-            <div class="form-actions">
-              <button id="save-tool-btn" class="action-button">
-                <i class="fas fa-save"></i> Save
-              </button>
-            </div>
-          </div>
+          </details>
 
           <!-- Add the hidden input for tools actors -->
           <input type="hidden" id="tools-actors-input" value="" />
