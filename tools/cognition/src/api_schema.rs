@@ -1,8 +1,7 @@
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
-    prelude::{ChatMessage, ChatMessageResponse, DeleteSource, RetrieveContext, RetrieveQuery},
-    rerank::{default_raw_scores, default_return_text, default_truncate, RankTexts, TruncationDirection},
+    prelude::{ChatMessage, ChatMessageResponse, RetrieveContext, RetrieveQuery},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
 use ollama_rs::generation::{
@@ -47,6 +46,17 @@ pub enum MessageRoleSchema {
     Tool,
 }
 
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub struct ToolCallSchema {
+    pub function: ToolCallFunctionSchema,
+}
+
+#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+pub struct ToolCallFunctionSchema {
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
 /// A single message in a chat conversation
 #[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
 #[schema(title = "ChatMessage")]
@@ -59,7 +69,7 @@ pub struct ChatMessageSchema {
     pub content: String,
 
     /// Optional list of tool calls attached to the message
-    #[schema(value_type = Option<Vec<Object>>)]
+    #[schema(value_type = Option<Vec<ToolCallSchema>>)]
     pub tool_calls: Option<Vec<ToolCall>>,
 
     /// Optional list of base64-encoded images attached to the message
@@ -320,86 +330,8 @@ impl Into<RetrieveContext> for RetrieveContextRequest {
 }
 
 //------------------------------------------------------------------------------
-// Rerank Module Schemas
-//------------------------------------------------------------------------------
-
-/// Direction for text truncation
-#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-pub enum TruncationDirectionRequestSchema {
-    #[serde(rename = "left")]
-    Left,
-    #[serde(rename = "right")]
-    Right,
-}
-
-/// Request schema for ranking texts
-#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
-pub struct RankTextsRequestSchema {
-    /// The query to compare texts against
-    pub query: String,
-
-    /// Whether to return raw similarity scores
-    #[schema(default = default_raw_scores)]
-    #[serde(default = "default_raw_scores")]
-    pub raw_scores: bool,
-
-    /// Whether to include the text content in the response
-    #[schema(default = default_return_text)]
-    #[serde(default = "default_return_text")]
-    pub return_text: bool,
-
-    /// List of texts to rank
-    pub texts: Vec<String>,
-
-    /// Whether to truncate texts
-    #[schema(default = default_truncate)]
-    #[serde(default = "default_truncate")]
-    pub truncate: bool,
-
-    /// Direction to truncate texts from
-    #[schema(default = default_truncation_direction)]
-    #[serde(default = "default_truncation_direction")]
-    pub truncation_direction: TruncationDirectionRequestSchema,
-}
-
-fn default_truncation_direction() -> TruncationDirectionRequestSchema {
-    TruncationDirectionRequestSchema::Right
-}
-
-impl Into<RankTexts> for RankTextsRequestSchema {
-    fn into(self) -> RankTexts {
-        let truncation_direction = match self.truncation_direction {
-            TruncationDirectionRequestSchema::Left => TruncationDirection::Left,
-            TruncationDirectionRequestSchema::Right => TruncationDirection::Right,
-        };
-
-        RankTexts {
-            query: self.query,
-            raw_scores: self.raw_scores,
-            return_text: self.return_text,
-            texts: self.texts,
-            truncate: self.truncate,
-            truncation_direction,
-        }
-    }
-}
-
-//------------------------------------------------------------------------------
 // File Operations Schemas
 //------------------------------------------------------------------------------
-
-/// Request schema for deleting indexed sources
-#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct DeleteSourceRequestSchema {
-    /// List of source identifiers to delete
-    pub sources: Vec<String>,
-}
-
-impl Into<DeleteSource> for DeleteSourceRequestSchema {
-    fn into(self) -> DeleteSource {
-        DeleteSource { sources: self.sources }
-    }
-}
 
 /// Metadata for file upload
 #[derive(Debug, Deserialize, ToSchema)]

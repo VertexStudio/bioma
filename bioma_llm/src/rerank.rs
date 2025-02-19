@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
+use utoipa::{ToResponse, ToSchema};
 
 // Max number of tokens to be processed for each input
 const DEFAULT_MAX_LENGTH: usize = 512;
@@ -30,7 +31,7 @@ pub enum RerankError {
 
 impl ActorError for RerankError {}
 
-#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(ToSchema, Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RankTexts {
     /// The query text to compare against the corpus of texts
     ///
@@ -71,8 +72,7 @@ pub struct RankTexts {
     pub truncation_direction: TruncationDirection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-// #[serde(rename_all = "lowercase")]
+#[derive(ToResponse, ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub enum TruncationDirection {
     Left,
     Right,

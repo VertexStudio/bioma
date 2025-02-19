@@ -8,8 +8,8 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, DeleteSourceRequestSchema,
-    EmbeddingsQueryRequestSchema, RankTextsRequestSchema, RetrieveContextRequest,
+    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, 
+    EmbeddingsQueryRequestSchema, RetrieveContextRequest,
     RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
@@ -1601,7 +1601,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     post,
     path = "/delete_source",
     description = "Delete indexed sources and their associated embeddings from the system.",
-    request_body(content = DeleteSourceRequestSchema, examples(
+    request_body(content = DeleteSource, examples(
         ("Basic" = (summary = "Delete multiple sources", value = json!({
             "sources": [
                 "/path/to/source1.pdf",
@@ -1629,7 +1629,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         (status = 500, description = "Internal server error")
     )
 )]
-async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1791,7 +1791,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
     post,
     path = "/rerank",
     description = "Rerank a list of texts based on their relevance to a query. Can return raw similarity scores and optionally include the original texts in the response.",
-    request_body(content = RankTextsRequestSchema, examples(
+    request_body(content = RankTexts, examples(
         ("Basic" = (summary = "Basic reranking", value = json!({
             "query": "What is Deep Learning?",
             "texts": [
@@ -1856,13 +1856,13 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
         (status = 500, description = "Internal server error")
     )
 )]
-async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: RankTexts = body.clone().into();
+    let body = body.clone();
 
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);

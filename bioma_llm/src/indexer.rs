@@ -266,7 +266,7 @@ pub struct ContentSource {
     pub uri: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct DeleteSource {
     pub sources: Vec<String>,
 }
