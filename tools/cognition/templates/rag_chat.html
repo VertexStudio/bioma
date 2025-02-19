@@ -1392,7 +1392,9 @@
                 style="margin-bottom: 10px"
               >
                 <i class="fa-solid fa-trash"></i>
-                <div id="delete-all-text" style="margin-left: 5px">Delete all</div>
+                <div id="delete-all-text" style="margin-left: 5px">
+                  Delete all
+                </div>
               </h4>
             </div>
             <div id="saved-sources-list" class="sources-list">
@@ -1436,7 +1438,8 @@
                 class="delete-all"
                 style="margin-bottom: 10px"
               >
-                <i class="fa-solid fa-trash"></i> <div style="margin-left: 5px">Delete all</div>
+                <i class="fa-solid fa-trash"></i>
+                <div style="margin-left: 5px">Delete all</div>
               </h4>
             </div>
             <div id="saved-tools-list" class="tools-list">
@@ -2682,8 +2685,8 @@
           updateToolsActors();
         });
 
-        deleteAllSourcesBtn.addEventListener("click", function (e) {
-          deleteAllSources();
+        deleteAllSourcesBtn.addEventListener("click", async function (e) {
+          await deleteAllSources();
           loadSavedSources();
         });
 
@@ -2781,6 +2784,10 @@
 
       function getActiveSources() {
         const sources = localStorage.getItem("savedSources");
+
+        if (!sources) {
+          return [];
+        }
 
         let savedSources = JSON.parse(sources);
 
