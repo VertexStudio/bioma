@@ -19,7 +19,8 @@ use utoipa::ToSchema;
 
 /// Role of a message in a chat conversation
 #[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-pub enum MessageRoleRequestSchema {
+#[schema(title = "MessageRole")]
+pub enum MessageRoleSchema {
     #[serde(rename = "user")]
     User,
     #[serde(rename = "assistant")]
@@ -32,16 +33,17 @@ pub enum MessageRoleRequestSchema {
 
 /// A single message in a chat conversation
 #[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-pub struct ChatMessageRequestSchema {
+#[schema(title = "ChatMessage")]
+pub struct ChatMessageSchema {
     /// The role of the message sender (user, assistant, system, or tool)
-    #[schema(value_type = MessageRoleRequestSchema)]
-    pub role: MessageRoleRequestSchema,
+    #[schema(value_type = MessageRoleSchema)]
+    pub role: MessageRoleSchema,
 
     /// The content of the message
     pub content: String,
 
     /// Optional list of tool calls attached to the message
-    #[schema(value_type = Vec<Object>)]
+    #[schema(value_type = Option<Vec<Object>>)]
     pub tool_calls: Option<Vec<ToolCall>>,
 
     /// Optional list of base64-encoded images attached to the message
@@ -54,9 +56,9 @@ pub struct ChatMessageRequestSchema {
 
 /// Request schema for chat completion
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ChatQueryRequestSchema {
+pub struct ChatQuery {
     /// The conversation history as a list of messages
-    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub messages: Vec<ChatMessage>,
 
     /// List of sources to search for relevant context
@@ -91,7 +93,7 @@ pub struct ChatResponseSchema {
     pub created_at: String,
 
     /// The generated chat message
-    #[schema(value_type = ChatMessageRequestSchema)]
+    #[schema(value_type = ChatMessageSchema)]
     pub message: ChatMessage,
 
     /// Whether the response is complete
@@ -103,7 +105,7 @@ pub struct ChatResponseSchema {
 
     /// The conversation context used to generate the response
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub context: Vec<ChatMessage>,
 }
 
@@ -134,7 +136,7 @@ fn default_chat_stream() -> bool {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ThinkQueryRequestSchema {
     /// The conversation history as a list of messages
-    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub messages: Vec<ChatMessage>,
 
     /// List of sources to search for relevant context
@@ -167,7 +169,7 @@ fn default_think_stream() -> bool {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct AskQueryRequestSchema {
     /// The conversation history as a list of messages
-    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub messages: Vec<ChatMessage>,
 
     /// List of sources to search for relevant context
@@ -626,6 +628,7 @@ pub struct ToolFunctionInfoSchema {
 
 /// Complete tool information
 #[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
+#[schema(title = "ToolInfo")]
 pub struct ToolInfoSchema {
     /// Type of the tool
     #[serde(rename = "type")]

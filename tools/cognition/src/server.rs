@@ -8,9 +8,9 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, ChatQueryRequestSchema, ChatResponseSchema, DeleteSourceRequestSchema,
-    EmbeddingsQueryRequestSchema, IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest,
-    RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
+    AskQueryRequestSchema, ChatQuery, ChatResponseSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
+    IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema,
+    UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -579,7 +579,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
                     If you send `tools_actors`, the endpoint with call the client that contains the tools and actually execute them.<br>
                     If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = ChatQueryRequestSchema, examples(
+    request_body(content = ChatQuery, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}]
@@ -702,7 +702,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         (status = 500, description = "Internal server error")
     )
 )]
-async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
