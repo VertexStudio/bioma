@@ -156,11 +156,7 @@ async fn chat_tool_call(
         .ok_or_else(|| ChatToolError::ToolNotFound(tool_call.function.name.clone()))?;
 
     let execution_result = user_actor
-        .send_and_wait_reply::<ToolsHub, ToolCall>(
-            tool_call.clone(),
-            hub_id,
-            SendOptions::default(),
-        )
+        .send_and_wait_reply::<ToolsHub, ToolCall>(tool_call.clone(), hub_id, SendOptions::default())
         .await
         .map_err(|e| ChatToolError::StreamResponseError(e.to_string()))?;
 

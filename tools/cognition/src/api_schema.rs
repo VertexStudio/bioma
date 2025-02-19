@@ -9,7 +9,7 @@ use bioma_llm::{
     rerank::{default_raw_scores, default_return_text, default_truncate, RankTexts, TruncationDirection},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
-use ollama_rs::generation::tools::ToolInfo;
+use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -39,6 +39,10 @@ pub struct ChatMessageRequestSchema {
 
     /// The content of the message
     pub content: String,
+
+    /// Optional list of tool calls attached to the message
+    #[schema(value_type = Vec<Object>)]
+    pub tool_calls: Option<Vec<ToolCall>>,
 
     /// Optional list of base64-encoded images attached to the message
     pub images: Option<Vec<String>>,
@@ -75,6 +79,51 @@ pub struct ChatQueryRequestSchema {
     /// Whether to stream the response
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
+}
+
+/// Response schema for chat completion
+#[derive(ToSchema, Debug, Serialize)]
+pub struct ChatResponseSchema {
+    /// The name of the model used for the completion
+    pub model: String,
+
+    /// The creation time of the completion
+    pub created_at: String,
+
+    /// The generated chat message
+    #[schema(value_type = ChatMessageRequestSchema)]
+    pub message: ChatMessage,
+
+    /// Whether the response is complete
+    pub done: bool,
+
+    /// Final statistics about the completion (only present when done is true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_data: Option<ChatMessageFinalResponseDataSchema>,
+
+    /// The conversation context used to generate the response
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<ChatMessageRequestSchema>)]
+    pub context: Vec<ChatMessage>,
+}
+
+/// Final statistics about a chat completion
+#[derive(ToSchema, Debug, Serialize)]
+pub struct ChatMessageFinalResponseDataSchema {
+    /// Time spent generating the response in nanoseconds
+    pub total_duration: u64,
+
+    /// Number of tokens in the prompt
+    pub prompt_eval_count: u16,
+
+    /// Time spent evaluating the prompt in nanoseconds
+    pub prompt_eval_duration: u64,
+
+    /// Number of tokens in the response
+    pub eval_count: u16,
+
+    /// Time spent generating the response in nanoseconds
+    pub eval_duration: u64,
 }
 
 fn default_chat_stream() -> bool {

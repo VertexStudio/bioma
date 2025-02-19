@@ -8,9 +8,9 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema,
-    UploadRequestSchema,
+    AskQueryRequestSchema, ChatQueryRequestSchema, ChatResponseSchema, DeleteSourceRequestSchema,
+    EmbeddingsQueryRequestSchema, IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest,
+    RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -660,7 +660,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                         }
                     },
                     "type": "function"
-                },
+                }
             ]
         }))),
         ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
@@ -673,7 +673,34 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
             "stream": true,
             "tools_actors":  ["/rag/tools_hub/your_id"]
         })))
-    ))
+    )),
+    responses(
+        (status = 200, description = "Chat response", body = ChatResponseSchema, content_type = "application/json", examples(
+            ("basic_response" = (summary = "Basic response", value = json!({
+                "model": "llama2",
+                "created_at": "2024-03-14T10:30:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": "The sky appears blue due to a phenomenon called Rayleigh scattering..."
+                },
+                "done": true,
+                "final_data": {
+                    "total_duration": 1200000000,
+                    "prompt_eval_count": 24,
+                    "prompt_eval_duration": 500000000,
+                    "eval_count": 150,
+                    "eval_duration": 700000000
+                },
+                "context": [
+                    {
+                        "role": "user",
+                        "content": "Why is the sky blue?"
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
+    )
 )]
 async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
