@@ -1524,7 +1524,6 @@
 
     <script>
       async function uploadAndIndexSource(file, source) {
-        console.log("🚀 ~ uploadAndIndexSource ~ source:", source);
         const fileInput = document.getElementById("file-input");
 
         if (!file) {
@@ -2903,33 +2902,36 @@
       }
 
       function createSourceElement(source, isActive = false) {
-        console.log("🚀 ~ createSourceElement ~ source:", source);
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item`;
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-                <div class="source-item-header">
-                    <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                    <span class="source-item-name">${source.path}</span>
-                    ${
-                      source.isLocal
-                        ? ""
-                        : `<label class="switch">
-                        <input type="checkbox" class="source-toggle" ${
-                          isActive ? "checked" : ""
-                        }>
-                        <span class="slider"></span>
-                    </label>`
-                    }
-                    <span id="upload-button" class="upload-icon upload-button" title="Upload file to source"><i class="fa-solid fa-paperclip"></i><input type="file" id="file-input" class="file-input" style="display: none" /></span>
-                    <div class="source-actions">
-                        <button class="source-action-btn delete-source" title="Delete">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
+        <div class="source-item-header">
+            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+            <span class="source-item-name">${source.path}</span>
+            ${
+              source.isLocal
+                ? ""
+                : `<label class="switch">
+                    <input type="checkbox" class="source-toggle" ${
+                      isActive ? "checked" : ""
+                    }>
+                    <span class="slider"></span>
+                </label>`
+            }
+            <span id="upload-button" class="upload-icon upload-button" title="Upload file to source">
+                <i class="fa-solid fa-paperclip"></i>
+                <input type="file" id="file-input" class="file-input" style="display: none" />
+            </span>
+            <span class="upload-status" style="display: none; font-size: 12px; margin-left: 10px;"></span>
+            <div class="source-actions">
+                <button class="source-action-btn delete-source" title="Delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    `;
 
         if (!source.isLocal) {
           sourceElement
@@ -2942,12 +2944,39 @@
 
         sourceElement
           .querySelector(".delete-source")
-          .addEventListener("click", (e) => {
+          .addEventListener("click", async (e) => {
             e.stopPropagation();
             if (source.isLocal) {
               deleteFromLocalSources(source);
             } else {
-              deleteSources([source.path]);
+              let uploadButton = sourceElement.querySelector(".upload-button");
+              let uploadStatus = sourceElement.querySelector(".upload-status");
+              let switchElement = sourceElement.querySelector(".switch");
+
+              uploadButton.style.pointerEvents = "none";
+              uploadButton.style.display = "none";
+              uploadStatus.style.display = "inline";
+              uploadStatus.innerText = "Deleting...";
+
+              if (switchElement) {
+                switchElement.style.display = "none";
+              }
+
+              try {
+                await deleteSources([source.path]);
+                uploadStatus.innerText = "Delete Complete!";
+              } catch (error) {
+                uploadStatus.innerText = "Delete Failed!";
+              } finally {
+                setTimeout(() => {
+                  uploadButton.style.display = "block";
+                  uploadButton.style.pointerEvents = "auto";
+
+                  if (switchElement) {
+                    switchElement.style.display = "block";
+                  }
+                }, 2000);
+              }
             }
           });
 
@@ -2961,9 +2990,35 @@
           .querySelector(".file-input")
           .addEventListener("change", async function (event) {
             const file = event.target.files[0];
-            console.log("🚀 ~ file:", file, source);
 
-            let upload = await uploadAndIndexSource(file, source);
+            let uploadButton = sourceElement.querySelector(".upload-button");
+            let uploadStatus = sourceElement.querySelector(".upload-status");
+            let switchElement = sourceElement.querySelector(".switch");
+
+            uploadButton.style.pointerEvents = "none";
+            uploadButton.style.display = "none";
+            uploadStatus.style.display = "inline";
+            uploadStatus.innerText = "Processing...";
+
+            if (switchElement) {
+              switchElement.style.display = "none";
+            }
+
+            try {
+              await uploadAndIndexSource(file, source);
+              uploadStatus.innerText = "Upload Complete!";
+            } catch (error) {
+              uploadStatus.innerText = "Upload Failed!";
+            } finally {
+              setTimeout(() => {
+                uploadButton.style.display = "block";
+                uploadButton.style.pointerEvents = "auto";
+
+                if (switchElement) {
+                  switchElement.style.display = "block";
+                }
+              }, 2000);
+            }
           });
 
         return sourceElement;
@@ -3059,23 +3114,21 @@
         localStorage.removeItem("savedTools");
       }
 
-      function deleteSources(sources) {
-        (async () => {
-          const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              sources: sources,
-            }),
-          });
+      async function deleteSources(sources) {
+        const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sources: sources,
+          }),
+        });
 
-          await fetchAvailableSources();
+        await fetchAvailableSources();
 
-          loadSavedSources();
-          updateSources();
-        })();
+        loadSavedSources();
+        updateSources();
       }
 
       function deleteFromLocalSources(source) {
