@@ -24,8 +24,10 @@
         --bg-secondary: #1c1c1f;
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
-        --sidebar-width: 250px;
+        --sidebar-width: 300px;
         --sidebar-width-collapsed: 60px;
+        --slider-width: 40px;
+        --slider-height: calc(var(--slider-width) * 0.5);
         --surrealist-gradient: linear-gradient(
           135deg,
           var(--primary) 0%,
@@ -81,6 +83,115 @@
         z-index: 1000;
       }
 
+      .resizer {
+        width: 5px;
+        cursor: ew-resize;
+        background-color: var(--border-color);
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        z-index: 1001;
+      }
+
+      .details {
+        background: var(--surrealist-gradient);
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 10px;
+        font-family: Arial, sans-serif;
+      }
+
+      .input-detail {
+        list-style: none;
+      }
+
+      .input-summary {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .input-summary h4 {
+        transition: color 0.3s ease-in-out;
+      }
+
+      .input-summary:hover h4 {
+        color: var(--primary-hover) !important;
+      }
+
+      .input-summary::marker {
+        display: none;
+        user-select: none;
+      }
+
+      .source-content {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        justify-content: space-around;
+        align-items: center;
+        height: 170px;
+      }
+
+      details[open] {
+        background: #121214;
+      }
+
+      summary {
+        font-weight: bold;
+        cursor: pointer;
+      }
+
+      .switch {
+        position: relative;
+        display: inline-block;
+        min-width: var(--slider-width);
+        width: var(--slider-width);
+        height: var(--slider-height);
+        margin-bottom: 0px !important;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: 0.4s;
+        border-radius: 24px;
+      }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: calc(var(--slider-height) * 0.8) !important;
+        width: calc(var(--slider-height) * 0.8);
+        /* Adjust left and bottom if the inner circle gets offset */
+        left: 4px;
+        bottom: 2px;
+        background-color: white;
+        transition: 0.4s;
+        border-radius: 50%;
+      }
+
+      input:checked + .slider {
+        background-color: var(--primary);
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(calc(var(--slider-height) * 0.8));
+      }
+
       #sidebar.collapsed {
         width: var(--sidebar-width-collapsed);
         padding: 1rem 0.5rem;
@@ -89,6 +200,26 @@
         align-items: center;
         overflow-x: visible;
         /* Allow tooltips to overflow */
+      }
+
+      .available-header {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .delete-all {
+        margin-top: 0px !important;
+        font-size: 0.7em !important;
+        display: flex;
+        flex-direction: row;
+      }
+
+      .delete-all:hover {
+        color: var(--primary-hover) !important;
+        cursor: pointer;
+        user-select: none;
       }
 
       .sidebar-header {
@@ -112,6 +243,8 @@
         width: 100%;
       }
 
+      #sidebar.collapsed details,
+      #sidebar.collapsed summary,
       #sidebar.collapsed h2,
       #sidebar.collapsed h3,
       #sidebar.collapsed h4,
@@ -158,7 +291,6 @@
       .tools-section {
         display: flex;
         flex-direction: column;
-        gap: 15px;
       }
 
       /* Add border above active tools header */
@@ -186,6 +318,9 @@
 
       .source-item,
       .tool-item {
+        margin-top: 10px;
+        display: flex;
+        flex-direction: row;
         background: var(--bg-main);
         border: 1px solid var(--border-color);
         border-radius: 4px;
@@ -194,16 +329,6 @@
         transition: all 0.2s ease;
         position: relative;
         /* For tooltip positioning */
-      }
-
-      .source-item:hover,
-      .tool-item:hover {
-        border-color: var(--primary);
-        background: linear-gradient(
-          135deg,
-          rgba(255, 0, 160, 0.1) 0%,
-          rgba(150, 0, 255, 0.1) 100%
-        );
       }
 
       .source-item.active,
@@ -255,6 +380,8 @@
       .source-item-header,
       .tool-item-header {
         display: flex;
+        width: 100%;
+        flex-direction: row;
         justify-content: space-between;
         align-items: center;
         gap: 8px;
@@ -262,15 +389,16 @@
 
       .source-item-name,
       .tool-item-name {
+        flex: 1;
         font-size: 0.9em;
         font-weight: bold;
         color: var(--text-primary);
-        flex: 1;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
 
+      .upload-icon,
       .source-icon,
       .tool-icon {
         color: var(--text-muted);
@@ -319,6 +447,7 @@
         border: 1px solid var(--border-color);
         border-radius: 4px;
         padding: 12px;
+        width: 80%;
       }
 
       .tools-form.hidden {
@@ -1251,106 +1380,119 @@
         </button>
       </div>
 
-      <h2 style="font-size: 1em">
-        <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
-      </h2>
-      <br />
+      <details class="details">
+        <summary>
+          <i class="fa-solid fa-book" style="margin-right: 8px"></i>
+          Sources
+        </summary>
 
-      <div class="section tools-section">
-        <!-- Add New Agent form moved to top -->
-        <div class="tools-form" id="tool-form">
-          <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
-          <div class="form-group">
-            <input type="text" id="tool-actor" placeholder="Agent name" />
-          </div>
-          <div class="form-actions">
-            <button id="save-tool-btn" class="action-button">
-              <i class="fas fa-save"></i> Save
-            </button>
-          </div>
-        </div>
+        <br />
 
-        <div class="tools-header">
-          <h3 class="section-inner-title">
-            <i class="fas fa-play-circle"></i> Active Tools
-          </h3>
-        </div>
+        <div class="section source-section">
+          <details class="input-detail">
+            <summary class="input-summary">
+              <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
+            </summary>
+            <div class="source-content">
+              <!-- Flex Container -->
+              <div class="source-form" id="source-form">
+                <div class="form-group">
+                  <input type="text" id="source" placeholder="/global" />
+                </div>
+              </div>
 
-        <!-- Add the hidden input for tools actors -->
-        <input type="hidden" id="tools-actors-input" value="" />
-
-        <div id="active-tools-list" class="tools-list">
-          <!-- Active tools will be listed here -->
-        </div>
-
-        <div class="saved-tools-section">
-          <h3 class="section-inner-title" style="margin-bottom: 10px">
-            <i class="fas fa-archive"></i> Available Tools
-          </h3>
-          <div id="saved-tools-list" class="tools-list">
-            <!-- Saved tools will be listed here -->
-          </div>
-        </div>
-      </div>
-
-      <!-- Sources section stars here-->
-
-      <h2 class="source-section-title" style="font-size: 1em">
-        <i class="fa-solid fa-book" style="margin-right: 8px"></i>
-        Context Sources
-      </h2>
-      <br />
-
-      <div class="section source-section">
-        <div class="source-form" id="source-form">
-          <h4><i class="fas fa-plus-circle"></i> Add Source</h4>
-          <div class="form-group">
-            <input type="text" id="source" placeholder="/global" />
-          </div>
-          <div class="form-actions">
-            <div class="form-info" id="form-info">
-              <p id="form-info-text">Select File</p>
               <button
-                id="upload-button"
-                class="action-button"
-                title="Upload Context"
+                id="new-source"
+                class="new-source action-button"
+                onclick="addNewSource()"
               >
-                <i class="fa-solid fa-file"></i>
+                Add new source
               </button>
-              <input type="file" id="file-input" style="display: none" />
             </div>
-            <div
-              id="loading-indicator"
-              class="loading-indicator"
-              style="display: none; margin-top: 10px"
-            >
-              <i class="fa-solid fa-spinner fa-spin"></i> Processing file...
+          </details>
+
+          <!-- Add the hidden input for sources actors -->
+          <input type="hidden" id="sources-input" value="" />
+
+          <div id="active-sources-list" class="sources-list">
+            <!-- Active sources will be listed here -->
+          </div>
+
+          <div class="saved-sources-section">
+            <div class="available-header">
+              <h3 class="section-inner-title" style="margin-bottom: 10px">
+                <i class="fas fa-archive"></i> Available Sources
+              </h3>
+              <h4
+                id="delete-all-sources"
+                class="delete-all"
+                style="margin-bottom: 10px"
+              >
+                <i class="fa-solid fa-trash"></i>
+                <div id="delete-all-text" style="margin-left: 5px">
+                  Delete all
+                </div>
+              </h4>
+            </div>
+            <div id="saved-sources-list" class="sources-list">
+              <!-- Saved sources will be listed here -->
             </div>
           </div>
         </div>
+      </details>
 
-        <div class="sources-header">
-          <h3 class="section-inner-title">
-            <i class="fas fa-play-circle"></i> Active Sources
-          </h3>
-        </div>
+      <details class="details">
+        <summary>
+          <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
+        </summary>
 
-        <!-- Add the hidden input for sources actors -->
-        <input type="hidden" id="sources-input" value="" />
+        <br />
 
-        <div id="active-sources-list" class="sources-list">
-          <!-- Active sources will be listed here -->
-        </div>
+        <div class="section tools-section">
+          <details class="input-detail">
+            <summary class="input-summary">
+              <h4><i class="fas fa-plus-circle"></i> Add Agent</h4>
+            </summary>
 
-        <div class="saved-sources-section">
-          <h3 class="section-inner-title" style="margin-bottom: 10px">
-            <i class="fas fa-archive"></i> Available Sources
-          </h3>
-          <div id="saved-sources-list" class="sources-list">
-            <!-- Saved sources will be listed here -->
+            <div class="source-content">
+              <div class="tools-form" id="tool-form">
+                <div class="form-group">
+                  <input type="text" id="tool-actor" placeholder="Agent name" />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button id="save-tool-btn" class="action-button">
+                  <i class="fas fa-save"></i> Save
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <!-- Add the hidden input for tools actors -->
+          <input type="hidden" id="tools-actors-input" value="" />
+
+          <div class="saved-tools-section">
+            <div class="available-header">
+              <h3 class="section-inner-title" style="margin-bottom: 10px">
+                <i class="fas fa-archive"></i> Available Tools
+              </h3>
+              <h4
+                id="delete-all-tools"
+                class="delete-all"
+                style="margin-bottom: 10px"
+              >
+                <i class="fa-solid fa-trash"></i>
+                <div style="margin-left: 5px">Delete all</div>
+              </h4>
+            </div>
+            <div id="saved-tools-list" class="tools-list">
+              <!-- Saved tools will be listed here -->
+            </div>
           </div>
         </div>
-      </div>
+      </details>
+
+      <div id="resizer" class="resizer"></div>
     </div>
 
     <!-- Main Content -->
@@ -1393,102 +1535,117 @@
       </div>
     </div>
 
+    <!-- Resizer logic -->
+
     <script>
-      document
-        .getElementById("upload-button")
-        .addEventListener("click", function () {
-          document.getElementById("file-input").click();
-        });
+      const resizer = document.querySelector(".resizer");
+      const sidebar = document.getElementById("sidebar");
+      let isResizing = false;
 
-      document
-        .getElementById("file-input")
-        .addEventListener("change", async function (event) {
-          const file = event.target.files[0];
-          const fileInput = document.getElementById("file-input");
+      resizer.addEventListener("mousedown", (e) => {
+        isResizing = true;
+        document.body.style.userSelect = "none"; // Prevent text selection while resizing
+        document.addEventListener("mousemove", resizeSidebar);
+        document.addEventListener("mouseup", stopResizing);
+      });
 
-          if (file) {
-            let directoryPath = document.getElementById("source").value.trim();
+      function resizeSidebar(e) {
+        if (!isResizing) return;
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth >= 280 && newWidth <= 500) {
+          sidebar.style.width = `${newWidth}px`;
+        }
+      }
 
-            if (directoryPath[0] == "/") {
-              directoryPath = directoryPath.slice(1);
-            }
+      function stopResizing() {
+        if (!isResizing) return;
+        isResizing = false;
+        document.body.style.userSelect = "";
+        document.removeEventListener("mousemove", resizeSidebar);
+        document.removeEventListener("mouseup", stopResizing);
 
-            const loadingIndicator =
-              document.getElementById("loading-indicator");
-            const formInfo = document.getElementById("form-info");
+        // Force recalculation of chat container scroll
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+    </script>
 
-            const metadata = {
-              path: directoryPath
-                ? `uploads/${directoryPath}/${file.name}`
-                : `uploads/${file.name}`,
+    <!-- Logic for uploading and indexing file -->
+
+    <script>
+      async function uploadAndIndexSource(file, source) {
+        const fileInput = document.getElementById("file-input");
+
+        if (!file) {
+          console.log("No file provided");
+        }
+
+        let directoryPath = source.path;
+
+        if (directoryPath[0] == "/") {
+          directoryPath = directoryPath.slice(1);
+        }
+
+        const metadata = {
+          path: directoryPath
+            ? `uploads/${directoryPath}/${file.name}`
+            : `uploads/${file.name}`,
+        };
+
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append(
+          "metadata",
+          new Blob([JSON.stringify(metadata)], {
+            type: "application/json",
+          })
+        );
+
+        try {
+          const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (uploadResponse.ok) {
+            const result = await uploadResponse.json();
+
+            const indexQuery = {
+              globs: result.paths,
+              source: directoryPath ? `/${directoryPath}` : undefined,
+              chunk_capacity: {
+                start: 500,
+                end: 2000,
+              },
+              chunk_overlap: 200,
+              mime_type: file.type,
+              summarize: true,
             };
 
-            const formData = new FormData();
-            formData.append("file", file);
-            formData.append(
-              "metadata",
-              new Blob([JSON.stringify(metadata)], { type: "application/json" })
-            );
+            const response = await fetch(`${RAG_ENDPOINT}/index`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(indexQuery),
+            });
 
-            const formInfoText = document.getElementById("form-info-text");
-
-            try {
-              loadingIndicator.style.display = "flex";
-              formInfo.style.display = "none";
-
-              const uploadResponse = await fetch(`${RAG_ENDPOINT}/upload`, {
-                method: "POST",
-                body: formData,
-              });
-
-              if (uploadResponse.ok) {
-                const result = await uploadResponse.json();
-
-                const indexQuery = {
-                  globs: result.paths,
-                  source: directoryPath ? `/${directoryPath}` : undefined,
-                  chunk_capacity: {
-                    start: 500,
-                    end: 2000,
-                  },
-                  chunk_overlap: 200,
-                };
-
-                const response = await fetch(`${RAG_ENDPOINT}/index`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify(indexQuery),
-                });
-
-                const jsonResponse = await response.json();
-
-                if (jsonResponse.sources.length > 0) {
-                  formInfoText.textContent = "Success";
-                } else {
-                  formInfoText.textContent = "Index failed";
-                }
-              } else {
-                formInfoText.textContent = "Upload failed";
-                console.error("❌ Upload failed:", await uploadResponse.text());
-              }
-            } catch (error) {
-              formInfoText.textContent = "Error while processing";
-              console.error("⚠️ Error during upload:", error);
-            } finally {
-              await fetchAvailableSources();
-              loadSavedSources();
-              loadActiveSources();
-
-              loadingIndicator.style.display = "none";
-              formInfo.style.display = "flex";
-
-              fileInput.value = "";
-            }
+            const jsonResponse = await response.json();
+          } else {
+            console.error("❌ Upload failed:", await uploadResponse.text());
           }
-        });
+        } catch (error) {
+          console.error("⚠️ Error during upload:", error);
+        } finally {
+          deleteFromLocalSources(source);
+          await fetchAvailableSources();
+          loadSavedSources();
+
+          fileInput.value = "";
+        }
+      }
     </script>
+
+    <!-- General Logic  -->
 
     <script>
       // Remove any trailing slashes from the endpoint
@@ -1641,10 +1798,10 @@
               msg.images || []
             );
             regularMessages += `
-              <div class="message ${roleClass}">
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
+                        <div class="message ${roleClass}">
+                          <div class="chunk">${processedContent}</div>
+                        </div>
+                      `;
             console.groupEnd();
           }
         });
@@ -1665,13 +1822,13 @@
               msg.images || []
             );
             systemMessage += `
-              <div class="message ${roleClass}">
-                <strong>${
-                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-                }:</strong>
-                <div class="chunk">${processedContent}</div>
-              </div>
-            `;
+                        <div class="message ${roleClass}">
+                          <strong>${
+                            msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                          }:</strong>
+                          <div class="chunk">${processedContent}</div>
+                        </div>
+                      `;
             console.groupEnd();
           }
         });
@@ -1687,36 +1844,37 @@
             lastMsg.images || []
           );
           lastUserMessage = `
-            <div class="message ${roleClass}">
-              <strong>${
-                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
-              }:</strong>
-              <div class="chunk">${processedContent}</div>
-            </div>
-          `;
+                      <div class="message ${roleClass}">
+                        <strong>${
+                          lastMsg.role.charAt(0).toUpperCase() +
+                          lastMsg.role.slice(1)
+                        }:</strong>
+                        <div class="chunk">${processedContent}</div>
+                      </div>
+                    `;
         }
         console.groupEnd();
 
         const result = `
-          <div class="context-container">
-            <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
-            <div class="context-content">
-              ${regularMessages}
-              ${
-                regularMessages && systemMessage
-                  ? '<div class="source-separator"></div>'
-                  : ""
-              }
-              ${systemMessage}
-              ${
-                (regularMessages || systemMessage) && lastUserMessage
-                  ? '<div class="source-separator"></div>'
-                  : ""
-              }
-              ${lastUserMessage}
-            </div>
-          </div>
-        `;
+                    <div class="context-container">
+                      <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+                      <div class="context-content">
+                        ${regularMessages}
+                        ${
+                          regularMessages && systemMessage
+                            ? '<div class="source-separator"></div>'
+                            : ""
+                        }
+                        ${systemMessage}
+                        ${
+                          (regularMessages || systemMessage) && lastUserMessage
+                            ? '<div class="source-separator"></div>'
+                            : ""
+                        }
+                        ${lastUserMessage}
+                      </div>
+                    </div>
+                  `;
 
         console.log("Final HTML length:", result.length);
         console.groupEnd();
@@ -1822,12 +1980,8 @@
         latestContext = null;
         let errorBuffer = [];
 
-        // Get tools actors list from sidebar input
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
+        const toolsActorsList = getActiveTools();
+
         if (toolsEnabled && toolsActorsList.length === 0) {
           alert("Please provide at least one tools actor.");
           toolsEnabled = false;
@@ -1844,7 +1998,9 @@
           messages: messageHistory,
           model: "llama3.2",
           stream: true,
-          tools_actors: toolsEnabled ? toolsActorsList : [],
+          tools_actors: toolsEnabled
+            ? toolsActorsList.map((tool) => tool.actor)
+            : [],
           ...(activeSources.length > 0 && { sources: activeSources }),
         };
 
@@ -1866,23 +2022,25 @@
             errorDiv = document.createElement("div");
             errorDiv.className = "message error-message";
             const errorContent = `
-              <div class="error-toggle">▶</div>
-              <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                        <div class="error-toggle">▶</div>
+                        <div class="error-header">⚠️ ${
+                          errorBuffer.length
+                        } Error${
               errorBuffer.length > 1 ? "s" : ""
             } Occurred</div>
-              <div class="error-content">
-                ${errorBuffer
-                  .map(
-                    (error) => `
-                  <div class="error-item">
-                    <i class="fas fa-exclamation-circle"></i>
-                    ${md.render(error)}
-                  </div>
-                `
-                  )
-                  .join("")}
-              </div>
-            `;
+                        <div class="error-content">
+                          ${errorBuffer
+                            .map(
+                              (error) => `
+                            <div class="error-item">
+                              <i class="fas fa-exclamation-circle"></i>
+                              ${md.render(error)}
+                            </div>
+                          `
+                            )
+                            .join("")}
+                        </div>
+                      `;
             errorDiv.innerHTML = errorContent;
             chatContainer.appendChild(errorDiv);
             initializeErrorToggles(errorDiv);
@@ -1935,15 +2093,15 @@
             const errorDiv = document.createElement("div");
             errorDiv.className = "message error-message";
             const errorContent = `
-              <div class="error-toggle">▶</div>
-              <div class="error-header">⚠️ Error Occurred</div>
-              <div class="error-content">
-                <div class="error-item">
-                  <i class="fas fa-exclamation-circle"></i>
-                  ${md.render(error.toString())}
-                </div>
-              </div>
-            `;
+                        <div class="error-toggle">▶</div>
+                        <div class="error-header">⚠️ Error Occurred</div>
+                        <div class="error-content">
+                          <div class="error-item">
+                            <i class="fas fa-exclamation-circle"></i>
+                            ${md.render(error.toString())}
+                          </div>
+                        </div>
+                      `;
             errorDiv.innerHTML = errorContent;
             chatContainer.appendChild(errorDiv);
             initializeErrorToggles(errorDiv);
@@ -1956,23 +2114,23 @@
       // Helper function to create error content
       function createErrorContent(errorBuffer) {
         return `
-          <div class="error-toggle">▶</div>
-          <div class="error-header">⚠️ ${errorBuffer.length} Error${
+                    <div class="error-toggle">▶</div>
+                    <div class="error-header">⚠️ ${errorBuffer.length} Error${
           errorBuffer.length > 1 ? "s" : ""
         } Occurred</div>
-          <div class="error-content">
-            ${errorBuffer
-              .map(
-                (error) => `
-              <div class="error-item">
-                <i class="fas fa-exclamation-circle"></i>
-                ${md.render(error)}
-              </div>
-            `
-              )
-              .join("")}
-          </div>
-        `;
+                    <div class="error-content">
+                      ${errorBuffer
+                        .map(
+                          (error) => `
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(error)}
+                        </div>
+                      `
+                        )
+                        .join("")}
+                    </div>
+                  `;
       }
 
       // Helper function to create error div
@@ -2101,15 +2259,15 @@
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
-            <div class="error-toggle">▶</div>
-            <div class="error-header">⚠️ Error Occurred</div>
-            <div class="error-content">
-              <div class="error-item">
-                <i class="fas fa-exclamation-circle"></i>
-                ${md.render(data.error)}
-              </div>
-            </div>
-          `;
+                      <div class="error-toggle">▶</div>
+                      <div class="error-header">⚠️ Error Occurred</div>
+                      <div class="error-content">
+                        <div class="error-item">
+                          <i class="fas fa-exclamation-circle"></i>
+                          ${md.render(data.error)}
+                        </div>
+                      </div>
+                    `;
           errorDiv.innerHTML = errorContent;
           chatContainer.appendChild(errorDiv);
           initializeErrorToggles(errorDiv);
@@ -2262,25 +2420,27 @@
           const specialMessageDiv = document.createElement("div");
           specialMessageDiv.className = "message tool-message";
           const formattedContent = `
-            <div class="tool-toggle">▶</div>
-            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
-            <div class="tool-content">
-              <div class="tool-details">
-                <strong>Arguments:</strong>
-                <pre><code>${JSON.stringify(
-                  toolData.call.function.arguments,
-                  null,
-                  2
-                )}</code></pre>
-                <strong>Response:</strong>
-                <pre><code>${JSON.stringify(
-                  toolData.response,
-                  null,
-                  2
-                )}</code></pre>
-              </div>
-            </div>
-          `;
+                      <div class="tool-toggle">▶</div>
+                      <div class="tool-header">🔧 Tool Call: ${
+                        toolData.tool
+                      }</div>
+                      <div class="tool-content">
+                        <div class="tool-details">
+                          <strong>Arguments:</strong>
+                          <pre><code>${JSON.stringify(
+                            toolData.call.function.arguments,
+                            null,
+                            2
+                          )}</code></pre>
+                          <strong>Response:</strong>
+                          <pre><code>${JSON.stringify(
+                            toolData.response,
+                            null,
+                            2
+                          )}</code></pre>
+                        </div>
+                      </div>
+                    `;
           specialMessageDiv.innerHTML = formattedContent;
           chatContainer.appendChild(specialMessageDiv);
           initializeToolToggles(specialMessageDiv);
@@ -2380,11 +2540,11 @@
         const div = document.createElement("div");
         div.className = "thinking-process";
         div.innerHTML = `
-          <div class="thinking-header" onclick="toggleThinking(this)">
-            <span class="thinking-text">Thinking...</span>
-          </div>
-          <div class="thinking-content"></div>
-        `;
+                    <div class="thinking-header" onclick="toggleThinking(this)">
+                      <span class="thinking-text">Thinking...</span>
+                    </div>
+                    <div class="thinking-content"></div>
+                  `;
         return div;
       }
 
@@ -2445,12 +2605,8 @@
           }
           if (e.ctrlKey) {
             e.preventDefault();
-            const toolsActorsInput =
-              document.getElementById("tools-actors-input");
-            const toolsActorsList = toolsActorsInput.value
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "");
+
+            const toolsActorsList = getActiveTools();
 
             // Only toggle if we have tools
             if (toolsActorsList.length > 0) {
@@ -2479,13 +2635,7 @@
       document
         .getElementById("send-button")
         .addEventListener("click", async () => {
-          // Allow toggling tools even during generation
-          const toolsActorsInput =
-            document.getElementById("tools-actors-input");
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
+          const toolsActorsList = getActiveTools();
 
           // Only toggle if we have tools
           if (toolsActorsList.length > 0) {
@@ -2502,11 +2652,8 @@
 
       function updateToolButton() {
         const toolButton = document.getElementById("send-button");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const toolsActorsList = toolsActorsInput.value
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s !== "");
+
+        const toolsActorsList = getActiveTools();
 
         // Disable tools if no actors are available
         if (toolsActorsList.length === 0) {
@@ -2551,21 +2698,23 @@
           inputContainer.classList.add("sidebar-collapsed");
         }
 
-        // Initialize tools management
+        // Initialize management
         initializeManagement();
       }
 
-      // Tool Management
+      // Management
       function initializeManagement() {
         // Tools
 
         const saveToolBtn = document.getElementById("save-tool-btn");
         const toolActorInput = document.getElementById("tool-actor");
+        const deleteAllToolsBtn = document.getElementById("delete-all-tools");
 
         //Sources
 
         const saveSourceBtn = document.getElementById("save-source-btn");
-        const sourceInput = document.getElementById("source");
+        const deleteAllSourcesBtn =
+          document.getElementById("delete-all-sources");
 
         // Add keypress event listener for Enter key
         toolActorInput.addEventListener("keypress", function (e) {
@@ -2575,16 +2724,22 @@
           }
         });
 
+        deleteAllToolsBtn.addEventListener("click", function (e) {
+          deleteAllTools();
+          loadSavedTools();
+          updateToolsActors();
+        });
+
+        deleteAllSourcesBtn.addEventListener("click", async function (e) {
+          await deleteAllSources();
+          loadSavedSources();
+        });
+
         // Load saved tools from localStorage
         loadSavedTools();
-        loadActiveTools();
-
-        // Load sources from localStorage
-        loadActiveSources();
 
         // Event Listeners
         saveToolBtn.addEventListener("click", saveTool);
-        saveSourceBtn.addEventListener("click", saveSource);
       }
 
       // Clear based on id of the input
@@ -2600,13 +2755,10 @@
           return;
         }
 
-        // Check for duplicates in both saved and active tools
         const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
-        const allTools = [...savedTools, ...activeTools];
 
         if (
-          allTools.some(
+          savedTools.some(
             (tool) => tool.actor.toLowerCase() === actor.toLowerCase()
           )
         ) {
@@ -2624,53 +2776,10 @@
         savedTools.push(tool);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
-        // Add to saved tools list and automatically activate it
-        addToActive(tool);
+        loadSavedTools();
 
         // Clear the form input
         clearForm("tool-actor");
-      }
-
-      function saveSource() {
-        const path = document.getElementById("source").value.trim();
-
-        if (!path) {
-          alert("Source path is required!");
-          return;
-        }
-
-        // Check for duplicates in both saved and active sources
-        const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
-        const allSources = [...savedSources, ...activeSources];
-
-        if (
-          allSources.some(
-            (source) => source.path.toLowerCase() === path.toLowerCase()
-          )
-        ) {
-          alert("This source already exists!");
-          return;
-        }
-
-        let split_path = path.split("/");
-
-        const source = {
-          id: Date.now().toString(),
-          path,
-          display_name: split_path[split_path.length - 1],
-          active: false,
-        };
-
-        // Save to localStorage
-        savedSources.push(source);
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
-
-        // Add to saved sources list and automatically activate it
-        addToActiveSources(source);
-
-        // Clear the form input
-        clearForm("source");
       }
 
       function getSavedTools() {
@@ -2679,52 +2788,77 @@
       }
 
       function getSavedSources() {
-        const tools = localStorage.getItem("savedSources");
-        return tools ? JSON.parse(tools) : [];
+        const sources = localStorage.getItem("savedSources");
+
+        if (!sources) {
+          return [];
+        }
+
+        const parsed_json = JSON.parse(sources);
+
+        return parsed_json.sources;
+      }
+
+      function getLocalOnlySources() {
+        const localSources = localStorage.getItem("localSources");
+
+        if (!localSources) {
+          return [];
+        }
+
+        return JSON.parse(localSources);
+      }
+
+      function getSavedSourcesExpanded() {
+        const source = localStorage.getItem("savedSources");
+
+        const parsed_json = JSON.parse(source);
+
+        return parsed_json;
       }
 
       function getActiveTools() {
-        const tools = localStorage.getItem("activeTools");
-        return tools ? JSON.parse(tools) : [];
+        const tools = localStorage.getItem("savedTools");
+
+        let savedTools = JSON.parse(tools);
+
+        return savedTools
+          ? savedTools.filter((tool) => tool.active == true)
+          : [];
       }
 
       function getActiveSources() {
-        const tools = localStorage.getItem("activeSources");
-        return tools ? JSON.parse(tools) : [];
+        const sources = localStorage.getItem("savedSources");
+
+        if (!sources) {
+          return [];
+        }
+
+        let savedSources = JSON.parse(sources);
+
+        return savedSources.sources.filter((source) => source.active == true);
       }
 
       function loadSavedTools() {
         const savedToolsList = document.getElementById("saved-tools-list");
         savedToolsList.innerHTML = "";
         const savedTools = getSavedTools();
-        const activeTools = getActiveTools();
 
-        // Filter out active tools from saved tools display
-        const availableTools = savedTools.filter(
-          (saved) => !activeTools.some((active) => active.id === saved.id)
-        );
-
-        availableTools.forEach((tool) => addToolToSavedList(tool));
+        savedTools.forEach((tool) => addToolToSavedList(tool));
       }
 
       function loadSavedSources() {
         const savedSourcesList = document.getElementById("saved-sources-list");
         savedSourcesList.innerHTML = "";
         const savedSources = getSavedSources();
-        const activeSources = getActiveSources();
+        const localOnlySources = getLocalOnlySources();
 
-        // Filter out active sources from saved sources display
-        const availableSources = savedSources.filter(
-          (saved) => !activeSources.some((active) => active.id === saved.id)
-        );
+        const allSources = [...savedSources, ...localOnlySources];
 
-        availableSources.forEach((source) => addSourceToSavedList(source));
+        allSources.forEach((source) => addSourceToSavedList(source));
       }
 
       async function fetchAvailableSources() {
-        let savedSources = getSavedSources();
-        let activeSources = getActiveSources();
-
         let endpoint = `${RAG_ENDPOINT}/sources`;
 
         const response = await fetch(endpoint, {
@@ -2733,6 +2867,8 @@
         });
 
         let body = await response.json();
+
+        let saved = getSavedSources();
 
         let maped_sources = body.sources.map((source_element) => {
           let split_path = source_element.source.split("/");
@@ -2747,274 +2883,345 @@
           return source;
         });
 
-        const grouped = Object.groupBy(body.sources, (item) => item.source);
+        const grouped = Object.groupBy(maped_sources, (item) => item.path);
 
-        const active = savedSources.filter((item1) =>
-          activeSources.some((item2) => item2.path === item1.path)
+        let keys = Object.keys(grouped).map((sourceLabel) => {
+          let exist = saved.find((element) => element.path == sourceLabel);
+
+          if (exist) {
+            return exist;
+          } else {
+            return {
+              active: false,
+              path: sourceLabel,
+            };
+          }
+        });
+
+        // let localSources = getLocalOnlySources();
+
+        localStorage.setItem(
+          "savedSources",
+          JSON.stringify({
+            sources: [...keys],
+            sourcesExpanded: maped_sources,
+          })
         );
-
-        const notSaved = maped_sources.filter(
-          (item1) => !savedSources.some((item2) => item2.path === item1.path)
-        );
-
-        let final_array = [...notSaved, ...savedSources];
-
-        localStorage.setItem("savedSources", JSON.stringify(final_array));
-
-        localStorage.setItem("activeSources", JSON.stringify(active));
 
         loadSavedSources();
-        loadActiveSources();
 
         return body.sources;
       }
 
-      function loadActiveTools() {
-        const activeToolsList = document.getElementById("active-tools-list");
-        activeToolsList.innerHTML = "";
-        const tools = getActiveTools();
-        tools.forEach((tool) => addToolToActiveList(tool));
-      }
-
-      function loadActiveSources() {
-        const activeSourcesList = document.getElementById(
-          "active-sources-list"
-        );
-        activeSourcesList.innerHTML = "";
-        const sources = getActiveSources();
-        sources.forEach((source) => addSourceToActiveList(source));
-      }
-
-      function addToolToActiveList(tool) {
-        const activeToolsList = document.getElementById("active-tools-list");
-        const toolElement = createToolElement(tool, true);
-        activeToolsList.appendChild(toolElement);
-      }
-
-      function addSourceToActiveList(source) {
-        const activeSourceList = document.getElementById("active-sources-list");
-        const sourceElement = createSourceElement(source, true);
-        activeSourceList.appendChild(sourceElement);
-      }
-
-      function addToActive(tool) {
-        const activeTools = getActiveTools();
-        if (!activeTools.some((t) => t.id === tool.id)) {
-          activeTools.push(tool);
-          localStorage.setItem("activeTools", JSON.stringify(activeTools));
-          addToolToActiveList(tool);
-          // Refresh saved tools list to remove the activated tool
-          loadSavedTools();
-          updateToolsActors();
-          updateToolButton();
-        }
-      }
-
-      function addToActiveSources(source) {
-        const activeSources = getActiveSources();
-        if (!activeSources.some((s) => s.id === source.id)) {
-          activeSources.push(source);
-          localStorage.setItem("activeSources", JSON.stringify(activeSources));
-          addSourceToActiveList(source);
-          // Refresh saved sources list to remove the activated source
-          loadSavedSources();
-          updateSources();
-        }
-      }
-
       function createToolElement(tool, isActive = false) {
         const toolElement = document.createElement("div");
-        toolElement.className = `tool-item${isActive ? " active" : ""}`;
+        toolElement.className = `tool-item`;
         toolElement.dataset.toolId = tool.id;
         toolElement.dataset.tooltip = tool.actor; // Add tooltip text
         toolElement.innerHTML = `
-          <div class="tool-item-header">
-            <span class="tool-icon"><i class="fas fa-wrench"></i></span>
-            <span class="tool-item-name">${tool.actor}</span>
-            <div class="tool-actions">
-              ${
-                isActive
-                  ? `
-                <button class="tool-action-btn delete-tool" title="Delete">
-                  <i class="fas fa-trash"></i>
-                </button>
-              `
-                  : `
-                <button class="tool-action-btn delete-tool" title="Delete">
-                  <i class="fas fa-trash"></i>
-                </button>
-              `
-              }
-            </div>
-          </div>
-        `;
+                <div class="tool-item-header">
+                  <span class="tool-icon"><i class="fas fa-wrench"></i></span>
+                  <span class="tool-item-name">${tool.actor}</span>
+                  <label class="switch">
+                      <input type="checkbox" class="tool-toggle" ${
+                        isActive ? "checked" : ""
+                      }>
+                      <span class="slider"></span>
+                  </label>
+                  <div class="tool-actions">
+                      <button class="tool-action-btn delete-tool" title="Delete">
+                        <i class="fas fa-trash"></i>
+                      </button>
+                  </div>
+                </div>
+              `;
 
         // Add event listeners
         const actions = toolElement.querySelector(".tool-actions");
 
-        if (isActive) {
-          toolElement.addEventListener("click", () => removeFromActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        } else {
-          toolElement.addEventListener("click", () => addToActive(tool));
-          actions
-            .querySelector(".delete-tool")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteTool(tool);
-            });
-        }
+        toolElement
+          .querySelector(".tool-toggle")
+          .addEventListener("change", (e) => {
+            e.stopPropagation();
+            setToolState(tool, e.target.checked);
+            updateToolsActors();
+          });
+
+        actions.querySelector(".delete-tool").addEventListener("click", (e) => {
+          e.stopPropagation(); // Prevent triggering the parent click
+          deleteTool(tool);
+          updateToolsActors();
+        });
 
         return toolElement;
       }
 
       function createSourceElement(source, isActive = false) {
         const sourceElement = document.createElement("div");
-        sourceElement.className = `source-item${isActive ? " active" : ""}`;
+        sourceElement.className = `source-item`;
         sourceElement.dataset.sourceId = source.id;
-        sourceElement.dataset.tooltip = source.path; // Add tooltip text
+        sourceElement.dataset.tooltip = source.path;
         sourceElement.innerHTML = `
-				<div class="source-item-header">
-					<span class="source-icon"><i class="fa-solid fa-book"></i></span>
-					<span class="source-item-name">${source.path}</span>
-					<div class="source-actions">
-					${
-            isActive
-              ? `
-						<button class="source-action-btn delete-source" title="Delete">
-						<i class="fas fa-trash"></i>
-						</button>
-					`
-              : `
-						<button class="source-action-btn delete-source" title="Delete">
-						<i class="fas fa-trash"></i>
-						</button>
-					`
-          }
-					</div>
-				</div>
-				`;
+        <div class="source-item-header">
+            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+            <span class="source-item-name">${source.path}</span>
+            ${
+              source.isLocal
+                ? ""
+                : `<label class="switch">
+                    <input type="checkbox" class="source-toggle" ${
+                      isActive ? "checked" : ""
+                    }>
+                    <span class="slider"></span>
+                </label>`
+            }
+            <span id="upload-button" class="upload-icon upload-button" title="Upload file to source">
+                <i class="fa-solid fa-paperclip"></i>
+                <input type="file" id="file-input" class="file-input" style="display: none" />
+            </span>
+            <span class="upload-status" style="display: none; font-size: 12px; margin-left: 10px;"></span>
+            <div class="source-actions">
+                <button class="source-action-btn delete-source" title="Delete">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    `;
 
-        // Add event listeners
-        const actions = sourceElement.querySelector(".source-actions");
-
-        if (isActive) {
-          sourceElement.addEventListener("click", () =>
-            removeFromActiveSource(source)
-          );
-          actions
-            .querySelector(".delete-source")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteSource(source);
-            });
-        } else {
-          sourceElement.addEventListener("click", () =>
-            addToActiveSources(source)
-          );
-          actions
-            .querySelector(".delete-source")
-            .addEventListener("click", (e) => {
-              e.stopPropagation(); // Prevent triggering the parent click
-              deleteSource(source);
+        if (!source.isLocal) {
+          sourceElement
+            .querySelector(".source-toggle")
+            .addEventListener("change", (e) => {
+              e.stopPropagation();
+              setSourceState(source, e.target.checked);
             });
         }
+
+        sourceElement
+          .querySelector(".delete-source")
+          .addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (source.isLocal) {
+              deleteFromLocalSources(source);
+            } else {
+              let uploadButton = sourceElement.querySelector(".upload-button");
+              let uploadStatus = sourceElement.querySelector(".upload-status");
+              let switchElement = sourceElement.querySelector(".switch");
+
+              uploadButton.style.pointerEvents = "none";
+              uploadButton.style.display = "none";
+              uploadStatus.style.display = "inline";
+              uploadStatus.innerText = "Deleting...";
+
+              if (switchElement) {
+                switchElement.style.display = "none";
+              }
+
+              try {
+                await deleteSources([source.path]);
+                uploadStatus.innerText = "Delete Complete!";
+              } catch (error) {
+                uploadStatus.innerText = "Delete Failed!";
+              } finally {
+                setTimeout(() => {
+                  uploadButton.style.display = "block";
+                  uploadButton.style.pointerEvents = "auto";
+
+                  if (switchElement) {
+                    switchElement.style.display = "block";
+                  }
+                }, 2000);
+              }
+            }
+          });
+
+        sourceElement
+          .querySelector(".upload-button")
+          .addEventListener("click", function () {
+            sourceElement.querySelector(".file-input").click();
+          });
+
+        sourceElement
+          .querySelector(".file-input")
+          .addEventListener("change", async function (event) {
+            const file = event.target.files[0];
+
+            let uploadButton = sourceElement.querySelector(".upload-button");
+            let uploadStatus = sourceElement.querySelector(".upload-status");
+            let newSourceButton = document.getElementById("new-source");
+            let switchElement = sourceElement.querySelector(".switch");
+
+            uploadButton.style.pointerEvents = "none";
+            uploadButton.style.display = "none";
+            uploadStatus.style.display = "inline";
+            uploadStatus.innerText = "Processing...";
+            newSourceButton.disabled = true;
+
+            if (switchElement) {
+              switchElement.style.display = "none";
+            }
+
+            try {
+              await uploadAndIndexSource(file, source);
+              uploadStatus.innerText = "Upload Complete!";
+            } catch (error) {
+              uploadStatus.innerText = "Upload Failed!";
+            } finally {
+              newSourceButton.disabled = false;
+              setTimeout(() => {
+                uploadButton.style.display = "block";
+                uploadButton.style.pointerEvents = "auto";
+
+                if (switchElement) {
+                  switchElement.style.display = "block";
+                }
+              }, 2000);
+            }
+          });
 
         return sourceElement;
       }
 
+      function addNewSource() {
+        let sourceValue = document.getElementById("source").value.trim();
+
+        if (!sourceValue) {
+          alert("Please type a valid source.");
+          return;
+        }
+
+        if (sourceValue[0] != "/") {
+          sourceValue = `/${sourceValue}`;
+        }
+
+        const savedSources = getSavedSources();
+        const localOnlySources = getLocalOnlySources();
+
+        const allSources = [...savedSources, ...localOnlySources];
+
+        if (allSources.some((element) => element.path == sourceValue)) {
+          alert("Source already exists.");
+          return;
+        }
+
+        const source = {
+          path: sourceValue,
+          active: false,
+          isLocal: true,
+        };
+
+        localOnlySources.push(source);
+
+        localStorage.setItem("localSources", JSON.stringify(localOnlySources));
+
+        document.getElementById("source").value = "";
+
+        loadSavedSources();
+      }
+
       function addToolToSavedList(tool) {
         const savedToolsList = document.getElementById("saved-tools-list");
-        const toolElement = createToolElement(tool, false);
+        const toolElement = createToolElement(tool, tool.active);
         savedToolsList.appendChild(toolElement);
       }
 
       function addSourceToSavedList(source) {
         const savedSourcesList = document.getElementById("saved-sources-list");
-        const sourceElement = createSourceElement(source, false);
+        const sourceElement = createSourceElement(source, source.active);
         savedSourcesList.appendChild(sourceElement);
       }
 
-      function removeFromActive(tool) {
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-        loadActiveTools();
-        // Refresh saved tools list to show the deactivated tool
-        loadSavedTools();
-        updateToolsActors();
-        updateToolButton();
+      function setSourceState(activeSource, state) {
+        let savedSourcesExpanded = getSavedSourcesExpanded();
+
+        let sources = savedSourcesExpanded.sources;
+
+        savedSourcesExpanded.sources = savedSourcesExpanded.sources.map(
+          (source) =>
+            source.path == activeSource.path
+              ? { ...source, active: state }
+              : source
+        );
+
+        localStorage.setItem(
+          "savedSources",
+          JSON.stringify(savedSourcesExpanded)
+        );
       }
 
-      function removeFromActiveSource(source) {
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
+      function setToolState(activeTool, state) {
+        let savedTools = getSavedTools();
+
+        savedTools = savedTools.map((tool) =>
+          tool.id == activeTool.id ? { ...tool, active: state } : tool
         );
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
-        loadActiveSources();
-        // Refresh saved tools list to show the deactivated tool
-        loadSavedSources();
-        updateSources();
+
+        localStorage.setItem("savedTools", JSON.stringify(savedTools));
       }
 
       function deleteTool(tool) {
         const savedTools = getSavedTools().filter((t) => t.id !== tool.id);
         localStorage.setItem("savedTools", JSON.stringify(savedTools));
 
-        // Also remove from active if present
-        const activeTools = getActiveTools().filter((t) => t.id !== tool.id);
-        localStorage.setItem("activeTools", JSON.stringify(activeTools));
-
         loadSavedTools();
-        loadActiveTools();
         updateToolsActors();
         updateToolButton();
       }
 
-      function deleteSource(source) {
-        const savedSources = getSavedSources().filter(
-          (s) => s.id !== source.id
+      function deleteAllTools() {
+        localStorage.removeItem("savedTools");
+      }
+
+      async function deleteSources(sources) {
+        const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sources: sources,
+          }),
+        });
+
+        await fetchAvailableSources();
+
+        loadSavedSources();
+        updateSources();
+      }
+
+      function deleteFromLocalSources(source) {
+        const localSources = getLocalOnlySources();
+
+        localStorage.setItem(
+          "localSources",
+          JSON.stringify(
+            localSources.filter((element) => element.path != source.path)
+          )
         );
-        localStorage.setItem("savedSources", JSON.stringify(savedSources));
 
-        // Also remove from active if present
-        const activeSources = getActiveSources().filter(
-          (s) => s.id !== source.id
-        );
-        localStorage.setItem("activeSources", JSON.stringify(activeSources));
+        loadSavedSources();
+      }
 
-        (async () => {
-          const deleteResponse = await fetch(`${RAG_ENDPOINT}/delete_source`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              sources: [source.path],
-            }),
-          });
+      async function deleteAllSources() {
+        let savedSources = getSavedSources().map((source) => source.path);
 
-          await fetchAvailableSources();
-
-          loadSavedSources();
-          loadActiveSources();
-          updateSources();
-        })();
+        const deleteAllElemenet = document.getElementById("delete-all-text");
+        try {
+          deleteAllElemenet.innerText = "Deleting...";
+          await deleteSources(savedSources);
+        } catch {
+        } finally {
+          localStorage.removeItem("savedSources");
+          localStorage.removeItem("localSources");
+          deleteAllElemenet.innerText = "Delete all";
+        }
       }
 
       function updateToolsActors() {
         const activeTools = getActiveTools();
-        const actors = activeTools.map((tool) => tool.actor);
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        toolsActorsInput.value = actors.join(", ");
-        localStorage.setItem("toolsActors", actors.join(", "));
 
         // Update tools state based on actors
-        if (actors.length === 0) {
+        if (activeTools.length === 0) {
           toolsEnabled = false;
         }
         updateToolButton();
@@ -3035,11 +3242,13 @@
         }
       }
 
-      // Toggle sidebar visibility
       function toggleSidebar() {
         const sidebar = document.getElementById("sidebar");
         const mainContent = document.getElementById("main-content");
         const inputContainer = document.getElementById("input-container");
+        const resizer = document.getElementById("resizer");
+
+        sidebar.style.width = "";
 
         sidebarVisible = !sidebarVisible;
         localStorage.setItem("sidebarVisible", sidebarVisible);
@@ -3048,7 +3257,6 @@
         mainContent.classList.toggle("sidebar-collapsed");
         inputContainer.classList.toggle("sidebar-collapsed");
 
-        // Force recalculation of chat container scroll
         chatContainer.scrollTop = chatContainer.scrollHeight;
       }
 
@@ -3072,17 +3280,10 @@
 
         // Load stored tools state
         const storedToolsEnabled = localStorage.getItem("toolsEnabled");
-        const toolsActorsInput = document.getElementById("tools-actors-input");
-        const storedToolsActors = localStorage.getItem("toolsActors");
 
         // Load stored sources state
         const sourcesInput = document.getElementById("sources-input");
         const storedSources = localStorage.getItem("sources");
-
-        // First load the tools actors and sources
-        if (storedToolsActors) {
-          toolsActorsInput.value = storedToolsActors;
-        }
 
         if (storedSources) {
           sourcesInput.value = storedSources;
@@ -3092,11 +3293,7 @@
         if (storedToolsEnabled !== null) {
           toolsEnabled = storedToolsEnabled === "true";
 
-          // Validate the state against available tools
-          const toolsActorsList = toolsActorsInput.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s !== "");
+          const toolsActorsList = getActiveTools();
 
           if (toolsActorsList.length === 0) {
             toolsEnabled = false;
@@ -3105,12 +3302,6 @@
 
         updateToolButton();
         updateThinkButton();
-
-        // Add change listener for tools actors
-        toolsActorsInput.addEventListener("change", function () {
-          localStorage.setItem("toolsActors", toolsActorsInput.value);
-          updateToolButton();
-        });
 
         // Add click handler for input container
         const inputContainer = document.getElementById("input-container");
@@ -3137,11 +3328,11 @@
       (function () {
         const style = document.createElement("style");
         style.textContent = `
-          .action-button[style*="cursor: not-allowed"]:hover {
-            background: var(--bg-secondary) !important;
-            border-color: var(--border-color) !important;
-          }
-        `;
+                    .action-button[style*="cursor: not-allowed"]:hover {
+                      background: var(--bg-secondary) !important;
+                      border-color: var(--border-color) !important;
+                    }
+                  `;
         document.head.appendChild(style);
       })();
 
