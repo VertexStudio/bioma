@@ -229,6 +229,33 @@
       const lastUpdatedElement = document.getElementById("last-updated");
       const refreshButton = document.getElementById("refresh-button");
 
+      // Intersection Observer to detect when the container is visible
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            //("Intersection state:", entry.isIntersecting);
+            if (entry.isIntersecting) {
+              //console.log("Container is visible, starting refresh");
+
+              setupHealthStatusRefresh();
+            } else {
+              //console.log("Container is hidden, clearing interval");
+
+              if (window.healthInterval) {
+                window.clearInterval(window.healthInterval);
+                window.healthInterval = null;
+              }
+            }
+          });
+        },
+        {
+          threshold: 0.1, // Will trigger when 10% of the container is visible
+        }
+      );
+
+      // Start observing the container
+      observer.observe(container);
+
       function displayError(message) {
         container.innerHTML = `
         <div class="error-container" style="grid-column: 1 / -1;">
@@ -236,6 +263,17 @@
           <p>${message}</p>
         </div>
       `;
+      }
+
+      // Helper function to check if an element is visible
+      function isElementVisible(element) {
+        return new Promise((resolve) => {
+          const observer = new IntersectionObserver((entries) => {
+            resolve(entries[0]);
+            observer.disconnect();
+          });
+          observer.observe(element);
+        });
       }
 
       function updateLastUpdated() {
@@ -250,8 +288,15 @@
       }
 
       async function fetchHealth() {
-        console.log("Fetching health status...");
+        //console.log("Fetching health status...");
         try {
+          // Verificar visibilidad antes de hacer el fetch
+          const entry = await isElementVisible(container);
+          if (!entry.isIntersecting) {
+            //console.log("Container not visible, skipping fetch");
+            return;
+          }
+
           const response = await fetch("http://0.0.0.0:5766/health", {
             method: "GET",
             timeout: 5000,
@@ -262,7 +307,7 @@
           }
 
           const data = await response.json();
-          console.log("Health API Response:", data);
+          //console.log("Health API Response:", data);
           container.innerHTML = "";
 
           // Orders the services alphabetically
@@ -271,7 +316,7 @@
           );
 
           for (const [name, info] of sortedEntries) {
-            console.log(`Processing service: ${name}`, info);
+            //console.log(`Processing service: ${name}`, info);
 
             const div = document.createElement("div");
             div.className = `service ${
@@ -285,7 +330,7 @@
               info.is_healthy &&
               info.health?.models?.length > 0
             ) {
-              console.log("Models found for Ollama:", info.health.models);
+              //console.log("Models found for Ollama:", info.health.models);
               let totalVram = 0;
 
               extraInfo += '<div class="ollama-container">';
@@ -294,47 +339,46 @@
               info.health.models.forEach((modelInfo) => {
                 totalVram += modelInfo.size_vram;
                 extraInfo += `
-                <div class="ollama-model">
-                    <p>
-                      <strong>
-                        ${modelInfo.model} - VRAM: ${(
+              <div class="ollama-model">
+                  <p>
+                    <strong>
+                      ${modelInfo.model} - VRAM: ${(
                   modelInfo.size_vram /
                   1024 /
                   1024
                 ).toFixed(2)}
-                  MB    </strong>
-                  </p>
-                </div>
-                `;
+                MB    </strong>
+                </p>
+              </div>
+              `;
               });
 
-              // Show total VRAM used if there are multiple models
               if (info.health.models.length > 1) {
                 extraInfo += `
-                      <p><strong>Total VRAM Used:</strong> ${(
-                        totalVram /
-                        1024 /
-                        1024
-                      ).toFixed(2)} MB</p>
-                    `;
+                    <p><strong>Total VRAM Used:</strong> ${(
+                      totalVram /
+                      1024 /
+                      1024
+                    ).toFixed(2)} MB</p>
+                  `;
               }
 
               extraInfo += "</div>";
             }
 
             div.innerHTML = `
-            <h3>${name
-              .replace(/_/g, " ")
-              .toLowerCase()
-              .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
-            <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
-            ${
-              !info.is_healthy
-                ? `<p class='error-message'>Error: ${info.error}</p>`
-                : ""
-            }
-            ${extraInfo}
-          `;
+          <h3>${name
+            .replace(/_/g, " ")
+            .toLowerCase()
+            .replace(/\b\w/g, (char) => char.toUpperCase())}</h3>
+          <p>Status: ${info.is_healthy ? "Healthy" : "Unhealthy"}</p>
+          ${
+            !info.is_healthy
+              ? `<p class='error-message'>Error: ${info.error}</p>`
+              : ""
+          }
+          ${extraInfo}
+        `;
 
             container.appendChild(div);
           }
@@ -348,8 +392,10 @@
       }
 
       function setupHealthStatusRefresh() {
+        //console.log("Setting up health status refresh...");
         // Clear any existing intervals to prevent multiple timers
         if (window.healthInterval) {
+          //console.log("Clearing existing interval");
           window.clearInterval(window.healthInterval);
         }
 

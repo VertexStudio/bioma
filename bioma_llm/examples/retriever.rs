@@ -1,5 +1,5 @@
 use bioma_actor::prelude::*;
-use bioma_llm::prelude::*;
+use bioma_llm::{indexer::GlobsContent, prelude::*};
 use clap::Parser;
 use retriever::RetrieveQuery;
 use tracing::{error, info};
@@ -87,9 +87,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send globs to the indexer actor
     info!("Indexing");
-    let index_globs = IndexGlobs::builder().globs(globs).build();
+    let index_globs =
+        Index::builder().content(IndexContent::Globs(GlobsContent::builder().globs(globs).build())).build();
     let _indexer = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
+        .send_and_wait_reply::<Indexer, Index>(
             index_globs,
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),

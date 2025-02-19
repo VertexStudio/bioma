@@ -9,8 +9,8 @@ use actix_web::{
 };
 use api_schema::{
     AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexGlobsRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat,
-    ThinkQueryRequestSchema, UploadRequestSchema,
+    IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema,
+    UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -167,7 +167,7 @@ impl Default for UploadConfig {
 ///
 /// 2. **File Processing:**
 ///    - **Zip Files:**  
-///      If the uploaded file’s original filename ends with `.zip`, it is treated as a zip archive:
+///      If the uploaded file's original filename ends with `.zip`, it is treated as a zip archive:
 ///        - The file is first copied to a temporary location.
 ///        - The zip archive is opened, and the function scans all entries to check for a common top-level
 ///          folder. During extraction, that common prefix (if present) is stripped.
@@ -395,32 +395,49 @@ async fn upload_config() -> impl Responder {
 #[utoipa::path(
     post,
     path = "/index",
-    description =   "Receives an array of path of files to index.</br>
-                    If `source` is not specified, it will will default to `/global`.",
-    request_body(content = IndexGlobsRequestSchema, examples(
-        ("basic" = (summary = "Basic", value = json!({
+    description =   "Index content from various sources (files, texts, or images).</br>
+                    If `source` is not specified, it will default to `/global`.",
+    request_body(content = IndexRequestSchema, examples(
+        ("globs" = (summary = "Index files using glob patterns", value = json!({
             "source": "/bioma",
             "globs": ["./path/to/files/**/*.rs"], 
             "chunk_capacity": {"start": 500, "end": 2000},
-            "chunk_overlap": 200
+            "chunk_overlap": 200,
+            "chunk_batch_size": 50,
+            "summarize": false
         }))),
+        ("texts" = (summary = "Index text content directly", value = json!({
+            "source": "/bioma",
+            "texts": ["This is some text to index", "Here is another text"],
+            "mime_type": "text/plain",
+            "chunk_capacity": {"start": 500, "end": 2000},
+            "chunk_overlap": 200,
+            "chunk_batch_size": 50,
+            "summarize": false
+        }))),
+        ("images" = (summary = "Index base64 encoded images", value = json!({
+            "source": "/bioma",
+            "images": ["base64_encoded_image_data"],
+            "mime_type": "image/jpeg",
+            "summarize": false
+        })))
     )),
     responses(
         (status = 200, description = "Ok"),
     )
 )]
-async fn index(body: web::Json<IndexGlobsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_globs: IndexGlobs = body.clone().into();
+    let index_request: Index = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response = user_actor
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
-            index_globs,
+        .send_and_wait_reply::<Indexer, Index>(
+            index_request,
             &data.indexer,
             SendOptions::builder().timeout(Duration::from_secs(600)).build(),
         )
@@ -476,7 +493,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -631,7 +648,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
     // Retrieve relevant context based on the user's query
     let retrieve_context = RetrieveContext {
         query: RetrieveQuery::Text(query.clone()),
-        limit: 5,
+        limit: data.config.retrieve_limit,
         threshold: 0.0,
         sources: body.sources.clone(),
     };
@@ -640,7 +657,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -653,18 +670,22 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             // Preserve user-provided system message if present, otherwise use default (our own system prompt)
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
-                let filtered = body.messages[..body.messages.len() - 1]
-                    .iter()
-                    .filter(|msg| {
-                        if msg.role == MessageRole::System {
-                            sys_msg = Some((*msg).clone());
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
+                let filtered = if !body.messages.is_empty() {
+                    body.messages[..body.messages.len() - 1]
+                        .iter()
+                        .filter(|msg| {
+                            if msg.role == MessageRole::System {
+                                sys_msg = Some((*msg).clone());
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 (sys_msg, filtered)
             };
 
@@ -719,11 +740,17 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
+
+                // Build conversation with messages if present
                 if !body.messages.is_empty() {
                     conversation.extend(filtered_messages);
                     conversation.push(context_message.clone());
-                    conversation.push(body.messages[body.messages.len() - 1].clone());
+                    // Only add last message if it exists
+                    if let Some(last_message) = body.messages.last() {
+                        conversation.push(last_message.clone());
+                    }
                 } else {
+                    // If no messages, just use the context message
                     conversation.push(context_message.clone());
                 }
 
@@ -743,7 +770,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                                 tools: Some(client_tools.into_iter().map(Into::into).collect()),
                             },
                             &data.chat,
-                            SendOptions::default(),
+                            SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                         )
                         .await;
 
@@ -767,11 +794,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                 for actor_id in &body.tools_actors {
                     let actor_id = ActorId::of::<ToolsHub>(actor_id.clone());
                     let tool_info = user_actor
-                        .send_and_wait_reply::<ToolsHub, ListTools>(
-                            ListTools(None),
-                            &actor_id,
-                            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-                        )
+                        .send_and_wait_reply::<ToolsHub, ListTools>(ListTools(None), &actor_id, SendOptions::default())
                         .await;
                     match tool_info {
                         Ok(tool_info) => {
@@ -972,7 +995,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
 
     let retrieve_context = RetrieveContext {
         query: RetrieveQuery::Text(query.clone()),
-        limit: 5,
+        limit: data.config.retrieve_limit,
         threshold: 0.0,
         sources: body.sources.clone(),
     };
@@ -981,7 +1004,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await
     {
@@ -998,18 +1021,22 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     // Preserve user-provided system message if present, otherwise use default (our own system prompt)
     let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
         let mut sys_msg = None;
-        let filtered = body.messages[..body.messages.len() - 1]
-            .iter()
-            .filter(|msg| {
-                if msg.role == MessageRole::System {
-                    sys_msg = Some((*msg).clone());
-                    false
-                } else {
-                    true
-                }
-            })
-            .cloned()
-            .collect();
+        let filtered = if !body.messages.is_empty() {
+            body.messages[..body.messages.len() - 1]
+                .iter()
+                .filter(|msg| {
+                    if msg.role == MessageRole::System {
+                        sys_msg = Some((*msg).clone());
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
         (sys_msg, filtered)
     };
 
@@ -1137,12 +1164,11 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             tools: None,
         };
 
-        // Use send() to get a stream instead of send_and_wait_reply()
         let mut chat_response = match user_actor
             .send::<Chat, ChatMessages>(
                 chat_request,
                 &data.think_chat,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+                SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )
             .await
         {
@@ -1304,7 +1330,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
     info!("Sending message to retriever actor");
     let retrieve_context = RetrieveContext {
         query: RetrieveQuery::Text(query.clone()),
-        limit: 5,
+        limit: data.config.retrieve_limit,
         threshold: 0.0,
         sources: body.sources.clone(),
     };
@@ -1313,7 +1339,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -1325,18 +1351,22 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
             // Preserve user-provided system message if present, otherwise use default (our own system prompt)
             let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
                 let mut sys_msg = None;
-                let filtered = body.messages[..body.messages.len() - 1]
-                    .iter()
-                    .filter(|msg| {
-                        if msg.role == MessageRole::System {
-                            sys_msg = Some((*msg).clone());
-                            false
-                        } else {
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
+                let filtered = if !body.messages.is_empty() {
+                    body.messages[..body.messages.len() - 1]
+                        .iter()
+                        .filter(|msg| {
+                            if msg.role == MessageRole::System {
+                                sys_msg = Some((*msg).clone());
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 (sys_msg, filtered)
             };
 
@@ -1405,7 +1435,7 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
                         tools: None,
                     },
                     &data.chat,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                 )
                 .await;
 
@@ -1451,7 +1481,7 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
         .send_and_wait_reply::<Indexer, DeleteSource>(
             delete_source,
             &data.indexer,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await;
 
@@ -1543,7 +1573,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
                     .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                         GenerateEmbeddings { content: EmbeddingContent::Text(chunk.to_vec()) },
                         &data.embeddings,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                     )
                     .await
                 {
@@ -1561,7 +1591,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
                 .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                     GenerateEmbeddings { content: embedding_content },
                     &data.embeddings,
-                    SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                 )
                 .await
             {
@@ -1615,7 +1645,7 @@ async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppStat
         .send_and_wait_reply::<Rerank, RankTexts>(
             rank_texts,
             &data.rerank,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(120)).build(),
+            SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
         .await
     {
@@ -1675,9 +1705,9 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
 #[utoipa::path(
     get,
     path = "/sources",
-    description = "List all indexed sources with their embedding counts.",
+    description = "List all indexed sources.",
     responses(
-        (status = 200, description = "List of sources with their embedding counts"),
+        (status = 200, description = "List of sources"),
     )
 )]
 async fn list_sources(data: web::Data<AppState>) -> HttpResponse {
@@ -1688,11 +1718,7 @@ async fn list_sources(data: web::Data<AppState>) -> HttpResponse {
 
     info!("Fetching list of sources");
     let response = user_actor
-        .send_and_wait_reply::<Retriever, ListSources>(
-            ListSources,
-            &data.retriever,
-            SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
-        )
+        .send_and_wait_reply::<Retriever, ListSources>(ListSources, &data.retriever, SendOptions::default())
         .await;
 
     match response {
@@ -1750,10 +1776,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Indexer setup
     let indexer_id = ActorId::of::<Indexer>("/rag/indexer");
+    let mut indexer = Indexer::default();
+    indexer.summary = Summary::builder()
+        .chat(Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build())
+        .text_prompt(config.summary_text_prompt.clone())
+        .build();
+
     let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
         engine.clone(),
         indexer_id.clone(),
-        Indexer::default(),
+        indexer,
         SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
     )
     .await?;
@@ -1877,7 +1909,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
         App::new()
-            .wrap(Logger::default())
+            .wrap(Logger::default().exclude_regex("^/health"))
             .wrap(cors)
             .app_data(data.clone())
             .app_data(

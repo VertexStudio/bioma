@@ -75,14 +75,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send globs to the indexer actor
     info!("Indexing");
-    let index_globs = IndexGlobs::builder()
-        .globs(vec![
-            // workspace_root.clone() + "/**/*.surql",
-            workspace_root.clone() + "/**/*.toml",
-        ])
+    let index_globs = Index::builder()
+        .source(workspace_root.clone())
+        .content(IndexContent::Globs(
+            GlobsContent::builder()
+                .globs(vec![
+                    // workspace_root.clone() + "/**/*.surql",
+                    workspace_root.clone() + "/**/*.toml",
+                ])
+                .build(),
+        ))
         .build();
     let _indexer = relay_ctx
-        .send_and_wait_reply::<Indexer, IndexGlobs>(
+        .send_and_wait_reply::<Indexer, Index>(
             index_globs,
             &indexer_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
