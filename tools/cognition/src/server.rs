@@ -8,8 +8,8 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, AskResponseSchema, ChatQuery, EmbeddingsQueryRequestSchema, IndexRequestSchema,
-    RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
+    AskQueryRequestSchema, ChatQuery, EmbeddingsQueryRequestSchema, IndexRequestSchema, RetrieveContextRequest,
+    RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -1358,7 +1358,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     )
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct AskResponse {
     #[serde(flatten)]
     response: ChatMessageResponse,
@@ -1442,7 +1442,7 @@ struct AskResponse {
         })))
     )),
     responses(
-        (status = 200, description = "Structured chat response", body = AskResponseSchema, content_type = "application/json", examples(
+        (status = 200, description = "Structured chat response", body = AskResponse, content_type = "application/json", examples(
             ("basic_response" = (summary = "Structured response", value = json!({
                 "model": "llama2",
                 "created_at": "2024-03-14T10:30:00Z",

@@ -2,7 +2,7 @@ use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartF
 use bioma_llm::{
     chat,
     indexer::{ImagesContent, TextsContent},
-    prelude::{ChatMessage, ChatMessageResponse, GlobsContent, Index, IndexContent, RetrieveContext, TextChunkConfig},
+    prelude::{ChatMessage, GlobsContent, Index, IndexContent, RetrieveContext, TextChunkConfig},
     retriever::default_retriever_sources,
 };
 use ollama_rs::generation::tools::ToolInfo;
@@ -91,17 +91,6 @@ pub struct AskQueryRequestSchema {
     /// Optional schema for structured output format
     #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
-}
-
-/// Response schema for ask operation
-#[derive(ToSchema, Debug, Serialize)]
-pub struct AskResponseSchema {
-    #[serde(flatten)]
-    pub response: ChatMessageResponse,
-
-    /// The conversation context used to generate the response
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub context: Vec<ChatMessage>,
 }
 
 //------------------------------------------------------------------------------
@@ -200,18 +189,6 @@ pub struct IndexImagesRequestSchema {
 
 fn default_source() -> String {
     "/global".to_string()
-}
-
-/// Configuration for text chunk capacity
-#[derive(ToSchema, Clone, Serialize, Deserialize)]
-pub struct ChunkCapacityRequestSchema {
-    /// Minimum number of tokens in a chunk
-    #[schema(minimum = 0)]
-    pub start: usize,
-
-    /// Maximum number of tokens in a chunk
-    #[schema(minimum = 0)]
-    pub end: usize,
 }
 
 impl Into<Index> for IndexRequestSchema {
