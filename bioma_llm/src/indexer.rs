@@ -79,17 +79,18 @@ pub struct Index {
     pub summarize: bool,
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkCapacity {
     pub start: usize,
     pub end: usize,
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextChunkConfig {
     /// Configuration for text chunk size limits
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
+    #[schema(value_type = ChunkCapacity)]
     pub chunk_capacity: std::ops::Range<usize>,
 
     /// The chunk overlap
@@ -109,7 +110,7 @@ impl Default for TextChunkConfig {
     }
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct GlobsContent {
     /// List of glob patterns
     pub globs: Vec<String>,
@@ -121,7 +122,7 @@ pub struct GlobsContent {
     pub config: TextChunkConfig,
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextsContent {
     /// The texts to index
     pub texts: Vec<String>,
@@ -142,7 +143,7 @@ fn default_text_mime_type() -> String {
     "text/plain".to_string()
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ImagesContent {
     /// The base64 encoded images
     pub images: Vec<String>,
