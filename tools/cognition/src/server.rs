@@ -1188,12 +1188,12 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             .tools
             .iter()
             .map(|t| {
-                let params = serde_json::to_string_pretty(&t.function.parameters)
+                let params = serde_json::to_string_pretty(&t.function().parameters)
                     .unwrap_or_else(|_| "Unable to parse parameters".to_string());
                 format!(
                     "- {}: {}\n  Parameters:\n{}",
-                    t.function.name,
-                    t.function.description,
+                    t.function().name,
+                    t.function().description,
                     params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
                 )
             })

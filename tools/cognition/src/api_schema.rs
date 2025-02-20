@@ -62,7 +62,7 @@ pub struct ThinkQueryRequestSchema {
 
     /// List of available tools for thinking
     #[serde(default)]
-    pub tools: Vec<ToolInfoSchema>,
+    pub tools: Vec<ToolInfo>,
 
     /// List of tool actor identifiers
     #[serde(default)]
@@ -363,46 +363,3 @@ pub struct UploadRequestSchema {
 //------------------------------------------------------------------------------
 // Tool Schemas
 //------------------------------------------------------------------------------
-
-/// Type of tool available
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-pub enum ToolTypeSchema {
-    #[serde(rename = "function")]
-    Function,
-}
-
-/// Information about a tool's function
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-pub struct ToolFunctionInfoSchema {
-    /// Name of the function
-    pub name: String,
-
-    /// Description of what the function does
-    pub description: String,
-
-    /// JSON Schema describing the function parameters
-    #[schema(value_type = Schema::Object)]
-    pub parameters: schemars::schema::RootSchema,
-}
-
-/// Complete tool information
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-#[schema(title = "ToolInfo")]
-pub struct ToolInfoSchema {
-    /// Type of the tool
-    #[serde(rename = "type")]
-    pub tool_type: ToolTypeSchema,
-
-    /// Function information for the tool
-    pub function: ToolFunctionInfoSchema,
-}
-
-impl From<ToolInfoSchema> for ToolInfo {
-    fn from(schema: ToolInfoSchema) -> Self {
-        ToolInfo::from_schema(
-            schema.function.name.into(),
-            schema.function.description.into(),
-            schema.function.parameters,
-        )
-    }
-}

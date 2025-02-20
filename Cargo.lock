@@ -4168,6 +4168,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.2.5"
+source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=b517e0ae11604418081836f2be7a21f0c689d429#b517e0ae11604418081836f2be7a21f0c689d429"
 dependencies = [
  "async-stream",
  "log",
