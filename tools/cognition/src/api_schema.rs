@@ -7,14 +7,13 @@ use bioma_llm::{
 };
 use ollama_rs::generation::tools::ToolInfo;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 
 //------------------------------------------------------------------------------
 // Chat Module Schemas
 //------------------------------------------------------------------------------
 
 /// Request schema for chat completion
-#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ChatQueryRequest {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
@@ -46,7 +45,7 @@ fn default_chat_stream() -> bool {
 }
 
 /// Request schema for think operation
-#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ThinkQueryRequest {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
@@ -78,7 +77,7 @@ fn default_think_stream() -> bool {
 }
 
 /// Request schema for asking a question
-#[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct AskQueryRequest {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
@@ -98,7 +97,7 @@ pub struct AskQueryRequest {
 //------------------------------------------------------------------------------
 
 /// Available embedding models
-#[derive(ToSchema, Deserialize)]
+#[derive(utoipa::ToSchema, Deserialize)]
 pub enum ModelEmbed {
     #[serde(rename = "nomic-embed-text")]
     NomicEmbedTextV15,
@@ -107,7 +106,7 @@ pub enum ModelEmbed {
 }
 
 /// Request schema for generating embeddings
-#[derive(ToSchema, Deserialize)]
+#[derive(utoipa::ToSchema, Deserialize)]
 pub struct EmbeddingsQueryRequest {
     /// The embedding model to use
     pub model: ModelEmbed,
@@ -121,7 +120,7 @@ pub struct EmbeddingsQueryRequest {
 //------------------------------------------------------------------------------
 
 /// Request schema for indexing content
-#[derive(ToSchema, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IndexRequest {
     /// Index content using glob patterns
@@ -133,7 +132,7 @@ pub enum IndexRequest {
 }
 
 /// Request schema for indexing files using glob patterns
-#[derive(ToSchema, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexGlobs {
     /// The glob patterns to match files for indexing
     #[serde(flatten)]
@@ -151,7 +150,7 @@ pub struct IndexGlobs {
 }
 
 /// Request schema for indexing text content directly
-#[derive(ToSchema, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexTexts {
     /// The text content to index
     #[serde(flatten)]
@@ -169,7 +168,7 @@ pub struct IndexTexts {
 }
 
 /// Request schema for indexing image content
-#[derive(ToSchema, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Clone, Serialize, Deserialize)]
 pub struct IndexImages {
     /// The image content to index
     #[serde(flatten)]
@@ -277,7 +276,7 @@ fn query_schema() -> utoipa::openapi::schema::Object {
 }
 
 /// Output format for retrieval results
-#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub enum RetrieveOutputFormat {
     #[serde(rename = "markdown")]
     Markdown,
@@ -286,7 +285,7 @@ pub enum RetrieveOutputFormat {
 }
 
 /// Request schema for retrieving context
-#[derive(ToSchema, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 #[schema(example = json!({
     "type": "Text",
     "query": "What is Bioma?",
@@ -315,7 +314,7 @@ fn default_retriever_format() -> RetrieveOutputFormat {
 //------------------------------------------------------------------------------
 
 /// Metadata for file upload
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UploadMetadata {
     /// Target path where the file should be stored
     #[schema(value_type = String)]
@@ -323,7 +322,7 @@ pub struct UploadMetadata {
 }
 
 /// Request schema for file upload
-#[derive(ToSchema, Debug, MultipartForm)]
+#[derive(utoipa::ToSchema, Debug, MultipartForm)]
 pub struct UploadRequest {
     /// The file to upload (max size: 100MB)
     #[multipart(limit = "100MB")]
