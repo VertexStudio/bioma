@@ -8,7 +8,8 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, EmbeddingsQueryRequestSchema, IndexRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema
+    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, EmbeddingsQueryRequestSchema,
+    IndexRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -70,17 +71,41 @@ impl AppState {
     }
 }
 
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug)]
+#[schema(example = json!({
+    "services": {
+        "surrealdb": {
+            "status": {
+                "is_healthy": true,
+                "error": null
+            }
+        },
+        "ollama": {
+            "status": {
+                "is_healthy": true,
+                "error": null
+            },
+            "health": {
+                "models": [
+                    {
+                        "size_vram": 12345,
+                        "model": "llama2"
+                    }
+                ]
+            }
+        }
+    }
+}))]
+pub struct HealthCheckResponse {
+    services: HashMap<Service, Responses>,
+}
+
 #[utoipa::path(
     get,
     path = "/health",
     description = "Check health of the server and its services.",
     responses(
-        (status = 200, description = "Ok", body = HashMap<Service, Responses>, content_type = "application/json", examples(
-            ("Basic" = (summary = "Basic health check", value = json!({
-                "status": "ok"
-            })))
-        )),
-        
+        (status = 200, description = "Health check response containing status of all services", body = HashMap<Service, Responses>)
     )
 )]
 async fn health(data: web::Data<AppState>) -> impl Responder {
