@@ -4,7 +4,7 @@ use std::time::Duration;
 use tracing::error;
 use url::Url;
 
-#[derive(thiserror::Error, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, thiserror::Error, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum HealthCheckError {
     #[error("Reqwest error: {0}")]
@@ -15,7 +15,7 @@ pub enum HealthCheckError {
     OllamaError(String),
 }
 
-#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Service {
     #[serde(rename = "surrealdb")]
     SurrealDB,
@@ -29,7 +29,7 @@ pub enum Service {
     Minio,
 }
 
-#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Status {
     pub is_healthy: bool,
     pub error: Option<HealthCheckError>,
@@ -45,45 +45,77 @@ impl Status {
     }
 }
 
-#[derive(Serialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(untagged)]
+#[schema(example = json!({
+    "type": "surrealdb",
+    "status": {
+        "is_healthy": true,
+        "error": null
+    }
+}))]
+#[schema(example = json!({
+    "type": "ollama",
+    "status": {
+        "is_healthy": true,
+        "error": null
+    },
+    "health": {
+        "models": [
+            {
+                "size_vram": 12345,
+                "model": "llama2"
+            }
+        ]
+    }
+}))]
 pub enum Responses {
+    #[schema(title = "SurrealDB Response")]
     SurrealDb {
         #[serde(flatten)]
+        #[schema(inline)]
         status: Status,
     },
+    #[schema(title = "Ollama Response")]
     Ollama {
         #[serde(flatten)]
+        #[schema(inline)]
         status: Status,
         health: Option<OllamaHealth>,
     },
+    #[schema(title = "PDF Analyzer Response")]
     PdfAnalyzer {
         #[serde(flatten)]
+        #[schema(inline)]
         status: Status,
         health: Option<PdfAnalyzerHealth>,
     },
+    #[schema(title = "Markitdown Response")]
     Markitdown {
         #[serde(flatten)]
+        #[schema(inline)]
         status: Status,
     },
+    #[schema(title = "Minio Response")]
     Minio {
         #[serde(flatten)]
+        #[schema(inline)]
         status: Status,
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
-struct OllamaRunningModel {
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct OllamaRunningModel {
     size_vram: u64,
     model: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct OllamaHealth {
     models: Vec<OllamaRunningModel>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct PdfAnalyzerHealth {
     info: String,
 }

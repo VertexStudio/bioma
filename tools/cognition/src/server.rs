@@ -8,13 +8,12 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, ChatQueryRequestSchema, DeleteSourceRequestSchema, EmbeddingsQueryRequestSchema,
-    IndexRequestSchema, RankTextsRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema,
-    UploadRequestSchema,
+    AskQueryRequest, ChatQueryRequest, EmbeddingsQueryRequest, IndexRequest, ModelEmbed, RetrieveContextRequest,
+    RetrieveOutputFormat, ThinkQueryRequest, UploadRequest,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::{markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer};
+use bioma_llm::{indexer::Indexed, markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer, retriever::ListedSources};
 use bioma_llm::{prelude::*, retriever::ListSources};
 use bioma_tool::client::ListTools;
 use clap::Parser;
@@ -77,7 +76,7 @@ impl AppState {
     path = "/health",
     description = "Check health of the server and its services.",
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Health check response containing status of all services", body = HashMap<Service, Responses>)
     )
 )]
 async fn health(data: web::Data<AppState>) -> impl Responder {
@@ -108,7 +107,7 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     path = "/hello",
     description = "Hello, world! from the server.",
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Ok", body = String, content_type = "text/plain"),
     )
 )]
 async fn hello() -> impl Responder {
@@ -120,7 +119,7 @@ async fn hello() -> impl Responder {
     path = "/reset",
     description = "Reset bioma engine.",
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Ok", body = String, content_type = "text/plain"),
     )
 )]
 async fn reset(data: web::Data<AppState>) -> HttpResponse {
@@ -139,10 +138,19 @@ async fn reset(data: web::Data<AppState>) -> HttpResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize)]
+#[response(example = json!({
+    "message": "File uploaded successfully",
+    "paths": ["/path/to/file.txt"],
+    "size": 1024
+}))]
 struct Uploaded {
+    /// A message describing the result of the upload operation
     message: String,
+    /// List of paths where files were saved, relative to the workspace root
+    #[schema(value_type = Vec<String>)]
     paths: Vec<std::path::PathBuf>,
+    /// Total size of uploaded files in bytes
     size: usize,
 }
 
@@ -199,12 +207,24 @@ impl Default for UploadConfig {
     post,
     path = "/upload",
     description = "Upload files to the server.",
-    request_body(content = UploadRequestSchema, content_type = "multipart/form-data"),
+    request_body(content = UploadRequest, content_type = "multipart/form-data"),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "File uploaded successfully", body = Uploaded, content_type = "application/json", examples(
+            ("single_file" = (summary = "Single file upload", value = json!({
+                "message": "File uploaded successfully",
+                "paths": ["/path/to/file.txt"],
+                "size": 1024
+            }))),
+            ("zip_file" = (summary = "Zip file extraction", value = json!({
+                "message": "Zip file extracted 3 files successfully",
+                "paths": ["/path/to/extracted/file1.txt", "/path/to/extracted/file2.txt", "/path/to/extracted/file3.txt"],
+                "size": 5120
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
-async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
+async fn upload(MultipartForm(form): MultipartForm<UploadRequest>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
 
     // Determine the target folder.
@@ -397,7 +417,7 @@ async fn upload_config() -> impl Responder {
     path = "/index",
     description =   "Index content from various sources (files, texts, or images).</br>
                     If `source` is not specified, it will default to `/global`.",
-    request_body(content = IndexRequestSchema, examples(
+    request_body(content = IndexRequest, examples(
         ("globs" = (summary = "Index files using glob patterns", value = json!({
             "source": "/bioma",
             "globs": ["./path/to/files/**/*.rs"], 
@@ -423,16 +443,54 @@ async fn upload_config() -> impl Responder {
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Content indexed successfully", body = Indexed, content_type = "application/json", examples(
+            ("globs_success" = (summary = "Successfully indexed files", value = json!({
+                "indexed": 5,
+                "cached": 2,
+                "sources": [
+                    {
+                        "source": "/bioma",
+                        "uri": "./path/to/files/main.rs",
+                        "status": "Indexed"
+                    },
+                    {
+                        "source": "/bioma",
+                        "uri": "./path/to/files/lib.rs",
+                        "status": "Cached"
+                    },
+                    {
+                        "source": "/bioma",
+                        "uri": "./path/to/files/error.rs",
+                        "status": { "Failed": "File not found" }
+                    }
+                ]
+            }))),
+            ("texts_success" = (summary = "Successfully indexed texts", value = json!({
+                "indexed": 2,
+                "cached": 0,
+                "sources": [
+                    {
+                        "source": "/bioma",
+                        "uri": "text_1",
+                        "status": "Indexed"
+                    },
+                    {
+                        "source": "/bioma",
+                        "uri": "text_2",
+                        "status": "Indexed"
+                    }
+                ]
+            })))
+        )),
     )
 )]
-async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_request: Index = body.clone().into();
+    let index_request = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response = user_actor
@@ -457,8 +515,7 @@ async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -
 #[utoipa::path(
     post,
     path = "/retrieve",
-    description =   "Retrieve context in .md format.<br>
-                    If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
+    description = "Retrieve context in .md format. If you send `sources` it will only use those resources to retrieve the context, if not, it will default to `/global`.",
     request_body(content = RetrieveContextRequest, examples(
         ("basic" = (summary = "Basic", value = json!({
             "type": "Text",
@@ -477,7 +534,8 @@ async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Retrieved context in the requested format (markdown or JSON)", body = String, content_type = "application/json"),
+        (status = 500, description = "Internal server error")
     )
 )]
 async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppState>) -> HttpResponse {
@@ -486,12 +544,12 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let retrieve_context: RetrieveContext = body.clone().into();
+    let retrieve_context_request = body.clone().into();
 
     info!("Sending message to retriever actor");
     let response = user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
-            retrieve_context,
+            retrieve_context_request,
             &data.retriever,
             SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
@@ -520,7 +578,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
                     If you send `tools_actors`, the endpoint with call the client that contains the tools and actually execute them.<br>
                     If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = ChatQueryRequestSchema, examples(
+    request_body(content = ChatQueryRequest, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}]
@@ -601,7 +659,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                         }
                     },
                     "type": "function"
-                },
+                }
             ]
         }))),
         ("with_tools_actors" = (summary = "Sending tools actor in payload", value = json!({
@@ -614,9 +672,36 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
             "stream": true,
             "tools_actors":  ["/rag/tools_hub/your_id"]
         })))
-    ))
+    )),
+    responses(
+        (status = 200, description = "Chat response", body = ChatResponse, content_type = "application/json", examples(
+            ("basic_response" = (summary = "Basic response", value = json!({
+                "model": "llama2",
+                "created_at": "2024-03-14T10:30:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": "The sky appears blue due to a phenomenon called Rayleigh scattering..."
+                },
+                "done": true,
+                "final_data": {
+                    "total_duration": 1200000000,
+                    "prompt_eval_count": 24,
+                    "prompt_eval_duration": 500000000,
+                    "eval_count": 150,
+                    "eval_duration": 700000000
+                },
+                "context": [
+                    {
+                        "role": "user",
+                        "content": "Why is the sky blue?"
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
+    )
 )]
-async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn chat(body: web::Json<ChatQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -872,7 +957,7 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
                     If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, <b>without execute them</b>.<br>
                     If you send `tools_actors`, the endpoint with call the client that contains the tools and return the tools information from all tools_actors.<br>
                     If you send 'sources' it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = ThinkQueryRequestSchema, examples(
+    request_body(content = ThinkQueryRequest, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "messages": [
                 {
@@ -976,10 +1061,34 @@ async fn chat(body: web::Json<ChatQueryRequestSchema>, data: web::Data<AppState>
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Chat response with tool analysis", body = ChatResponse, content_type = "application/json", examples(
+            ("basic_response" = (summary = "Basic response", value = json!({
+                "model": "llama2",
+                "created_at": "2024-03-14T10:30:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": "Based on your request, I'll help you analyze and determine the tools needed. Here's what we need to do:\n\n1. Use the `random` tool to generate a number between 15 and 1566\n2. Use the `echo` tool to display the generated number\n3. Use the `write_file` tool to save the number to the specified file"
+                },
+                "done": true,
+                "final_data": {
+                    "total_duration": 1200000000,
+                    "prompt_eval_count": 24,
+                    "prompt_eval_duration": 500000000,
+                    "eval_count": 150,
+                    "eval_duration": 700000000
+                },
+                "context": [
+                    {
+                        "role": "user",
+                        "content": "Please generate a random number, start 15, end 1566. Then, echo that number and write the result to a file called path/to/file/test.txt"
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
-async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn think(body: web::Json<ThinkQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1050,12 +1159,12 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
             .tools
             .iter()
             .map(|t| {
-                let params = serde_json::to_string_pretty(&t.function.parameters)
+                let params = serde_json::to_string_pretty(&t.function().parameters)
                     .unwrap_or_else(|_| "Unable to parse parameters".to_string());
                 format!(
                     "- {}: {}\n  Parameters:\n{}",
-                    t.function.name,
-                    t.function.description,
+                    t.function().name,
+                    t.function().description,
                     params.split('\n').map(|line| format!("    {}", line)).collect::<Vec<_>>().join("\n")
                 )
             })
@@ -1220,7 +1329,7 @@ async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppStat
     )
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct AskResponse {
     #[serde(flatten)]
     response: ChatMessageResponse,
@@ -1231,11 +1340,9 @@ struct AskResponse {
 #[utoipa::path(
     post,
     path = "/ask",
-    description =   "Generates a chat response. Specific response format can be specified.>br>
-                    If you send `sources` it will <b>only use those resources<b> to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = AskQueryRequestSchema, examples(
-        ("Basic" = (summary = "Basic", value = json!({
-            "model": "llama3.2",
+    description = "Generates a structured chat response based on a specific format schema. This endpoint is designed for getting formatted, structured responses rather than free-form chat.\nIf you send `sources` it will only use those resources to retrieve the context, if not, it will default to `/global`.",
+    request_body(content = AskQueryRequest, examples(
+        ("Basic" = (summary = "Basic structured query", value = json!({
             "messages": [
                 {
                     "role": "user",
@@ -1269,8 +1376,7 @@ struct AskResponse {
                 }
             }
         }))),
-        ("With sources" = (summary = "With sources", value = json!({
-            "model": "llama3.2",
+        ("With sources" = (summary = "Query with specific sources", value = json!({
             "messages": [
                 {
                     "role": "user",
@@ -1304,13 +1410,41 @@ struct AskResponse {
                     }
                 }
             }
-        }))),
+        })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Structured chat response", body = AskResponse, content_type = "application/json", examples(
+            ("basic_response" = (summary = "Structured response", value = json!({
+                "model": "llama2",
+                "created_at": "2024-03-14T10:30:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": {
+                        "name": "Puerto Rico",
+                        "capital": "San Juan",
+                        "languages": ["Spanish", "English"]
+                    }
+                },
+                "done": true,
+                "final_data": {
+                    "total_duration": 1200000000,
+                    "prompt_eval_count": 24,
+                    "prompt_eval_duration": 500000000,
+                    "eval_count": 150,
+                    "eval_duration": 700000000
+                },
+                "context": [
+                    {
+                        "role": "user",
+                        "content": "Tell me about Puerto Rico."
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
-async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1460,15 +1594,36 @@ async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) 
 #[utoipa::path(
     post,
     path = "/delete_source",
-    description = "Delete indexed sources.",
-    request_body(content = DeleteSourceRequestSchema, examples(
-        ("Basic" = (summary = "Basic", value = json!({"sources": ["path/to/source1", "path/to/source2"]}))),
+    description = "Delete indexed sources and their associated embeddings from the system.",
+    request_body(content = DeleteSource, examples(
+        ("Basic" = (summary = "Delete multiple sources", value = json!({
+            "sources": [
+                "/path/to/source1.pdf",
+                "/path/to/source2.md",
+                "/path/to/directory/*"
+            ]
+        })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Sources deleted successfully", body = DeletedSource, content_type = "application/json", examples(
+            ("success" = (summary = "Successful deletion", value = json!({
+                "deleted_embeddings": 42,
+                "deleted_sources": [
+                    {
+                        "source": "/global",
+                        "uri": "/path/to/source1.pdf"
+                    },
+                    {
+                        "source": "/global",
+                        "uri": "/path/to/source2.md"
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
-async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1503,36 +1658,47 @@ async fn delete_source(body: web::Json<DeleteSourceRequestSchema>, data: web::Da
 #[utoipa::path(
     post,
     path = "/embed",
-    description = "Generate embeddings for text or images.",
-    request_body(content = EmbeddingsQueryRequestSchema, examples(
-        ("Basic" = (summary = "Text", value = json!({
-            "input": "This text will generate embeddings",
-            "model": "nomic-embed-text"
+    description = "Generate embeddings for text or images. Supports both single inputs and batches.\nFor text, accepts plain text or arrays of text.\nFor images, accepts base64-encoded image data or arrays of base64 images.",
+    request_body(content = EmbeddingsQueryRequest, examples(
+        ("Single Text" = (summary = "Single text input", value = json!({
+            "model": "nomic-embed-text",
+            "input": "This text will generate embeddings"
         }))),
-        ("Image" = (summary = "Image", value = json!({
+        ("Multiple Texts" = (summary = "Multiple text inputs", value = json!({
+            "model": "nomic-embed-text",
+            "input": [
+                "First text to embed",
+                "Second text to embed",
+                "Third text to embed"
+            ]
+        }))),
+        ("Single Image" = (summary = "Single image input", value = json!({
             "model": "nomic-embed-vision",
             "input": "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAABRklEQVR4nAA2Acn+A2ql2+Vv1LF7X3Mw2i9cMEBUs0/l0C6/irfF6wPqowTw0ORE00EZ/He1x+LwZ3nDwaZVNIgn6FI8KQabKikArD0j4g6LU2Mz9DpsAgnYGy6195whWQQ4XIk1a74tA98BtQfyE3oQkaA/uufBkIegK+TH6LMh/O44hIio5wAw4umxtkxZNCIf35A4YNshDwNeeHFnHP0YUSelrm8DMioFvjc7QOcZmEBw/pv+SXEH2G+O0ZdiHDTb6wnhAcRk1rkuJLwy/d7DDKTgqOflV5zk7IBgmz0f8J4o5gA4yb3rYzzUyLRXS0bY40xnoY/rtniWFdlrtSHkR/0A1ClG/qVWNyD1CXVkxE4IW5Tj+8qk1sD42XW6TQpPAO7NhmcDxDz092Q2AR8XYKPa1LPkGberOYArt0gkbQEAAP//4hWZNZ4Pc4kAAAAASUVORK5CYII="
         }))),
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Generated embeddings", body = GeneratedEmbeddings, content_type = "application/json", examples(
+            ("text_embeddings" = (summary = "Text embeddings", value = json!({
+                "embeddings": [
+                    [0.1, 0.2, 0.3, 0.4, 0.5],
+                    [0.2, 0.3, 0.4, 0.5, 0.6]
+                ]
+            })))
+        )),
+        (status = 400, description = "Invalid request (wrong model or input format)"),
+        (status = 500, description = "Internal server error")
     )
 )]
-async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    // Validate model
-    match body.model.as_str() {
-        "nomic-embed-text" | "nomic-embed-vision" => (),
-        _ => return HttpResponse::BadRequest().body("Invalid model"),
-    }
-
     // Process input based on model type
-    let embedding_content = match body.model.as_str() {
-        "nomic-embed-text" => {
+    let embedding_content = match body.model {
+        ModelEmbed::NomicEmbedTextV15 => {
             // Handle text embeddings
             let texts = match body.input.as_str() {
                 Some(s) => vec![s.to_string()],
@@ -1543,7 +1709,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
             };
             EmbeddingContent::Text(texts)
         }
-        "nomic-embed-vision" => {
+        ModelEmbed::NomicEmbedVisionV15 => {
             // Handle base64 image embeddings
             let base64_images = match body.input.as_str() {
                 Some(s) => vec![s.to_string()],
@@ -1558,7 +1724,6 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
 
             EmbeddingContent::Image(images)
         }
-        _ => unreachable!(),
     };
 
     // Process embeddings - different handling for text vs images
@@ -1612,28 +1777,79 @@ async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<Ap
 #[utoipa::path(
     post,
     path = "/rerank",
-    description = "Rerank texts based on a query.",
-    request_body(content = RankTextsRequestSchema, examples(
-        ("Basic" = (summary = "Basic", value = json!({
+    description = "Rerank a list of texts based on their relevance to a query. Can return raw similarity scores and optionally include the original texts in the response.",
+    request_body(content = RankTexts, examples(
+        ("Basic" = (summary = "Basic reranking", value = json!({
             "query": "What is Deep Learning?",
             "texts": [
                 "Deep Learning is learning under water",
-                "Deep learning is a branch of machine learning"
+                "Deep learning is a branch of machine learning based on artificial neural networks",
+                "Deep learning enables machines to learn from experience"
             ],
-            "raw_scores": false
+            "raw_scores": false,
+            "return_text": true
+        }))),
+        ("Advanced" = (summary = "Advanced options", value = json!({
+            "query": "What is Deep Learning?",
+            "texts": [
+                "Deep Learning is learning under water",
+                "Deep learning is a branch of machine learning based on artificial neural networks",
+                "Deep learning enables machines to learn from experience"
+            ],
+            "raw_scores": true,
+            "return_text": true,
+            "truncate": true,
+            "truncation_direction": "right"
         })))
     )),
     responses(
-        (status = 200, description = "Ok"),
+        (status = 200, description = "Ranked texts", body = RankedTexts, content_type = "application/json", examples(
+            ("with_text" = (summary = "Response with text included", value = json!({
+                "texts": [
+                    {
+                        "index": 1,
+                        "score": 0.92,
+                        "text": "Deep learning is a branch of machine learning based on artificial neural networks"
+                    },
+                    {
+                        "index": 2,
+                        "score": 0.78,
+                        "text": "Deep learning enables machines to learn from experience"
+                    },
+                    {
+                        "index": 0,
+                        "score": 0.45,
+                        "text": "Deep Learning is learning under water"
+                    }
+                ]
+            }))),
+            ("without_text" = (summary = "Response without text", value = json!({
+                "texts": [
+                    {
+                        "index": 1,
+                        "score": 0.92
+                    },
+                    {
+                        "index": 2,
+                        "score": 0.78
+                    },
+                    {
+                        "index": 0,
+                        "score": 0.45
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
-async fn rerank(body: web::Json<RankTextsRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn rerank(body: web::Json<RankTexts>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let body: RankTexts = body.clone().into();
+    let body = body.clone();
 
     let max_text_len = body.texts.iter().map(|text| text.len()).max().unwrap_or(0);
     info!("Received rerank query with {} texts (max. {} chars)", body.texts.len(), max_text_len);
@@ -1707,7 +1923,21 @@ async fn swagger_initializer(data: web::Data<AppState>) -> impl Responder {
     path = "/sources",
     description = "List all indexed sources.",
     responses(
-        (status = 200, description = "List of sources"),
+        (status = 200, description = "List of sources", body = ListedSources, content_type = "application/json", examples(
+            ("Basic" = (summary = "Basic list of sources", value = json!({
+                "sources": [
+                    {
+                        "source": "/global",
+                        "uri": "/path/to/source1.pdf"
+                    },
+                    {
+                        "source": "/global",
+                        "uri": "/path/to/source2.md"
+                    }
+                ]
+            })))
+        )),
+        (status = 500, description = "Internal server error")
     )
 )]
 async fn list_sources(data: web::Data<AppState>) -> HttpResponse {

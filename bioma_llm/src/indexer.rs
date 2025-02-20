@@ -79,11 +79,18 @@ pub struct Index {
     pub summarize: bool,
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkCapacity {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextChunkConfig {
     /// Configuration for text chunk size limits
     #[builder(default = default_chunk_capacity())]
     #[serde(default = "default_chunk_capacity")]
+    #[schema(value_type = ChunkCapacity)]
     pub chunk_capacity: std::ops::Range<usize>,
 
     /// The chunk overlap
@@ -103,7 +110,7 @@ impl Default for TextChunkConfig {
     }
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct GlobsContent {
     /// List of glob patterns
     pub globs: Vec<String>,
@@ -115,7 +122,7 @@ pub struct GlobsContent {
     pub config: TextChunkConfig,
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextsContent {
     /// The texts to index
     pub texts: Vec<String>,
@@ -136,7 +143,7 @@ fn default_text_mime_type() -> String {
     "text/plain".to_string()
 }
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ImagesContent {
     /// The base64 encoded images
     pub images: Vec<String>,
@@ -178,21 +185,29 @@ pub fn default_chunk_batch_size() -> usize {
     DEFAULT_CHUNK_BATCH_SIZE
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct IndexedSource {
     pub source: String,
     pub uri: String,
     pub status: IndexStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub enum IndexStatus {
+    /// Content has been successfully indexed
+    #[schema(title = "IndexedContent")]
     Indexed,
+
+    /// Content was already cached
+    #[schema(title = "CachedContent")]
     Cached,
+
+    /// Content failed to be indexed with error message
+    #[schema(title = "FailedContent")]
     Failed(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct Indexed {
     pub indexed: usize,
     pub cached: usize,
@@ -245,18 +260,18 @@ enum IndexResult {
 }
 
 /// The source of the embeddings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct ContentSource {
     pub source: String,
     pub uri: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct DeleteSource {
     pub sources: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct DeletedSource {
     pub deleted_embeddings: usize,
     pub deleted_sources: Vec<ContentSource>,

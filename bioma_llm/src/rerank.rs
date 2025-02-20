@@ -30,7 +30,7 @@ pub enum RerankError {
 
 impl ActorError for RerankError {}
 
-#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RankTexts {
     /// The query text to compare against the corpus of texts
     ///
@@ -71,8 +71,7 @@ pub struct RankTexts {
     pub truncation_direction: TruncationDirection,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-// #[serde(rename_all = "lowercase")]
+#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub enum TruncationDirection {
     Left,
     Right,
@@ -94,7 +93,7 @@ pub fn default_truncation_direction() -> TruncationDirection {
     TruncationDirection::Right
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct RankedText {
     pub index: usize,
     pub score: f32,
@@ -102,7 +101,7 @@ pub struct RankedText {
     pub text: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct RankedTexts {
     pub texts: Vec<RankedText>,
 }

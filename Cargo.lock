@@ -1015,6 +1015,7 @@ dependencies = [
  "tree-sitter-rust",
  "ulid",
  "url",
+ "utoipa",
  "uuid",
  "walkdir",
  "zip",
@@ -4167,7 +4168,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.2.5"
-source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=95c7295a15ef91e25f86ca3c5d41eb7eedf46db5#95c7295a15ef91e25f86ca3c5d41eb7eedf46db5"
+source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=9733cc22d337ba4200a489dd2c79090ff0631612#9733cc22d337ba4200a489dd2c79090ff0631612"
 dependencies = [
  "async-stream",
  "log",
@@ -4180,6 +4181,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "url",
+ "utoipa",
 ]
 
 [[package]]
