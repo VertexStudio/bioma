@@ -5,77 +5,9 @@ use bioma_llm::{
     prelude::{ChatMessage, ChatMessageResponse, GlobsContent, Index, IndexContent, RetrieveContext, TextChunkConfig},
     retriever::default_retriever_sources,
 };
-use ollama_rs::generation::{
-    chat::ChatMessageFinalResponseData,
-    tools::{ToolCall, ToolInfo},
-};
+use ollama_rs::generation::tools::ToolInfo;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-
-//------------------------------------------------------------------------------
-// Common Types
-//------------------------------------------------------------------------------
-
-#[derive(ToSchema, Debug, Serialize)]
-pub struct ChatMessageResponseSchema {
-    /// The name of the model used for the completion.
-    pub model: String,
-    /// The creation time of the completion, in such format: `2023-08-04T08:52:19.385406455-07:00`.
-    pub created_at: String,
-    /// The generated chat message.
-    #[schema(value_type = ChatMessageSchema)]
-    pub message: ChatMessage,
-    /// Whether the response is complete
-    pub done: bool,
-    #[serde(flatten)]
-    /// The final data of the completion. This is only present if the completion is done.
-    #[schema(value_type = Option<ChatMessageFinalResponseDataSchema>)]
-    pub final_data: Option<ChatMessageFinalResponseData>,
-}
-
-/// Role of a message in a chat conversation
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-#[schema(title = "MessageRole")]
-pub enum MessageRoleSchema {
-    #[serde(rename = "user")]
-    User,
-    #[serde(rename = "assistant")]
-    Assistant,
-    #[serde(rename = "system")]
-    System,
-    #[serde(rename = "tool")]
-    Tool,
-}
-
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-pub struct ToolCallSchema {
-    pub function: ToolCallFunctionSchema,
-}
-
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-pub struct ToolCallFunctionSchema {
-    pub name: String,
-    pub arguments: serde_json::Value,
-}
-
-/// A single message in a chat conversation
-#[derive(ToSchema, Clone, Serialize, Deserialize, Debug)]
-#[schema(title = "ChatMessage")]
-pub struct ChatMessageSchema {
-    /// The role of the message sender (user, assistant, system, or tool)
-    #[schema(value_type = MessageRoleSchema)]
-    pub role: MessageRoleSchema,
-
-    /// The content of the message
-    pub content: String,
-
-    /// Optional list of tool calls attached to the message
-    #[schema(value_type = Option<Vec<ToolCallSchema>>)]
-    pub tool_calls: Option<Vec<ToolCall>>,
-
-    /// Optional list of base64-encoded images attached to the message
-    pub images: Option<Vec<String>>,
-}
 
 //------------------------------------------------------------------------------
 // Chat Module Schemas
@@ -85,7 +17,6 @@ pub struct ChatMessageSchema {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ChatQuery {
     /// The conversation history as a list of messages
-    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub messages: Vec<ChatMessage>,
 
     /// List of sources to search for relevant context
@@ -99,7 +30,7 @@ pub struct ChatQuery {
 
     /// List of available tools for the chat
     #[serde(default)]
-    pub tools: Vec<ToolInfoSchema>,
+    pub tools: Vec<ToolInfo>,
 
     /// List of tool actor identifiers
     #[serde(default)]
@@ -110,38 +41,6 @@ pub struct ChatQuery {
     pub stream: bool,
 }
 
-/// Response schema for chat completion
-#[derive(ToSchema, Debug, Serialize)]
-pub struct ChatResponseSchema {
-    #[schema(value_type = ChatMessageResponseSchema)]
-    #[serde(flatten)]
-    pub response: ChatMessageResponse,
-
-    /// The conversation context used to generate the response
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[schema(value_type = Vec<ChatMessageSchema>)]
-    pub context: Vec<ChatMessage>,
-}
-
-/// Final statistics about a chat completion
-#[derive(ToSchema, Debug, Serialize)]
-pub struct ChatMessageFinalResponseDataSchema {
-    /// Time spent generating the response in nanoseconds
-    pub total_duration: u64,
-
-    /// Number of tokens in the prompt
-    pub prompt_eval_count: u16,
-
-    /// Time spent evaluating the prompt in nanoseconds
-    pub prompt_eval_duration: u64,
-
-    /// Number of tokens in the response
-    pub eval_count: u16,
-
-    /// Time spent generating the response in nanoseconds
-    pub eval_duration: u64,
-}
-
 fn default_chat_stream() -> bool {
     true
 }
@@ -150,7 +49,6 @@ fn default_chat_stream() -> bool {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct ThinkQueryRequestSchema {
     /// The conversation history as a list of messages
-    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub messages: Vec<ChatMessage>,
 
     /// List of sources to search for relevant context
@@ -183,7 +81,6 @@ fn default_think_stream() -> bool {
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct AskQueryRequestSchema {
     /// The conversation history as a list of messages
-    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub messages: Vec<ChatMessage>,
 
     /// List of sources to search for relevant context
@@ -199,13 +96,11 @@ pub struct AskQueryRequestSchema {
 /// Response schema for ask operation
 #[derive(ToSchema, Debug, Serialize)]
 pub struct AskResponseSchema {
-    #[schema(value_type = ChatMessageResponseSchema)]
     #[serde(flatten)]
     pub response: ChatMessageResponse,
 
     /// The conversation context used to generate the response
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    #[schema(value_type = Vec<ChatMessageSchema>)]
     pub context: Vec<ChatMessage>,
 }
 

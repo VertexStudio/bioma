@@ -110,9 +110,7 @@ indexmap = "2.7"
 #     "function-calling",
 #     "stream",
 # ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "95c7295a15ef91e25f86ca3c5d41eb7eedf46db5", features = [
-    "stream",
-] }
-# ollama-rs = { path = "../ollama-rs", features = [
+# ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "95c7295a15ef91e25f86ca3c5d41eb7eedf46db5", features = [
 #     "stream",
 # ] }
+ollama-rs = { path = "../ollama-rs-vertex/ollama-rs", features = ["stream"] }

@@ -4168,7 +4168,6 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.2.5"
-source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=95c7295a15ef91e25f86ca3c5d41eb7eedf46db5#95c7295a15ef91e25f86ca3c5d41eb7eedf46db5"
 dependencies = [
  "async-stream",
  "log",
@@ -4181,6 +4180,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "url",
+ "utoipa",
 ]
 
 [[package]]

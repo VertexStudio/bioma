@@ -33,7 +33,7 @@ pub enum ChatToolError {
     ToolNotFound(String),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ChatResponse {
     #[serde(flatten)]
     pub response: ChatMessageResponse,

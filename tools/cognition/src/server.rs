@@ -8,8 +8,8 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, EmbeddingsQueryRequestSchema,
-    IndexRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
+    AskQueryRequestSchema, AskResponseSchema, ChatQuery, EmbeddingsQueryRequestSchema, IndexRequestSchema,
+    RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -703,7 +703,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         })))
     )),
     responses(
-        (status = 200, description = "Chat response", body = ChatResponseSchema, content_type = "application/json", examples(
+        (status = 200, description = "Chat response", body = ChatResponse, content_type = "application/json", examples(
             ("basic_response" = (summary = "Basic response", value = json!({
                 "model": "llama2",
                 "created_at": "2024-03-14T10:30:00Z",
@@ -1090,7 +1090,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         })))
     )),
     responses(
-        (status = 200, description = "Chat response with tool analysis", body = ChatResponseSchema, content_type = "application/json", examples(
+        (status = 200, description = "Chat response with tool analysis", body = ChatResponse, content_type = "application/json", examples(
             ("basic_response" = (summary = "Basic response", value = json!({
                 "model": "llama2",
                 "created_at": "2024-03-14T10:30:00Z",
