@@ -1,7 +1,8 @@
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
 use bioma_llm::{
     chat,
-    prelude::{ChatMessage, ChatMessageResponse, RetrieveContext},
+    indexer::{default_chunk_batch_size, default_chunk_overlap, ImagesContent, TextsContent, DEFAULT_CHUNK_CAPACITY},
+    prelude::{ChatMessage, ChatMessageResponse, GlobsContent, Index, IndexContent, RetrieveContext, TextChunkConfig},
     retriever::default_retriever_sources,
 };
 use ollama_rs::generation::{
@@ -230,6 +231,200 @@ pub struct EmbeddingsQueryRequestSchema {
 
     /// The input data to generate embeddings for (text or base64-encoded image)
     pub input: serde_json::Value,
+}
+
+//------------------------------------------------------------------------------
+// Indexer Module Schemas
+//------------------------------------------------------------------------------
+
+/// Request schema for indexing content
+#[derive(ToSchema, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum IndexRequestSchema {
+    /// Index content using glob patterns
+    Globs(IndexGlobsRequestSchema),
+    /// Index text content directly
+    Texts(IndexTextsRequestSchema),
+    /// Index image content
+    Images(IndexImagesRequestSchema),
+}
+
+/// Request schema for indexing files using glob patterns
+#[derive(ToSchema, Clone, Serialize, Deserialize)]
+pub struct IndexGlobsRequestSchema {
+    /// The source identifier for the indexed content
+    #[schema(default = default_source)]
+    #[serde(default = "default_source")]
+    pub source: String,
+
+    /// List of glob patterns to match files for indexing
+    #[schema(example = json!(["./path/to/files/**/*.rs"]))]
+    pub globs: Vec<String>,
+
+    /// Configuration for text chunk size limits
+    #[schema(example = json!({"start": 500, "end": 2000}))]
+    #[serde(default = "default_chunk_capacity")]
+    pub chunk_capacity: ChunkCapacityRequestSchema,
+
+    /// Number of tokens to overlap between chunks
+    #[schema(default = default_chunk_overlap, minimum = 0)]
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: usize,
+
+    /// Number of chunks to process in each batch
+    #[schema(default = default_chunk_batch_size, minimum = 0)]
+    #[serde(default = "default_chunk_batch_size")]
+    pub chunk_batch_size: usize,
+
+    /// Whether to summarize each file
+    #[schema(default = false)]
+    #[serde(default)]
+    pub summarize: bool,
+}
+
+/// Request schema for indexing text content directly
+#[derive(ToSchema, Clone, Serialize, Deserialize)]
+pub struct IndexTextsRequestSchema {
+    /// The source identifier for the indexed content
+    #[schema(default = default_source)]
+    #[serde(default = "default_source")]
+    pub source: String,
+
+    /// List of texts to index
+    pub texts: Vec<String>,
+
+    /// MIME type for the texts
+    #[schema(default = default_text_mime_type)]
+    #[serde(default = "default_text_mime_type")]
+    pub mime_type: String,
+
+    /// Configuration for text chunk size limits
+    #[schema(example = json!({"start": 500, "end": 2000}))]
+    #[serde(default = "default_chunk_capacity")]
+    pub chunk_capacity: ChunkCapacityRequestSchema,
+
+    /// Number of tokens to overlap between chunks
+    #[schema(default = default_chunk_overlap, minimum = 0)]
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: usize,
+
+    /// Number of chunks to process in each batch
+    #[schema(default = default_chunk_batch_size, minimum = 0)]
+    #[serde(default = "default_chunk_batch_size")]
+    pub chunk_batch_size: usize,
+
+    /// Whether to summarize each text
+    #[schema(default = false)]
+    #[serde(default)]
+    pub summarize: bool,
+}
+
+/// Request schema for indexing image content
+#[derive(ToSchema, Clone, Serialize, Deserialize)]
+pub struct IndexImagesRequestSchema {
+    /// The source identifier for the indexed content
+    #[schema(default = default_source)]
+    #[serde(default = "default_source")]
+    pub source: String,
+
+    /// List of base64 encoded images
+    pub images: Vec<String>,
+
+    /// Optional MIME type for the images
+    #[serde(default)]
+    pub mime_type: Option<String>,
+
+    /// Whether to summarize each image
+    #[schema(default = false)]
+    #[serde(default)]
+    pub summarize: bool,
+}
+
+fn default_text_mime_type() -> String {
+    "text/plain".to_string()
+}
+
+fn default_source() -> String {
+    "/global".to_string()
+}
+
+fn default_chunk_capacity() -> ChunkCapacityRequestSchema {
+    ChunkCapacityRequestSchema { start: DEFAULT_CHUNK_CAPACITY.start, end: DEFAULT_CHUNK_CAPACITY.end }
+}
+
+/// Configuration for text chunk capacity
+#[derive(ToSchema, Clone, Serialize, Deserialize)]
+pub struct ChunkCapacityRequestSchema {
+    /// Minimum number of tokens in a chunk
+    #[schema(minimum = 0)]
+    pub start: usize,
+
+    /// Maximum number of tokens in a chunk
+    #[schema(minimum = 0)]
+    pub end: usize,
+}
+
+impl Into<Index> for IndexRequestSchema {
+    fn into(self) -> Index {
+        match self {
+            IndexRequestSchema::Globs(globs) => {
+                let chunk_capacity =
+                    std::ops::Range { start: globs.chunk_capacity.start, end: globs.chunk_capacity.end };
+
+                Index::builder()
+                    .source(globs.source)
+                    .content(IndexContent::Globs(
+                        GlobsContent::builder()
+                            .globs(globs.globs)
+                            .config(
+                                TextChunkConfig::builder()
+                                    .chunk_capacity(chunk_capacity)
+                                    .chunk_overlap(globs.chunk_overlap)
+                                    .chunk_batch_size(globs.chunk_batch_size)
+                                    .build(),
+                            )
+                            .build(),
+                    ))
+                    .summarize(globs.summarize)
+                    .build()
+            }
+            IndexRequestSchema::Texts(texts) => {
+                let chunk_capacity =
+                    std::ops::Range { start: texts.chunk_capacity.start, end: texts.chunk_capacity.end };
+
+                Index::builder()
+                    .source(texts.source)
+                    .content(IndexContent::Texts(
+                        TextsContent::builder()
+                            .texts(texts.texts)
+                            .mime_type(texts.mime_type)
+                            .config(
+                                TextChunkConfig::builder()
+                                    .chunk_capacity(chunk_capacity)
+                                    .chunk_overlap(texts.chunk_overlap)
+                                    .chunk_batch_size(texts.chunk_batch_size)
+                                    .build(),
+                            )
+                            .build(),
+                    ))
+                    .summarize(texts.summarize)
+                    .build()
+            }
+            IndexRequestSchema::Images(images) => {
+                let content = if let Some(mime) = images.mime_type {
+                    ImagesContent::builder().images(images.images).mime_type(mime).build()
+                } else {
+                    ImagesContent::builder().images(images.images).build()
+                };
+
+                Index::builder()
+                    .source(images.source)
+                    .content(IndexContent::Images(content))
+                    .summarize(images.summarize)
+                    .build()
+            }
+        }
+    }
 }
 
 //------------------------------------------------------------------------------

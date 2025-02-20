@@ -8,9 +8,7 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, 
-    EmbeddingsQueryRequestSchema, RetrieveContextRequest,
-    RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
+    AskQueryRequestSchema, AskResponseSchema, ChatQuery, ChatResponseSchema, EmbeddingsQueryRequestSchema, IndexRequestSchema, RetrieveContextRequest, RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -423,7 +421,7 @@ async fn upload_config() -> impl Responder {
     path = "/index",
     description =   "Index content from various sources (files, texts, or images).</br>
                     If `source` is not specified, it will default to `/global`.",
-    request_body(content = Index, examples(
+    request_body(content = IndexRequestSchema, examples(
         ("globs" = (summary = "Index files using glob patterns", value = json!({
             "source": "/bioma",
             "globs": ["./path/to/files/**/*.rs"], 
@@ -490,13 +488,13 @@ async fn upload_config() -> impl Responder {
         )),
     )
 )]
-async fn index(body: web::Json<Index>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let index_request= body.clone();
+    let index_request = body.clone().into();
 
     info!("Sending message to indexer actor");
     let response = user_actor
