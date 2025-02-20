@@ -8,8 +8,8 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequestSchema, ChatQuery, EmbeddingsQueryRequestSchema, IndexRequestSchema, RetrieveContextRequest,
-    RetrieveOutputFormat, ThinkQueryRequestSchema, UploadRequestSchema,
+    AskQueryRequest, ChatQueryRequest, EmbeddingsQueryRequest, IndexRequest, RetrieveContextRequest,
+    RetrieveOutputFormat, ThinkQueryRequest, UploadRequest,
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
@@ -236,7 +236,7 @@ impl Default for UploadConfig {
     post,
     path = "/upload",
     description = "Upload files to the server.",
-    request_body(content = UploadRequestSchema, content_type = "multipart/form-data"),
+    request_body(content = UploadRequest, content_type = "multipart/form-data"),
     responses(
         (status = 200, description = "File uploaded successfully", body = Uploaded, content_type = "application/json", examples(
             ("single_file" = (summary = "Single file upload", value = json!({
@@ -253,7 +253,7 @@ impl Default for UploadConfig {
         (status = 500, description = "Internal server error")
     )
 )]
-async fn upload(MultipartForm(form): MultipartForm<UploadRequestSchema>, data: web::Data<AppState>) -> impl Responder {
+async fn upload(MultipartForm(form): MultipartForm<UploadRequest>, data: web::Data<AppState>) -> impl Responder {
     let output_dir = data.engine.local_store_dir().clone();
 
     // Determine the target folder.
@@ -446,7 +446,7 @@ async fn upload_config() -> impl Responder {
     path = "/index",
     description =   "Index content from various sources (files, texts, or images).</br>
                     If `source` is not specified, it will default to `/global`.",
-    request_body(content = IndexRequestSchema, examples(
+    request_body(content = IndexRequest, examples(
         ("globs" = (summary = "Index files using glob patterns", value = json!({
             "source": "/bioma",
             "globs": ["./path/to/files/**/*.rs"], 
@@ -513,7 +513,7 @@ async fn upload_config() -> impl Responder {
         )),
     )
 )]
-async fn index(body: web::Json<IndexRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn index(body: web::Json<IndexRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -607,7 +607,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
                     If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, without execute them.<br>
                     If you send `tools_actors`, the endpoint with call the client that contains the tools and actually execute them.<br>
                     If you send `sources` it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = ChatQuery, examples(
+    request_body(content = ChatQueryRequest, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "model": "llama3.2",
             "messages": [{"role": "user", "content": "Why is the sky blue?"}]
@@ -730,7 +730,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         (status = 500, description = "Internal server error")
     )
 )]
-async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+async fn chat(body: web::Json<ChatQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -986,7 +986,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     If you send `tools`, the definitions that you send, wil be send to the model and will return the tool call, <b>without execute them</b>.<br>
                     If you send `tools_actors`, the endpoint with call the client that contains the tools and return the tools information from all tools_actors.<br>
                     If you send 'sources' it will <b>only use those resources</b> to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = ThinkQueryRequestSchema, examples(
+    request_body(content = ThinkQueryRequest, examples(
         ("Message only" = (summary = "Basic query", value = json!({
             "messages": [
                 {
@@ -1117,7 +1117,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         (status = 500, description = "Internal server error")
     )
 )]
-async fn think(body: web::Json<ThinkQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn think(body: web::Json<ThinkQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1370,7 +1370,7 @@ struct AskResponse {
     post,
     path = "/ask",
     description = "Generates a structured chat response based on a specific format schema. This endpoint is designed for getting formatted, structured responses rather than free-form chat.\nIf you send `sources` it will only use those resources to retrieve the context, if not, it will default to `/global`.",
-    request_body(content = AskQueryRequestSchema, examples(
+    request_body(content = AskQueryRequest, examples(
         ("Basic" = (summary = "Basic structured query", value = json!({
             "messages": [
                 {
@@ -1473,7 +1473,7 @@ struct AskResponse {
         (status = 500, description = "Internal server error")
     )
 )]
-async fn ask(body: web::Json<AskQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn ask(body: web::Json<AskQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1688,7 +1688,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
     post,
     path = "/embed",
     description = "Generate embeddings for text or images. Supports both single inputs and batches.\nFor text, accepts plain text or arrays of text.\nFor images, accepts base64-encoded image data or arrays of base64 images.",
-    request_body(content = EmbeddingsQueryRequestSchema, examples(
+    request_body(content = EmbeddingsQueryRequest, examples(
         ("Single Text" = (summary = "Single text input", value = json!({
             "model": "nomic-embed-text",
             "input": "This text will generate embeddings"
@@ -1719,7 +1719,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
         (status = 500, description = "Internal server error")
     )
 )]
-async fn embed(body: web::Json<EmbeddingsQueryRequestSchema>, data: web::Data<AppState>) -> HttpResponse {
+async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState>) -> HttpResponse {
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),

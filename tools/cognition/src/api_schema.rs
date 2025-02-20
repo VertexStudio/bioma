@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 
 /// Request schema for chat completion
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ChatQuery {
+pub struct ChatQueryRequest {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
 
@@ -47,7 +47,7 @@ fn default_chat_stream() -> bool {
 
 /// Request schema for think operation
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ThinkQueryRequestSchema {
+pub struct ThinkQueryRequest {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
 
@@ -79,7 +79,7 @@ fn default_think_stream() -> bool {
 
 /// Request schema for asking a question
 #[derive(ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct AskQueryRequestSchema {
+pub struct AskQueryRequest {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
 
@@ -99,7 +99,7 @@ pub struct AskQueryRequestSchema {
 
 /// Available embedding models
 #[derive(ToSchema, Deserialize)]
-pub enum ModelEmbedRequestSchema {
+pub enum ModelEmbed {
     #[serde(rename = "nomic-embed-text")]
     NomicEmbedTextV15,
     #[serde(rename = "nomic-embed-vision")]
@@ -108,9 +108,9 @@ pub enum ModelEmbedRequestSchema {
 
 /// Request schema for generating embeddings
 #[derive(ToSchema, Deserialize)]
-pub struct EmbeddingsQueryRequestSchema {
+pub struct EmbeddingsQueryRequest {
     /// The embedding model to use
-    #[schema(value_type = ModelEmbedRequestSchema)]
+    #[schema(value_type = ModelEmbed)]
     pub model: String,
 
     /// The input data to generate embeddings for (text or base64-encoded image)
@@ -124,18 +124,18 @@ pub struct EmbeddingsQueryRequestSchema {
 /// Request schema for indexing content
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum IndexRequestSchema {
+pub enum IndexRequest {
     /// Index content using glob patterns
-    Globs(IndexGlobsRequestSchema),
+    Globs(IndexGlobs),
     /// Index text content directly
-    Texts(IndexTextsRequestSchema),
+    Texts(IndexTexts),
     /// Index image content
-    Images(IndexImagesRequestSchema),
+    Images(IndexImages),
 }
 
 /// Request schema for indexing files using glob patterns
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
-pub struct IndexGlobsRequestSchema {
+pub struct IndexGlobs {
     /// The glob patterns to match files for indexing
     #[serde(flatten)]
     pub content: GlobsContent,
@@ -153,7 +153,7 @@ pub struct IndexGlobsRequestSchema {
 
 /// Request schema for indexing text content directly
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
-pub struct IndexTextsRequestSchema {
+pub struct IndexTexts {
     /// The text content to index
     #[serde(flatten)]
     pub content: TextsContent,
@@ -171,7 +171,7 @@ pub struct IndexTextsRequestSchema {
 
 /// Request schema for indexing image content
 #[derive(ToSchema, Clone, Serialize, Deserialize)]
-pub struct IndexImagesRequestSchema {
+pub struct IndexImages {
     /// The image content to index
     #[serde(flatten)]
     pub content: ImagesContent,
@@ -191,10 +191,10 @@ fn default_source() -> String {
     "/global".to_string()
 }
 
-impl Into<Index> for IndexRequestSchema {
+impl Into<Index> for IndexRequest {
     fn into(self) -> Index {
         match self {
-            IndexRequestSchema::Globs(globs) => {
+            IndexRequest::Globs(globs) => {
                 let chunk_capacity = std::ops::Range {
                     start: globs.content.config.chunk_capacity.start,
                     end: globs.content.config.chunk_capacity.end,
@@ -217,7 +217,7 @@ impl Into<Index> for IndexRequestSchema {
                     .summarize(globs.summarize)
                     .build()
             }
-            IndexRequestSchema::Texts(texts) => {
+            IndexRequest::Texts(texts) => {
                 let chunk_capacity = std::ops::Range {
                     start: texts.content.config.chunk_capacity.start,
                     end: texts.content.config.chunk_capacity.end,
@@ -241,7 +241,7 @@ impl Into<Index> for IndexRequestSchema {
                     .summarize(texts.summarize)
                     .build()
             }
-            IndexRequestSchema::Images(images) => {
+            IndexRequest::Images(images) => {
                 let content = ImagesContent::builder().images(images.content.images).build();
 
                 Index::builder()
@@ -325,7 +325,7 @@ pub struct UploadMetadata {
 
 /// Request schema for file upload
 #[derive(ToSchema, Debug, MultipartForm)]
-pub struct UploadRequestSchema {
+pub struct UploadRequest {
     /// The file to upload (max size: 100MB)
     #[multipart(limit = "100MB")]
     #[schema(value_type = String, format = Binary)]
@@ -336,7 +336,3 @@ pub struct UploadRequestSchema {
     #[schema(value_type = UploadMetadata)]
     pub metadata: MpJson<UploadMetadata>,
 }
-
-//------------------------------------------------------------------------------
-// Tool Schemas
-//------------------------------------------------------------------------------
