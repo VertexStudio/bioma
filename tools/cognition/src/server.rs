@@ -8,7 +8,7 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
-    AskQueryRequest, ChatQueryRequest, EmbeddingsQueryRequest, IndexRequest, RetrieveContextRequest,
+    AskQueryRequest, ChatQueryRequest, EmbeddingsQueryRequest, IndexRequest, ModelEmbed, RetrieveContextRequest,
     RetrieveOutputFormat, ThinkQueryRequest, UploadRequest,
 };
 use base64::Engine as Base64Engine;
@@ -1725,15 +1725,9 @@ async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    // Validate model
-    match body.model.as_str() {
-        "nomic-embed-text" | "nomic-embed-vision" => (),
-        _ => return HttpResponse::BadRequest().body("Invalid model"),
-    }
-
     // Process input based on model type
-    let embedding_content = match body.model.as_str() {
-        "nomic-embed-text" => {
+    let embedding_content = match body.model {
+        ModelEmbed::NomicEmbedTextV15 => {
             // Handle text embeddings
             let texts = match body.input.as_str() {
                 Some(s) => vec![s.to_string()],
@@ -1744,7 +1738,7 @@ async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState
             };
             EmbeddingContent::Text(texts)
         }
-        "nomic-embed-vision" => {
+        ModelEmbed::NomicEmbedVisionV15 => {
             // Handle base64 image embeddings
             let base64_images = match body.input.as_str() {
                 Some(s) => vec![s.to_string()],
@@ -1759,7 +1753,6 @@ async fn embed(body: web::Json<EmbeddingsQueryRequest>, data: web::Data<AppState
 
             EmbeddingContent::Image(images)
         }
-        _ => unreachable!(),
     };
 
     // Process embeddings - different handling for text vs images

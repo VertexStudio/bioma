@@ -110,8 +110,7 @@ pub enum ModelEmbed {
 #[derive(ToSchema, Deserialize)]
 pub struct EmbeddingsQueryRequest {
     /// The embedding model to use
-    #[schema(value_type = ModelEmbed)]
-    pub model: String,
+    pub model: ModelEmbed,
 
     /// The input data to generate embeddings for (text or base64-encoded image)
     pub input: serde_json::Value,
