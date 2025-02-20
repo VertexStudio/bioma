@@ -71,35 +71,6 @@ impl AppState {
     }
 }
 
-#[derive(utoipa::ToSchema, Serialize, Clone, Debug)]
-#[schema(example = json!({
-    "services": {
-        "surrealdb": {
-            "status": {
-                "is_healthy": true,
-                "error": null
-            }
-        },
-        "ollama": {
-            "status": {
-                "is_healthy": true,
-                "error": null
-            },
-            "health": {
-                "models": [
-                    {
-                        "size_vram": 12345,
-                        "model": "llama2"
-                    }
-                ]
-            }
-        }
-    }
-}))]
-pub struct HealthCheckResponse {
-    services: HashMap<Service, Responses>,
-}
-
 #[utoipa::path(
     get,
     path = "/health",
