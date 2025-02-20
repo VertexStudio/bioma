@@ -2,8 +2,8 @@ use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartF
 use bioma_llm::{
     chat,
     indexer::{ImagesContent, TextsContent},
-    prelude::{ChatMessage, GlobsContent, Index, IndexContent, RetrieveContext, TextChunkConfig},
-    retriever::default_retriever_sources,
+    prelude::{ChatMessage, GlobsContent, Index, IndexContent, RetrieveContext, RetrieveQuery, TextChunkConfig},
+    retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
 use ollama_rs::generation::tools::ToolInfo;
 use serde::{Deserialize, Serialize};
@@ -256,25 +256,6 @@ impl Into<Index> for IndexRequest {
 // Retriever Module Schemas
 //------------------------------------------------------------------------------
 
-fn query_schema() -> utoipa::openapi::schema::Object {
-    use utoipa::openapi::schema::{ObjectBuilder, Type};
-
-    ObjectBuilder::new()
-        .schema_type(Type::Object)
-        .property(
-            "type",
-            ObjectBuilder::new()
-                .schema_type(Type::String)
-                .enum_values(Some(["Text"]))
-                .description(Some("Type of query"))
-                .build(),
-        )
-        .required("type")
-        .property("query", ObjectBuilder::new().schema_type(Type::String).description(Some("The query text")).build())
-        .required("query")
-        .build()
-}
-
 /// Output format for retrieval results
 #[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub enum RetrieveOutputFormat {
@@ -295,9 +276,26 @@ pub enum RetrieveOutputFormat {
     "format": "markdown"
 }))]
 pub struct RetrieveContextRequest {
-    #[serde(flatten)]
-    #[schema(schema_with = query_schema)]
-    pub retrieve_context: RetrieveContext,
+    /// The type of query
+    pub r#type: RetrieveType,
+
+    /// The query text
+    pub query: String,
+
+    /// The number of contexts to return
+    #[schema(default = default_retriever_limit)]
+    #[serde(default = "default_retriever_limit")]
+    pub limit: usize,
+
+    /// The threshold for the similarity score
+    #[schema(default = default_retriever_threshold)]
+    #[serde(default = "default_retriever_threshold")]
+    pub threshold: f32,
+
+    /// A list of sources to filter the search
+    #[schema(default = default_retriever_sources)]
+    #[serde(default = "default_retriever_sources")]
+    pub sources: Vec<String>,
 
     /// The format of the output (markdown or json)
     #[schema(default = default_retriever_format)]
@@ -305,8 +303,24 @@ pub struct RetrieveContextRequest {
     pub format: RetrieveOutputFormat,
 }
 
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
+pub enum RetrieveType {
+    Text,
+}
+
 fn default_retriever_format() -> RetrieveOutputFormat {
     RetrieveOutputFormat::Markdown
+}
+
+impl From<RetrieveContextRequest> for RetrieveContext {
+    fn from(request: RetrieveContextRequest) -> Self {
+        RetrieveContext::builder()
+            .query(RetrieveQuery::Text(request.query))
+            .threshold(request.threshold)
+            .limit(request.limit)
+            .sources(request.sources)
+            .build()
+    }
 }
 
 //------------------------------------------------------------------------------

@@ -573,12 +573,12 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let retrieve_context_request = body.clone();
+    let retrieve_context_request = body.clone().into();
 
     info!("Sending message to retriever actor");
     let response = user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
-            retrieve_context_request.retrieve_context,
+            retrieve_context_request,
             &data.retriever,
             SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
         )
