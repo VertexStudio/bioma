@@ -842,7 +842,7 @@ impl Message<Index> for Indexer {
 
                         let content = if let Some(ext) = ext {
                             if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
-                                Content::Image { data: ImageData::Path(uri.clone()) }
+                                Content::Image { data: ImageData::Path(pathbuf.to_string_lossy().into_owned()) }
                             } else {
                                 let chunk_config =
                                     (config.chunk_capacity.clone(), config.chunk_overlap, config.chunk_batch_size);
