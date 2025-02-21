@@ -30,6 +30,10 @@ pub enum SummarizeContent {
     /// Text content to summarize
     Text(String),
     /// Image content to summarize (base64 encoded)
+    ///
+    /// Note: Image summarization requires using an LLM model that supports image processing
+    /// (e.g., llama2-vision, gpt4-vision). Make sure to configure the chat actor with
+    /// an appropriate model.
     Image(String),
 }
 
@@ -53,6 +57,10 @@ pub struct SummaryResponse {
 ///
 /// The Summary actor uses a Chat actor to generate concise summaries of text and image content.
 /// It handles text truncation, formatting, and communication with the underlying chat model.
+///
+/// # Important
+/// For image summarization to work, you must configure the chat actor with an LLM model
+/// that supports image processing (e.g., llama2-vision, gpt4-vision).
 ///
 /// # Example
 /// ```rust,no_run
