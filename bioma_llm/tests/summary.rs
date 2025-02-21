@@ -61,8 +61,8 @@ It provides practical examples and use cases.
 
     // Request text summarization
     let response = relay_ctx
-        .send_and_wait_reply::<Summary, SummarizeText>(
-            SummarizeText { content: SummarizeContent::Text(text.to_string()), uri: "test_document.md".to_string() },
+        .send_and_wait_reply::<Summary, Summarize>(
+            Summarize { content: SummarizeContent::Text(text.to_string()), uri: "test_document.md".to_string() },
             &summary_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
@@ -118,8 +118,8 @@ async fn test_image_summarization() -> Result<(), TestError> {
 
     // Request image summarization
     let response = relay_ctx
-        .send_and_wait_reply::<Summary, SummarizeText>(
-            SummarizeText { content: SummarizeContent::Image(base64_data), uri: "elephant.jpg".to_string() },
+        .send_and_wait_reply::<Summary, Summarize>(
+            Summarize { content: SummarizeContent::Image(base64_data), uri: "elephant.jpg".to_string() },
             &summary_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
@@ -166,8 +166,8 @@ async fn test_summary_error_handling() -> Result<(), TestError> {
 
     // Test with empty text - this should work but produce a summary about empty content
     let response = relay_ctx
-        .send_and_wait_reply::<Summary, SummarizeText>(
-            SummarizeText { content: SummarizeContent::Text("".to_string()), uri: "empty.txt".to_string() },
+        .send_and_wait_reply::<Summary, Summarize>(
+            Summarize { content: SummarizeContent::Text("".to_string()), uri: "empty.txt".to_string() },
             &summary_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
@@ -180,8 +180,8 @@ async fn test_summary_error_handling() -> Result<(), TestError> {
 
     // Test with invalid base64 for image - this should fail with a base64 error
     let result = relay_ctx
-        .send_and_wait_reply::<Summary, SummarizeText>(
-            SummarizeText {
+        .send_and_wait_reply::<Summary, Summarize>(
+            Summarize {
                 content: SummarizeContent::Image("invalid_base64".to_string()),
                 uri: "invalid.jpg".to_string(),
             },
@@ -198,8 +198,8 @@ async fn test_summary_error_handling() -> Result<(), TestError> {
     // Test with very large base64 string (simulating a huge image)
     let large_base64 = "A".repeat(10_000_000); // 10MB of base64 data
     let result = relay_ctx
-        .send_and_wait_reply::<Summary, SummarizeText>(
-            SummarizeText { content: SummarizeContent::Image(large_base64), uri: "too_large.jpg".to_string() },
+        .send_and_wait_reply::<Summary, Summarize>(
+            Summarize { content: SummarizeContent::Image(large_base64), uri: "too_large.jpg".to_string() },
             &summary_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
@@ -247,8 +247,8 @@ async fn test_long_text_truncation() -> Result<(), TestError> {
 
     // Request summarization of long text
     let response = relay_ctx
-        .send_and_wait_reply::<Summary, SummarizeText>(
-            SummarizeText { content: SummarizeContent::Text(long_text), uri: "long_text.txt".to_string() },
+        .send_and_wait_reply::<Summary, Summarize>(
+            Summarize { content: SummarizeContent::Text(long_text), uri: "long_text.txt".to_string() },
             &summary_id,
             SendOptions::builder().timeout(std::time::Duration::from_secs(30)).build(),
         )
