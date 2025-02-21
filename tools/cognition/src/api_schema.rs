@@ -24,7 +24,6 @@ pub struct ChatQueryRequest {
     pub sources: Vec<String>,
 
     /// Optional schema for structured output format
-    #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
 
     /// List of available tools for the chat
@@ -56,7 +55,6 @@ pub struct ThinkQueryRequest {
     pub sources: Vec<String>,
 
     /// Optional schema for structured output format
-    #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
 
     /// List of available tools for thinking
@@ -88,7 +86,6 @@ pub struct AskQueryRequest {
     pub sources: Vec<String>,
 
     /// Optional schema for structured output format
-    #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
 }
 
