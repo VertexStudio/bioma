@@ -32,7 +32,7 @@ pub enum SummarizeContent {
     /// Image content to summarize (base64 encoded)
     ///
     /// Note: Image summarization requires using an LLM model that supports image processing
-    /// (e.g., llama2-vision, gpt4-vision). Make sure to configure the chat actor with
+    /// (e.g., llama3.2-vision). Make sure to configure the chat actor with
     /// an appropriate model.
     Image(String),
 }
@@ -60,7 +60,7 @@ pub struct SummaryResponse {
 ///
 /// # Important
 /// For image summarization to work, you must configure the chat actor with an LLM model
-/// that supports image processing (e.g., llama2-vision, gpt4-vision).
+/// that supports image processing (e.g., llama3.2-vision).
 ///
 /// # Example
 /// ```rust,no_run
