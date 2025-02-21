@@ -76,6 +76,9 @@ pub struct Summary {
     /// The prompt template for text summarization
     #[builder(default = default_text_prompt())]
     pub text_prompt: std::borrow::Cow<'static, str>,
+    /// The prompt template for image summarization
+    #[builder(default = default_image_prompt())]
+    pub image_prompt: std::borrow::Cow<'static, str>,
     /// Maximum number of characters to process in a text for summarization
     #[builder(default = default_max_text_length())]
     pub max_text_length: usize,
@@ -91,6 +94,11 @@ fn default_text_prompt() -> std::borrow::Cow<'static, str> {
     "Provide a concise summary of the following text. Focus on the key points and main ideas:\n\n".into()
 }
 
+fn default_image_prompt() -> std::borrow::Cow<'static, str> {
+    "Provide a concise description of this image. Focus on the key visual elements, subjects, and overall composition."
+        .into()
+}
+
 fn default_max_text_length() -> usize {
     10_000
 }
@@ -100,6 +108,7 @@ impl Default for Summary {
         Self {
             chat: Chat::builder().model(std::borrow::Cow::Borrowed("llama3.2:3b")).build(),
             text_prompt: default_text_prompt(),
+            image_prompt: default_image_prompt(),
             max_text_length: default_max_text_length(),
             chat_id: None,
             chat_handle: None,
@@ -112,6 +121,7 @@ impl Clone for Summary {
         Self {
             chat: self.chat.clone(),
             text_prompt: self.text_prompt.clone(),
+            image_prompt: self.image_prompt.clone(),
             max_text_length: self.max_text_length,
             chat_id: self.chat_id.clone(),
             chat_handle: None,
@@ -197,7 +207,7 @@ impl Summary {
                 (create_text_summary_prompt(&self.text_prompt, &truncated_text), None)
             }
             SummarizeContent::Image(base64_data) => {
-                (create_image_summary_prompt(), Some(vec![Image::from_base64(base64_data.clone())]))
+                (self.image_prompt.to_string(), Some(vec![Image::from_base64(base64_data.clone())]))
             }
         };
 
@@ -234,12 +244,6 @@ fn truncate_text(text: &str, max_length: usize) -> String {
 /// Create a prompt for text summarization
 fn create_text_summary_prompt(prompt_template: &str, text: &str) -> String {
     format!("{}{}", prompt_template, text)
-}
-
-/// Create a prompt for image summarization
-fn create_image_summary_prompt() -> String {
-    "Provide a concise description of this image. Focus on the key visual elements, subjects, and overall composition."
-        .to_string()
 }
 
 /// Format the summary in markdown with the URI
