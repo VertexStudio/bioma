@@ -435,9 +435,8 @@ async fn test_indexer_without_summary() -> Result<(), TestError> {
     Ok(())
 }
 
-// TODO: Add support for image summaries in the indexer
 #[test(tokio::test)]
-async fn test_indexer_with_images() -> Result<(), TestError> {
+async fn test_indexer_with_images_summary() -> Result<(), TestError> {
     let engine = ActorEngine::test().await?;
     let temp_dir = tempfile::tempdir()?;
 
@@ -473,7 +472,7 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    let source = "/test/indexer/with/images".to_string();
+    let source = "/test/indexer/with/images/summary".to_string();
 
     // Index with summary generation enabled
     let globs = vec![
@@ -501,8 +500,6 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     let query = "SELECT VALUE summary FROM source WHERE id.source = $source";
     let mut results = db.lock().await.query(query).bind(("source", source)).await.map_err(SystemActorError::from)?;
 
-    println!("Results: {:?}", results);
-
     let summaries: Vec<Option<String>> = results.take(0).map_err(SystemActorError::from)?;
     assert!(!summaries.is_empty(), "Should find at least one image summary");
 
@@ -513,7 +510,6 @@ async fn test_indexer_with_images() -> Result<(), TestError> {
     for summary in valid_summaries {
         assert!(summary.contains("**URI**:"), "Summary should contain URI");
         assert!(summary.contains("**Summary**:"), "Summary should contain summary section");
-        println!("Summary content: {}", summary);
     }
 
     // Cleanup
