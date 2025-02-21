@@ -35,7 +35,7 @@ pub enum SummarizeContent {
 
 /// Request to generate a summary
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SummarizeText {
+pub struct Summarize {
     /// The content to summarize
     pub content: SummarizeContent,
     /// The URI/path of the source document
@@ -49,20 +49,20 @@ pub struct SummaryResponse {
     pub summary: String,
 }
 
-/// Actor responsible for generating summaries of text content
+/// Actor responsible for generating summaries of text and image content
 ///
-/// The Summary actor uses a Chat actor to generate concise summaries of text content.
+/// The Summary actor uses a Chat actor to generate concise summaries of text and image content.
 /// It handles text truncation, formatting, and communication with the underlying chat model.
 ///
 /// # Example
 /// ```rust,no_run
 /// use bioma_actor::prelude::*;
-/// use bioma_llm::summary::{Summary, SummarizeText};
+/// use bioma_llm::summary::{Summary, Summarize, SummarizeContent};
 ///
 /// async fn summarize_text(ctx: &ActorContext<MyActor>, text: String, uri: String) -> Result<String, Error> {
 ///     let summary_id = ActorId::of::<Summary>("/summary");
-///     let response = ctx.send_and_wait_reply::<Summary, SummarizeText>(
-///         SummarizeText { text, uri },
+///     let response = ctx.send_and_wait_reply::<Summary, Summarize>(
+///         Summarize { content: SummarizeContent::Text(text), uri },
 ///         &summary_id,
 ///         SendOptions::default()
 ///     ).await?;
@@ -127,7 +127,7 @@ impl Actor for Summary {
 
         let mut stream = ctx.recv().await?;
         while let Some(Ok(frame)) = stream.next().await {
-            if let Some(input) = frame.is::<SummarizeText>() {
+            if let Some(input) = frame.is::<Summarize>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
@@ -139,10 +139,10 @@ impl Actor for Summary {
     }
 }
 
-impl Message<SummarizeText> for Summary {
+impl Message<Summarize> for Summary {
     type Response = SummaryResponse;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &SummarizeText) -> Result<(), Self::Error> {
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &Summarize) -> Result<(), Self::Error> {
         let Some(chat_id) = &self.chat_id else {
             return Err(SummaryError::ChatActorNotInitialized);
         };
@@ -188,7 +188,7 @@ impl Summary {
     async fn generate_summary(
         &self,
         ctx: &ActorContext<Self>,
-        message: &SummarizeText,
+        message: &Summarize,
         chat_id: &ActorId,
     ) -> Result<SummaryResponse, SummaryError> {
         let (prompt, images) = match &message.content {

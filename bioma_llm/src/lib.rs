@@ -18,7 +18,7 @@ pub mod prelude {
     };
     pub use crate::rerank::{self, RankTexts, RankedText, RankedTexts, Rerank, RerankError};
     pub use crate::retriever::{self, RetrieveContext, RetrieveQuery, Retriever, RetrieverError};
-    pub use crate::summary::{self, SummarizeText, Summary, SummaryError, SummaryResponse};
+    pub use crate::summary::{self, Summarize, Summary, SummaryError, SummaryResponse};
     pub use ollama_rs::generation::{
         chat::{ChatMessage, ChatMessageResponse, MessageRole},
         images::Image,

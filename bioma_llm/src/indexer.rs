@@ -2,8 +2,8 @@ use crate::{
     embeddings::{Embeddings, EmbeddingsError, ImageData, StoreEmbeddings},
     markitdown::{AnalyzeMCFile, MarkitDown, MarkitDownError},
     pdf_analyzer::{AnalyzePdf, PdfAnalyzer, PdfAnalyzerError},
-    prelude::{SummarizeText, Summary, SummaryError},
-    summary::SummarizeContent,
+    prelude::{Summary, SummaryError},
+    summary::{Summarize, SummarizeContent},
 };
 use base64::Engine;
 use bioma_actor::prelude::*;
@@ -319,7 +319,7 @@ impl Indexer {
         }
     }
 
-    /// Process summary generation and indexing for a text
+    /// Process summary generation and indexing for a text or image
     ///
     /// This function:
     /// 1. Generates a summary using the Summary actor
@@ -341,11 +341,8 @@ impl Indexer {
             Content::Image { data } => {
                 match data {
                     ImageData::Path(path) => {
-                        let local_store_dir = ctx.engine().local_store_dir();
-                        let full_path = local_store_dir.join(path);
-
                         // Read image file and convert to base64
-                        let image_data = tokio::fs::read(&full_path).await?;
+                        let image_data = tokio::fs::read(path).await?;
                         let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
                         SummarizeContent::Image(base64_data)
                     }
@@ -356,8 +353,8 @@ impl Indexer {
 
         // Generate summary
         let response = ctx
-            .send_and_wait_reply::<Summary, SummarizeText>(
-                SummarizeText { content: summarize_content, uri: source.uri.clone() },
+            .send_and_wait_reply::<Summary, Summarize>(
+                Summarize { content: summarize_content, uri: source.uri.clone() },
                 summary_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
             )
@@ -386,6 +383,68 @@ impl Indexer {
                 Ok((response.summary, vec![]))
             }
         }
+    }
+
+    /// Process content embeddings and summary in parallel
+    ///
+    /// This function:
+    /// 1. Generates embeddings for the content
+    /// 2. If summarization is enabled, generates a summary and its embeddings
+    /// 3. Combines all embeddings and returns them with the summary
+    async fn process_embeddings_and_summary(
+        &self,
+        ctx: &ActorContext<Self>,
+        source: &ContentSource,
+        content: &Content,
+        embeddings_id: &ActorId,
+        summarize: bool,
+        embeddings_content: EmbeddingContent,
+        metadata: Option<Vec<Value>>,
+    ) -> Result<(Vec<RecordId>, Option<String>), IndexerError> {
+        // Start summary generation in parallel only if summarize is enabled
+        let summary_future = async {
+            let mut summary_embeddings_ids = Vec::new();
+            let mut summary_text = None;
+            if summarize {
+                if let Some(summary_id) = &self.summary_id {
+                    match self.process_summary(ctx, source, content, summary_id, embeddings_id).await {
+                        Ok((summary, ids)) => {
+                            summary_text = Some(summary);
+                            summary_embeddings_ids.extend(ids);
+                        }
+                        Err(e) => error!("Failed to process summary: {}", e),
+                    }
+                }
+            }
+            (summary_text, summary_embeddings_ids)
+        };
+
+        // Process embeddings in parallel with summary generation
+        let embeddings_future = async {
+            let result = ctx
+                .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
+                    StoreEmbeddings { content: embeddings_content, metadata },
+                    embeddings_id,
+                    SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
+                )
+                .await;
+
+            match result {
+                Ok(stored_embeddings) => stored_embeddings.ids,
+                Err(e) => {
+                    error!("Failed to generate embeddings: {}", e);
+                    Vec::new()
+                }
+            }
+        };
+
+        // Wait for both operations to complete
+        let ((summary_text, summary_ids), mut embeddings_ids) = tokio::join!(summary_future, embeddings_future);
+
+        // Combine original embeddings with summary embeddings
+        embeddings_ids.extend(summary_ids);
+
+        Ok((embeddings_ids, summary_text))
     }
 
     async fn index_content(
@@ -444,28 +503,22 @@ impl Indexer {
                     ImageData::Base64(_) => None, // Base64 images don't have file metadata
                 };
 
-                let result = ctx
-                    .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-                        StoreEmbeddings {
-                            content: EmbeddingContent::Image(vec![data.clone()]),
-                            metadata: metadata.map(|m| vec![m]),
-                        },
+                let (embeddings_ids, summary_text) = self
+                    .process_embeddings_and_summary(
+                        ctx,
+                        &source,
+                        &Content::Image { data: data.clone() },
                         embeddings_id,
-                        SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
+                        summarize,
+                        EmbeddingContent::Image(vec![data]),
+                        metadata.map(|m| vec![m]),
                     )
-                    .await;
+                    .await?;
 
-                let mut embeddings_ids: Vec<RecordId> = Vec::new();
-
-                match result {
-                    Ok(stored_embeddings) => {
-                        embeddings_ids.extend(stored_embeddings.ids);
-                        Ok(IndexResult::Indexed(embeddings_ids, None))
-                    }
-                    Err(e) => {
-                        error!("Failed to generate image embedding: {}", e);
-                        Ok(IndexResult::Failed)
-                    }
+                if embeddings_ids.is_empty() {
+                    Ok(IndexResult::Failed)
+                } else {
+                    Ok(IndexResult::Indexed(embeddings_ids, summary_text))
                 }
             }
             Content::Text { content, text_type, chunk_config: (chunk_capacity, chunk_overlap, chunk_batch_size) } => {
@@ -519,63 +572,36 @@ impl Indexer {
                 let chunk_batches = chunks.chunks(chunk_batch_size);
                 let metadata_batches = metadata.chunks(chunk_batch_size);
 
-                // Start summary generation in parallel only if summarize is enabled
-                let summary_future = async {
-                    let mut summary_embeddings_ids = Vec::new();
-                    let mut summary_text = None;
-                    if summarize {
-                        if let Some(summary_id) = &self.summary_id {
-                            let content_for_summary = Content::Text {
+                let mut all_embeddings_ids = Vec::new();
+                for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
+                    let (embeddings_ids, summary_text) = self
+                        .process_embeddings_and_summary(
+                            ctx,
+                            &source,
+                            &Content::Text {
                                 content: content.clone(),
                                 text_type: text_type.clone(),
                                 chunk_config: (chunk_capacity.clone(), chunk_overlap, chunk_batch_size),
-                            };
-                            match self
-                                .process_summary(ctx, &source, &content_for_summary, summary_id, embeddings_id)
-                                .await
-                            {
-                                Ok((summary, ids)) => {
-                                    summary_text = Some(summary);
-                                    summary_embeddings_ids.extend(ids);
-                                }
-                                Err(e) => error!("Failed to process summary: {}", e),
-                            }
-                        }
+                            },
+                            embeddings_id,
+                            summarize && all_embeddings_ids.is_empty(), // Only summarize on first batch
+                            EmbeddingContent::Text(chunk_batch.to_vec()),
+                            Some(metadata_batch.to_vec()),
+                        )
+                        .await?;
+
+                    all_embeddings_ids.extend(embeddings_ids);
+
+                    if let Some(text) = summary_text {
+                        return Ok(IndexResult::Indexed(all_embeddings_ids, Some(text)));
                     }
-                    (summary_text, summary_embeddings_ids)
-                };
+                }
 
-                // Process embeddings in parallel with summary generation
-                let embeddings_future = async {
-                    let mut embeddings_ids = Vec::new();
-                    for (chunk_batch, metadata_batch) in chunk_batches.zip(metadata_batches) {
-                        let result = ctx
-                            .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-                                StoreEmbeddings {
-                                    content: EmbeddingContent::Text(chunk_batch.to_vec()),
-                                    metadata: Some(metadata_batch.to_vec()),
-                                },
-                                embeddings_id,
-                                SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
-                            )
-                            .await;
-
-                        match result {
-                            Ok(stored_embeddings) => {
-                                embeddings_ids.extend(stored_embeddings.ids);
-                            }
-                            Err(e) => error!("Failed to generate embeddings: {} {}", e, source.source),
-                        }
-                    }
-                    embeddings_ids
-                };
-
-                // Wait for both operations to complete
-                let ((summary_text, summary_ids), mut embeddings_ids) = tokio::join!(summary_future, embeddings_future);
-
-                // Combine original embeddings with summary embeddings
-                embeddings_ids.extend(summary_ids);
-                Ok(IndexResult::Indexed(embeddings_ids, summary_text))
+                if all_embeddings_ids.is_empty() {
+                    Ok(IndexResult::Failed)
+                } else {
+                    Ok(IndexResult::Indexed(all_embeddings_ids, None))
+                }
             }
         }
     }
