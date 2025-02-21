@@ -82,9 +82,11 @@ impl Default for Chat {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
+#[schema(title = "Schema")]
 pub struct Schema {
     #[serde(flatten)]
+    #[schema(value_type = schema::Object)]
     schema: schemars::schema::RootSchema,
 }
 

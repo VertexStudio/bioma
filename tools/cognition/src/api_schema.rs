@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request schema for chat completion
 #[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ChatQueryRequest {
+pub struct ChatQuery {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
 
@@ -24,7 +24,6 @@ pub struct ChatQueryRequest {
     pub sources: Vec<String>,
 
     /// Optional schema for structured output format
-    #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
 
     /// List of available tools for the chat
@@ -46,7 +45,7 @@ fn default_chat_stream() -> bool {
 
 /// Request schema for think operation
 #[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ThinkQueryRequest {
+pub struct ThinkQuery {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
 
@@ -56,7 +55,6 @@ pub struct ThinkQueryRequest {
     pub sources: Vec<String>,
 
     /// Optional schema for structured output format
-    #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
 
     /// List of available tools for thinking
@@ -78,7 +76,7 @@ fn default_think_stream() -> bool {
 
 /// Request schema for asking a question
 #[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct AskQueryRequest {
+pub struct AskQuery {
     /// The conversation history as a list of messages
     pub messages: Vec<ChatMessage>,
 
@@ -88,7 +86,6 @@ pub struct AskQueryRequest {
     pub sources: Vec<String>,
 
     /// Optional schema for structured output format
-    #[schema(value_type = Option<Schema::Object>)]
     pub format: Option<chat::Schema>,
 }
 
@@ -107,7 +104,7 @@ pub enum ModelEmbed {
 
 /// Request schema for generating embeddings
 #[derive(utoipa::ToSchema, Deserialize)]
-pub struct EmbeddingsQueryRequest {
+pub struct EmbeddingsQuery {
     /// The embedding model to use
     pub model: ModelEmbed,
 
@@ -274,7 +271,7 @@ pub enum RetrieveOutputFormat {
     "limit": 10,
     "sources": ["path/to/source1", "path/to/source2"],
     "format": "markdown"
-}))]
+}), as = RetrieveContext)]
 pub struct RetrieveContextRequest {
     /// The type of query
     pub r#type: RetrieveType,
@@ -337,7 +334,7 @@ pub struct UploadMetadata {
 
 /// Request schema for file upload
 #[derive(utoipa::ToSchema, Debug, MultipartForm)]
-pub struct UploadRequest {
+pub struct Upload {
     /// The file to upload (max size: 100MB)
     #[multipart(limit = "100MB")]
     #[schema(value_type = String, format = Binary)]
