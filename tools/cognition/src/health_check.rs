@@ -19,8 +19,10 @@ pub enum HealthCheckError {
 pub enum Service {
     #[serde(rename = "surrealdb")]
     SurrealDB,
-    #[serde(rename = "ollama")]
-    Ollama,
+    #[serde(rename = "ollama_chat")]
+    OllamaChat,
+    #[serde(rename = "ollama_think")]
+    OllamaThink,
     #[serde(rename = "pdf_analyzer")]
     PdfAnalyzer,
     #[serde(rename = "markitdown")]

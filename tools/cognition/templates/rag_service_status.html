@@ -326,7 +326,7 @@
             let extraInfo = "";
 
             if (
-              name === "ollama" &&
+              (name === "ollama_chat" || name === "ollama_think") &&
               info.is_healthy &&
               info.health?.models?.length > 0
             ) {

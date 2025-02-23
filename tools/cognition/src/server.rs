@@ -86,7 +86,7 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     services.insert(Service::SurrealDB, check_surrealdb(data.config.engine.endpoint.to_string()).await);
 
     // Ollama health check
-    services.insert(Service::Ollama, check_ollama(data.config.chat_endpoint.clone()).await);
+    services.insert(Service::OllamaChat, check_ollama(data.config.chat_endpoint.clone()).await);
 
     // pdf-analyzer health check
     services.insert(Service::PdfAnalyzer, check_pdf_analyzer(PdfAnalyzer::default().pdf_analyzer_url).await);
