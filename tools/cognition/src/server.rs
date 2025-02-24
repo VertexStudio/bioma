@@ -795,25 +795,27 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             {
                 if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                     match &metadata {
-                        Metadata::Image(_image_metadata) => match tokio::fs::read(&source.uri).await {
-                            Ok(image_data) => {
-                                match tokio::task::spawn_blocking(move || {
-                                    base64::engine::general_purpose::STANDARD.encode(image_data)
-                                })
-                                .await
-                                {
-                                    Ok(base64_data) => {
-                                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                                    }
-                                    Err(e) => {
-                                        error!("Error encoding image: {:?}", e);
+                        Metadata::Image(_image_metadata) => {
+                            match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
+                                Ok(image_data) => {
+                                    match tokio::task::spawn_blocking(move || {
+                                        base64::engine::general_purpose::STANDARD.encode(image_data)
+                                    })
+                                    .await
+                                    {
+                                        Ok(base64_data) => {
+                                            context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                                        }
+                                        Err(e) => {
+                                            error!("Error encoding image: {:?}", e);
+                                        }
                                     }
                                 }
+                                Err(e) => {
+                                    error!("Error reading image file: {:?}", e);
+                                }
                             }
-                            Err(e) => {
-                                error!("Error reading image file: {:?}", e);
-                            }
-                        },
+                        }
                         _ => {}
                     }
                 }

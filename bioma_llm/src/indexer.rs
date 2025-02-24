@@ -457,7 +457,6 @@ impl Indexer {
     ) -> Result<IndexResult, IndexerError> {
         match content {
             Content::Image { data } => {
-                // Generate metadata first
                 let metadata = match &data {
                     ImageData::Path(path) => {
                         let path_clone = path.clone();
@@ -499,14 +498,12 @@ impl Indexer {
                     ImageData::Base64(base64_data) => {
                         let base64_clone = base64_data.clone();
                         tokio::task::spawn_blocking(move || {
-                            // Handle data URL format if present
                             let base64_content = if let Some(idx) = base64_clone.find(";base64,") {
                                 &base64_clone[idx + 8..]
                             } else {
                                 &base64_clone
                             };
 
-                            // Decode base64
                             let image_data = base64::engine::general_purpose::STANDARD.decode(base64_content).ok()?;
                             let cursor = std::io::Cursor::new(image_data);
 
