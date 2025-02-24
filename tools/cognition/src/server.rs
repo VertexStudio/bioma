@@ -787,38 +787,35 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 ChatMessage::system(format!("{}{}", data.config.chat_prompt, context.to_markdown()))
             };
 
-            // Only one image since ollama only supports one image per message
-            if let Some(ctx) = context
-                .context
-                .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
-            {
-                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
-                    match &metadata {
-                        Metadata::Image(_image_metadata) => {
-                            match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
-                                Ok(image_data) => {
-                                    match tokio::task::spawn_blocking(move || {
-                                        base64::engine::general_purpose::STANDARD.encode(image_data)
-                                    })
-                                    .await
-                                    {
-                                        Ok(base64_data) => {
-                                            context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                                        }
-                                        Err(e) => {
-                                            error!("Error encoding image: {:?}", e);
-                                        }
-                                    }
+            // TODO: Image support varies between models.
+            // For example, llama3.2-vision support only one image per message. So if we have > 1, it's going to throw an error.
+            let mut base64_images = Vec::new();
+            for ctx in context.context.iter() {
+                if let (Some(source), Some(Metadata::Image(_))) = (&ctx.source, &ctx.metadata) {
+                    match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    base64_images.push(Image::from_base64(&base64_data));
                                 }
                                 Err(e) => {
-                                    error!("Error reading image file: {:?}", e);
+                                    error!("Error encoding image: {:?}", e);
                                 }
                             }
                         }
-                        _ => {}
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
                     }
                 }
+            }
+
+            if !base64_images.is_empty() {
+                context_message.images = Some(base64_images);
             }
 
             // Set up streaming channel with sufficient buffer for chat responses
@@ -1234,23 +1231,35 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
 
     let mut context_message = ChatMessage::system(system_prompt);
 
-    // Only one image since ollama only supports one image per message
-    if let Some(ctx) =
-        retrieved.context.iter().find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
-    {
-        if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
-            if let Metadata::Image(_) = metadata {
-                if let Ok(image_data) = tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
-                    if let Ok(base64_data) = tokio::task::spawn_blocking(move || {
+    // TODO: Image support varies between models.
+    // For example, llama3.2-vision support only one image per message. So if we have > 1, it's going to throw an error.
+    let mut base64_images = Vec::new();
+    for ctx in retrieved.context.iter() {
+        if let (Some(source), Some(Metadata::Image(_))) = (&ctx.source, &ctx.metadata) {
+            match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
+                Ok(image_data) => {
+                    match tokio::task::spawn_blocking(move || {
                         base64::engine::general_purpose::STANDARD.encode(image_data)
                     })
                     .await
                     {
-                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                        Ok(base64_data) => {
+                            base64_images.push(Image::from_base64(&base64_data));
+                        }
+                        Err(e) => {
+                            error!("Error encoding image: {:?}", e);
+                        }
                     }
+                }
+                Err(e) => {
+                    error!("Error reading image file: {:?}", e);
                 }
             }
         }
+    }
+
+    if !base64_images.is_empty() {
+        context_message.images = Some(base64_images);
     }
 
     let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
@@ -1519,38 +1528,35 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content))
             };
 
-            // Only one image since ollama only supports one image per message
-            if let Some(ctx) = context
-                .context
-                .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
-            {
-                if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
-                    match &metadata {
-                        Metadata::Image(_image_metadata) => {
-                            match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
-                                Ok(image_data) => {
-                                    match tokio::task::spawn_blocking(move || {
-                                        base64::engine::general_purpose::STANDARD.encode(image_data)
-                                    })
-                                    .await
-                                    {
-                                        Ok(base64_data) => {
-                                            context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                                        }
-                                        Err(e) => {
-                                            error!("Error encoding image: {:?}", e);
-                                        }
-                                    }
+            // TODO: Image support varies between models.
+            // For example, llama3.2-vision support only one image per message. So if we have > 1, it's going to throw an error.
+            let mut base64_images = Vec::new();
+            for ctx in context.context.iter() {
+                if let (Some(source), Some(Metadata::Image(_))) = (&ctx.source, &ctx.metadata) {
+                    match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    base64_images.push(Image::from_base64(&base64_data));
                                 }
                                 Err(e) => {
-                                    error!("Error reading image file: {:?}", e);
+                                    error!("Error encoding image: {:?}", e);
                                 }
                             }
                         }
-                        _ => {}
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
                     }
                 }
+            }
+
+            if !base64_images.is_empty() {
+                context_message.images = Some(base64_images);
             }
 
             let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
