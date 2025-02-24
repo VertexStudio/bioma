@@ -2910,10 +2910,9 @@
           let split_path = source_element.source.split("/");
 
           const source = {
-            id: Date.now().toString() + "-" + split_path[split_path.length - 1],
             path: source_element.source,
-            display_name: split_path[split_path.length - 1],
             active: false,
+            uri: source_element.uri,
           };
 
           return source;
@@ -2938,7 +2937,7 @@
           "savedSources",
           JSON.stringify({
             sources: [...keys],
-            sourcesExpanded: maped_sources,
+            sourcesExpanded: grouped,
           })
         );
 
@@ -3023,13 +3022,31 @@
     `;
 
         if (!source.isLocal) {
-          sourceElement
-            .querySelector(".source-toggle")
-            .addEventListener("change", (e) => {
-              e.stopPropagation();
-              setSourceState(source, e.target.checked);
-            });
+          const toggle = sourceElement.querySelector(".source-toggle");
+
+          toggle.addEventListener("change", (e) => {
+            e.stopPropagation();
+            setSourceState(source, e.target.checked);
+          });
         }
+
+        let sourceUris = null;
+
+        if (!source.isLocal) {
+          const expanded = getSavedSourcesExpanded().sourcesExpanded;
+          sourceUris = expanded[source.path];
+        }
+
+        sourceElement.addEventListener("click", (e) => {
+          e.stopPropagation();
+
+          if (
+            e.target.classList.contains("source-toggle") ||
+            e.target.closest(".switch")
+          ) {
+            return;
+          }
+        });
 
         sourceElement
           .querySelector(".delete-source")
@@ -3071,13 +3088,15 @@
 
         sourceElement
           .querySelector(".upload-button")
-          .addEventListener("click", function () {
+          .addEventListener("click", function (e) {
+            e.stopPropagation();
             sourceElement.querySelector(".file-input").click();
           });
 
         sourceElement
           .querySelector(".file-input")
           .addEventListener("change", async function (event) {
+            event.stopPropagation();
             const file = event.target.files[0];
 
             let uploadButton = sourceElement.querySelector(".upload-button");
