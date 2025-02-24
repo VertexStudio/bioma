@@ -10,10 +10,8 @@ pub struct Relay;
 impl Actor for Relay {
     type Error = SystemActorError;
 
-    fn start(&mut self, _ctx: &mut ActorContext<Self>) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            panic!("Relay should not be started");
-        }
+    async fn start(&mut self, _ctx: &mut ActorContext<Self>) -> Result<(), Self::Error> {
+        panic!("Relay should not be started");
     }
 }
 

@@ -91,7 +91,7 @@ impl RetrievedContext {
     pub fn to_markdown(&self) -> String {
         let mut context_content = String::new();
 
-        for (_index, context) in self.context.iter().enumerate() {
+        for context in self.context.iter() {
             context_content.push_str("---\n\n");
 
             if let Some(source) = &context.source {
@@ -168,7 +168,7 @@ impl Message<RetrieveContext> for Retriever {
                         s.metadata
                             .as_ref()
                             .and_then(|m| serde_json::from_value::<Metadata>(m.clone()).ok())
-                            .map_or(false, |metadata| matches!(metadata, Metadata::Text(_)))
+                            .is_some_and(|metadata| matches!(metadata, Metadata::Text(_)))
                     });
 
                 // Process text content with reranking
@@ -265,7 +265,7 @@ impl Message<ListSources> for Retriever {
     }
 }
 
-#[derive(bon::Builder, Debug, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Serialize, Deserialize, Default)]
 pub struct Retriever {
     #[builder(default)]
     pub embeddings: Embeddings,
@@ -277,19 +277,6 @@ pub struct Retriever {
     embeddings_handle: Option<tokio::task::JoinHandle<()>>,
     #[serde(skip)]
     rerank_handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Default for Retriever {
-    fn default() -> Self {
-        Self {
-            embeddings: Embeddings::default(),
-            rerank: Rerank::default(),
-            embeddings_id: None,
-            rerank_id: None,
-            embeddings_handle: None,
-            rerank_handle: None,
-        }
-    }
 }
 
 impl Actor for Retriever {

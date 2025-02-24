@@ -296,7 +296,7 @@ impl Indexer {
         ctx: &ActorContext<Self>,
         source: &ContentSource,
     ) -> Result<Option<IndexedSource>, IndexerError> {
-        let query = format!("SELECT id.source AS source, id.uri AS uri FROM source:{{source: $source, uri: $uri}}");
+        let query = "SELECT id.source AS source, id.uri AS uri FROM source:{source: $source, uri: $uri}".to_string();
         let db = ctx.engine().db();
         let mut results = db
             .lock()
@@ -490,7 +490,7 @@ impl Indexer {
                                     .as_secs(),
                             });
 
-                            Some(serde_json::to_value(image_metadata).ok()?)
+                            serde_json::to_value(image_metadata).ok()
                         })
                         .await
                         .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
@@ -525,7 +525,7 @@ impl Indexer {
                                 created: now,
                             });
 
-                            Some(serde_json::to_value(image_metadata).ok()?)
+                            serde_json::to_value(image_metadata).ok()
                         })
                         .await
                         .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
@@ -657,7 +657,7 @@ impl Indexer {
                         .db()
                         .lock()
                         .await
-                        .query(*&source_query)
+                        .query(source_query)
                         .bind(("source", source.source.clone()))
                         .bind(("uri", source.uri.clone()))
                         .bind(("summary", summary_text))
@@ -992,7 +992,7 @@ impl Message<Index> for Indexer {
 
                 for text in texts {
                     // Generate file path with appropriate extension
-                    let extension = match self.determine_extension(Some(&mime_type), false, None) {
+                    let extension = match self.determine_extension(Some(mime_type), false, None) {
                         Ok(ext) => ext,
                         Err(e) => {
                             error!("Failed to determine text extension: {}", e);
@@ -1015,7 +1015,7 @@ impl Message<Index> for Indexer {
                     }
 
                     // Save the text content to file
-                    self.save_content_to_file(&text, &filepath).await?;
+                    self.save_content_to_file(text, &filepath).await?;
 
                     info!("Indexing text: {}", &filepath.display());
                     let content = Content::Text {
@@ -1038,7 +1038,7 @@ impl Message<Index> for Indexer {
 
                 for image in images {
                     // Generate file path with appropriate extension
-                    let extension = match self.determine_extension(mime_type.as_deref(), true, Some(&image)) {
+                    let extension = match self.determine_extension(mime_type.as_deref(), true, Some(image)) {
                         Ok(ext) => ext,
                         Err(e) => {
                             error!("Failed to determine image extension: {}", e);
@@ -1061,7 +1061,7 @@ impl Message<Index> for Indexer {
                     }
 
                     // Save the image content to file
-                    self.save_base64_to_file(&image, &filepath).await?;
+                    self.save_base64_to_file(image, &filepath).await?;
 
                     info!("Indexing image: {}", &filepath.display());
                     let content =
@@ -1122,7 +1122,7 @@ impl Message<DeleteSource> for Indexer {
     }
 }
 
-#[derive(bon::Builder, Debug, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, Serialize, Deserialize, Default)]
 pub struct Indexer {
     pub embeddings: Embeddings,
     pub pdf_analyzer: PdfAnalyzer,
@@ -1140,25 +1140,6 @@ pub struct Indexer {
     markitdown_handle: Option<tokio::task::JoinHandle<()>>,
     #[serde(skip)]
     summary_handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Default for Indexer {
-    fn default() -> Self {
-        Self {
-            embeddings: Embeddings::default(),
-            pdf_analyzer: PdfAnalyzer::default(),
-            markitdown: MarkitDown::default(),
-            summary: Summary::default(),
-            embeddings_id: None,
-            pdf_analyzer_id: None,
-            markitdown_id: None,
-            summary_id: None,
-            pdf_analyzer_handle: None,
-            embeddings_handle: None,
-            markitdown_handle: None,
-            summary_handle: None,
-        }
-    }
 }
 
 impl Actor for Indexer {

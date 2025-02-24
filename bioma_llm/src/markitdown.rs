@@ -69,7 +69,7 @@ impl Message<AnalyzeMCFile> for MarkitDown {
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, msg: &AnalyzeMCFile) -> Result<(), MarkitDownError> {
         info!("path {:?}", msg.file_path);
-        let markdown = self.post_markitdown(&msg).await?;
+        let markdown = self.post_markitdown(msg).await?;
         ctx.reply(markdown).await?;
         Ok(())
     }

@@ -937,8 +937,10 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 if let Err(e) = tool_call_tree {
                     if tools.len() > 0 {
                         error!("Error during chat with tools: {:?}", e);
+                        let _ = tx.send(Err(e.to_string())).await;
                     } else {
                         error!("Error during chat: {:?}", e);
+                        let _ = tx.send(Err(e.to_string())).await;
                     }
                 }
 
