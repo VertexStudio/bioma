@@ -1380,7 +1380,7 @@
         </button>
       </div>
 
-      <details class="details">
+      <details id="sources-details" class="details">
         <summary>
           <i class="fa-solid fa-book" style="margin-right: 8px"></i>
           Sources
@@ -2735,6 +2735,14 @@
           loadSavedSources();
         });
 
+        document
+          .getElementById("sources-details")
+          .addEventListener("toggle", async function (event) {
+            if (this.open) {
+              await fetchAvailableSources();
+            }
+          });
+
         // Load saved tools from localStorage
         loadSavedTools();
 
@@ -2897,8 +2905,6 @@
             };
           }
         });
-
-        // let localSources = getLocalOnlySources();
 
         localStorage.setItem(
           "savedSources",
