@@ -1353,6 +1353,19 @@
           opacity: 0.4;
         }
       }
+
+      .uri {
+        font-family: var(--font-family);
+        color: var(--text-muted);
+        padding: 4px 0;
+        font-size: 0.9em;
+      }
+
+      .source-separator {
+        border-top: 1px solid var(--border-color);
+        margin-top: 10px;
+        padding-top: 10px;
+      }
     </style>
   </head>
 
@@ -1735,14 +1748,19 @@
         const lines = content.split("\n");
         lines.forEach((line) => {
           const trimmedLine = line.trim();
-          if (trimmedLine.startsWith("[URI:")) {
+          if (
+            trimmedLine.startsWith("[URI:") ||
+            trimmedLine.startsWith("[SOURCE:") ||
+            trimmedLine.startsWith("[CHUNK:")
+          ) {
             flushNormalLines();
-            let uri = trimmedLine.slice(5, -1).trim();
-            processedContent += `<div class="uri">URI: ${uri}</div>`;
+            // Keep the original format for display
+            processedContent += `<div class="uri">${trimmedLine}</div>`;
           } else if (trimmedLine.startsWith("Source:")) {
             flushNormalLines();
+            // Convert old "Source:" format to new [SOURCE:] format
             let source = trimmedLine.slice(7).trim();
-            processedContent += `<div class="source">Source: ${source}</div>`;
+            processedContent += `<div class="uri">[SOURCE:${source}]</div>`;
           } else if (trimmedLine.startsWith("[IMAGE:")) {
             flushNormalLines();
             let imageType = trimmedLine.slice(7, -1).trim();
@@ -2804,6 +2822,11 @@
 
         const parsed_json = JSON.parse(sources);
 
+        // Check if parsed_json and parsed_json.sources exist
+        if (!parsed_json || !parsed_json.sources) {
+          return [];
+        }
+
         return parsed_json.sources;
       }
 
@@ -2843,6 +2866,11 @@
         }
 
         let savedSources = JSON.parse(sources);
+
+        // Check if savedSources and savedSources.sources exist
+        if (!savedSources || !savedSources.sources) {
+          return [];
+        }
 
         return savedSources.sources.filter((source) => source.active == true);
       }
