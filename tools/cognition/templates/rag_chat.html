@@ -1381,7 +1381,7 @@
       </div>
 
       <details class="details">
-        <summary>
+        <summary onclick="fetchAvailableSources()">
           <i class="fa-solid fa-book" style="margin-right: 8px"></i>
           Sources
         </summary>
@@ -2897,8 +2897,6 @@
             };
           }
         });
-
-        // let localSources = getLocalOnlySources();
 
         localStorage.setItem(
           "savedSources",
