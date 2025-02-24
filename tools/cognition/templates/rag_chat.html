@@ -398,8 +398,18 @@
         text-overflow: ellipsis;
       }
 
+      .source-item-list {
+        white-space: nowrap;
+        width: auto;
+        overflow: auto;
+        max-height: 300px !important;
+      }
+
       .source-item-list ol li {
-        margin-top: 10px;
+        white-space: nowrap;
+        width: auto;
+        margin-top: 20px;
+        font-size: 0.9em !important;
       }
 
       .upload-icon,
@@ -931,6 +941,7 @@
       /* Scrollbar styling */
       ::-webkit-scrollbar {
         width: 8px;
+        height: 8px;
       }
 
       ::-webkit-scrollbar-track {
