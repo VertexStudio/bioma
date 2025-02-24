@@ -25,7 +25,7 @@
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
         --sidebar-width: 300px;
-        --sidebar-width-collapsed: 60px;
+        --sidebar-width-collapsed: 100px;
         --slider-width: 40px;
         --slider-height: calc(var(--slider-width) * 0.5);
         --surrealist-gradient: linear-gradient(
@@ -396,6 +396,10 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      .source-item-list ol li {
+        margin-top: 10px;
       }
 
       .upload-icon,
@@ -1565,7 +1569,7 @@
       function resizeSidebar(e) {
         if (!isResizing) return;
         const newWidth = window.innerWidth - e.clientX;
-        if (newWidth >= 280 && newWidth <= 500) {
+        if (newWidth >= 280 && newWidth <= 550) {
           sidebar.style.width = `${newWidth}px`;
         }
       }
@@ -2990,63 +2994,79 @@
       }
 
       function createSourceElement(source, isActive = false) {
+        let sourcesUris = null;
+
+        if (!source.isLocal) {
+          let savedSourcesExpanded = getSavedSourcesExpanded().sourcesExpanded;
+
+          sourcesUris = savedSourcesExpanded[source.path]
+            .map((source) => `<li>${source.uri}</li>`)
+            .join(""); // Removes commas and creates a proper list
+        }
+
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item`;
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
+        sourceElement.style.display = "flex";
+        sourceElement.style.flexDirection = "column";
         sourceElement.innerHTML = `
-        <div class="source-item-header">
-            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-            <span class="source-item-name">${source.path}</span>
-            ${
-              source.isLocal
-                ? ""
-                : `<label class="switch">
-                    <input type="checkbox" class="source-toggle" ${
-                      isActive ? "checked" : ""
-                    }>
-                    <span class="slider"></span>
-                </label>`
-            }
-            <span id="upload-button" class="upload-icon upload-button" title="Upload file to source">
-                <i class="fa-solid fa-paperclip"></i>
-                <input type="file" id="file-input" class="file-input" style="display: none" />
-            </span>
-            <span class="upload-status" style="display: none; font-size: 12px; margin-left: 10px;"></span>
-            <div class="source-actions">
-                <button class="source-action-btn delete-source" title="Delete">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-        </div>
+              <div class="source-item-header">
+                  <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                  <span class="source-item-name">${source.path}</span>
+                  ${
+                    source.isLocal
+                      ? ""
+                      : `<label class="switch">
+                          <input type="checkbox" class="source-toggle" ${
+                            isActive ? "checked" : ""
+                          }>
+                          <span class="slider"></span>
+                      </label>`
+                  }
+                  <span id="upload-button" class="upload-icon upload-button" title="Upload file to source">
+                      <i class="fa-solid fa-paperclip"></i>
+                      <input type="file" id="file-input" class="file-input" style="display: none" />
+                  </span>
+                  <span class="upload-status" style="display: none; font-size: 12px; margin-left: 10px;"></span>
+                  <div class="source-actions">
+                      <button class="source-action-btn delete-source" title="Delete">
+                          <i class="fas fa-trash"></i>
+                      </button>
+                  </div>
+              </div>
+
+              <div class="source-item-list" style="display: none;">
+                  <ol>
+                    ${sourcesUris}
+                  </ol>
+              </div>
     `;
+
+        const listContainer = sourceElement.querySelector(".source-item-list");
 
         if (!source.isLocal) {
           const toggle = sourceElement.querySelector(".source-toggle");
-
           toggle.addEventListener("change", (e) => {
             e.stopPropagation();
             setSourceState(source, e.target.checked);
           });
+
+          sourceElement.addEventListener("click", (e) => {
+            e.stopPropagation();
+
+            if (
+              e.target.classList.contains("source-toggle") ||
+              e.target.closest(".switch")
+            ) {
+              return;
+            }
+
+            // Toggle List Visibility
+            listContainer.style.display =
+              listContainer.style.display === "none" ? "block" : "none";
+          });
         }
-
-        let sourceUris = null;
-
-        if (!source.isLocal) {
-          const expanded = getSavedSourcesExpanded().sourcesExpanded;
-          sourceUris = expanded[source.path];
-        }
-
-        sourceElement.addEventListener("click", (e) => {
-          e.stopPropagation();
-
-          if (
-            e.target.classList.contains("source-toggle") ||
-            e.target.closest(".switch")
-          ) {
-            return;
-          }
-        });
 
         sourceElement
           .querySelector(".delete-source")
