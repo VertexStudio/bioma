@@ -768,7 +768,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
         async move {
             // Check if the actor already exists
             let actor_record: Option<ActorRecord> =
-                engine.db().lock().await.select(&id.record_id()).await.map_err(SystemActorError::from)?;
+                engine.db().lock().await.select(id.record_id()).await.map_err(SystemActorError::from)?;
 
             if let Some(actor_record) = actor_record {
                 // Actor exists, apply options
@@ -776,7 +776,7 @@ pub trait Actor: Sized + Serialize + for<'de> Deserialize<'de> + Debug + Send + 
                     SpawnExistsOptions::Reset => {
                         // Reset the actor by deleting its record
                         let _: Option<ActorRecord> =
-                            engine.db().lock().await.delete(&id.record_id()).await.map_err(SystemActorError::from)?;
+                            engine.db().lock().await.delete(id.record_id()).await.map_err(SystemActorError::from)?;
                         // We'll create a new record below
                     }
                     SpawnExistsOptions::Error => {
@@ -1012,12 +1012,8 @@ impl<T: Actor> ActorContext<T> {
     pub async fn health(&self) -> bool {
         // Check if the actor is still in the database
         let record: Result<Option<ActorRecord>, SystemActorError> =
-            self.engine().db().lock().await.select(&self.id.record_id()).await.map_err(SystemActorError::from);
-        if let Ok(Some(_)) = record {
-            true
-        } else {
-            false
-        }
+            self.engine().db().lock().await.select(self.id.record_id()).await.map_err(SystemActorError::from);
+        matches!(record, Ok(Some(_)))
     }
 
     /// Initialize health monitoring and start periodic health updates for this actor
@@ -1140,7 +1136,7 @@ impl<T: Actor> ActorContext<T> {
     /// Kill the actor
     pub async fn kill(&self) -> Result<(), SystemActorError> {
         let _: Option<ActorRecord> =
-            self.engine().db().lock().await.delete(&self.id.record_id()).await.map_err(SystemActorError::from)?;
+            self.engine().db().lock().await.delete(self.id.record_id()).await.map_err(SystemActorError::from)?;
         Ok(())
     }
 
@@ -1341,7 +1337,7 @@ impl<T: Actor> ActorContext<T> {
             }
         }
 
-        let msg_value = serde_json::to_value(&message)?;
+        let msg_value = serde_json::to_value(message)?;
         let name = std::any::type_name::<MT>();
         let msg_id = Id::ulid();
         let request_id = RecordId::from_table_key(DB_TABLE_MESSAGE, msg_id.to_string());
@@ -1716,7 +1712,7 @@ impl<T: Actor> ActorContext<T> {
     /// * `Err(SystemActorError)` if sending the error failed
     pub async fn error(&self, error: &impl ActorError) -> Result<(), SystemActorError> {
         if let Some(tx) = &self.tx {
-            let value = serde_json::to_value(&error.to_string())?;
+            let value = serde_json::to_value(error.to_string())?;
             tx.send(Err(value)).map_err(|_| SystemActorError::MessageReply("Reply channel closed".into()))?;
             Ok(())
         } else {
