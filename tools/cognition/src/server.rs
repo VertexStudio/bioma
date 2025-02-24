@@ -774,6 +774,34 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 (sys_msg, filtered)
             };
 
+            // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
+            let image_info = context
+                .context
+                .iter()
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+                .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
+
+            // Remove all images from context except the one we're using
+            if let Some((uri, _)) = &image_info {
+                context.context.retain(|c| {
+                    if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
+                        if matches!(metadata, Metadata::Image(_)) {
+                            // Only keep this image if it's the one we're using
+                            source.uri == *uri
+                        } else {
+                            // Keep all non-image content
+                            true
+                        }
+                    } else {
+                        // Keep items without source or metadata
+                        true
+                    }
+                });
+            } else {
+                // If we didn't find an image to use, remove all images from context
+                context.context.retain(|c| c.metadata.as_ref().map_or(true, |m| !matches!(m, Metadata::Image(_))));
+            }
+
             // Create the system message with context
             let mut context_message = if let Some(sys_msg) = system_message {
                 // Use the request's system message and append context
@@ -787,35 +815,27 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 ChatMessage::system(format!("{}{}", data.config.chat_prompt, context.to_markdown()))
             };
 
-            // TODO: Image support varies between models.
-            // For example, llama3.2-vision support only one image per message. So if we have > 1, it's going to throw an error.
-            let mut base64_images = Vec::new();
-            for ctx in context.context.iter() {
-                if let (Some(source), Some(Metadata::Image(_))) = (&ctx.source, &ctx.metadata) {
-                    match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
-                        Ok(image_data) => {
-                            match tokio::task::spawn_blocking(move || {
-                                base64::engine::general_purpose::STANDARD.encode(image_data)
-                            })
-                            .await
-                            {
-                                Ok(base64_data) => {
-                                    base64_images.push(Image::from_base64(&base64_data));
-                                }
-                                Err(e) => {
-                                    error!("Error encoding image: {:?}", e);
-                                }
+            // Add the image to the context message if we found one
+            if let Some((uri, Metadata::Image(_))) = image_info {
+                match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+                    Ok(image_data) => {
+                        match tokio::task::spawn_blocking(move || {
+                            base64::engine::general_purpose::STANDARD.encode(image_data)
+                        })
+                        .await
+                        {
+                            Ok(base64_data) => {
+                                context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                            }
+                            Err(e) => {
+                                error!("Error encoding image: {:?}", e);
                             }
                         }
-                        Err(e) => {
-                            error!("Error reading image file: {:?}", e);
-                        }
+                    }
+                    Err(e) => {
+                        error!("Error reading image file: {:?}", e);
                     }
                 }
-            }
-
-            if !base64_images.is_empty() {
-                context_message.images = Some(base64_images);
             }
 
             // Set up streaming channel with sufficient buffer for chat responses
@@ -1108,7 +1128,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         sources: body.sources.clone(),
     };
 
-    let retrieved = match user_actor
+    let mut retrieved = match user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
@@ -1120,13 +1140,6 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         Err(e) => return HttpResponse::InternalServerError().body(format!("Error fetching context: {}", e)),
     };
 
-    let context_content = if retrieved.context.is_empty() {
-        "No additional context available".to_string()
-    } else {
-        retrieved.to_markdown()
-    };
-
-    // Preserve user-provided system message if present, otherwise use default (our own system prompt)
     let (system_message, filtered_messages): (Option<ChatMessage>, Vec<_>) = {
         let mut sys_msg = None;
         let filtered = if !body.messages.is_empty() {
@@ -1146,6 +1159,40 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
             Vec::new()
         };
         (sys_msg, filtered)
+    };
+
+    // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
+    let image_info = retrieved
+        .context
+        .iter()
+        .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+        .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
+
+    // Remove all images from context except the one we're using
+    if let Some((uri, _)) = &image_info {
+        retrieved.context.retain(|c| {
+            if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
+                if matches!(metadata, Metadata::Image(_)) {
+                    // Only keep this image if it's the one we're using
+                    source.uri == *uri
+                } else {
+                    // Keep all non-image content
+                    true
+                }
+            } else {
+                // Keep items without source or metadata
+                true
+            }
+        });
+    } else {
+        // If we didn't find an image to use, remove all images from context
+        retrieved.context.retain(|c| c.metadata.as_ref().map_or(true, |m| !matches!(m, Metadata::Image(_))));
+    }
+
+    let context_content = if retrieved.context.is_empty() {
+        "No additional context available".to_string()
+    } else {
+        retrieved.to_markdown()
     };
 
     // Build the system prompt based on system message or tools
@@ -1231,35 +1278,25 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
 
     let mut context_message = ChatMessage::system(system_prompt);
 
-    // TODO: Image support varies between models.
-    // For example, llama3.2-vision support only one image per message. So if we have > 1, it's going to throw an error.
-    let mut base64_images = Vec::new();
-    for ctx in retrieved.context.iter() {
-        if let (Some(source), Some(Metadata::Image(_))) = (&ctx.source, &ctx.metadata) {
-            match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
-                Ok(image_data) => {
-                    match tokio::task::spawn_blocking(move || {
-                        base64::engine::general_purpose::STANDARD.encode(image_data)
-                    })
+    // Add the image to the context message if we found one
+    if let Some((uri, Metadata::Image(_))) = image_info {
+        match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+            Ok(image_data) => {
+                match tokio::task::spawn_blocking(move || base64::engine::general_purpose::STANDARD.encode(image_data))
                     .await
-                    {
-                        Ok(base64_data) => {
-                            base64_images.push(Image::from_base64(&base64_data));
-                        }
-                        Err(e) => {
-                            error!("Error encoding image: {:?}", e);
-                        }
+                {
+                    Ok(base64_data) => {
+                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                    }
+                    Err(e) => {
+                        error!("Error encoding image: {:?}", e);
                     }
                 }
-                Err(e) => {
-                    error!("Error reading image file: {:?}", e);
-                }
+            }
+            Err(e) => {
+                error!("Error reading image file: {:?}", e);
             }
         }
-    }
-
-    if !base64_images.is_empty() {
-        context_message.images = Some(base64_images);
     }
 
     let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
@@ -1490,7 +1527,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
         .await;
 
     match retrieved {
-        Ok(context) => {
+        Ok(mut context) => {
             info!("Context fetched: {:#?}", context);
             let context_content = context.to_markdown();
 
@@ -1516,6 +1553,34 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 (sys_msg, filtered)
             };
 
+            // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
+            let image_info = context
+                .context
+                .iter()
+                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+                .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
+
+            // Remove all images from context except the one we're using
+            if let Some((uri, _)) = &image_info {
+                context.context.retain(|c| {
+                    if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
+                        if matches!(metadata, Metadata::Image(_)) {
+                            // Only keep this image if it's the one we're using
+                            source.uri == *uri
+                        } else {
+                            // Keep all non-image content
+                            true
+                        }
+                    } else {
+                        // Keep items without source or metadata
+                        true
+                    }
+                });
+            } else {
+                // If we didn't find an image to use, remove all images from context
+                context.context.retain(|c| c.metadata.as_ref().map_or(true, |m| !matches!(m, Metadata::Image(_))));
+            }
+
             // Create the system message with context
             let mut context_message = if let Some(sys_msg) = system_message {
                 // Use existing system message and append context
@@ -1528,35 +1593,27 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 ChatMessage::system(format!("{}{}", data.config.chat_prompt, context_content))
             };
 
-            // TODO: Image support varies between models.
-            // For example, llama3.2-vision support only one image per message. So if we have > 1, it's going to throw an error.
-            let mut base64_images = Vec::new();
-            for ctx in context.context.iter() {
-                if let (Some(source), Some(Metadata::Image(_))) = (&ctx.source, &ctx.metadata) {
-                    match tokio::fs::read(data.engine.local_store_dir().join(&source.uri)).await {
-                        Ok(image_data) => {
-                            match tokio::task::spawn_blocking(move || {
-                                base64::engine::general_purpose::STANDARD.encode(image_data)
-                            })
-                            .await
-                            {
-                                Ok(base64_data) => {
-                                    base64_images.push(Image::from_base64(&base64_data));
-                                }
-                                Err(e) => {
-                                    error!("Error encoding image: {:?}", e);
-                                }
+            // Add the image to the context message if we found one
+            if let Some((uri, Metadata::Image(_))) = image_info {
+                match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+                    Ok(image_data) => {
+                        match tokio::task::spawn_blocking(move || {
+                            base64::engine::general_purpose::STANDARD.encode(image_data)
+                        })
+                        .await
+                        {
+                            Ok(base64_data) => {
+                                context_message.images = Some(vec![Image::from_base64(&base64_data)]);
+                            }
+                            Err(e) => {
+                                error!("Error encoding image: {:?}", e);
                             }
                         }
-                        Err(e) => {
-                            error!("Error reading image file: {:?}", e);
-                        }
+                    }
+                    Err(e) => {
+                        error!("Error reading image file: {:?}", e);
                     }
                 }
-            }
-
-            if !base64_images.is_empty() {
-                context_message.images = Some(base64_images);
             }
 
             let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
