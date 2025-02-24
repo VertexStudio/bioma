@@ -458,45 +458,81 @@ impl Indexer {
         match content {
             Content::Image { data } => {
                 // Generate metadata first
-                let metadata = if let ImageData::Path(path) = &data {
-                    let path_clone = path.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let file = std::fs::File::open(&path_clone).ok()?;
-                        let reader = std::io::BufReader::new(file);
+                let metadata = match &data {
+                    ImageData::Path(path) => {
+                        let path_clone = path.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let file = std::fs::File::open(&path_clone).ok()?;
+                            let reader = std::io::BufReader::new(file);
+                            let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
+                            let format_type = format.format();
+                            let dimensions = match format_type {
+                                Some(_) => format.into_dimensions().ok()?,
+                                None => return None,
+                            };
 
-                        let format = image::ImageReader::new(reader).with_guessed_format().ok()?;
-                        let format_type = format.format();
-                        let dimensions = match format_type {
-                            Some(_) => format.into_dimensions().ok()?,
-                            None => return None,
-                        };
+                            let file_metadata = std::fs::metadata(&path_clone).ok()?;
 
-                        let file_metadata = std::fs::metadata(&path_clone).ok()?;
+                            let image_metadata = Metadata::Image(ImageMetadata {
+                                format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
+                                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+                                size_bytes: file_metadata.len(),
+                                modified: file_metadata
+                                    .modified()
+                                    .ok()?
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .ok()?
+                                    .as_secs(),
+                                created: file_metadata
+                                    .created()
+                                    .ok()?
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .ok()?
+                                    .as_secs(),
+                            });
 
-                        let image_metadata = Metadata::Image(ImageMetadata {
-                            format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
-                            dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
-                            size_bytes: file_metadata.len(),
-                            modified: file_metadata
-                                .modified()
-                                .ok()?
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .ok()?
-                                .as_secs(),
-                            created: file_metadata
-                                .created()
-                                .ok()?
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .ok()?
-                                .as_secs(),
-                        });
+                            Some(serde_json::to_value(image_metadata).ok()?)
+                        })
+                        .await
+                        .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+                    }
+                    ImageData::Base64(base64_data) => {
+                        let base64_clone = base64_data.clone();
+                        tokio::task::spawn_blocking(move || {
+                            // Handle data URL format if present
+                            let base64_content = if let Some(idx) = base64_clone.find(";base64,") {
+                                &base64_clone[idx + 8..]
+                            } else {
+                                &base64_clone
+                            };
 
-                        Some(serde_json::to_value(image_metadata).ok()?)
-                    })
-                    .await
-                    .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
-                } else {
-                    None // Base64 images don't have file metadata
+                            // Decode base64
+                            let image_data = base64::engine::general_purpose::STANDARD.decode(base64_content).ok()?;
+                            let cursor = std::io::Cursor::new(image_data);
+
+                            let format = image::ImageReader::new(cursor).with_guessed_format().ok()?;
+                            let format_type = format.format();
+                            let dimensions = match format_type {
+                                Some(_) => format.into_dimensions().ok()?,
+                                None => return None,
+                            };
+
+                            let now =
+                                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+
+                            let image_metadata = Metadata::Image(ImageMetadata {
+                                format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
+                                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+                                size_bytes: base64_content.len() as u64,
+                                modified: now,
+                                created: now,
+                            });
+
+                            Some(serde_json::to_value(image_metadata).ok()?)
+                        })
+                        .await
+                        .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+                    }
                 };
 
                 let (embeddings_ids, summary_text) = self
