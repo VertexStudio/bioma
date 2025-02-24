@@ -2616,16 +2616,11 @@
             resizeTextarea();
             return;
           }
-          if (isGenerating) {
-            // Prevent sending while generating
-            e.preventDefault();
-            return;
-          }
+
+          // Allow toggling tools with Ctrl+Enter even during generation
           if (e.ctrlKey) {
             e.preventDefault();
-
             const toolsActorsList = getActiveTools();
-
             // Only toggle if we have tools
             if (toolsActorsList.length > 0) {
               toolsEnabled = !toolsEnabled;
@@ -2633,12 +2628,22 @@
             }
             return;
           }
+
+          // Allow toggling think mode with Alt+Enter even during generation
           if (e.altKey) {
             e.preventDefault();
             thinkEnabled = !thinkEnabled;
             updateThinkButton();
             return;
           }
+
+          // Only send a query if not already generating
+          if (isGenerating) {
+            // Prevent sending while generating
+            e.preventDefault();
+            return;
+          }
+
           e.preventDefault();
           const endpoint = thinkEnabled ? "/think" : "/chat";
           await sendQuery(endpoint);
@@ -2659,6 +2664,12 @@
           if (toolsActorsList.length > 0) {
             toolsEnabled = !toolsEnabled;
             updateToolButton();
+          }
+
+          // Only send a query if not already generating
+          if (!isGenerating && queryInput.value.trim()) {
+            const endpoint = thinkEnabled ? "/think" : "/chat";
+            await sendQuery(endpoint);
           }
         });
 
@@ -3303,7 +3314,7 @@
       document.addEventListener("DOMContentLoaded", () => {
         initializeSidebar();
 
-        // Initialize send button functionality
+        // Initialize send button functionality (arrow button, not the tool toggle button)
         const sendButton = document.querySelector(".send-button");
         sendButton.addEventListener("click", async () => {
           if (!isGenerating) {
