@@ -18,11 +18,11 @@ fn convert_pdf_json_to_markdown(json_data: &Vec<JsonDataFromPdf>) -> Result<Stri
         match item.item_type.as_str() {
             "Title" => markdown.push_str(&format!("# {}", item.text)),
             "Section header" => markdown.push_str(&format!("# {}", item.text)),
-            "Text" => markdown.push_str(&format!("{}", item.text)),
+            "Text" => markdown.push_str(&item.text.to_string()),
             "Table" => markdown.push_str(""),
-            _ => markdown.push_str(&format!("{}", item.text)),
+            _ => markdown.push_str(&item.text.to_string()),
         }
-        markdown.push_str("\n");
+        markdown.push('\n');
     }
 
     Ok(markdown)
