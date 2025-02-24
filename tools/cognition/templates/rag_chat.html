@@ -2796,6 +2796,11 @@
 
         const parsed_json = JSON.parse(sources);
 
+        // Check if parsed_json and parsed_json.sources exist
+        if (!parsed_json || !parsed_json.sources) {
+          return [];
+        }
+
         return parsed_json.sources;
       }
 
@@ -2835,6 +2840,11 @@
         }
 
         let savedSources = JSON.parse(sources);
+
+        // Check if savedSources and savedSources.sources exist
+        if (!savedSources || !savedSources.sources) {
+          return [];
+        }
 
         return savedSources.sources.filter((source) => source.active == true);
       }
