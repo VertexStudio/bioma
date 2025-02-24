@@ -258,7 +258,7 @@ impl Rerank {
 
                     while let Some(request) = rerank_rx.blocking_recv() {
                         let start = std::time::Instant::now();
-                        let texts = request.message.texts.iter().map(|text| text).collect::<Vec<&String>>();
+                        let texts = request.message.texts.iter().collect::<Vec<&String>>();
                         match reranker.rerank(&request.message.query, texts, false, None) {
                             Ok(results) => {
                                 // compute average text length
