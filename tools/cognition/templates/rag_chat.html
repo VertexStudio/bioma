@@ -24,7 +24,7 @@
         --bg-secondary: #1c1c1f;
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
-        --sidebar-width: 300px;
+        --sidebar-width: 350px;
         --sidebar-width-collapsed: 100px;
         --slider-width: 40px;
         --slider-height: calc(var(--slider-width) * 0.5);
@@ -365,6 +365,10 @@
         opacity: 1;
         visibility: visible;
       }
+
+	  .number-of-elements {
+		font-size: 0.8em;
+	  }
 
       /* Add text selection color */
       ::selection {
@@ -3007,11 +3011,11 @@
 
       function createSourceElement(source, isActive = false) {
         let sourcesUris = null;
+        let savedSources = getSavedSourcesExpanded();
+        console.log("🚀 ~ createSourceElement ~ savedSources:", savedSources);
 
         if (!source.isLocal) {
-          let savedSourcesExpanded = getSavedSourcesExpanded().sourcesExpanded;
-
-          sourcesUris = savedSourcesExpanded[source.path]
+          sourcesUris = savedSources.sourcesExpanded[source.path]
             .map((source) => `<li>${source.uri}</li>`)
             .join(""); // Removes commas and creates a proper list
         }
@@ -3025,7 +3029,11 @@
         sourceElement.innerHTML = `
               <div class="source-item-header">
                   <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                  <span class="source-item-name">${source.path}</span>
+                  <span class="source-item-name">${
+                    source.path
+                  } <span class="number-of-elements">(${
+          sourcesUris ? savedSources.sourcesExpanded[source.path].length : 0
+        } items)</span></span>
                   ${
                     source.isLocal
                       ? ""
