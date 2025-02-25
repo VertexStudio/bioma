@@ -24,8 +24,8 @@
         --bg-secondary: #1c1c1f;
         --border-color: #2a2a2d;
         --font-family: "JetBrains Mono", monospace;
-        --sidebar-width: 300px;
-        --sidebar-width-collapsed: 60px;
+        --sidebar-width: 350px;
+        --sidebar-width-collapsed: 100px;
         --slider-width: 40px;
         --slider-height: calc(var(--slider-width) * 0.5);
         --surrealist-gradient: linear-gradient(
@@ -366,6 +366,10 @@
         visibility: visible;
       }
 
+      .number-of-elements {
+        font-size: 0.8em;
+      }
+
       /* Add text selection color */
       ::selection {
         background: rgba(255, 0, 160, 0.3);
@@ -396,6 +400,36 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      .source-item-list {
+        margin-top: 8px;
+        white-space: nowrap;
+        width: auto;
+        overflow: auto;
+        max-height: 300px !important;
+      }
+
+      .source-item-list ul {
+        list-style: none;
+        padding: 5px;
+        margin: 5px;
+
+        display: table;
+        width: 95%;
+      }
+
+      .source-item-list ul li {
+        white-space: nowrap;
+        width: auto;
+        font-size: 0.9em !important;
+
+        border-bottom: 2px solid #211e21 !important;
+        padding-top: 9px;
+        padding-bottom: 9px;
+        padding-left: 5px;
+
+        color: #c7c7c7;
       }
 
       .upload-icon,
@@ -927,6 +961,7 @@
       /* Scrollbar styling */
       ::-webkit-scrollbar {
         width: 8px;
+        height: 8px;
       }
 
       ::-webkit-scrollbar-track {
@@ -1565,7 +1600,7 @@
       function resizeSidebar(e) {
         if (!isResizing) return;
         const newWidth = window.innerWidth - e.clientX;
-        if (newWidth >= 280 && newWidth <= 500) {
+        if (newWidth >= 280 && newWidth <= 550) {
           sidebar.style.width = `${newWidth}px`;
         }
       }
@@ -2919,10 +2954,9 @@
           let split_path = source_element.source.split("/");
 
           const source = {
-            id: Date.now().toString() + "-" + split_path[split_path.length - 1],
             path: source_element.source,
-            display_name: split_path[split_path.length - 1],
             active: false,
+            uri: source_element.uri,
           };
 
           return source;
@@ -2947,7 +2981,7 @@
           "savedSources",
           JSON.stringify({
             sources: [...keys],
-            sourcesExpanded: maped_sources,
+            sourcesExpanded: grouped,
           })
         );
 
@@ -3000,44 +3034,89 @@
       }
 
       function createSourceElement(source, isActive = false) {
+        let sourcesUris = null;
+        let savedSources = getSavedSourcesExpanded();
+
+        if (!source.isLocal) {
+          sourcesUris = savedSources.sourcesExpanded[source.path];
+        }
+
         const sourceElement = document.createElement("div");
         sourceElement.className = `source-item`;
         sourceElement.dataset.sourceId = source.id;
         sourceElement.dataset.tooltip = source.path;
+        sourceElement.style.display = "flex";
+        sourceElement.style.flexDirection = "column";
         sourceElement.innerHTML = `
-        <div class="source-item-header">
-            <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-            <span class="source-item-name">${source.path}</span>
-            ${
-              source.isLocal
-                ? ""
-                : `<label class="switch">
-                    <input type="checkbox" class="source-toggle" ${
-                      isActive ? "checked" : ""
-                    }>
-                    <span class="slider"></span>
-                </label>`
-            }
-            <span id="upload-button" class="upload-icon upload-button" title="Upload file to source">
-                <i class="fa-solid fa-paperclip"></i>
-                <input type="file" id="file-input" class="file-input" style="display: none" />
-            </span>
-            <span class="upload-status" style="display: none; font-size: 12px; margin-left: 10px;"></span>
-            <div class="source-actions">
-                <button class="source-action-btn delete-source" title="Delete">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-        </div>
+              <div class="source-item-header">
+                  <span class="source-icon"><i class="fa-solid fa-book"></i></span>
+                  <span class="source-item-name">${
+                    source.path
+                  } <span class="number-of-elements">(${
+          sourcesUris ? savedSources.sourcesExpanded[source.path].length : 0
+        } items)</span></span>
+                  ${
+                    source.isLocal
+                      ? ""
+                      : `<label class="switch">
+                          <input type="checkbox" class="source-toggle" ${
+                            isActive ? "checked" : ""
+                          }>
+                          <span class="slider"></span>
+                      </label>`
+                  }
+                  <span id="upload-button" class="upload-icon upload-button" title="Upload file to source">
+                      <i class="fa-solid fa-paperclip"></i>
+                      <input type="file" id="file-input" class="file-input" style="display: none" />
+                  </span>
+                  <span class="upload-status" style="display: none; font-size: 12px; margin-left: 10px;"></span>
+                  <div class="source-actions">
+                      <button class="source-action-btn delete-source" title="Delete">
+                          <i class="fas fa-trash"></i>
+                      </button>
+                  </div>
+              </div>
+
+              <div class="source-item-list" style="display: none;">
+                  <ul>
+                  </ul>
+              </div>
     `;
 
+        const listContainer = sourceElement.querySelector(".source-item-list");
+
         if (!source.isLocal) {
-          sourceElement
-            .querySelector(".source-toggle")
-            .addEventListener("change", (e) => {
-              e.stopPropagation();
-              setSourceState(source, e.target.checked);
-            });
+          let savedSourcesExpanded = getSavedSourcesExpanded().sourcesExpanded;
+          let ulElement = sourceElement.querySelector(".source-item-list ul");
+
+          savedSourcesExpanded[source.path].forEach((source) => {
+            let li = document.createElement("li");
+            li.textContent = source.uri;
+            ulElement.appendChild(li);
+          });
+        }
+
+        if (!source.isLocal) {
+          const toggle = sourceElement.querySelector(".source-toggle");
+          toggle.addEventListener("change", (e) => {
+            e.stopPropagation();
+            setSourceState(source, e.target.checked);
+          });
+
+          sourceElement.addEventListener("click", (e) => {
+            e.stopPropagation();
+
+            if (
+              e.target.classList.contains("source-toggle") ||
+              e.target.closest(".switch")
+            ) {
+              return;
+            }
+
+            // Toggle List Visibility
+            listContainer.style.display =
+              listContainer.style.display === "none" ? "block" : "none";
+          });
         }
 
         sourceElement
@@ -3080,13 +3159,15 @@
 
         sourceElement
           .querySelector(".upload-button")
-          .addEventListener("click", function () {
+          .addEventListener("click", function (e) {
+            e.stopPropagation();
             sourceElement.querySelector(".file-input").click();
           });
 
         sourceElement
           .querySelector(".file-input")
           .addEventListener("change", async function (event) {
+            event.stopPropagation();
             const file = event.target.files[0];
 
             let uploadButton = sourceElement.querySelector(".upload-button");
