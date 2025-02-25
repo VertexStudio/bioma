@@ -1525,14 +1525,14 @@
           <button
             id="send-button"
             class="action-button"
-            title="Chat with tools (Ctrl+Enter)"
+            title="Toggle tools mode (Ctrl+Enter)"
           >
             <i class="fas fa-comments fa-wrench"></i>
           </button>
           <button
             id="think-button"
             class="action-button"
-            title="Think deeply (Alt+Enter)"
+            title="Toggle think mode (Alt+Enter)"
           >
             <i class="fas fa-brain"></i>
           </button>
@@ -1541,7 +1541,7 @@
           <button class="send-button" title="Send message" disabled>
             <i class="fas fa-arrow-up"></i>
           </button>
-          <button id="stop-button" title="Stop generation">
+          <button id="stop-button" title="Stop generation (Esc)">
             <i class="fas fa-stop"></i>
           </button>
         </div>
@@ -2666,11 +2666,7 @@
             updateToolButton();
           }
 
-          // Only send a query if not already generating
-          if (!isGenerating && queryInput.value.trim()) {
-            const endpoint = thinkEnabled ? "/think" : "/chat";
-            await sendQuery(endpoint);
-          }
+          // Remove the automatic sending of the query when toggling tools
         });
 
       document.getElementById("think-button").addEventListener("click", () => {
@@ -2696,7 +2692,9 @@
           toolButton.style.opacity = "1";
           toolButton.style.cursor = "pointer";
           toolButton.classList.toggle("active", toolsEnabled);
-          toolButton.title = toolsEnabled ? "Tools enabled" : "Tools disabled";
+          toolButton.title = toolsEnabled
+            ? "Tools (Ctrl+Enter)"
+            : "Tools (Ctrl+Enter)";
         }
 
         localStorage.setItem("toolsEnabled", toolsEnabled);
@@ -2706,8 +2704,8 @@
         const thinkButton = document.getElementById("think-button");
         thinkButton.classList.toggle("active", thinkEnabled);
         thinkButton.title = thinkEnabled
-          ? "Think mode enabled"
-          : "Think mode disabled";
+          ? "Think mode (Alt+Enter)"
+          : "Think mode (Alt+Enter)";
         localStorage.setItem("thinkEnabled", thinkEnabled);
       }
 
