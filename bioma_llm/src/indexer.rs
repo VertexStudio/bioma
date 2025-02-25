@@ -731,60 +731,6 @@ impl Indexer {
     }
 }
 
-/// Helper function to extract metadata from a base64 encoded image
-/// If mime_type is provided, it will be used to determine the extension
-fn extract_image_metadata(
-    base64_data: String,
-    mime_type: Option<String>,
-) -> Result<(String, ImageMetadata), &'static str> {
-    // If MIME type is provided, use it to determine the extension
-    let extension_from_mime = mime_type.and_then(|mime| match mime.split('/').last() {
-        Some("jpeg") => Some("jpg".to_string()),
-        Some(ext) if !ext.is_empty() => Some(ext.to_string()),
-        _ => None,
-    });
-
-    // Decode base64 data
-    let base64_content =
-        if let Some(idx) = base64_data.find(";base64,") { &base64_data[idx + 8..] } else { &base64_data };
-
-    let image_data = match base64::engine::general_purpose::STANDARD.decode(base64_content) {
-        Ok(data) => data,
-        Err(_) => return Err("Invalid base64 data"),
-    };
-
-    let cursor = std::io::Cursor::new(&image_data);
-    let format = match image::ImageReader::new(cursor).with_guessed_format() {
-        Ok(format) => format,
-        Err(_) => return Err("Failed to determine image format"),
-    };
-
-    let format_type = format.format();
-    let dimensions = match format_type {
-        Some(_) => match format.into_dimensions() {
-            Ok(dim) => dim,
-            Err(_) => return Err("Failed to get image dimensions"),
-        },
-        None => return Err("Unknown image format"),
-    };
-
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-
-    // Use the extension from MIME type if available, otherwise determine from image data
-    let extension = extension_from_mime
-        .unwrap_or_else(|| format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string());
-
-    let metadata = ImageMetadata {
-        format: extension.clone(),
-        dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
-        size_bytes: image_data.len() as u64,
-        modified: now,
-        created: now,
-    };
-
-    Ok((extension, metadata))
-}
-
 impl Message<Index> for Indexer {
     type Response = Indexed;
 
@@ -1006,7 +952,61 @@ impl Message<Index> for Indexer {
                     let (extension, image_metadata) = tokio::task::spawn_blocking({
                         let image_clone = image.clone();
                         let mime_type_clone = mime_type.clone();
-                        move || extract_image_metadata(image_clone.clone(), mime_type_clone)
+                        move || {
+                            // If MIME type is provided, use it to determine the extension
+                            let extension_from_mime = mime_type_clone.and_then(|mime| match mime.split('/').last() {
+                                Some("jpeg") => Some("jpg".to_string()),
+                                Some(ext) if !ext.is_empty() => Some(ext.to_string()),
+                                _ => None,
+                            });
+
+                            // Decode base64 data
+                            let base64_content = if let Some(idx) = image_clone.find(";base64,") {
+                                &image_clone[idx + 8..]
+                            } else {
+                                &image_clone
+                            };
+
+                            let image_data = match base64::engine::general_purpose::STANDARD.decode(base64_content) {
+                                Ok(data) => data,
+                                Err(_) => return Err("Invalid base64 data"),
+                            };
+
+                            let cursor = std::io::Cursor::new(&image_data);
+                            let format = match image::ImageReader::new(cursor).with_guessed_format() {
+                                Ok(format) => format,
+                                Err(_) => return Err("Failed to determine image format"),
+                            };
+
+                            let format_type = format.format();
+                            let dimensions = match format_type {
+                                Some(_) => match format.into_dimensions() {
+                                    Ok(dim) => dim,
+                                    Err(_) => return Err("Failed to get image dimensions"),
+                                },
+                                None => return Err("Unknown image format"),
+                            };
+
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+
+                            // Use the extension from MIME type if available, otherwise determine from image data
+                            let extension = extension_from_mime.unwrap_or_else(|| {
+                                format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string()
+                            });
+
+                            let metadata = ImageMetadata {
+                                format: extension.clone(),
+                                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+                                size_bytes: image_data.len() as u64,
+                                modified: now,
+                                created: now,
+                            };
+
+                            Ok((extension, metadata))
+                        }
                     })
                     .await
                     .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
