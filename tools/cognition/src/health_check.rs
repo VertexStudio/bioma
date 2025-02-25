@@ -160,15 +160,12 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
 
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    
-
     match response {
         Ok(response) => {
             let response = response.json::<OllamaHealth>().await;
 
             match response {
                 Ok(health) => {
-
                     if health.models.iter().any(|model| model.size_vram == 0) {
                         return Responses::Ollama {
                             status: Status::unhealthy(HealthCheckError::OllamaError(
@@ -234,13 +231,9 @@ pub async fn check_pdf_analyzer(endpoint: Url) -> Responses {
     // Make the request using the client
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    
-
     match response {
         Ok(response) => {
             let response = response.text().await;
-
-            
 
             match response {
                 Ok(info) => {
