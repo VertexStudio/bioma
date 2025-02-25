@@ -140,8 +140,8 @@ pub async fn check_markitdown(endpoint: Url) -> Responses {
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
     match response {
-        Ok(_) => return Responses::Markitdown { status: Status::healthy() },
-        Err(e) => return Responses::Markitdown { status: Status::unhealthy(e) },
+        Ok(_) => Responses::Markitdown { status: Status::healthy() },
+        Err(e) => Responses::Markitdown { status: Status::unhealthy(e) },
     }
 }
 
@@ -160,7 +160,9 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
 
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    let health = match response {
+    
+
+    match response {
         Ok(response) => {
             let response = response.json::<OllamaHealth>().await;
 
@@ -186,17 +188,15 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
                 }
                 Err(e) => {
                     error!("Error parsing response: {}", e);
-                    return Responses::Ollama {
+                    Responses::Ollama {
                         status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())),
                         health: None,
-                    };
+                    }
                 }
-            };
+            }
         }
         Err(e) => Responses::Ollama { status: Status::unhealthy(e), health: None },
-    };
-
-    health
+    }
 }
 
 pub async fn check_minio(endpoint: Url) -> Responses {
@@ -217,7 +217,7 @@ pub async fn check_minio(endpoint: Url) -> Responses {
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
     match response {
-        Ok(_) => return Responses::Minio { status: Status::healthy() },
+        Ok(_) => Responses::Minio { status: Status::healthy() },
         Err(e) => Responses::Minio { status: Status::unhealthy(e) },
     }
 }
@@ -240,11 +240,15 @@ pub async fn check_pdf_analyzer(endpoint: Url) -> Responses {
     // Make the request using the client
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
-    let health = match response {
+    
+
+    match response {
         Ok(response) => {
             let response = response.text().await;
 
-            let health = match response {
+            
+
+            match response {
                 Ok(info) => {
                     Responses::PdfAnalyzer { status: Status::healthy(), health: Some(PdfAnalyzerHealth { info }) }
                 }
@@ -252,14 +256,10 @@ pub async fn check_pdf_analyzer(endpoint: Url) -> Responses {
                     status: Status::unhealthy(HealthCheckError::ParseError(e.to_string())),
                     health: None,
                 },
-            };
-
-            health
+            }
         }
         Err(e) => Responses::PdfAnalyzer { status: Status::unhealthy(e), health: None },
-    };
-
-    health
+    }
 }
 
 pub async fn check_surrealdb(endpoint: String) -> Responses {
@@ -286,7 +286,7 @@ pub async fn check_surrealdb(endpoint: String) -> Responses {
     let response = client.get(endpoint).send().await.map_err(|e| HealthCheckError::ReqwestError(e.to_string()));
 
     match response {
-        Ok(_) => return Responses::SurrealDb { status: Status::healthy() },
-        Err(e) => return Responses::SurrealDb { status: Status::unhealthy(e) },
-    };
+        Ok(_) => Responses::SurrealDb { status: Status::healthy() },
+        Err(e) => Responses::SurrealDb { status: Status::unhealthy(e) },
+    }
 }

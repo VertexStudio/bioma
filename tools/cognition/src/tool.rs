@@ -79,7 +79,7 @@ impl ToolClient {
         for tool in &list_tools.tools {
             info!("├─ {}", tool.name);
         }
-        let tools: Vec<ToolInfo> = list_tools.tools.into_iter().map(|tool| ToolsHub::parse_tool_info(tool)).collect();
+        let tools: Vec<ToolInfo> = list_tools.tools.into_iter().map(ToolsHub::parse_tool_info).collect();
         Ok(tools)
     }
 
@@ -372,7 +372,7 @@ impl Message<ToolCall> for ToolsHub {
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &ToolCall) -> Result<(), ToolsHubError> {
         if let Some((_tool_info, client)) = self.get_tool(&message.function.name) {
-            let result = client.call(ctx, &message).await?;
+            let result = client.call(ctx, message).await?;
             ctx.reply(result).await?;
         } else {
             ctx.reply(CallToolResult {

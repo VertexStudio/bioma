@@ -64,7 +64,7 @@ pub async fn chat_with_tools(
         messages: messages.clone(),
         restart: true,
         persist: false,
-        stream: stream,
+        stream,
         format: format.clone(),
         tools: if tools.is_empty() { None } else { Some(tools.clone()) },
     };
@@ -78,7 +78,7 @@ pub async fn chat_with_tools(
     let mut chat_response = match user_actor
         .send::<Chat, ChatMessages>(
             chat_request,
-            &chat_actor,
+            chat_actor,
             SendOptions::builder().timeout(std::time::Duration::from_secs(2000)).build(),
         )
         .await
@@ -111,7 +111,7 @@ pub async fn chat_with_tools(
                     info!("Tool calls: {:#?}", message_response.message.tool_calls);
                     for tool_call in message_response.message.tool_calls.iter() {
                         // Call the tool
-                        let tool_response = chat_tool_call(user_actor, &tool_call, tool_hub_map, tx.clone()).await;
+                        let tool_response = chat_tool_call(user_actor, tool_call, tool_hub_map, tx.clone()).await;
                         match tool_response {
                             Ok(tool_response) => {
                                 messages

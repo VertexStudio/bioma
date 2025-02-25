@@ -186,9 +186,9 @@ fn default_source() -> String {
     "/global".to_string()
 }
 
-impl Into<Index> for IndexRequest {
-    fn into(self) -> Index {
-        match self {
+impl From<IndexRequest> for Index {
+    fn from(val: IndexRequest) -> Self {
+        match val {
             IndexRequest::Globs(globs) => {
                 let chunk_capacity = std::ops::Range {
                     start: globs.content.config.chunk_capacity.start,
