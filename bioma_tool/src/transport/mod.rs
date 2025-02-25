@@ -14,19 +14,15 @@ pub enum TransportType {
 }
 
 impl Transport for TransportType {
-    fn start(&mut self, request_tx: mpsc::Sender<String>) -> impl std::future::Future<Output = Result<()>> {
-        async move {
-            match self {
-                TransportType::Stdio(t) => t.start(request_tx).await,
-            }
+    async fn start(&mut self, request_tx: mpsc::Sender<String>) -> Result<()> {
+        match self {
+            TransportType::Stdio(t) => t.start(request_tx).await,
         }
     }
 
-    fn send(&mut self, message: String) -> impl std::future::Future<Output = Result<()>> {
-        async move {
-            match self {
-                TransportType::Stdio(t) => t.send(message).await,
-            }
+    async fn send(&mut self, message: String) -> Result<()> {
+        match self {
+            TransportType::Stdio(t) => t.send(message).await,
         }
     }
 }

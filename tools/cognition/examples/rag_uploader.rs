@@ -6,7 +6,6 @@ use serde::Serialize;
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
-use tokio;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -64,7 +63,7 @@ async fn upload_file(client: &Client, server_url: &str, bucket: &str, path: &Pat
         );
 
     let response = client
-        .post(&format!("{}/upload", server_url))
+        .post(format!("{}/upload", server_url))
         .multipart(form)
         .send()
         .await
@@ -81,7 +80,7 @@ async fn upload_file(client: &Client, server_url: &str, bucket: &str, path: &Pat
 
 async fn index_files(client: &Client, server_url: &str, upload_glob: &str) -> Result<()> {
     let response = client
-        .post(&format!("{}/index", server_url))
+        .post(format!("{}/index", server_url))
         .json(&json!({
             "globs": [upload_glob]
         }))

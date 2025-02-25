@@ -186,9 +186,9 @@ fn default_source() -> String {
     "/global".to_string()
 }
 
-impl Into<Index> for IndexRequest {
-    fn into(self) -> Index {
-        match self {
+impl From<IndexRequest> for Index {
+    fn from(val: IndexRequest) -> Self {
+        match val {
             IndexRequest::Globs(globs) => {
                 let chunk_capacity = std::ops::Range {
                     start: globs.content.config.chunk_capacity.start,
@@ -237,7 +237,7 @@ impl Into<Index> for IndexRequest {
                     .build()
             }
             IndexRequest::Images(images) => {
-                let content = ImagesContent::builder().images(images.content.images).build();
+                let content = ImagesContent { images: images.content.images, mime_type: images.content.mime_type };
 
                 Index::builder()
                     .source(images.source)

@@ -229,7 +229,7 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
 
     // Determine the target folder.
     // If the metadata path ends with ".zip", remove the extension so that "new.zip" becomes "new".
-    let target_folder = if form.metadata.path.as_path().extension().map_or(false, |ext| ext == "zip") {
+    let target_folder = if form.metadata.path.as_path().extension().is_some_and(|ext| ext == "zip") {
         form.metadata.path.with_extension("")
     } else {
         form.metadata.path.clone()
@@ -265,7 +265,7 @@ async fn upload(MultipartForm(form): MultipartForm<Upload>, data: web::Data<AppS
     let target_folder_clone = target_folder.clone();
     let output_dir_clone = output_dir.clone();
 
-    if form.file.file_name.as_ref().map_or(false, |name| name.ends_with(".zip")) {
+    if form.file.file_name.as_ref().is_some_and(|name| name.ends_with(".zip")) {
         // Handle zip file extraction.
         let extract_result = tokio::task::spawn_blocking(
             move || -> Result<Vec<std::path::PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
@@ -778,7 +778,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             let image_info = context
                 .context
                 .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+                .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
                 .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
 
             // Remove all images from context except the one we're using
@@ -799,7 +799,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 });
             } else {
                 // If we didn't find an image to use, remove all images from context
-                context.context.retain(|c| c.metadata.as_ref().map_or(true, |m| !matches!(m, Metadata::Image(_))));
+                context.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
             }
 
             // Create the system message with context
@@ -871,7 +871,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                                 persist: false,
                                 stream: false,
                                 format: body.format.clone(),
-                                tools: Some(client_tools.into_iter().map(Into::into).collect()),
+                                tools: Some(client_tools),
                             },
                             &data.chat,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
@@ -935,7 +935,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 .await;
 
                 if let Err(e) = tool_call_tree {
-                    if tools.len() > 0 {
+                    if !tools.is_empty() {
                         error!("Error during chat with tools: {:?}", e);
                         let _ = tx.send(Err(e.to_string())).await;
                     } else {
@@ -1167,7 +1167,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
     let image_info = retrieved
         .context
         .iter()
-        .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+        .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
         .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
 
     // Remove all images from context except the one we're using
@@ -1188,7 +1188,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         });
     } else {
         // If we didn't find an image to use, remove all images from context
-        retrieved.context.retain(|c| c.metadata.as_ref().map_or(true, |m| !matches!(m, Metadata::Image(_))));
+        retrieved.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
     }
 
     let context_content = if retrieved.context.is_empty() {
@@ -1319,7 +1319,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
             messages: conversation.clone(),
             restart: true,
             persist: false,
-            stream: body.stream.clone(),
+            stream: body.stream,
             format: body.format.clone(),
             tools: None,
         };
@@ -1559,7 +1559,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             let image_info = context
                 .context
                 .iter()
-                .find(|ctx| ctx.metadata.as_ref().map_or(false, |m| matches!(m, Metadata::Image(_))))
+                .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
                 .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
 
             // Remove all images from context except the one we're using
@@ -1580,7 +1580,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 });
             } else {
                 // If we didn't find an image to use, remove all images from context
-                context.context.retain(|c| c.metadata.as_ref().map_or(true, |m| !matches!(m, Metadata::Image(_))));
+                context.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
             }
 
             // Create the system message with context
@@ -1699,7 +1699,7 @@ async fn delete_source(body: web::Json<DeleteSource>, data: web::Data<AppState>)
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let delete_source = body.clone().into();
+    let delete_source = body.clone();
 
     info!("Sending delete message to indexer actor for sources: {:?}", body.sources);
     let response = user_actor
@@ -1790,7 +1790,7 @@ async fn embed(body: web::Json<EmbeddingsQuery>, data: web::Data<AppState>) -> H
             };
 
             // Validate base64 images
-            let images = base64_images.into_iter().map(|base64| ImageData::Base64(base64)).collect();
+            let images = base64_images.into_iter().map(ImageData::Base64).collect();
 
             EmbeddingContent::Image(images)
         }

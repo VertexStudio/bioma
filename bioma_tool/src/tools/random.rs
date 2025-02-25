@@ -46,7 +46,7 @@ impl ToolDef for RandomNumber {
         schema::Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
     }
 
-    async fn call<'a>(&'a self, args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         let start = args.start;
         let end = args.end;
 
