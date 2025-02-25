@@ -3024,12 +3024,9 @@
       function createSourceElement(source, isActive = false) {
         let sourcesUris = null;
         let savedSources = getSavedSourcesExpanded();
-        console.log("🚀 ~ createSourceElement ~ savedSources:", savedSources);
 
         if (!source.isLocal) {
-          sourcesUris = savedSources.sourcesExpanded[source.path]
-            .map((source) => `<li>${source.uri}</li>`)
-            .join(""); // Removes commas and creates a proper list
+          sourcesUris = savedSources.sourcesExpanded[source.path];
         }
 
         const sourceElement = document.createElement("div");
@@ -3070,12 +3067,23 @@
 
               <div class="source-item-list" style="display: none;">
                   <ul>
-                    ${sourcesUris}
                   </ul>
               </div>
     `;
 
         const listContainer = sourceElement.querySelector(".source-item-list");
+
+        if (!source.isLocal) {
+          let savedSourcesExpanded = getSavedSourcesExpanded().sourcesExpanded;
+          let ulElement = sourceElement.querySelector(".source-item-list ul");
+          console.log("🚀 ~ createSourceElement ~ ulElement:", ulElement);
+
+          savedSourcesExpanded[source.path].forEach((source) => {
+            let li = document.createElement("li");
+            li.textContent = source.uri;
+            ulElement.appendChild(li);
+          });
+        }
 
         if (!source.isLocal) {
           const toggle = sourceElement.querySelector(".source-toggle");
