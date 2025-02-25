@@ -286,7 +286,13 @@ pub struct ImageDimensions {
 #[derive(Debug, Clone)]
 pub enum Content {
     Text { content: String, text_type: TextType, chunk_config: (std::ops::Range<usize>, usize, usize) },
-    Image { data: ImageData },
+    Image { data: ImageContent },
+}
+
+#[derive(Debug, Clone)]
+pub enum ImageContent {
+    Path(String),
+    Base64(String, ImageMetadata),
 }
 
 impl Indexer {
@@ -340,13 +346,13 @@ impl Indexer {
             Content::Text { content, .. } => SummarizeContent::Text(content.to_string()),
             Content::Image { data } => {
                 match data {
-                    ImageData::Path(path) => {
+                    ImageContent::Path(path) => {
                         // Read image file and convert to base64
                         let image_data = tokio::fs::read(path).await?;
                         let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
                         SummarizeContent::Image(base64_data)
                     }
-                    ImageData::Base64(base64_data) => SummarizeContent::Image(base64_data.clone()),
+                    ImageContent::Base64(base64_data, _) => SummarizeContent::Image(base64_data.clone()),
                 }
             }
         };
@@ -458,7 +464,7 @@ impl Indexer {
         match content {
             Content::Image { data } => {
                 let metadata = match &data {
-                    ImageData::Path(path) => {
+                    ImageContent::Path(path) => {
                         let path_clone = path.clone();
                         tokio::task::spawn_blocking(move || {
                             let file = std::fs::File::open(&path_clone).ok()?;
@@ -495,41 +501,19 @@ impl Indexer {
                         .await
                         .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
                     }
-                    ImageData::Base64(base64_data) => {
-                        let base64_clone = base64_data.clone();
-                        tokio::task::spawn_blocking(move || {
-                            let base64_content = if let Some(idx) = base64_clone.find(";base64,") {
-                                &base64_clone[idx + 8..]
-                            } else {
-                                &base64_clone
-                            };
-
-                            let image_data = base64::engine::general_purpose::STANDARD.decode(base64_content).ok()?;
-                            let cursor = std::io::Cursor::new(image_data);
-
-                            let format = image::ImageReader::new(cursor).with_guessed_format().ok()?;
-                            let format_type = format.format();
-                            let dimensions = match format_type {
-                                Some(_) => format.into_dimensions().ok()?,
-                                None => return None,
-                            };
-
-                            let now =
-                                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-
-                            let image_metadata = Metadata::Image(ImageMetadata {
-                                format: format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string(),
-                                dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
-                                size_bytes: base64_content.len() as u64,
-                                modified: now,
-                                created: now,
-                            });
-
-                            serde_json::to_value(image_metadata).ok()
-                        })
-                        .await
-                        .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+                    ImageContent::Base64(_base64_data, image_metadata) => {
+                        // We already have the metadata, just convert it to Value
+                        Some(
+                            serde_json::to_value(Metadata::Image(image_metadata.clone()))
+                                .map_err(|e| IndexerError::Other(format!("Failed to serialize metadata: {}", e)))?,
+                        )
                     }
+                };
+
+                // Convert ImageContent to ImageData for embeddings service
+                let image_data = match &data {
+                    ImageContent::Path(path) => ImageData::Path(path.clone()),
+                    ImageContent::Base64(base64_data, _) => ImageData::Base64(base64_data.clone()),
                 };
 
                 let (embeddings_ids, summary_text) = self
@@ -539,7 +523,7 @@ impl Indexer {
                         &Content::Image { data: data.clone() },
                         embeddings_id,
                         summarize,
-                        EmbeddingContent::Image(vec![data]),
+                        EmbeddingContent::Image(vec![image_data]),
                         metadata.map(|m| vec![m]),
                     )
                     .await?;
@@ -726,76 +710,6 @@ impl Indexer {
         Ok((uri, filepath, absolute_path))
     }
 
-    /// Helper function to determine file extension from MIME type or content
-    fn determine_extension(
-        &self,
-        mime_type: Option<&str>,
-        is_image: bool,
-        content: Option<&str>,
-    ) -> Result<String, IndexerError> {
-        if let Some(mime) = mime_type {
-            if is_image {
-                match mime.split('/').last() {
-                    Some("jpeg") => Ok("jpg".to_string()),
-                    Some(ext) if !ext.is_empty() => Ok(ext.to_string()),
-                    _ => Err(IndexerError::Other("Invalid or unsupported image MIME type".to_string())),
-                }
-            } else {
-                // For text content, we always have a MIME type
-                match mime.split('/').last() {
-                    Some("plain") => Ok("txt".to_string()),
-                    Some("markdown") | Some("md") => Ok("md".to_string()),
-                    Some("html") => Ok("html".to_string()),
-                    Some(ext) if !ext.is_empty() => Ok(ext.to_string()),
-                    _ => Err(IndexerError::Other("Invalid or unsupported text MIME type".to_string())),
-                }
-            }
-        } else if is_image {
-            // Try to determine image type from base64 content
-            if let Some(content) = content {
-                // First try to find data URL format
-                if let Some(idx) = content.find("data:image/") {
-                    let format_end = content[idx + 11..]
-                        .find(';')
-                        .map(|i| idx + 11 + i)
-                        .ok_or_else(|| IndexerError::Other("Invalid data URL format".to_string()))?;
-
-                    let format = &content[idx + 11..format_end];
-                    match format {
-                        "jpeg" | "jpg" => Ok("jpg".to_string()),
-                        "png" => Ok("png".to_string()),
-                        "gif" => Ok("gif".to_string()),
-                        "webp" => Ok("webp".to_string()),
-                        _ => Err(IndexerError::Other(format!("Unsupported image format: {}", format))),
-                    }
-                } else {
-                    // Try to detect format from raw base64 data
-                    let data = base64::engine::general_purpose::STANDARD
-                        .decode(content)
-                        .map_err(|_| IndexerError::Other("Invalid base64 data".to_string()))?;
-
-                    // Check file signatures
-                    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-                        Ok("jpg".to_string())
-                    } else if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-                        Ok("png".to_string())
-                    } else if data.starts_with(&[0x47, 0x49, 0x46]) {
-                        Ok("gif".to_string())
-                    } else if data.starts_with(&[0x52, 0x49, 0x46, 0x46]) && data.len() > 11 && &data[8..12] == b"WEBP"
-                    {
-                        Ok("webp".to_string())
-                    } else {
-                        Err(IndexerError::Other("Unable to determine image format from base64 content".to_string()))
-                    }
-                }
-            } else {
-                Err(IndexerError::Other("No MIME type or content provided to determine image format".to_string()))
-            }
-        } else {
-            Ok("txt".to_string())
-        }
-    }
-
     /// Helper function to save content to file
     async fn save_content_to_file(&self, content: &str, filepath: &Path) -> Result<(), IndexerError> {
         tokio::fs::write(filepath, content).await?;
@@ -815,6 +729,60 @@ impl Indexer {
         tokio::fs::write(filepath, data).await?;
         Ok(())
     }
+}
+
+/// Helper function to extract metadata from a base64 encoded image
+/// If mime_type is provided, it will be used to determine the extension
+fn extract_image_metadata(
+    base64_data: String,
+    mime_type: Option<String>,
+) -> Result<(String, ImageMetadata), &'static str> {
+    // If MIME type is provided, use it to determine the extension
+    let extension_from_mime = mime_type.and_then(|mime| match mime.split('/').last() {
+        Some("jpeg") => Some("jpg".to_string()),
+        Some(ext) if !ext.is_empty() => Some(ext.to_string()),
+        _ => None,
+    });
+
+    // Decode base64 data
+    let base64_content =
+        if let Some(idx) = base64_data.find(";base64,") { &base64_data[idx + 8..] } else { &base64_data };
+
+    let image_data = match base64::engine::general_purpose::STANDARD.decode(base64_content) {
+        Ok(data) => data,
+        Err(_) => return Err("Invalid base64 data"),
+    };
+
+    let cursor = std::io::Cursor::new(&image_data);
+    let format = match image::ImageReader::new(cursor).with_guessed_format() {
+        Ok(format) => format,
+        Err(_) => return Err("Failed to determine image format"),
+    };
+
+    let format_type = format.format();
+    let dimensions = match format_type {
+        Some(_) => match format.into_dimensions() {
+            Ok(dim) => dim,
+            Err(_) => return Err("Failed to get image dimensions"),
+        },
+        None => return Err("Unknown image format"),
+    };
+
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+
+    // Use the extension from MIME type if available, otherwise determine from image data
+    let extension = extension_from_mime
+        .unwrap_or_else(|| format_type.map(|f| f.extensions_str()[0]).unwrap_or("unknown").to_string());
+
+    let metadata = ImageMetadata {
+        format: extension.clone(),
+        dimensions: ImageDimensions { width: dimensions.0, height: dimensions.1 },
+        size_bytes: image_data.len() as u64,
+        modified: now,
+        created: now,
+    };
+
+    Ok((extension, metadata))
 }
 
 impl Message<Index> for Indexer {
@@ -897,7 +865,7 @@ impl Message<Index> for Indexer {
 
                         let content = if let Some(ext) = ext {
                             if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
-                                Content::Image { data: ImageData::Path(pathbuf.to_string_lossy().into_owned()) }
+                                Content::Image { data: ImageContent::Path(pathbuf.to_string_lossy().into_owned()) }
                             } else {
                                 let chunk_config =
                                     (config.chunk_capacity.clone(), config.chunk_overlap, config.chunk_batch_size);
@@ -991,19 +959,16 @@ impl Message<Index> for Indexer {
                 let prefix = self.create_group_directory(ctx).await?;
 
                 for text in texts {
-                    // Generate file path with appropriate extension
-                    let extension = match self.determine_extension(Some(mime_type), false, None) {
-                        Ok(ext) => ext,
-                        Err(e) => {
-                            error!("Failed to determine text extension: {}", e);
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: "unknown".to_string(),
-                                status: IndexStatus::Failed(format!("Failed to determine text format: {}", e)),
-                            });
-                            continue;
-                        }
-                    };
+                    // Determine extension based on MIME type
+                    let extension = match mime_type.split('/').last() {
+                        Some("plain") => "txt",
+                        Some("markdown") | Some("md") => "md",
+                        Some("html") => "html",
+                        Some(ext) if !ext.is_empty() => ext,
+                        _ => "txt", // Default to txt if MIME type is invalid
+                    }
+                    .to_string();
+
                     let (uri, filepath, _) = self.generate_file_path(ctx, &prefix, &extension).await?;
                     let source = ContentSource { source: message.source.clone(), uri };
 
@@ -1037,20 +1002,17 @@ impl Message<Index> for Indexer {
                 let prefix = self.create_group_directory(ctx).await?;
 
                 for image in images {
-                    // Generate file path with appropriate extension
-                    let extension = match self.determine_extension(mime_type.as_deref(), true, Some(image)) {
-                        Ok(ext) => ext,
-                        Err(e) => {
-                            error!("Failed to determine image extension: {}", e);
-                            sources.push(IndexedSource {
-                                source: message.source.clone(),
-                                uri: "unknown".to_string(),
-                                status: IndexStatus::Failed(format!("Failed to determine image format: {}", e)),
-                            });
-                            continue;
-                        }
-                    };
-                    let (uri, filepath, absolute_path) = self.generate_file_path(ctx, &prefix, &extension).await?;
+                    // Gotta get metadata early because we need to know the extension to save the file
+                    let (extension, image_metadata) = tokio::task::spawn_blocking({
+                        let image_clone = image.clone();
+                        let mime_type_clone = mime_type.clone();
+                        move || extract_image_metadata(image_clone.clone(), mime_type_clone)
+                    })
+                    .await
+                    .map_err(|e| IndexerError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+                    .map_err(|e| IndexerError::Other(format!("Failed to process image: {}", e)))?;
+
+                    let (uri, filepath, _) = self.generate_file_path(ctx, &prefix, &extension).await?;
                     let source = ContentSource { source: message.source.clone(), uri: uri.clone() };
 
                     // Check if source already exists
@@ -1061,11 +1023,10 @@ impl Message<Index> for Indexer {
                     }
 
                     // Save the image content to file
-                    self.save_base64_to_file(image, &filepath).await?;
+                    self.save_base64_to_file(&image, &filepath).await?;
 
                     info!("Indexing image: {}", &filepath.display());
-                    let content =
-                        Content::Image { data: ImageData::Path(absolute_path.to_string_lossy().into_owned()) };
+                    let content = Content::Image { data: ImageContent::Base64(image.clone(), image_metadata) };
 
                     // Process content
                     let result =
