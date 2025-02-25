@@ -168,12 +168,6 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
 
             match response {
                 Ok(health) => {
-                    if health.models.is_empty() {
-                        return Responses::Ollama {
-                            status: Status::unhealthy(HealthCheckError::OllamaError("No models running".to_string())),
-                            health: None,
-                        };
-                    }
 
                     if health.models.iter().any(|model| model.size_vram == 0) {
                         return Responses::Ollama {
