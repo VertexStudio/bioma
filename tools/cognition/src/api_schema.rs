@@ -237,7 +237,7 @@ impl Into<Index> for IndexRequest {
                     .build()
             }
             IndexRequest::Images(images) => {
-                let content = ImagesContent::builder().images(images.content.images).build();
+                let content = ImagesContent { images: images.content.images, mime_type: images.content.mime_type };
 
                 Index::builder()
                     .source(images.source)
