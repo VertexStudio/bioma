@@ -52,7 +52,7 @@ pub struct ToolResponse {
 pub async fn chat_with_tools(
     user_actor: &ActorContext<UserActor>,
     chat_actor: &ActorId,
-    messages: &Vec<ChatMessage>,
+    messages: &[ChatMessage],
     tools: &Vec<ToolInfo>,
     tool_hub_map: &HashMap<String, ActorId>,
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
@@ -61,7 +61,7 @@ pub async fn chat_with_tools(
 ) -> Result<(), ChatToolError> {
     // Make chat request with current messages and tools
     let chat_request = ChatMessages {
-        messages: messages.clone(),
+        messages: messages.to_owned(),
         restart: true,
         persist: false,
         stream,
@@ -72,7 +72,7 @@ pub async fn chat_with_tools(
     info!("chat_with_tools: {} tools, {} messages, actor: {}", tools.len(), messages.len(), chat_actor);
     debug!("Chat request: {:#?}", serde_json::to_string_pretty(&chat_request).unwrap_or_default());
 
-    let mut messages = messages.clone();
+    let mut messages = messages.to_owned();
 
     // Send chat request
     let mut chat_response = match user_actor

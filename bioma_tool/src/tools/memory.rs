@@ -98,7 +98,7 @@ impl ToolDef for Memory {
                     None => return Ok(Self::error("Key is required for retrieve action")),
                 };
                 match store.get(&key) {
-                    Some(value) => serde_json::to_string_pretty(value).map_err(|e| ToolError::ResultSerialize(e))?,
+                    Some(value) => serde_json::to_string_pretty(value).map_err(ToolError::ResultSerialize)?,
                     None => format!("No memory found for key: {}", key),
                 }
             }

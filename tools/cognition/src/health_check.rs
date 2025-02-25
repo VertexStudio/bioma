@@ -184,7 +184,7 @@ pub async fn check_ollama(endpoint: Url) -> Responses {
                         };
                     }
 
-                    return Responses::Ollama { status: Status::healthy(), health: Some(health) };
+                    Responses::Ollama { status: Status::healthy(), health: Some(health) }
                 }
                 Err(e) => {
                     error!("Error parsing response: {}", e);

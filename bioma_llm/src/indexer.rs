@@ -1023,7 +1023,7 @@ impl Message<Index> for Indexer {
                     }
 
                     // Save the image content to file
-                    self.save_base64_to_file(&image, &filepath).await?;
+                    self.save_base64_to_file(image, &filepath).await?;
 
                     info!("Indexing image: {}", &filepath.display());
                     let content = Content::Image { data: ImageContent::Base64(image.clone(), image_metadata) };

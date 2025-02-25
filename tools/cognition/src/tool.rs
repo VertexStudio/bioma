@@ -181,8 +181,7 @@ impl ToolsHub {
 
     /// Converts a tool input schema to a schema object.
     fn convert_schema_object(input: ToolInputSchema) -> Result<SchemaObject, anyhow::Error> {
-        let mut schema_obj = SchemaObject::default();
-        schema_obj.instance_type = Some(InstanceType::Object.into());
+        let mut schema_obj = SchemaObject { instance_type: Some(InstanceType::Object.into()), ..Default::default() };
         if let Some(props) = input.properties {
             let converted_props = Self::convert_properties(props)?;
             schema_obj.object = Some(Box::new(ObjectValidation {

@@ -99,7 +99,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
         let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
 
         async move {
-            let response = ListResourcesResult { next_cursor: None, resources: resources, meta: None };
+            let response = ListResourcesResult { next_cursor: None, resources, meta: None };
 
             info!("Successfully handled resources/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
@@ -144,7 +144,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
         let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
 
         async move {
-            let response = ListPromptsResult { next_cursor: None, prompts: prompts, meta: None };
+            let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
 
             info!("Successfully handled prompts/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())
@@ -193,7 +193,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
         let tools = server.get_tools().iter().map(|tool| tool.def()).collect::<Vec<_>>();
 
         async move {
-            let response = ListToolsResult { next_cursor: None, tools: tools, meta: None };
+            let response = ListToolsResult { next_cursor: None, tools, meta: None };
 
             info!("Successfully handled tools/list request");
             Ok(serde_json::to_value(response).unwrap_or_default())

@@ -60,9 +60,7 @@ impl ModelContextProtocolClient {
         let transport = StdioTransport::new_client(&server);
         let transport = match transport {
             Ok(transport) => transport,
-            Err(e) => {
-                return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e.to_string()).into()))
-            }
+            Err(e) => return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into())),
         };
 
         let transport = match server.transport.as_str() {
@@ -177,14 +175,14 @@ impl ModelContextProtocolClient {
         let request = jsonrpc_core::MethodCall {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
-            params: Params::Map(params.as_object().map(|obj| obj.clone()).unwrap_or_default()),
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
             id: jsonrpc_core::Id::Num(id),
         };
 
         // Send request
         let request_str = serde_json::to_string(&request)?;
         if let Err(e) = self.transport.send(request_str).await {
-            return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e.to_string()).into()));
+            return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
         // Wait for response with timeout
@@ -229,7 +227,7 @@ impl ModelContextProtocolClient {
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
-            params: Params::Map(params.as_object().map(|obj| obj.clone()).unwrap_or_default()),
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
         };
 
         // Send notification without waiting for response
@@ -237,7 +235,7 @@ impl ModelContextProtocolClient {
         self.transport
             .send(request_str)
             .await
-            .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e.to_string()).into()))
+            .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
     }
 }
 
