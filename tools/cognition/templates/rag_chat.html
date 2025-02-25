@@ -366,9 +366,9 @@
         visibility: visible;
       }
 
-	  .number-of-elements {
-		font-size: 0.8em;
-	  }
+      .number-of-elements {
+        font-size: 0.8em;
+      }
 
       /* Add text selection color */
       ::selection {
@@ -410,11 +410,23 @@
         max-height: 300px !important;
       }
 
+      .source-item-list ul {
+        list-style: none;
+        padding: 5px;
+        margin: 5px;
+
+        display: table;
+        width: 95%;
+      }
+
       .source-item-list ul li {
         white-space: nowrap;
         width: auto;
         margin-top: 20px;
         font-size: 0.9em !important;
+
+        border-bottom: 2px solid var(--border-color) !important;
+        padding-bottom: 25px;
       }
 
       .upload-icon,
