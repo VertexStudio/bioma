@@ -904,17 +904,17 @@ impl Message<Index> for Indexer {
                 // Create a shared directory for all texts in this message
                 let prefix = self.create_group_directory(ctx).await?;
 
-                for text in texts {
-                    // Determine extension based on MIME type
-                    let extension = match mime_type.split('/').last() {
-                        Some("plain") => "txt",
-                        Some("markdown") | Some("md") => "md",
-                        Some("html") => "html",
-                        Some(ext) if !ext.is_empty() => ext,
-                        _ => "txt", // Default to txt if MIME type is invalid
-                    }
-                    .to_string();
+                // Determine extension based on MIME type once for all texts
+                let extension = match mime_type.split('/').last() {
+                    Some("plain") => "txt",
+                    Some("markdown") | Some("md") => "md",
+                    Some("html") => "html",
+                    Some(ext) if !ext.is_empty() => ext,
+                    _ => "txt", // Default to txt if MIME type is invalid
+                }
+                .to_string();
 
+                for text in texts {
                     let (uri, filepath, _) = self.generate_file_path(ctx, &prefix, &extension).await?;
                     let source = ContentSource { source: message.source.clone(), uri };
 
@@ -947,19 +947,19 @@ impl Message<Index> for Indexer {
                 // Create a shared directory for all images in this message
                 let prefix = self.create_group_directory(ctx).await?;
 
+                // If MIME type is provided, determine the extension once for all images
+                let extension_from_mime = mime_type.as_ref().and_then(|mime| match mime.split('/').last() {
+                    Some("jpeg") => Some("jpg".to_string()),
+                    Some(ext) if !ext.is_empty() => Some(ext.to_string()),
+                    _ => None,
+                });
+
                 for image in images {
                     // Gotta get metadata early because we need to know the extension to save the file
                     let (extension, image_metadata) = tokio::task::spawn_blocking({
                         let image_clone = image.clone();
-                        let mime_type_clone = mime_type.clone();
+                        let extension_from_mime = extension_from_mime.clone();
                         move || {
-                            // If MIME type is provided, use it to determine the extension
-                            let extension_from_mime = mime_type_clone.and_then(|mime| match mime.split('/').last() {
-                                Some("jpeg") => Some("jpg".to_string()),
-                                Some(ext) if !ext.is_empty() => Some(ext.to_string()),
-                                _ => None,
-                            });
-
                             // Decode base64 data
                             let base64_content = if let Some(idx) = image_clone.find(";base64,") {
                                 &image_clone[idx + 8..]
