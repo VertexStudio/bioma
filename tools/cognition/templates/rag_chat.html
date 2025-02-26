@@ -12,6 +12,37 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
     />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css"
+      rel="stylesheet"
+    />
+    <!-- Prism.js and essential components -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <!-- Language components -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup-templating.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-php.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-csharp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-ruby.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-swift.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-kotlin.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-scala.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-ini.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-docker.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-graphql.min.js"></script>
 
     <style>
       :root {
@@ -33,6 +64,8 @@
           var(--primary) 0%,
           #9600ff 100%
         );
+        --code-bg: #1e1e1e;
+        --user-chat-width: 70%;
       }
 
       @font-face {
@@ -747,7 +780,6 @@
         padding: 12px;
         border-radius: 12px;
         max-width: 85%;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         position: relative;
       }
 
@@ -757,9 +789,12 @@
         margin-left: auto;
         color: var(--text-primary);
         position: relative;
-        /* For positioning the edit icon */
-        position: relative;
-        /* For positioning the edit icon */
+        max-width: var(--user-chat-width, 70%);
+        border-radius: 1.5rem;
+        padding: 0.05rem 1.25rem;
+        font-size: 1rem;
+        overflow-wrap: break-word;
+        text-align: start;
       }
 
       .user-message::before {
@@ -773,10 +808,12 @@
       }
 
       .assistant-message {
-        background-color: var(--bg-secondary);
+        background-color: transparent;
         align-self: flex-start;
-        border: 1px solid var(--border-color);
         color: var(--text-primary);
+        width: 100%;
+        max-width: 100%;
+        padding: 0px;
       }
 
       .system-message {
@@ -819,7 +856,6 @@
         font-size: 0.8em;
         color: var(--text-muted);
         cursor: pointer;
-        margin-top: 10px;
         padding: 5px 10px;
         background-color: var(--bg-secondary);
         border-radius: 4px;
@@ -860,12 +896,16 @@
         );
         border: 1px solid rgba(255, 0, 160, 0.2);
         color: var(--text-primary);
+        padding: 12px;
+        border-radius: 12px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
 
       .context-content .assistant-message {
         background-color: var(--bg-main);
         border: 1px solid var(--border-color);
         color: var(--text-secondary);
+        width: auto;
       }
 
       .context-content .system-message {
@@ -1038,7 +1078,7 @@
       .thinking-process {
         margin-bottom: 15px;
         position: relative;
-        max-width: 85%;
+        max-width: 100%;
         align-self: flex-start;
       }
 
@@ -1052,7 +1092,15 @@
         width: 100%;
       }
 
-      .thinking-header i,
+      .thinking-header i {
+        margin-right: 8px;
+        transition: transform 0.2s ease;
+      }
+
+      .thinking-header.expanded i {
+        transform: rotate(90deg);
+      }
+
       .thinking-header .thinking-text {
         background: linear-gradient(
           to right,
@@ -1086,23 +1134,16 @@
 
       .thinking-content {
         margin-top: 8px;
-        padding: 12px;
+        padding: 0 0 0 15px;
         display: none;
         white-space: pre-wrap;
         font-family: var(--font-family);
         font-size: 0.9em;
         color: var(--text-muted);
-        background: linear-gradient(
-          135deg,
-          rgba(255, 0, 160, 0.05) 0%,
-          rgba(150, 0, 255, 0.05) 100%
-        );
-        border: 1px solid rgba(255, 0, 160, 0.2);
-        border-radius: 8px;
         line-height: 1.5;
-        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
         max-width: 100%;
         overflow-wrap: break-word;
+        border-left: 2px solid var(--text-muted);
       }
 
       .thinking-content.visible {
@@ -1203,6 +1244,21 @@
         white-space: pre;
       }
 
+      .standalone-typing-indicator {
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        margin-bottom: 15px;
+      }
+
+      /* Special class for immediately expanded messages */
+      .message.assistant-message.expanded {
+        max-width: 100%;
+        width: 100%;
+        transition: all 0.3s ease-in-out;
+      }
+
       @keyframes pulse {
         0% {
           opacity: 0.4;
@@ -1228,7 +1284,7 @@
         padding: 1em;
         background-color: var(--bg-secondary);
         border: 1px solid var(--border-color);
-        border-radius: 4px;
+        border-radius: 0px 0px 4px 4px;
         overflow-x: auto;
         font-size: 0.9em;
         line-height: 1.4;
@@ -1400,6 +1456,178 @@
         border-top: 1px solid var(--border-color);
         margin-top: 10px;
         padding-top: 10px;
+      }
+
+      /* Code block styling */
+      pre[class*="language-"] {
+        position: relative;
+        background: var(--code-bg) !important;
+        border-radius: 8px;
+        margin: 1.5em 0;
+        padding: 1em;
+        overflow: auto;
+      }
+
+      code[class*="language-"] {
+        font-family: var(--font-family);
+        font-size: 0.9em;
+        line-height: 1.5;
+      }
+
+      .token.punctuation {
+        color: #d4d4d4;
+      }
+
+      .token.property,
+      .token.tag,
+      .token.boolean,
+      .token.number,
+      .token.constant,
+      .token.symbol,
+      .token.deleted {
+        color: #b5cea8;
+      }
+
+      .token.operator,
+      .token.entity,
+      .token.url,
+      .language-css .token.string,
+      .style .token.string {
+        color: #d4d4d4;
+      }
+
+      .token.atrule,
+      .token.attr-value,
+      .token.keyword {
+        color: #569cd6;
+      }
+
+      .token.function,
+      .token.class-name {
+        color: #dcdcaa;
+      }
+
+      .token.regex,
+      .token.important,
+      .token.variable {
+        color: #d16969;
+      }
+
+      /* Syntax highlighting overrides */
+      .token.comment,
+      .token.prolog,
+      .token.doctype,
+      .token.cdata {
+        color: #6a9955;
+      }
+
+      .token.selector,
+      .token.attr-name,
+      .token.string,
+      .token.char,
+      .token.builtin,
+      .token.inserted {
+        color: #ce9178;
+      }
+
+      .code-block-wrapper {
+        position: relative;
+        margin: 1.5em 0;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .code-block-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 8px 16px 8px 12px;
+        font-size: 0.9em;
+        color: var(--text-muted);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .code-block-wrapper pre {
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .code-block-wrapper pre[class*="language-"] {
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .code-block-language {
+        font-family: var(--font-family);
+        text-transform: lowercase;
+      }
+
+      .code-block-actions {
+        display: flex;
+        margin-left: auto;
+      }
+
+      .code-block-button {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 6px 0 6px 12px;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.9em;
+        min-width: 75px;
+        justify-content: flex-end;
+      }
+
+      .code-block-button i {
+        font-size: 0.9em;
+      }
+
+      .copy-button {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: var(--text-muted);
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        opacity: 0;
+        z-index: 10;
+      }
+
+      .copy-button.copied {
+        background: var(--primary);
+        color: var(--text-primary);
+      }
+
+      .context-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .context-copy {
+        font-size: 0.9em;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 5px;
+        display: inline-flex;
+        align-items: center;
+        user-select: none;
+        transition: color 0.2s;
+      }
+
+      .context-copy:hover {
+        color: var(--text-primary);
       }
     </style>
   </head>
@@ -1719,21 +1947,75 @@
       let messageHistory = [];
       let thinkingStartTime = null;
 
+      // Configure markdown-it for code highlighting
+      md.renderer.rules.fence = function (tokens, idx, options, env, self) {
+        const token = tokens[idx];
+        const code = token.content.trim();
+        const lang = token.info.trim() || "";
+
+        // Special handling for mermaid diagrams
+        if (lang === "mermaid") {
+          return '<div class="mermaid">' + code + "</div>";
+        }
+
+        // Create wrapper for code block with header and copy button
+        const langClass = lang ? `language-${lang}` : "";
+        const highlighted = lang
+          ? Prism.highlight(
+              code,
+              Prism.languages[lang] || Prism.languages.plaintext,
+              lang
+            )
+          : code;
+
+        return `
+          <div class="code-block-wrapper">
+            <div class="code-block-header">
+              <span class="code-block-language">${lang || "text"}</span>
+              <div class="code-block-actions">
+                <button class="code-block-button" onclick="copyCode(this)" aria-label="Copy code">
+                  <i class="fas fa-copy"></i> Copy
+                </button>
+              </div>
+            </div>
+            <pre><code class="${langClass}">${highlighted}</code></pre>
+          </div>
+        `;
+      };
+
+      // Function to copy code to clipboard
+      window.copyCode = async function (button) {
+        const wrapper = button.closest(".code-block-wrapper");
+        const code = wrapper.querySelector("code");
+        const text = code.innerText;
+
+        try {
+          await navigator.clipboard.writeText(text);
+          button.innerHTML = '<i class="fas fa-check"></i> Copied';
+          button.classList.add("copied");
+          setTimeout(() => {
+            button.innerHTML = '<i class="fas fa-copy"></i> Copy';
+            button.classList.remove("copied");
+          }, 2000);
+        } catch (err) {
+          console.error("Failed to copy text:", err);
+          button.innerHTML = '<i class="fas fa-times"></i> Failed';
+          setTimeout(() => {
+            button.innerHTML = '<i class="fas fa-copy"></i> Copy';
+          }, 2000);
+        }
+      };
+
+      // Initialize Prism.js highlighting
+      document.addEventListener("DOMContentLoaded", (event) => {
+        Prism.highlightAll();
+      });
+
       mermaid.initialize({ startOnLoad: true });
 
       (async () => {
         await fetchAvailableSources();
       })();
-
-      // Custom renderer for code fences (handles mermaid code blocks)
-      md.renderer.rules.fence = function (tokens, idx) {
-        const token = tokens[idx];
-        const code = token.content.trim();
-        if (token.info.trim() === "mermaid") {
-          return '<div class="mermaid">' + code + "</div>";
-        }
-        return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
-      };
 
       // Updated helper to process a base64 image
       function processBase64Image(base64String, type = "jpeg") {
@@ -1846,15 +2128,58 @@
           if (msg.role !== "system" && index !== lastMessageIndex) {
             console.group(`Message ${index} (${msg.role})`);
             const roleClass = msg.role + "-message";
-            const processedContent = processMessageContent(
-              msg.content || "",
-              msg.images || []
-            );
-            regularMessages += `
+
+            if (msg.role === "tool") {
+              // Try to parse the tool message content as JSON for better formatting
+              let toolContent = msg.content || "";
+              try {
+                // Parse and re-stringify for consistent formatting
+                const jsonObj = JSON.parse(toolContent);
+                toolContent = JSON.stringify(jsonObj, null, 2);
+
+                // Apply syntax highlighting using the same approach as used elsewhere
+                const lang = "json";
+                const highlighted = Prism.highlight(
+                  toolContent,
+                  Prism.languages[lang] || Prism.languages.plaintext,
+                  lang
+                );
+
+                regularMessages += `
+                        <div class="message ${roleClass}">
+                          <div class="chunk">
+                            <div class="code-block-wrapper">
+                              <button class="copy-button" onclick="copyCode(this)" aria-label="Copy code">
+                                <i class="fas fa-copy"></i>
+                              </button>
+                              <pre><code class="language-json">${highlighted}</code></pre>
+                            </div>
+                          </div>
+                        </div>
+                      `;
+              } catch (e) {
+                // Not valid JSON, use regular message processing
+                const processedContent = processMessageContent(
+                  msg.content || "",
+                  msg.images || []
+                );
+                regularMessages += `
                         <div class="message ${roleClass}">
                           <div class="chunk">${processedContent}</div>
                         </div>
                       `;
+              }
+            } else {
+              const processedContent = processMessageContent(
+                msg.content || "",
+                msg.images || []
+              );
+              regularMessages += `
+                        <div class="message ${roleClass}">
+                          <div class="chunk">${processedContent}</div>
+                        </div>
+                      `;
+            }
             console.groupEnd();
           }
         });
@@ -1909,8 +2234,13 @@
         console.groupEnd();
 
         const result = `
-                    <div class="context-container">
-                      <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+                    <div class="context-container" style="margin-top: 0.5rem;">
+                      <div class="context-actions">
+                        <div class="context-toggle" onclick="toggleContext(this)">Show Context ▶</div>
+                        <div class="context-copy" onclick="copyContext(this)" title="Copy raw response">
+                          <i class="fas fa-copy"></i>
+                        </div>
+                      </div>
                       <div class="context-content">
                         ${regularMessages}
                         ${
@@ -2365,6 +2695,16 @@
           let chunk = data.message.content;
           let idx = 0;
 
+          // If we receive actual content, remove any standalone typing indicator
+          if (chunk.trim()) {
+            const standaloneIndicator = document.querySelector(
+              ".standalone-typing-indicator"
+            );
+            if (standaloneIndicator) {
+              standaloneIndicator.remove();
+            }
+          }
+
           while (idx < chunk.length) {
             if (!isThinkingActive) {
               const openPos = chunk.indexOf("<think>", idx);
@@ -2518,72 +2858,110 @@
         let assistantBlock;
         let assistantContent;
 
-        if (lastMessageRole === "assistant") {
-          assistantBlock = lastMessageDiv;
-          assistantContent = assistantBlock.querySelector(
-            "div:not(.context-container):not(.thinking-process)"
+        // If there's actual content or already an assistant message block, create/use the container
+        if (visibleText.trim() || lastMessageRole === "assistant") {
+          // Remove standalone typing indicator if it exists
+          const standaloneIndicator = document.querySelector(
+            ".standalone-typing-indicator"
           );
-          if (!assistantContent) {
+          if (standaloneIndicator) {
+            standaloneIndicator.remove();
+          }
+
+          if (lastMessageRole === "assistant") {
+            assistantBlock = lastMessageDiv;
+            assistantContent = assistantBlock.querySelector(
+              "div:not(.context-container):not(.thinking-process)"
+            );
+            if (!assistantContent) {
+              assistantContent = document.createElement("div");
+              assistantBlock.appendChild(assistantContent);
+            }
+
+            // Ensure max width when we get first content
+            if (
+              visibleText.trim() &&
+              !assistantBlock.classList.contains("expanded")
+            ) {
+              assistantBlock.classList.add("expanded");
+            }
+          } else {
+            assistantBlock = document.createElement("div");
+            assistantBlock.className = "message assistant-message";
+            // Set the message index for this assistant message
+            assistantBlock.dataset.messageIndex =
+              messageHistory.length.toString();
+            if (visibleText.trim()) {
+              assistantBlock.classList.add("expanded");
+            }
             assistantContent = document.createElement("div");
             assistantBlock.appendChild(assistantContent);
+            chatContainer.appendChild(assistantBlock);
+          }
+
+          const existingIndicators =
+            assistantContent.querySelectorAll(".typing-indicator");
+          existingIndicators.forEach((indicator) => indicator.remove());
+
+          assistantContent.innerHTML = md.render(visibleText || "");
+          const typingIndicator = document.createElement("span");
+          typingIndicator.className = "typing-indicator";
+
+          let lastContentElement = assistantContent;
+          const walker = document.createTreeWalker(
+            assistantContent,
+            NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+            {
+              acceptNode: function (node) {
+                if (
+                  node.nodeType === Node.TEXT_NODE &&
+                  !node.textContent.trim()
+                ) {
+                  return NodeFilter.FILTER_SKIP;
+                }
+                if (node.classList?.contains("typing-indicator")) {
+                  return NodeFilter.FILTER_SKIP;
+                }
+                return NodeFilter.FILTER_ACCEPT;
+              },
+            }
+          );
+
+          while (walker.nextNode()) {
+            lastContentElement = walker.currentNode;
+          }
+
+          if (
+            lastContentElement.nodeType === Node.TEXT_NODE ||
+            getComputedStyle(lastContentElement).display === "inline"
+          ) {
+            lastContentElement.parentNode.appendChild(typingIndicator);
+          } else {
+            lastContentElement.appendChild(typingIndicator);
+          }
+
+          if (!contextSet && context?.length) {
+            const contextSection = createContextSection(context);
+            if (contextSection) {
+              const contextDiv = document.createElement("div");
+              contextDiv.innerHTML = contextSection;
+              assistantBlock.appendChild(contextDiv);
+            }
+            contextSet = true;
           }
         } else {
-          assistantBlock = document.createElement("div");
-          assistantBlock.className = "message assistant-message";
-          assistantContent = document.createElement("div");
-          assistantBlock.appendChild(assistantContent);
-          chatContainer.appendChild(assistantBlock);
-        }
-
-        const existingIndicators =
-          assistantContent.querySelectorAll(".typing-indicator");
-        existingIndicators.forEach((indicator) => indicator.remove());
-
-        assistantContent.innerHTML = md.render(visibleText || "");
-        const typingIndicator = document.createElement("span");
-        typingIndicator.className = "typing-indicator";
-
-        let lastContentElement = assistantContent;
-        const walker = document.createTreeWalker(
-          assistantContent,
-          NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
-          {
-            acceptNode: function (node) {
-              if (
-                node.nodeType === Node.TEXT_NODE &&
-                !node.textContent.trim()
-              ) {
-                return NodeFilter.FILTER_SKIP;
-              }
-              if (node.classList?.contains("typing-indicator")) {
-                return NodeFilter.FILTER_SKIP;
-              }
-              return NodeFilter.FILTER_ACCEPT;
-            },
+          // For empty initial message, just show the typing indicator without container
+          // First check if there's already a standalone typing indicator
+          const existingIndicator = document.querySelector(
+            ".standalone-typing-indicator"
+          );
+          if (!existingIndicator) {
+            const typingIndicator = document.createElement("div");
+            typingIndicator.className = "standalone-typing-indicator";
+            typingIndicator.innerHTML =
+              '<span class="typing-indicator"></span>';
+            chatContainer.appendChild(typingIndicator);
           }
-        );
-
-        while (walker.nextNode()) {
-          lastContentElement = walker.currentNode;
-        }
-
-        if (
-          lastContentElement.nodeType === Node.TEXT_NODE ||
-          getComputedStyle(lastContentElement).display === "inline"
-        ) {
-          lastContentElement.parentNode.appendChild(typingIndicator);
-        } else {
-          lastContentElement.appendChild(typingIndicator);
-        }
-
-        if (!contextSet && context?.length) {
-          const contextSection = createContextSection(context);
-          if (contextSection) {
-            const contextDiv = document.createElement("div");
-            contextDiv.innerHTML = contextSection;
-            assistantBlock.appendChild(contextDiv);
-          }
-          contextSet = true;
         }
 
         chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -2593,34 +2971,38 @@
         const div = document.createElement("div");
         div.className = "thinking-process";
         div.innerHTML = `
-                    <div class="thinking-header" onclick="toggleThinking(this)">
-                      <span class="thinking-text">Thinking...</span>
-                    </div>
-                    <div class="thinking-content"></div>
-                  `;
+    <div class="thinking-header" onclick="toggleThinking(this)">
+      <i class="fas fa-chevron-right"></i>
+      <span class="thinking-text">Thinking...</span>
+    </div>
+    <div class="thinking-content"></div>
+  `;
         return div;
       }
 
       function appendThinkingChunk(text, contentDiv) {
         if (!contentDiv) return;
-        const cleanedText = text.replace(/<\/?think>/g, "");
+        const cleanedText = text.replace(/<\/?think>/g, "").replace(/^\n+/, "");
         contentDiv.textContent += cleanedText;
       }
 
       window.toggleContext = function (toggleElement) {
-        const contextContent = toggleElement.nextElementSibling;
+        const contextContainer = toggleElement.closest(".context-container");
+        const contextContent =
+          contextContainer.querySelector(".context-content");
         const isHidden =
           contextContent.style.display === "none" ||
           !contextContent.style.display;
         contextContent.style.display = isHidden ? "block" : "none";
         toggleElement.textContent = isHidden
           ? "Hide Context ▼"
-          : "Show Context ◀";
+          : "Show Context ▶";
       };
 
       window.toggleThinking = function (header) {
         const content = header.nextElementSibling;
         content.classList.toggle("visible");
+        header.classList.toggle("expanded");
       };
 
       function initializeToolToggles(container) {
@@ -3529,8 +3911,17 @@
           assistantTextBuffer = "";
         }
 
+        // Clean up all typing indicators
         const indicators = document.querySelectorAll(".typing-indicator");
         indicators.forEach((indicator) => indicator.remove());
+
+        // Also remove standalone typing indicator if it exists
+        const standaloneIndicator = document.querySelector(
+          ".standalone-typing-indicator"
+        );
+        if (standaloneIndicator) {
+          standaloneIndicator.remove();
+        }
 
         // Re-enable input
         queryInput.disabled = false;
@@ -3543,6 +3934,35 @@
         sendButton.disabled = !this.value.trim();
         resizeTextarea();
       });
+
+      window.copyContext = function (copyElement) {
+        const assistantMessage = copyElement.closest(
+          ".message.assistant-message"
+        );
+        const messageIndex = assistantMessage.dataset.messageIndex;
+
+        // Get the message content from history using the index
+        const textToCopy = messageHistory[messageIndex]?.content || "";
+
+        navigator.clipboard
+          .writeText(textToCopy)
+          .then(() => {
+            // Visual feedback
+            const icon = copyElement.querySelector("i");
+            icon.className = "fas fa-check";
+            setTimeout(() => {
+              icon.className = "fas fa-copy";
+            }, 2000);
+          })
+          .catch((err) => {
+            console.error("Failed to copy text:", err);
+            const icon = copyElement.querySelector("i");
+            icon.className = "fas fa-times";
+            setTimeout(() => {
+              icon.className = "fas fa-copy";
+            }, 2000);
+          });
+      };
     </script>
   </body>
 </html>
