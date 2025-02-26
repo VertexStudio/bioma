@@ -46,6 +46,7 @@
           #9600ff 100%
         );
         --code-bg: #1e1e1e;
+        --user-chat-width: 70%;
       }
 
       @font-face {
@@ -770,9 +771,12 @@
         margin-left: auto;
         color: var(--text-primary);
         position: relative;
-        /* For positioning the edit icon */
-        position: relative;
-        /* For positioning the edit icon */
+        max-width: var(--user-chat-width, 70%);
+        border-radius: 1.5rem;
+        padding: 0.05rem 1.25rem;
+        font-size: 1rem;
+        overflow-wrap: break-word;
+        text-align: start;
       }
 
       .user-message::before {
