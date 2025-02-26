@@ -1060,7 +1060,7 @@
       .thinking-process {
         margin-bottom: 15px;
         position: relative;
-        max-width: 85%;
+        max-width: 100%;
         align-self: flex-start;
       }
 
@@ -1074,7 +1074,15 @@
         width: 100%;
       }
 
-      .thinking-header i,
+      .thinking-header i {
+        margin-right: 8px;
+        transition: transform 0.2s ease;
+      }
+
+      .thinking-header.expanded i {
+        transform: rotate(90deg);
+      }
+
       .thinking-header .thinking-text {
         background: linear-gradient(
           to right,
@@ -1108,23 +1116,16 @@
 
       .thinking-content {
         margin-top: 8px;
-        padding: 12px;
+        padding: 0 0 0 15px;
         display: none;
         white-space: pre-wrap;
         font-family: var(--font-family);
         font-size: 0.9em;
         color: var(--text-muted);
-        background: linear-gradient(
-          135deg,
-          rgba(255, 0, 160, 0.05) 0%,
-          rgba(150, 0, 255, 0.05) 100%
-        );
-        border: 1px solid rgba(255, 0, 160, 0.2);
-        border-radius: 8px;
         line-height: 1.5;
-        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
         max-width: 100%;
         overflow-wrap: break-word;
+        border-left: 2px solid var(--text-muted);
       }
 
       .thinking-content.visible {
@@ -2874,11 +2875,12 @@
         const div = document.createElement("div");
         div.className = "thinking-process";
         div.innerHTML = `
-                    <div class="thinking-header" onclick="toggleThinking(this)">
-                      <span class="thinking-text">Thinking...</span>
-                    </div>
-                    <div class="thinking-content"></div>
-                  `;
+    <div class="thinking-header" onclick="toggleThinking(this)">
+      <i class="fas fa-chevron-right"></i>
+      <span class="thinking-text">Thinking...</span>
+    </div>
+    <div class="thinking-content"></div>
+  `;
         return div;
       }
 
@@ -2902,6 +2904,7 @@
       window.toggleThinking = function (header) {
         const content = header.nextElementSibling;
         content.classList.toggle("visible");
+        header.classList.toggle("expanded");
       };
 
       function initializeToolToggles(container) {
