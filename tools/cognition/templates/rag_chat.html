@@ -1216,6 +1216,21 @@
         white-space: pre;
       }
 
+      .standalone-typing-indicator {
+        padding: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        margin-bottom: 15px;
+      }
+
+      /* Special class for immediately expanded messages */
+      .message.assistant-message.expanded {
+        max-width: 85%;
+        width: 85%;
+        transition: all 0.3s ease-in-out;
+      }
+
       @keyframes pulse {
         0% {
           opacity: 0.4;
@@ -2577,6 +2592,16 @@
           let chunk = data.message.content;
           let idx = 0;
 
+          // If we receive actual content, remove any standalone typing indicator
+          if (chunk.trim()) {
+            const standaloneIndicator = document.querySelector(
+              ".standalone-typing-indicator"
+            );
+            if (standaloneIndicator) {
+              standaloneIndicator.remove();
+            }
+          }
+
           while (idx < chunk.length) {
             if (!isThinkingActive) {
               const openPos = chunk.indexOf("<think>", idx);
@@ -2730,72 +2755,107 @@
         let assistantBlock;
         let assistantContent;
 
-        if (lastMessageRole === "assistant") {
-          assistantBlock = lastMessageDiv;
-          assistantContent = assistantBlock.querySelector(
-            "div:not(.context-container):not(.thinking-process)"
+        // If there's actual content or already an assistant message block, create/use the container
+        if (visibleText.trim() || lastMessageRole === "assistant") {
+          // Remove standalone typing indicator if it exists
+          const standaloneIndicator = document.querySelector(
+            ".standalone-typing-indicator"
           );
-          if (!assistantContent) {
+          if (standaloneIndicator) {
+            standaloneIndicator.remove();
+          }
+
+          if (lastMessageRole === "assistant") {
+            assistantBlock = lastMessageDiv;
+            assistantContent = assistantBlock.querySelector(
+              "div:not(.context-container):not(.thinking-process)"
+            );
+            if (!assistantContent) {
+              assistantContent = document.createElement("div");
+              assistantBlock.appendChild(assistantContent);
+            }
+
+            // Ensure max width when we get first content
+            if (
+              visibleText.trim() &&
+              !assistantBlock.classList.contains("expanded")
+            ) {
+              assistantBlock.classList.add("expanded");
+            }
+          } else {
+            assistantBlock = document.createElement("div");
+            assistantBlock.className = "message assistant-message";
+            if (visibleText.trim()) {
+              assistantBlock.classList.add("expanded");
+            }
             assistantContent = document.createElement("div");
             assistantBlock.appendChild(assistantContent);
+            chatContainer.appendChild(assistantBlock);
+          }
+
+          const existingIndicators =
+            assistantContent.querySelectorAll(".typing-indicator");
+          existingIndicators.forEach((indicator) => indicator.remove());
+
+          assistantContent.innerHTML = md.render(visibleText || "");
+          const typingIndicator = document.createElement("span");
+          typingIndicator.className = "typing-indicator";
+
+          let lastContentElement = assistantContent;
+          const walker = document.createTreeWalker(
+            assistantContent,
+            NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+            {
+              acceptNode: function (node) {
+                if (
+                  node.nodeType === Node.TEXT_NODE &&
+                  !node.textContent.trim()
+                ) {
+                  return NodeFilter.FILTER_SKIP;
+                }
+                if (node.classList?.contains("typing-indicator")) {
+                  return NodeFilter.FILTER_SKIP;
+                }
+                return NodeFilter.FILTER_ACCEPT;
+              },
+            }
+          );
+
+          while (walker.nextNode()) {
+            lastContentElement = walker.currentNode;
+          }
+
+          if (
+            lastContentElement.nodeType === Node.TEXT_NODE ||
+            getComputedStyle(lastContentElement).display === "inline"
+          ) {
+            lastContentElement.parentNode.appendChild(typingIndicator);
+          } else {
+            lastContentElement.appendChild(typingIndicator);
+          }
+
+          if (!contextSet && context?.length) {
+            const contextSection = createContextSection(context);
+            if (contextSection) {
+              const contextDiv = document.createElement("div");
+              contextDiv.innerHTML = contextSection;
+              assistantBlock.appendChild(contextDiv);
+            }
+            contextSet = true;
           }
         } else {
-          assistantBlock = document.createElement("div");
-          assistantBlock.className = "message assistant-message";
-          assistantContent = document.createElement("div");
-          assistantBlock.appendChild(assistantContent);
-          chatContainer.appendChild(assistantBlock);
-        }
-
-        const existingIndicators =
-          assistantContent.querySelectorAll(".typing-indicator");
-        existingIndicators.forEach((indicator) => indicator.remove());
-
-        assistantContent.innerHTML = md.render(visibleText || "");
-        const typingIndicator = document.createElement("span");
-        typingIndicator.className = "typing-indicator";
-
-        let lastContentElement = assistantContent;
-        const walker = document.createTreeWalker(
-          assistantContent,
-          NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
-          {
-            acceptNode: function (node) {
-              if (
-                node.nodeType === Node.TEXT_NODE &&
-                !node.textContent.trim()
-              ) {
-                return NodeFilter.FILTER_SKIP;
-              }
-              if (node.classList?.contains("typing-indicator")) {
-                return NodeFilter.FILTER_SKIP;
-              }
-              return NodeFilter.FILTER_ACCEPT;
-            },
+          // For empty initial message, just show the typing indicator without container
+          // First check if there's already a standalone typing indicator
+          const existingIndicator = document.querySelector(
+            ".standalone-typing-indicator"
+          );
+          if (!existingIndicator) {
+            const typingIndicator = document.createElement("div");
+            typingIndicator.className = "standalone-typing-indicator";
+            typingIndicator.innerHTML =
+              '<span class="typing-indicator"></span>';
+            chatContainer.appendChild(typingIndicator);
           }
-        );
-
-        while (walker.nextNode()) {
-          lastContentElement = walker.currentNode;
-        }
-
-        if (
-          lastContentElement.nodeType === Node.TEXT_NODE ||
-          getComputedStyle(lastContentElement).display === "inline"
-        ) {
-          lastContentElement.parentNode.appendChild(typingIndicator);
-        } else {
-          lastContentElement.appendChild(typingIndicator);
-        }
-
-        if (!contextSet && context?.length) {
-          const contextSection = createContextSection(context);
-          if (contextSection) {
-            const contextDiv = document.createElement("div");
-            contextDiv.innerHTML = contextSection;
-            assistantBlock.appendChild(contextDiv);
-          }
-          contextSet = true;
         }
 
         chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -3741,8 +3801,17 @@
           assistantTextBuffer = "";
         }
 
+        // Clean up all typing indicators
         const indicators = document.querySelectorAll(".typing-indicator");
         indicators.forEach((indicator) => indicator.remove());
+
+        // Also remove standalone typing indicator if it exists
+        const standaloneIndicator = document.querySelector(
+          ".standalone-typing-indicator"
+        );
+        if (standaloneIndicator) {
+          standaloneIndicator.remove();
+        }
 
         // Re-enable input
         queryInput.disabled = false;
