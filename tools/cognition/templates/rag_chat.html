@@ -2984,7 +2984,9 @@
       }
 
       window.toggleContext = function (toggleElement) {
-        const contextContent = toggleElement.nextElementSibling;
+        const contextContainer = toggleElement.closest(".context-container");
+        const contextContent =
+          contextContainer.querySelector(".context-content");
         const isHidden =
           contextContent.style.display === "none" ||
           !contextContent.style.display;
