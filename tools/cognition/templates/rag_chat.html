@@ -3932,33 +3932,33 @@
         resizeTextarea();
       });
 
-      window.copyContext = function (copyButton) {
-        const messageDiv = copyButton.closest(".message");
+      window.copyContext = function (copyElement) {
+        const assistantBlock = copyElement.closest(
+          ".message.assistant-message"
+        );
+        const assistantContent = assistantBlock.querySelector(
+          "div:not(.context-container):not(.context-actions)"
+        );
+        const textToCopy = assistantContent ? assistantContent.innerText : "";
 
-        // Find the last assistant message in history
-        const assistantMessage = [...messageHistory]
-          .reverse()
-          .find((msg) => msg.role === "assistant");
-
-        if (assistantMessage?.content) {
-          // Copy to clipboard
-          navigator.clipboard
-            .writeText(assistantMessage.content)
-            .then(() => {
-              // Visual feedback
-              copyButton.innerHTML = '<i class="fas fa-check"></i>';
-              setTimeout(() => {
-                copyButton.innerHTML = '<i class="fas fa-copy"></i>';
-              }, 2000);
-            })
-            .catch((err) => {
-              console.error("Failed to copy:", err);
-              copyButton.innerHTML = '<i class="fas fa-times"></i>';
-              setTimeout(() => {
-                copyButton.innerHTML = '<i class="fas fa-copy"></i>';
-              }, 2000);
-            });
-        }
+        navigator.clipboard
+          .writeText(textToCopy)
+          .then(() => {
+            // Visual feedback
+            const icon = copyElement.querySelector("i");
+            icon.className = "fas fa-check";
+            setTimeout(() => {
+              icon.className = "fas fa-copy";
+            }, 2000);
+          })
+          .catch((err) => {
+            console.error("Failed to copy text:", err);
+            const icon = copyElement.querySelector("i");
+            icon.className = "fas fa-times";
+            setTimeout(() => {
+              icon.className = "fas fa-copy";
+            }, 2000);
+          });
       };
     </script>
   </body>
