@@ -1515,6 +1515,54 @@
       .code-block-wrapper {
         position: relative;
         margin: 1.5em 0;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .code-block-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 8px 12px;
+        font-size: 0.9em;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .code-block-wrapper pre {
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .code-block-wrapper pre[class*="language-"] {
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .code-block-language {
+        font-family: var(--font-family);
+        text-transform: lowercase;
+      }
+
+      .code-block-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .code-block-button {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 4px;
+        transition: color 0.2s;
+        display: flex;
+        align-items: center;
+      }
+
+      .code-block-button:hover {
+        color: var(--text-primary);
       }
 
       .copy-button {
@@ -1898,7 +1946,7 @@
           return '<div class="mermaid">' + code + "</div>";
         }
 
-        // Create wrapper for code block with copy button
+        // Create wrapper for code block with header and copy button
         const langClass = lang ? `language-${lang}` : "";
         const highlighted = lang
           ? Prism.highlight(
@@ -1910,9 +1958,14 @@
 
         return `
           <div class="code-block-wrapper">
-            <button class="copy-button" onclick="copyCode(this)" aria-label="Copy code">
-              <i class="fas fa-copy"></i>
-            </button>
+            <div class="code-block-header">
+              <span class="code-block-language">${lang || "text"}</span>
+              <div class="code-block-actions">
+                <button class="code-block-button" onclick="copyCode(this)" aria-label="Copy code">
+                  <i class="fas fa-copy"></i>
+                </button>
+              </div>
+            </div>
             <pre><code class="${langClass}">${highlighted}</code></pre>
           </div>
         `;
@@ -1920,16 +1973,14 @@
 
       // Function to copy code to clipboard
       window.copyCode = async function (button) {
-        const pre = button.nextElementSibling;
-        const code = pre.querySelector("code");
+        const wrapper = button.closest(".code-block-wrapper");
+        const code = wrapper.querySelector("code");
         const text = code.innerText;
 
         try {
           await navigator.clipboard.writeText(text);
-          button.classList.add("copied");
           button.innerHTML = '<i class="fas fa-check"></i>';
           setTimeout(() => {
-            button.classList.remove("copied");
             button.innerHTML = '<i class="fas fa-copy"></i>';
           }, 2000);
         } catch (err) {
