@@ -838,7 +838,6 @@
         font-size: 0.8em;
         color: var(--text-muted);
         cursor: pointer;
-        margin-top: 10px;
         padding: 5px 10px;
         background-color: var(--bg-secondary);
         border-radius: 4px;
@@ -1547,6 +1546,29 @@
         background: var(--primary);
         color: var(--text-primary);
       }
+
+      .context-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 10px;
+        justify-content: space-between;
+      }
+
+      .context-copy {
+        font-size: 0.9em;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 5px;
+        display: inline-flex;
+        align-items: center;
+        user-select: none;
+        transition: color 0.2s;
+      }
+
+      .context-copy:hover {
+        color: var(--text-primary);
+      }
     </style>
   </head>
 
@@ -2148,7 +2170,12 @@
 
         const result = `
                     <div class="context-container" style="margin-top: 0.5rem;">
-                      <div class="context-toggle" onclick="toggleContext(this)">Show Context ▶</div>
+                      <div class="context-actions">
+                        <div class="context-toggle" onclick="toggleContext(this)">Show Context ▶</div>
+                        <div class="context-copy" onclick="copyContext(this)" title="Copy raw response">
+                          <i class="fas fa-copy"></i>
+                        </div>
+                      </div>
                       <div class="context-content">
                         ${regularMessages}
                         ${
@@ -3837,6 +3864,35 @@
         sendButton.disabled = !this.value.trim();
         resizeTextarea();
       });
+
+      window.copyContext = function (copyButton) {
+        const messageDiv = copyButton.closest(".message");
+
+        // Find the last assistant message in history
+        const assistantMessage = [...messageHistory]
+          .reverse()
+          .find((msg) => msg.role === "assistant");
+
+        if (assistantMessage?.content) {
+          // Copy to clipboard
+          navigator.clipboard
+            .writeText(assistantMessage.content)
+            .then(() => {
+              // Visual feedback
+              copyButton.innerHTML = '<i class="fas fa-check"></i>';
+              setTimeout(() => {
+                copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+              }, 2000);
+            })
+            .catch((err) => {
+              console.error("Failed to copy:", err);
+              copyButton.innerHTML = '<i class="fas fa-times"></i>';
+              setTimeout(() => {
+                copyButton.innerHTML = '<i class="fas fa-copy"></i>';
+              }, 2000);
+            });
+        }
+      };
     </script>
   </body>
 </html>
