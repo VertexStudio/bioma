@@ -22,6 +22,6 @@ pub mod prelude {
     pub use ollama_rs::generation::{
         chat::{ChatMessage, ChatMessageResponse, MessageRole},
         images::Image,
-        tools::{ToolInfo, ToolCall}
+        tools::{ToolCall, ToolInfo},
     };
 }

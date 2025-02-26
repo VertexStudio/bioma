@@ -604,24 +604,32 @@ impl Embeddings {
 
                             match request.content {
                                 EmbeddingContent::Text(texts) => {
-                                    let avg_text_len =
-                                        texts.iter().map(|text| text.len() as f32).sum::<f32>() / texts.len() as f32;
                                     let text_count = texts.len();
-                                    match text_embedding.embed(texts, None) {
-                                        Ok(embeddings) => {
-                                            info!(
-                                                "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
-                                                text_count,
-                                                avg_text_len,
-                                                start.elapsed()
-                                            );
-                                            let _ = request.response_tx.send(Ok(embeddings));
-                                        }
-                                        Err(err) => {
-                                            error!("Failed to generate text embeddings: {}", err);
-                                            let _ = request.response_tx.send(Err(err));
+                                    let mut all_embeddings = Vec::with_capacity(text_count);
+
+                                    // Process texts in chunks
+                                    for chunk in texts.chunks(10) {
+                                        let avg_text_len = chunk.iter().map(|text| text.len() as f32).sum::<f32>()
+                                            / chunk.len() as f32;
+                                        match text_embedding.embed(chunk.to_vec(), None) {
+                                            Ok(mut embeddings) => {
+                                                info!(
+                                                    "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
+                                                    chunk.len(),
+                                                    avg_text_len,
+                                                    start.elapsed()
+                                                );
+                                                all_embeddings.append(&mut embeddings);
+                                            }
+                                            Err(err) => {
+                                                error!("Failed to generate text embeddings: {}", err);
+                                                let _ = request.response_tx.send(Err(err));
+                                                return Ok(());
+                                            }
                                         }
                                     }
+
+                                    let _ = request.response_tx.send(Ok(all_embeddings));
                                 }
                                 EmbeddingContent::Image(images) => {
                                     let image_count = images.len();
