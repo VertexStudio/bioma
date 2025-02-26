@@ -2888,6 +2888,9 @@
           } else {
             assistantBlock = document.createElement("div");
             assistantBlock.className = "message assistant-message";
+            // Set the message index for this assistant message
+            assistantBlock.dataset.messageIndex =
+              messageHistory.length.toString();
             if (visibleText.trim()) {
               assistantBlock.classList.add("expanded");
             }
@@ -3933,13 +3936,13 @@
       });
 
       window.copyContext = function (copyElement) {
-        const assistantBlock = copyElement.closest(
+        const assistantMessage = copyElement.closest(
           ".message.assistant-message"
         );
-        const assistantContent = assistantBlock.querySelector(
-          "div:not(.context-container):not(.context-actions)"
-        );
-        const textToCopy = assistantContent ? assistantContent.innerText : "";
+        const messageIndex = assistantMessage.dataset.messageIndex;
+
+        // Get the message content from history using the index
+        const textToCopy = messageHistory[messageIndex]?.content || "";
 
         navigator.clipboard
           .writeText(textToCopy)
