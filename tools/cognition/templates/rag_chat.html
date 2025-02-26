@@ -12,6 +12,18 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
     />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
 
     <style>
       :root {
@@ -33,6 +45,7 @@
           var(--primary) 0%,
           #9600ff 100%
         );
+        --code-bg: #1e1e1e;
       }
 
       @font-face {
@@ -1401,6 +1414,113 @@
         margin-top: 10px;
         padding-top: 10px;
       }
+
+      /* Code block styling */
+      pre[class*="language-"] {
+        position: relative;
+        background: var(--code-bg) !important;
+        border-radius: 8px;
+        margin: 1.5em 0;
+        padding: 1em;
+        overflow: auto;
+      }
+
+      code[class*="language-"] {
+        font-family: var(--font-family);
+        font-size: 0.9em;
+        line-height: 1.5;
+      }
+
+      .token.punctuation {
+        color: #d4d4d4;
+      }
+
+      .token.property,
+      .token.tag,
+      .token.boolean,
+      .token.number,
+      .token.constant,
+      .token.symbol,
+      .token.deleted {
+        color: #b5cea8;
+      }
+
+      .token.operator,
+      .token.entity,
+      .token.url,
+      .language-css .token.string,
+      .style .token.string {
+        color: #d4d4d4;
+      }
+
+      .token.atrule,
+      .token.attr-value,
+      .token.keyword {
+        color: #569cd6;
+      }
+
+      .token.function,
+      .token.class-name {
+        color: #dcdcaa;
+      }
+
+      .token.regex,
+      .token.important,
+      .token.variable {
+        color: #d16969;
+      }
+
+      /* Syntax highlighting overrides */
+      .token.comment,
+      .token.prolog,
+      .token.doctype,
+      .token.cdata {
+        color: #6a9955;
+      }
+
+      .token.selector,
+      .token.attr-name,
+      .token.string,
+      .token.char,
+      .token.builtin,
+      .token.inserted {
+        color: #ce9178;
+      }
+
+      .code-block-wrapper {
+        position: relative;
+        margin: 1.5em 0;
+      }
+
+      .copy-button {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: var(--text-muted);
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        opacity: 0;
+        z-index: 10;
+      }
+
+      .code-block-wrapper:hover .copy-button {
+        opacity: 1;
+      }
+
+      .copy-button:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+      }
+
+      .copy-button.copied {
+        background: var(--primary);
+        color: var(--text-primary);
+      }
     </style>
   </head>
 
@@ -1719,21 +1839,70 @@
       let messageHistory = [];
       let thinkingStartTime = null;
 
+      // Configure markdown-it for code highlighting
+      md.renderer.rules.fence = function (tokens, idx, options, env, self) {
+        const token = tokens[idx];
+        const code = token.content.trim();
+        const lang = token.info.trim() || "";
+
+        // Special handling for mermaid diagrams
+        if (lang === "mermaid") {
+          return '<div class="mermaid">' + code + "</div>";
+        }
+
+        // Create wrapper for code block with copy button
+        const langClass = lang ? `language-${lang}` : "";
+        const highlighted = lang
+          ? Prism.highlight(
+              code,
+              Prism.languages[lang] || Prism.languages.plaintext,
+              lang
+            )
+          : code;
+
+        return `
+          <div class="code-block-wrapper">
+            <button class="copy-button" onclick="copyCode(this)" aria-label="Copy code">
+              <i class="fas fa-copy"></i>
+            </button>
+            <pre><code class="${langClass}">${highlighted}</code></pre>
+          </div>
+        `;
+      };
+
+      // Function to copy code to clipboard
+      window.copyCode = async function (button) {
+        const pre = button.nextElementSibling;
+        const code = pre.querySelector("code");
+        const text = code.innerText;
+
+        try {
+          await navigator.clipboard.writeText(text);
+          button.classList.add("copied");
+          button.innerHTML = '<i class="fas fa-check"></i>';
+          setTimeout(() => {
+            button.classList.remove("copied");
+            button.innerHTML = '<i class="fas fa-copy"></i>';
+          }, 2000);
+        } catch (err) {
+          console.error("Failed to copy text:", err);
+          button.innerHTML = '<i class="fas fa-times"></i>';
+          setTimeout(() => {
+            button.innerHTML = '<i class="fas fa-copy"></i>';
+          }, 2000);
+        }
+      };
+
+      // Initialize Prism.js highlighting
+      document.addEventListener("DOMContentLoaded", (event) => {
+        Prism.highlightAll();
+      });
+
       mermaid.initialize({ startOnLoad: true });
 
       (async () => {
         await fetchAvailableSources();
       })();
-
-      // Custom renderer for code fences (handles mermaid code blocks)
-      md.renderer.rules.fence = function (tokens, idx) {
-        const token = tokens[idx];
-        const code = token.content.trim();
-        if (token.info.trim() === "mermaid") {
-          return '<div class="mermaid">' + code + "</div>";
-        }
-        return "<pre><code>" + md.utils.escapeHtml(code) + "</code></pre>";
-      };
 
       // Updated helper to process a base64 image
       function processBase64Image(base64String, type = "jpeg") {

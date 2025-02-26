@@ -71,14 +71,7 @@ pub struct Chat {
 
 impl Default for Chat {
     fn default() -> Self {
-        Self {
-            model: DEFAULT_MODEL_NAME.into(),
-            generation_options: None,
-            endpoint: Url::parse(DEFAULT_ENDPOINT).unwrap(),
-            messages_number_limit: DEFAULT_MESSAGES_NUMBER_LIMIT,
-            history: Vec::new(),
-            ollama: Ollama::default(),
-        }
+        Self::builder().build()
     }
 }
 
