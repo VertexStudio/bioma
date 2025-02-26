@@ -786,10 +786,12 @@
       }
 
       .assistant-message {
-        background-color: var(--bg-secondary);
+        background-color: transparent;
         align-self: flex-start;
-        border: 1px solid var(--border-color);
         color: var(--text-primary);
+        width: 100%;
+        max-width: 100%;
+        padding: 0px;
       }
 
       .system-message {
@@ -1226,8 +1228,8 @@
 
       /* Special class for immediately expanded messages */
       .message.assistant-message.expanded {
-        max-width: 85%;
-        width: 85%;
+        max-width: 100%;
+        width: 100%;
         transition: all 0.3s ease-in-out;
       }
 
@@ -2137,7 +2139,7 @@
 
         const result = `
                     <div class="context-container">
-                      <div class="context-toggle" onclick="toggleContext(this)">Show Context ◀</div>
+                      <div class="context-toggle" onclick="toggleContext(this)">Show Context ▶</div>
                       <div class="context-content">
                         ${regularMessages}
                         ${
@@ -2887,7 +2889,7 @@
         contextContent.style.display = isHidden ? "block" : "none";
         toggleElement.textContent = isHidden
           ? "Hide Context ▼"
-          : "Show Context ◀";
+          : "Show Context ▶";
       };
 
       window.toggleThinking = function (header) {
