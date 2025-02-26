@@ -2886,7 +2886,7 @@
 
       function appendThinkingChunk(text, contentDiv) {
         if (!contentDiv) return;
-        const cleanedText = text.replace(/<\/?think>/g, "");
+        const cleanedText = text.replace(/<\/?think>/g, "").replace(/^\n+/, "");
         contentDiv.textContent += cleanedText;
       }
 
