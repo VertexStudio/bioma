@@ -2015,15 +2015,58 @@
           if (msg.role !== "system" && index !== lastMessageIndex) {
             console.group(`Message ${index} (${msg.role})`);
             const roleClass = msg.role + "-message";
-            const processedContent = processMessageContent(
-              msg.content || "",
-              msg.images || []
-            );
-            regularMessages += `
+
+            if (msg.role === "tool") {
+              // Try to parse the tool message content as JSON for better formatting
+              let toolContent = msg.content || "";
+              try {
+                // Parse and re-stringify for consistent formatting
+                const jsonObj = JSON.parse(toolContent);
+                toolContent = JSON.stringify(jsonObj, null, 2);
+
+                // Apply syntax highlighting using the same approach as used elsewhere
+                const lang = "json";
+                const highlighted = Prism.highlight(
+                  toolContent,
+                  Prism.languages[lang] || Prism.languages.plaintext,
+                  lang
+                );
+
+                regularMessages += `
+                        <div class="message ${roleClass}">
+                          <div class="chunk">
+                            <div class="code-block-wrapper">
+                              <button class="copy-button" onclick="copyCode(this)" aria-label="Copy code">
+                                <i class="fas fa-copy"></i>
+                              </button>
+                              <pre><code class="language-json">${highlighted}</code></pre>
+                            </div>
+                          </div>
+                        </div>
+                      `;
+              } catch (e) {
+                // Not valid JSON, use regular message processing
+                const processedContent = processMessageContent(
+                  msg.content || "",
+                  msg.images || []
+                );
+                regularMessages += `
                         <div class="message ${roleClass}">
                           <div class="chunk">${processedContent}</div>
                         </div>
                       `;
+              }
+            } else {
+              const processedContent = processMessageContent(
+                msg.content || "",
+                msg.images || []
+              );
+              regularMessages += `
+                        <div class="message ${roleClass}">
+                          <div class="chunk">${processedContent}</div>
+                        </div>
+                      `;
+            }
             console.groupEnd();
           }
         });
