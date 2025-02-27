@@ -226,7 +226,7 @@ impl Summary {
         // Get summary from chat actor
         let response = ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
-                ChatMessages::builder().messages(vec![chat_message]).build(),
+                ChatMessages::builder().messages(vec![chat_message]).restart(true).build(),
                 chat_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(300)).build(),
             )
