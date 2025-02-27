@@ -1363,10 +1363,20 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
             match response {
                 Ok(message_response) => {
                     // Create response with context only on first message
-                    let response = ChatResponse {
-                        response: message_response,
-                        context: if is_first_message { conversation.clone() } else { vec![] },
-                    };
+                    let mut response_messages = if is_first_message { conversation.clone() } else { vec![] };
+                    if is_first_message {
+                        // Update system message with filtered context
+                        if let Some(msg) = response_messages.iter_mut().find(|m| m.role == MessageRole::System) {
+                            if let Some(sys_content) = msg.content.split("\n\n").nth(1) {
+                                msg.content = format!(
+                                    "Use the following context to answer the user's query:\n{}\n\n{}",
+                                    retrieved.to_markdown_filtered(),
+                                    sys_content
+                                );
+                            }
+                        }
+                    }
+                    let response = ChatResponse { response: message_response, context: response_messages };
                     is_first_message = false;
 
                     if tx.send(Ok(Json(response))).await.is_err() {
@@ -2236,7 +2246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
             // Add static video files serving
-            .service(Files::new("/static/videos", "/home/sergio/Downloads/animal-cross-video"))
+            .service(Files::new("/static/videos", "/home/sergio/Downloads/Characters"))
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
