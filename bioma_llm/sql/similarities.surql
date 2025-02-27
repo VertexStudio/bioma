@@ -11,7 +11,8 @@ SELECT
     text,
     vector::similarity::cosine(embedding, $query) AS similarity,
     metadata,
-    <-{prefix}_source_embeddings.in[0].id.{source, uri} AS source
+    <-{prefix}_source_embeddings.in[0].id.{source, uri} AS source,
+    <-{prefix}_source_embeddings.in[0].video_url AS video_url
 FROM type::table($prefix + "_embedding")
 WHERE 
     id IN $filtered_ids

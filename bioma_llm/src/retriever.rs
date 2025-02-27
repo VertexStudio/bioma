@@ -75,6 +75,7 @@ pub fn default_retriever_sources() -> Vec<String> {
 pub struct Context {
     pub text: Option<String>,
     pub source: Option<ContentSource>,
+    pub video_url: Option<String>,
     pub metadata: Option<Metadata>,
 }
 
@@ -200,6 +201,7 @@ impl Message<RetrieveContext> for Retriever {
                                 Context {
                                     text: text_similarities[t.index].0.text.clone(),
                                     source: text_similarities[t.index].0.source.clone(),
+                                    video_url: text_similarities[t.index].0.video_url.clone(),
                                     metadata: text_similarities[t.index]
                                         .0
                                         .metadata
@@ -220,6 +222,7 @@ impl Message<RetrieveContext> for Retriever {
                         Context {
                             text: s.text,
                             source: s.source.clone(),
+                            video_url: s.video_url.clone(),
                             metadata: s.metadata.and_then(|m| serde_json::from_value(m).ok()),
                         },
                         score,
