@@ -13,7 +13,12 @@ use api_schema::{
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::{indexer::Indexed, markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer, retriever::ListedSources};
+use bioma_llm::{
+    indexer::Indexed,
+    markitdown::MarkitDown,
+    pdf_analyzer::PdfAnalyzer,
+    retriever::{Context, ListedSources},
+};
 use bioma_llm::{prelude::*, retriever::ListSources};
 use bioma_tool::client::ListTools;
 use clap::Parser;
@@ -792,7 +797,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 .collect();
 
             // Create the system message with context
-            let mut context_message = if let Some(sys_msg) = system_message {
+            let mut context_message = if let Some(ref sys_msg) = system_message {
                 // Use the request's system message and append context
                 ChatMessage::system(format!(
                     "Use the following context to answer the user's query:\n{}\n\n{}",
@@ -838,6 +843,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             // Set up streaming channel with sufficient buffer for chat responses
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
+            // Clone system_message before spawning task
+            let system_message = system_message.clone();
+
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
@@ -877,7 +885,20 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
                     match chat_response {
                         Ok(response) => {
-                            let response = ChatResponse { response, context: conversation.clone() };
+                            // Update the system message in conversation with filtered context
+                            if let Some(msg) = conversation.iter_mut().find(|m| m.role == MessageRole::System) {
+                                if let Some(sys_msg) = &system_message {
+                                    msg.content = format!(
+                                        "Use the following context to answer the user's query:\n{}\n\n{}",
+                                        context.to_markdown_filtered(),
+                                        sys_msg.content
+                                    );
+                                } else {
+                                    msg.content =
+                                        format!("{}{}", data.config.chat_prompt, context.to_markdown_filtered());
+                                }
+                            }
+                            let response = ChatResponse { response, context: conversation };
                             let _ = tx.send(Ok(Json(response))).await;
                             return Ok(());
                         }
@@ -918,16 +939,16 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     info!("Tool: {}", tool_info.name());
                 }
 
-                let chat_with_tools_tx = tx.clone();
                 let tool_call_tree = cognition::chat_with_tools(
                     &user_actor,
                     &data.chat,
                     &conversation,
                     &tools,
                     &tool_hub_map,
-                    chat_with_tools_tx,
+                    tx.clone(),
                     body.format.clone(),
                     body.stream,
+                    &context,
                 )
                 .await;
 
@@ -2214,6 +2235,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(UPLOAD_MEMORY_LIMIT)
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
+            // Add static video files serving
+            .service(Files::new("/static/videos", "/home/sergio/Downloads/animal-cross-video"))
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))

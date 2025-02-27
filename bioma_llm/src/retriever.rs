@@ -3,6 +3,7 @@ use crate::indexer::{ContentSource, Metadata};
 use crate::rerank::{RankTexts, Rerank, RerankError, TruncationDirection};
 use bioma_actor::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use tracing::{error, info};
 
 const DEFAULT_RETRIEVER_LIMIT: usize = 10;
@@ -89,8 +90,54 @@ impl RetrievedContext {
         self.context.reverse();
     }
 
+    pub fn to_markdown_filtered(&self) -> String {
+        let mut context_content = String::new();
+        let mut seen_video_urls = HashSet::new();
+        let mut seen_uris = HashSet::new();
+
+        for context in self.context.iter() {
+            // Skip this context if we've seen this URI before
+            if let Some(source) = &context.source {
+                if !seen_uris.insert(source.uri.clone()) {
+                    continue;
+                }
+            }
+
+            context_content.push_str("---\n\n");
+
+            if let Some(source) = &context.source {
+                context_content.push_str(&format!("[SOURCE:{}]\n\n", source.source));
+                context_content.push_str(&format!("[URI:{}]\n\n", source.uri));
+            }
+
+            match &context.metadata {
+                Some(Metadata::Text(text_metadata)) => {
+                    context_content.push_str(&format!("[CHUNK:{}]\n\n", text_metadata.chunk_number))
+                }
+                Some(Metadata::Image(image_metadata)) => {
+                    context_content.push_str(&format!("[IMAGE:{}]\n\n", image_metadata.format))
+                }
+                None => (),
+            }
+
+            if let Some(text) = &context.text {
+                context_content.push_str(text);
+            }
+            context_content.push_str("\n\n");
+
+            if let Some(video_url) = &context.video_url {
+                if seen_video_urls.insert(video_url.clone()) {
+                    context_content.push_str(&format!("[VIDEO:{}]\n\n", video_url));
+                }
+            }
+        }
+
+        context_content
+    }
+
     pub fn to_markdown(&self) -> String {
         let mut context_content = String::new();
+        let mut seen_video_urls = HashSet::new();
 
         for context in self.context.iter() {
             context_content.push_str("---\n\n");
@@ -114,6 +161,12 @@ impl RetrievedContext {
                 context_content.push_str(text);
             }
             context_content.push_str("\n\n");
+
+            if let Some(video_url) = &context.video_url {
+                if seen_video_urls.insert(video_url.clone()) {
+                    context_content.push_str(&format!("[VIDEO:{}]\n\n", video_url));
+                }
+            }
         }
 
         context_content

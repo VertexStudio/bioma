@@ -1629,6 +1629,20 @@
       .context-copy:hover {
         color: var(--text-primary);
       }
+
+      /* Video container styles */
+      .video-container {
+        margin: 1rem 0;
+        max-width: 100%;
+        border-radius: 0.5rem;
+        overflow: hidden;
+      }
+
+      .video-container video {
+        width: 100%;
+        max-height: 480px;
+        object-fit: contain;
+      }
     </style>
   </head>
 
@@ -2064,6 +2078,23 @@
         // Process each line for markers
         const lines = content.split("\n");
         lines.forEach((line) => {
+          // Check for video file path
+          const videoMatch = line.match(/\[VIDEO:([^\]]+)\]/);
+          if (videoMatch) {
+            flushNormalLines();
+            const videoPath = videoMatch[1];
+            // Get just the filename from the path
+            const filename = videoPath.split("/").pop();
+            processedContent += `
+              <div class="video-container">
+                <video controls autoplay loop muted>
+                  <source src="/static/videos/${filename}" type="video/mp4">
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+            `;
+            return;
+          }
           const trimmedLine = line.trim();
           if (
             trimmedLine.startsWith("[URI:") ||
