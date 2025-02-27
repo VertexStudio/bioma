@@ -340,6 +340,7 @@ impl Indexer {
         content: &Content,
         summary_id: &ActorId,
         embeddings_id: &ActorId,
+        metadata: Option<Vec<Value>>,
     ) -> Result<(String, Vec<RecordId>), IndexerError> {
         // Generate summary based on content type
         let summarize_content = match content {
@@ -369,14 +370,7 @@ impl Indexer {
         // Generate embeddings for the summary
         let result = ctx
             .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-                StoreEmbeddings {
-                    content: EmbeddingContent::Text(vec![response.summary.clone()]),
-                    metadata: Some(vec![serde_json::to_value(Metadata::Text(TextMetadata {
-                        content: TextType::Markdown,
-                        chunk_number: 0,
-                    }))
-                    .unwrap_or_default()]),
-                },
+                StoreEmbeddings { content: EmbeddingContent::Text(vec![response.summary.clone()]), metadata },
                 embeddings_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
             )
@@ -413,7 +407,8 @@ impl Indexer {
             let mut summary_text = None;
             if summarize {
                 if let Some(summary_id) = &self.summary_id {
-                    match self.process_summary(ctx, source, content, summary_id, embeddings_id).await {
+                    match self.process_summary(ctx, source, content, summary_id, embeddings_id, metadata.clone()).await
+                    {
                         Ok((summary, ids)) => {
                             summary_text = Some(summary);
                             summary_embeddings_ids.extend(ids);
@@ -426,10 +421,11 @@ impl Indexer {
         };
 
         // Process embeddings in parallel with summary generation
+        let metadata_clone = metadata.clone();
         let embeddings_future = async {
             let result = ctx
                 .send_and_wait_reply::<Embeddings, StoreEmbeddings>(
-                    StoreEmbeddings { content: embeddings_content, metadata },
+                    StoreEmbeddings { content: embeddings_content, metadata: metadata_clone },
                     embeddings_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
                 )
