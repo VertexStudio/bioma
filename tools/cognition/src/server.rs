@@ -1148,7 +1148,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         sources: body.sources.clone(),
     };
 
-    let mut retrieved = match user_actor
+    let retrieved = match user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
@@ -1187,27 +1187,6 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         .iter()
         .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
         .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
-
-    // Remove all images from context except the one we're using
-    if let Some((uri, _)) = &image_info {
-        retrieved.context.retain(|c| {
-            if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
-                if matches!(metadata, Metadata::Image(_)) {
-                    // Only keep this image if it's the one we're using
-                    source.uri == *uri
-                } else {
-                    // Keep all non-image content
-                    true
-                }
-            } else {
-                // Keep items without source or metadata
-                true
-            }
-        });
-    } else {
-        // If we didn't find an image to use, remove all images from context
-        retrieved.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
-    }
 
     let context_content = if retrieved.context.is_empty() {
         "No additional context available".to_string()
@@ -2246,7 +2225,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
             // Add static video files serving
-            .service(Files::new("/static/videos", "/home/sergio/Downloads/Characters"))
+            .service(Files::new(
+                "/static/videos",
+                "/home/vertex/Documents/Repositorios/bioma/.output/store/uploads/Characters",
+            ))
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
