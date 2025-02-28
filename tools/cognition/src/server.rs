@@ -1148,7 +1148,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         sources: body.sources.clone(),
     };
 
-    let mut retrieved = match user_actor
+    let retrieved = match user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
@@ -1182,32 +1182,22 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
     };
 
     // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
-    let image_info = retrieved
+    // Collect all image information from the context
+    let image_infos: Vec<(String, Metadata)> = retrieved
         .context
         .iter()
-        .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
-        .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
-
-    // Remove all images from context except the one we're using
-    if let Some((uri, _)) = &image_info {
-        retrieved.context.retain(|c| {
-            if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
+        .filter_map(|ctx| {
+            if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                 if matches!(metadata, Metadata::Image(_)) {
-                    // Only keep this image if it's the one we're using
-                    source.uri == *uri
+                    Some((source.uri.clone(), metadata.clone()))
                 } else {
-                    // Keep all non-image content
-                    true
+                    None
                 }
             } else {
-                // Keep items without source or metadata
-                true
+                None
             }
-        });
-    } else {
-        // If we didn't find an image to use, remove all images from context
-        retrieved.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
-    }
+        })
+        .collect();
 
     let context_content = if retrieved.context.is_empty() {
         "No additional context available".to_string()
@@ -1298,24 +1288,34 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
 
     let mut context_message = ChatMessage::system(system_prompt);
 
-    // Add the image to the context message if we found one
-    if let Some((uri, Metadata::Image(_))) = image_info {
-        match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
-            Ok(image_data) => {
-                match tokio::task::spawn_blocking(move || base64::engine::general_purpose::STANDARD.encode(image_data))
+    // Add images to the context message if we found any
+    if !image_infos.is_empty() {
+        let mut images = Vec::with_capacity(image_infos.len());
+
+        for (uri, _) in image_infos {
+            match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+                Ok(image_data) => {
+                    match tokio::task::spawn_blocking(move || {
+                        base64::engine::general_purpose::STANDARD.encode(image_data)
+                    })
                     .await
-                {
-                    Ok(base64_data) => {
-                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                    }
-                    Err(e) => {
-                        error!("Error encoding image: {:?}", e);
+                    {
+                        Ok(base64_data) => {
+                            images.push(Image::from_base64(&base64_data));
+                        }
+                        Err(e) => {
+                            error!("Error encoding image: {:?}", e);
+                        }
                     }
                 }
+                Err(e) => {
+                    error!("Error reading image file: {:?}", e);
+                }
             }
-            Err(e) => {
-                error!("Error reading image file: {:?}", e);
-            }
+        }
+
+        if !images.is_empty() {
+            context_message.images = Some(images);
         }
     }
 

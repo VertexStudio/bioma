@@ -3471,11 +3471,10 @@
         sourceElement.innerHTML = `
               <div class="source-item-header">
                   <span class="source-icon"><i class="fa-solid fa-book"></i></span>
-                  <span class="source-item-name">${
-                    source.path
-                  } <span class="number-of-elements">(${
-          sourcesUris ? savedSources.sourcesExpanded[source.path].length : 0
-        } items)</span></span>
+                  <span class="source-item-name">${source.path}</span>
+				  <span class="number-of-elements">(${
+            sourcesUris ? savedSources.sourcesExpanded[source.path].length : 0
+          } items)</span>
                   ${
                     source.isLocal
                       ? ""
