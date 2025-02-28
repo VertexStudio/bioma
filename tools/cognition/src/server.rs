@@ -1182,11 +1182,22 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
     };
 
     // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
-    let image_info = retrieved
+    // Collect all image information from the context
+    let image_infos: Vec<(String, Metadata)> = retrieved
         .context
         .iter()
-        .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
-        .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
+        .filter_map(|ctx| {
+            if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
+                if matches!(metadata, Metadata::Image(_)) {
+                    Some((source.uri.clone(), metadata.clone()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
 
     let context_content = if retrieved.context.is_empty() {
         "No additional context available".to_string()
@@ -1277,24 +1288,34 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
 
     let mut context_message = ChatMessage::system(system_prompt);
 
-    // Add the image to the context message if we found one
-    if let Some((uri, Metadata::Image(_))) = image_info {
-        match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
-            Ok(image_data) => {
-                match tokio::task::spawn_blocking(move || base64::engine::general_purpose::STANDARD.encode(image_data))
+    // Add images to the context message if we found any
+    if !image_infos.is_empty() {
+        let mut images = Vec::with_capacity(image_infos.len());
+
+        for (uri, _) in image_infos {
+            match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+                Ok(image_data) => {
+                    match tokio::task::spawn_blocking(move || {
+                        base64::engine::general_purpose::STANDARD.encode(image_data)
+                    })
                     .await
-                {
-                    Ok(base64_data) => {
-                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                    }
-                    Err(e) => {
-                        error!("Error encoding image: {:?}", e);
+                    {
+                        Ok(base64_data) => {
+                            images.push(Image::from_base64(&base64_data));
+                        }
+                        Err(e) => {
+                            error!("Error encoding image: {:?}", e);
+                        }
                     }
                 }
+                Err(e) => {
+                    error!("Error reading image file: {:?}", e);
+                }
             }
-            Err(e) => {
-                error!("Error reading image file: {:?}", e);
-            }
+        }
+
+        if !images.is_empty() {
+            context_message.images = Some(images);
         }
     }
 
