@@ -138,7 +138,7 @@ impl Message<ChatMessages> for Chat {
             chat_message_request.tools = tools.clone();
             stream = false;
         }
-
+    
         // Add generation options
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
