@@ -138,7 +138,7 @@ impl Message<ChatMessages> for Chat {
             chat_message_request.tools = tools.clone();
             stream = false;
         }
-    
+
         // Add generation options
         if let Some(generation_options) = &self.generation_options {
             chat_message_request = chat_message_request.options(generation_options.clone());
@@ -165,6 +165,17 @@ impl Message<ChatMessages> for Chat {
         // ) {
         //     error!("Failed to write chat request debug file: {}", e);
         // }
+
+        // print history except images
+        info!("Chat history ({} messages):", self.history.len());
+        for message in &self.history {
+            // Skip printing content if it appears to be an image (base64 or binary data)
+            if !message.content.starts_with("data:image/") && !message.content.contains(";base64,") {
+                info!("[{:?}]: {}", message.role, message.content);
+            } else {
+                info!("[{:?}]: <image content>", message.role);
+            }
+        }
 
         if stream {
             // Get streaming response from Ollama

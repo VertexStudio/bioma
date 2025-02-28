@@ -13,12 +13,7 @@ use api_schema::{
 };
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::{
-    indexer::Indexed,
-    markitdown::MarkitDown,
-    pdf_analyzer::PdfAnalyzer,
-    retriever::{Context, ListedSources},
-};
+use bioma_llm::{indexer::Indexed, markitdown::MarkitDown, pdf_analyzer::PdfAnalyzer, retriever::ListedSources};
 use bioma_llm::{prelude::*, retriever::ListSources};
 use bioma_tool::client::ListTools;
 use clap::Parser;
@@ -2236,6 +2231,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
+        let assets_dir = engine.local_store_dir().join("animal-crossing");
+
         App::new()
             .wrap(Logger::default().exclude_regex("^/health"))
             .wrap(cors)
@@ -2246,7 +2243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
             // Add static video files serving
-            .service(Files::new("/static/videos", "/home/sergio/Downloads/Characters"))
+            .service(Files::new("/static/videos", assets_dir))
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
