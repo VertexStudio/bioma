@@ -2246,10 +2246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
             // Add static video files serving
-            .service(Files::new(
-                "/static/videos",
-                "/home/vertex/Documents/Repositorios/bioma/.output/store/uploads/Characters",
-            ))
+            .service(Files::new("/static/videos", "/home/sergio/Downloads/Characters"))
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
