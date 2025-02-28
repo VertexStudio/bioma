@@ -1629,6 +1629,31 @@
       .context-copy:hover {
         color: var(--text-primary);
       }
+
+      .ttft-display {
+        position: fixed;
+        bottom: 100px;
+        right: 20px;
+        background-color: rgba(25, 25, 29, 0.95);
+        color: var(--primary);
+        padding: 10px 15px;
+        border-radius: 6px;
+        font-size: 1em;
+        font-weight: bold;
+        z-index: 1000;
+        transition: all 0.3s ease-in-out;
+        border: 2px solid var(--primary);
+        box-shadow: 0 0 15px rgba(255, 0, 160, 0.5);
+        font-family: var(--font-family);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(20px);
+      }
+
+      .ttft-display.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
     </style>
   </head>
 
@@ -1939,6 +1964,7 @@
       let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
       let currentController = null; // Store the AbortController for the current request
       let isGenerating = false; // Track if we're currently generating a response
+      let ttftDisplayed = false; // Track if TTFT has been displayed for the current response
 
       const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
@@ -2325,9 +2351,11 @@
         // Reset any previous state and setup for new generation
         if (currentController) {
           currentController.abort();
+          currentController = null;
         }
         currentController = new AbortController();
         isGenerating = true;
+        ttftDisplayed = false; // Reset TTFT tracking for new query
 
         // Update button visibility
         const stopButton = document.getElementById("stop-button");
@@ -2657,6 +2685,43 @@
           return;
         }
 
+        // Extract TTFT if present
+        if (data.ttft_ms || (data.response && data.response.ttft_ms) && !ttftDisplayed) {
+          const ttftMs = data.ttft_ms || data.response.ttft_ms;
+          console.log(`Time to first token: ${ttftMs}ms`);
+          
+          // Create or update TTFT display
+          let ttftDisplay = document.getElementById('ttft-display');
+          let ttftDisplay = document.getElementById("ttft-display");
+          if (!ttftDisplay) {
+            ttftDisplay = document.createElement("div");
+            ttftDisplay.id = "ttft-display";
+            ttftDisplay.className = "ttft-display";
+            document.body.appendChild(ttftDisplay);
+          }
+
+          ttftDisplay.innerHTML = `<i class="fas fa-bolt"></i> TTFT: ${ttftMs}ms`;
+
+          // Use the visible class for better animation
+          setTimeout(() => {
+            ttftDisplay.classList.add("visible");
+          }, 10); // Small delay to ensure the transition works
+
+          // Fade out after 5 seconds
+          setTimeout(() => {
+            ttftDisplay.classList.remove("visible");
+
+            // Remove from DOM after transition completes
+            setTimeout(() => {
+              if (ttftDisplay.parentNode) {
+                ttftDisplay.parentNode.removeChild(ttftDisplay);
+              }
+            }, 300); // Match transition duration
+          }, 5000);
+
+          ttftDisplayed = true;
+        }
+
         if (data.context) {
           latestContext = data.context;
         }
@@ -2682,6 +2747,9 @@
                 });
               }
             }
+
+            // Reset TTFT display flag when response is complete
+            ttftDisplayed = false;
           }
           return;
         }
@@ -2791,6 +2859,9 @@
             }
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
             assistantTextBuffer = "";
+
+            // Reset TTFT display flag when response is complete
+            ttftDisplayed = false;
           }
         }
       }
@@ -3872,6 +3943,7 @@
         const sendButton = document.querySelector(".send-button");
         stopButton.style.display = "none";
         sendButton.style.display = "flex";
+        ttftDisplayed = false; // Reset TTFT tracking when stopping generation
 
         // Check input content to set correct button state
         sendButton.disabled = !queryInput.value.trim();
