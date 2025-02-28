@@ -167,15 +167,16 @@ impl Message<ChatMessages> for Chat {
         // }
 
         // print history except images
-        info!("Chat history ({} messages):", self.history.len());
+        info!("\nChat history ({} messages):", self.history.len());
         for message in &self.history {
             // Skip printing content if it appears to be an image (base64 or binary data)
             if !message.content.starts_with("data:image/") && !message.content.contains(";base64,") {
-                info!("[{:?}]: {}", message.role, message.content);
+                info!("\n[{:?}]: {:#?}", message.role, message.content);
             } else {
-                info!("[{:?}]: <image content>", message.role);
+                info!("\n[{:?}]: <image content>", message.role);
             }
         }
+        info!(""); // Add final line break
 
         if stream {
             // Get streaming response from Ollama
