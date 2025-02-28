@@ -2380,6 +2380,155 @@
         queryInput.value = "";
         resizeTextarea();
 
+        // Check if Blender3D Agent is selected
+        const activeTools = getActiveTools();
+        const isBlender3DAgentSelected = activeTools.some(
+          (tool) => tool.actor === "Blender3D Agent"
+        );
+
+        if (isBlender3DAgentSelected) {
+          // Simulate tool call for Blender3D Agent
+
+          // Add a typing indicator first
+          const typingIndicator = document.createElement("div");
+          typingIndicator.className = "typing-indicator";
+          typingIndicator.innerHTML = "<span></span><span></span><span></span>";
+
+          // Create a temporary assistant message to hold the typing indicator
+          const tempAssistantMessage = document.createElement("div");
+          tempAssistantMessage.className = "message assistant-message";
+          tempAssistantMessage.appendChild(typingIndicator);
+          chatContainer.appendChild(tempAssistantMessage);
+
+          // Add delay before showing tool call
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+
+          // Remove the temporary message
+          tempAssistantMessage.remove();
+
+          const toolData = {
+            tool: "Blender3D Agent",
+            call: {
+              function: {
+                name: "render_3d_scene",
+                arguments: {
+                  description: queryText,
+                  format: "png",
+                  resolution: "1920x1080",
+                },
+              },
+            },
+            response: {
+              status: "scheduled",
+              job_id: "blender_" + Date.now(),
+              estimated_time: "5-10 minutes",
+            },
+          };
+
+          // Display tool call
+          const specialMessageDiv = document.createElement("div");
+          specialMessageDiv.className = "message tool-message";
+          const formattedContent = `
+            <div class="tool-toggle">▶</div>
+            <div class="tool-header">🔧 Tool Call: ${toolData.tool}</div>
+            <div class="tool-content">
+              <div class="tool-details">
+                <strong>Arguments:</strong>
+                <pre><code>${JSON.stringify(
+                  toolData.call.function.arguments,
+                  null,
+                  2
+                )}</code></pre>
+                <strong>Response:</strong>
+                <pre><code>${JSON.stringify(
+                  toolData.response,
+                  null,
+                  2
+                )}</code></pre>
+              </div>
+            </div>
+          `;
+          specialMessageDiv.innerHTML = formattedContent;
+          chatContainer.appendChild(specialMessageDiv);
+          initializeToolToggles(specialMessageDiv);
+
+          // Add to message history
+          messageHistory.push({
+            role: "tool",
+            content: JSON.stringify(toolData),
+          });
+
+          // Add a small delay before assistant response
+          await new Promise((resolve) => setTimeout(resolve, 800));
+
+          // Simulate streaming response
+          createOrUpdateAssistantMessage("");
+
+          // Add typing indicator to assistant message
+          const assistantMessageDiv = chatContainer.lastElementChild;
+          const typingIndicator2 = document.createElement("div");
+          typingIndicator2.className = "typing-indicator";
+          typingIndicator2.innerHTML =
+            "<span></span><span></span><span></span>";
+          assistantMessageDiv.appendChild(typingIndicator2);
+
+          let responseText = "I've scheduled your Blender3D rendering task. ";
+          const fullResponse =
+            responseText +
+            "The job has been queued and will be processed shortly. You'll receive a notification when the rendering is complete. The estimated time for completion is 5-10 minutes depending on the complexity of the scene.";
+
+          // Simulate streaming by adding text incrementally with variable delay
+          for (let i = 0; i < fullResponse.length; i += 3) {
+            // Random delay between 10-50ms for more natural typing
+            await new Promise((resolve) =>
+              setTimeout(resolve, Math.floor(Math.random() * 40) + 10)
+            );
+            assistantTextBuffer = fullResponse.substring(0, i + 3);
+            createOrUpdateAssistantMessage(assistantTextBuffer);
+          }
+
+          // Remove typing indicator
+          const indicators =
+            assistantMessageDiv.querySelectorAll(".typing-indicator");
+          indicators.forEach((indicator) => indicator.remove());
+
+          // Add context section with copy button
+          const contextData = {
+            sources: [
+              {
+                source: "/blender3d/documentation",
+                content:
+                  "Blender3D Agent documentation and rendering capabilities",
+              },
+            ],
+          };
+
+          // Create context section
+          const contextSection = createContextSection(contextData);
+          const assistantMessage = chatContainer.lastElementChild;
+          assistantMessage.innerHTML += contextSection;
+
+          // Initialize context toggles
+          const toggleElement =
+            assistantMessage.querySelector(".context-toggle");
+          if (toggleElement) {
+            toggleElement.addEventListener("click", function () {
+              window.toggleContext(this);
+            });
+          }
+
+          // Add to message history
+          messageHistory.push({
+            role: "assistant",
+            content: fullResponse,
+            context: contextData,
+          });
+
+          // Reset generation state
+          resetGenerationState();
+          return;
+        }
+
         // Start thinking animation immediately for /think endpoint
         // or create empty assistant message for /chat
         if (endpoint === "/think") {
@@ -3344,6 +3493,17 @@
         const savedToolsList = document.getElementById("saved-tools-list");
         savedToolsList.innerHTML = "";
         const savedTools = getSavedTools();
+
+        // Add Blender3D Agent if it doesn't exist
+        if (!savedTools.some((tool) => tool.actor === "Blender3D Agent")) {
+          const blenderTool = {
+            id: "blender3d_" + Date.now().toString(),
+            actor: "Blender3D Agent",
+            active: false,
+          };
+          savedTools.push(blenderTool);
+          localStorage.setItem("savedTools", JSON.stringify(savedTools));
+        }
 
         savedTools.forEach((tool) => addToolToSavedList(tool));
       }
