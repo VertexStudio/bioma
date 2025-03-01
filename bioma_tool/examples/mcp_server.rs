@@ -39,8 +39,8 @@ impl ModelContextProtocolServer for McpServer {
         Self {
             tools: vec![
                 Box::new(tools::echo::Echo),
-                // Box::new(tools::memory::Memory),
-                // Box::new(tools::fetch::Fetch::default()),
+                Box::new(tools::memory::Memory),
+                Box::new(tools::fetch::Fetch::default()),
                 Box::new(tools::random::RandomNumber),
             ],
             resources: vec![Box::new(resources::readme::Readme)],
