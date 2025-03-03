@@ -215,6 +215,7 @@ pub struct Similarity {
     pub text: Option<String>,
     pub similarity: f32,
     pub source: Option<ContentSource>,
+    pub video_url: Option<String>,
     pub metadata: Option<Value>,
 }
 

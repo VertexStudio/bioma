@@ -19,6 +19,8 @@ pub mod health_check;
 pub mod tool;
 pub mod user;
 
+use crate::retriever::RetrievedContext;
+
 #[derive(Error, Debug)]
 pub enum ChatToolError {
     #[error("Error fetching tools: {0}")]
@@ -58,6 +60,7 @@ pub async fn chat_with_tools(
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
     stream: bool,
+    context: &RetrievedContext,
 ) -> Result<(), ChatToolError> {
     // Make chat request with current messages and tools
     let chat_request = ChatMessages {
@@ -97,10 +100,20 @@ pub async fn chat_with_tools(
             Ok(message_response) => {
                 if message_response.message.tool_calls.is_empty() {
                     // Stream the response chunk
-                    let response = ChatResponse {
-                        response: message_response,
-                        context: if is_first_message { messages.clone() } else { vec![] },
-                    };
+                    let mut response_messages = if is_first_message { messages.clone() } else { vec![] };
+                    if is_first_message {
+                        // Update system message with filtered context
+                        if let Some(msg) = response_messages.iter_mut().find(|m| m.role == MessageRole::System) {
+                            if let Some(sys_content) = msg.content.split("\n\n").nth(1) {
+                                msg.content = format!(
+                                    "Use the following context to answer the user's query:\n{}\n\n{}",
+                                    context.to_markdown_filtered(),
+                                    sys_content
+                                );
+                            }
+                        }
+                    }
+                    let response = ChatResponse { response: message_response, context: response_messages };
                     is_first_message = false;
 
                     if tx.send(Ok(Json(response))).await.is_err() {
@@ -129,6 +142,7 @@ pub async fn chat_with_tools(
                         tx.clone(),
                         format.clone(),
                         stream,
+                        context,
                     ))
                     .await?
                 }

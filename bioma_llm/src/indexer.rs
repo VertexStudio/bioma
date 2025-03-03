@@ -189,6 +189,7 @@ pub fn default_chunk_batch_size() -> usize {
 pub struct IndexedSource {
     pub source: String,
     pub uri: String,
+    pub video_url: Option<String>,
     pub status: IndexStatus,
 }
 
@@ -318,6 +319,7 @@ impl Indexer {
             Ok(Some(IndexedSource {
                 source: source.source.clone(),
                 uri: source.uri.clone(),
+                video_url: None,
                 status: IndexStatus::Cached,
             }))
         } else {
@@ -615,6 +617,18 @@ impl Indexer {
         }
     }
 
+    /// Helper function to check for an associated video file
+    async fn check_for_video(&self, filepath: &Path) -> Option<String> {
+        let video_path = filepath.with_extension("mp4");
+        if video_path.exists() {
+            // Get the path relative to the local store directory
+            if let Some(video_uri) = video_path.to_str() {
+                return Some(video_uri.to_string());
+            }
+        }
+        None
+    }
+
     /// Handles the result of indexing a source, updating the sources vector and storing the source in the database if needed
     async fn handle_index_result(
         &self,
@@ -626,9 +640,23 @@ impl Indexer {
         match result {
             Ok(IndexResult::Indexed(ids, summary_text)) => {
                 if !ids.is_empty() {
+                    // Check for video file if this is an image source
+                    let video_url = if let Some(ext) = Path::new(&source.uri).extension().and_then(|e| e.to_str()) {
+                        if IMAGE_EXTENSIONS.iter().any(|&img_ext| img_ext.eq_ignore_ascii_case(ext)) {
+                            let local_store_dir = ctx.engine().local_store_dir();
+                            let source_path = local_store_dir.join(&source.uri);
+                            self.check_for_video(&source_path).await
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     sources.push(IndexedSource {
                         source: source.source.clone(),
                         uri: source.uri.clone(),
+                        video_url: video_url.clone(),
                         status: IndexStatus::Indexed,
                     });
 
@@ -643,6 +671,7 @@ impl Indexer {
                         .bind(("summary", summary_text))
                         .bind(("emb_ids", ids))
                         .bind(("prefix", self.embeddings.table_prefix()))
+                        .bind(("video_url", video_url))
                         .await
                         .map_err(SystemActorError::from)?;
                     Ok(true)
@@ -650,6 +679,7 @@ impl Indexer {
                     sources.push(IndexedSource {
                         source: source.source.clone(),
                         uri: source.uri.clone(),
+                        video_url: None,
                         status: IndexStatus::Failed("No embeddings generated".to_string()),
                     });
                     Ok(false)
@@ -659,6 +689,7 @@ impl Indexer {
                 sources.push(IndexedSource {
                     source: source.source.clone(),
                     uri: source.uri.clone(),
+                    video_url: None,
                     status: IndexStatus::Failed("Failed to generate embeddings".to_string()),
                 });
                 Ok(false)
@@ -667,6 +698,7 @@ impl Indexer {
                 sources.push(IndexedSource {
                     source: source.source.clone(),
                     uri: source.uri.clone(),
+                    video_url: None,
                     status: IndexStatus::Failed(format!("Indexing error: {}", e)),
                 });
                 Ok(false)
@@ -782,6 +814,7 @@ impl Message<Index> for Indexer {
                         sources.push(IndexedSource {
                             source: message.source.clone(),
                             uri: pattern.clone(),
+                            video_url: None,
                             status: IndexStatus::Failed("Invalid glob pattern".to_string()),
                         });
                         continue;
@@ -830,6 +863,7 @@ impl Message<Index> for Indexer {
                                             sources.push(IndexedSource {
                                                 source: message.source.clone(),
                                                 uri: uri.clone(),
+                                                video_url: None,
                                                 status: IndexStatus::Failed(format!("PDF conversion error: {}", e)),
                                             });
                                             continue;

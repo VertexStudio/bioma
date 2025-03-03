@@ -774,36 +774,25 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 (sys_msg, filtered)
             };
 
-            // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
-            let image_info = context
+            // Collect all image information from the context
+            let image_infos: Vec<(String, Metadata)> = context
                 .context
                 .iter()
-                .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
-                .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
-
-            // Remove all images from context except the one we're using
-            if let Some((uri, _)) = &image_info {
-                context.context.retain(|c| {
-                    if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
+                .filter_map(|ctx| {
+                    if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                         if matches!(metadata, Metadata::Image(_)) {
-                            // Only keep this image if it's the one we're using
-                            source.uri == *uri
+                            Some((source.uri.clone(), metadata.clone()))
                         } else {
-                            // Keep all non-image content
-                            true
+                            None
                         }
                     } else {
-                        // Keep items without source or metadata
-                        true
+                        None
                     }
-                });
-            } else {
-                // If we didn't find an image to use, remove all images from context
-                context.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
-            }
+                })
+                .collect();
 
             // Create the system message with context
-            let mut context_message = if let Some(sys_msg) = system_message {
+            let mut context_message = if let Some(ref sys_msg) = system_message {
                 // Use the request's system message and append context
                 ChatMessage::system(format!(
                     "Use the following context to answer the user's query:\n{}\n\n{}",
@@ -815,31 +804,42 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 ChatMessage::system(format!("{}{}", data.config.chat_prompt, context.to_markdown()))
             };
 
-            // Add the image to the context message if we found one
-            if let Some((uri, Metadata::Image(_))) = image_info {
-                match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
-                    Ok(image_data) => {
-                        match tokio::task::spawn_blocking(move || {
-                            base64::engine::general_purpose::STANDARD.encode(image_data)
-                        })
-                        .await
-                        {
-                            Ok(base64_data) => {
-                                context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                            }
-                            Err(e) => {
-                                error!("Error encoding image: {:?}", e);
+            // Add images to the context message if we found any
+            if !image_infos.is_empty() {
+                let mut images = Vec::with_capacity(image_infos.len());
+
+                for (uri, _) in image_infos {
+                    match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+                        Ok(image_data) => {
+                            match tokio::task::spawn_blocking(move || {
+                                base64::engine::general_purpose::STANDARD.encode(image_data)
+                            })
+                            .await
+                            {
+                                Ok(base64_data) => {
+                                    images.push(Image::from_base64(&base64_data));
+                                }
+                                Err(e) => {
+                                    error!("Error encoding image: {:?}", e);
+                                }
                             }
                         }
+                        Err(e) => {
+                            error!("Error reading image file: {:?}", e);
+                        }
                     }
-                    Err(e) => {
-                        error!("Error reading image file: {:?}", e);
-                    }
+                }
+
+                if !images.is_empty() {
+                    context_message.images = Some(images);
                 }
             }
 
             // Set up streaming channel with sufficient buffer for chat responses
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
+
+            // Clone system_message before spawning task
+            let system_message = system_message.clone();
 
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
@@ -880,7 +880,20 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
                     match chat_response {
                         Ok(response) => {
-                            let response = ChatResponse { response, context: conversation.clone() };
+                            // Update the system message in conversation with filtered context
+                            if let Some(msg) = conversation.iter_mut().find(|m| m.role == MessageRole::System) {
+                                if let Some(sys_msg) = &system_message {
+                                    msg.content = format!(
+                                        "Use the following context to answer the user's query:\n{}\n\n{}",
+                                        context.to_markdown_filtered(),
+                                        sys_msg.content
+                                    );
+                                } else {
+                                    msg.content =
+                                        format!("{}{}", data.config.chat_prompt, context.to_markdown_filtered());
+                                }
+                            }
+                            let response = ChatResponse { response, context: conversation };
                             let _ = tx.send(Ok(Json(response))).await;
                             return Ok(());
                         }
@@ -921,16 +934,16 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     info!("Tool: {}", tool_info.name());
                 }
 
-                let chat_with_tools_tx = tx.clone();
                 let tool_call_tree = cognition::chat_with_tools(
                     &user_actor,
                     &data.chat,
                     &conversation,
                     &tools,
                     &tool_hub_map,
-                    chat_with_tools_tx,
+                    tx.clone(),
                     body.format.clone(),
                     body.stream,
+                    &context,
                 )
                 .await;
 
@@ -1130,7 +1143,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         sources: body.sources.clone(),
     };
 
-    let mut retrieved = match user_actor
+    let retrieved = match user_actor
         .send_and_wait_reply::<Retriever, RetrieveContext>(
             retrieve_context,
             &data.retriever,
@@ -1164,32 +1177,22 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
     };
 
     // TODO: Only keep one image since some models (eg. llama3.2-vision) only support one image per message.
-    let image_info = retrieved
+    // Collect all image information from the context
+    let image_infos: Vec<(String, Metadata)> = retrieved
         .context
         .iter()
-        .find(|ctx| ctx.metadata.as_ref().is_some_and(|m| matches!(m, Metadata::Image(_))))
-        .and_then(|ctx| Some((ctx.source.as_ref()?.uri.clone(), ctx.metadata.as_ref()?.clone())));
-
-    // Remove all images from context except the one we're using
-    if let Some((uri, _)) = &image_info {
-        retrieved.context.retain(|c| {
-            if let (Some(source), Some(metadata)) = (&c.source, &c.metadata) {
+        .filter_map(|ctx| {
+            if let (Some(source), Some(metadata)) = (&ctx.source, &ctx.metadata) {
                 if matches!(metadata, Metadata::Image(_)) {
-                    // Only keep this image if it's the one we're using
-                    source.uri == *uri
+                    Some((source.uri.clone(), metadata.clone()))
                 } else {
-                    // Keep all non-image content
-                    true
+                    None
                 }
             } else {
-                // Keep items without source or metadata
-                true
+                None
             }
-        });
-    } else {
-        // If we didn't find an image to use, remove all images from context
-        retrieved.context.retain(|c| c.metadata.as_ref().is_none_or(|m| !matches!(m, Metadata::Image(_))));
-    }
+        })
+        .collect();
 
     let context_content = if retrieved.context.is_empty() {
         "No additional context available".to_string()
@@ -1280,24 +1283,34 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
 
     let mut context_message = ChatMessage::system(system_prompt);
 
-    // Add the image to the context message if we found one
-    if let Some((uri, Metadata::Image(_))) = image_info {
-        match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
-            Ok(image_data) => {
-                match tokio::task::spawn_blocking(move || base64::engine::general_purpose::STANDARD.encode(image_data))
+    // Add images to the context message if we found any
+    if !image_infos.is_empty() {
+        let mut images = Vec::with_capacity(image_infos.len());
+
+        for (uri, _) in image_infos {
+            match tokio::fs::read(data.engine.local_store_dir().join(&uri)).await {
+                Ok(image_data) => {
+                    match tokio::task::spawn_blocking(move || {
+                        base64::engine::general_purpose::STANDARD.encode(image_data)
+                    })
                     .await
-                {
-                    Ok(base64_data) => {
-                        context_message.images = Some(vec![Image::from_base64(&base64_data)]);
-                    }
-                    Err(e) => {
-                        error!("Error encoding image: {:?}", e);
+                    {
+                        Ok(base64_data) => {
+                            images.push(Image::from_base64(&base64_data));
+                        }
+                        Err(e) => {
+                            error!("Error encoding image: {:?}", e);
+                        }
                     }
                 }
+                Err(e) => {
+                    error!("Error reading image file: {:?}", e);
+                }
             }
-            Err(e) => {
-                error!("Error reading image file: {:?}", e);
-            }
+        }
+
+        if !images.is_empty() {
+            context_message.images = Some(images);
         }
     }
 
@@ -1345,10 +1358,20 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
             match response {
                 Ok(message_response) => {
                     // Create response with context only on first message
-                    let response = ChatResponse {
-                        response: message_response,
-                        context: if is_first_message { conversation.clone() } else { vec![] },
-                    };
+                    let mut response_messages = if is_first_message { conversation.clone() } else { vec![] };
+                    if is_first_message {
+                        // Update system message with filtered context
+                        if let Some(msg) = response_messages.iter_mut().find(|m| m.role == MessageRole::System) {
+                            if let Some(sys_content) = msg.content.split("\n\n").nth(1) {
+                                msg.content = format!(
+                                    "Use the following context to answer the user's query:\n{}\n\n{}",
+                                    retrieved.to_markdown_filtered(),
+                                    sys_content
+                                );
+                            }
+                        }
+                    }
+                    let response = ChatResponse { response: message_response, context: response_messages };
                     is_first_message = false;
 
                     if tx.send(Ok(Json(response))).await.is_err() {
@@ -2208,6 +2231,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = HttpServer::new(move || {
         let cors = Cors::default().allow_any_origin().allow_any_method().allow_any_header().max_age(3600);
 
+        let assets_dir = engine.local_store_dir().join("animal-crossing");
+
         App::new()
             .wrap(Logger::default().exclude_regex("^/health"))
             .wrap(cors)
@@ -2217,6 +2242,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(UPLOAD_MEMORY_LIMIT)
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
+            // Add static video files serving
+            .service(Files::new("/static/videos", assets_dir))
             .service(Files::new("/templates", "tools/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
