@@ -10,7 +10,7 @@ DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding
     FIELDS embedding MTREE DIMENSION {dim} DIST COSINE 
     TYPE F32 CAPACITY 40 DOC_IDS_ORDER 1000 DOC_IDS_CACHE 2000 MTREE_CACHE 2000;
 
--- Add index on the id field for faster lookups
+-- Add index on the id (it does not automatically create an index on the id field)
 DEFINE INDEX {prefix}_embedding_id_idx ON {prefix}_embedding FIELDS id;
 
 -- Add Full-Text Search index for the embedding text field
