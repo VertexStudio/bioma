@@ -39,6 +39,8 @@ pub struct ChatResponse {
     pub response: ChatMessageResponse,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_ms: Option<u64>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -58,6 +60,8 @@ pub async fn chat_with_tools(
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
     stream: bool,
+    first_token_sent: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    request_start_time: std::time::Instant,
 ) -> Result<(), ChatToolError> {
     // Make chat request with current messages and tools
     let chat_request = ChatMessages {
@@ -96,10 +100,21 @@ pub async fn chat_with_tools(
         match response {
             Ok(message_response) => {
                 if message_response.message.tool_calls.is_empty() {
+                    // Check if this is the first token and log TTFT if it is
+                    let ttft_ms = if !first_token_sent.load(std::sync::atomic::Ordering::Relaxed) {
+                        let ttft = request_start_time.elapsed();
+                        info!("TTFT: {:?}", ttft);
+                        first_token_sent.store(true, std::sync::atomic::Ordering::Relaxed);
+                        Some(ttft.as_millis() as u64)
+                    } else {
+                        None
+                    };
+
                     // Stream the response chunk
                     let response = ChatResponse {
                         response: message_response,
                         context: if is_first_message { messages.clone() } else { vec![] },
+                        ttft_ms,
                     };
                     is_first_message = false;
 
@@ -129,6 +144,8 @@ pub async fn chat_with_tools(
                         tx.clone(),
                         format.clone(),
                         stream,
+                        first_token_sent.clone(),
+                        request_start_time,
                     ))
                     .await?
                 }
@@ -185,7 +202,7 @@ async fn chat_tool_call(
         final_data: None,
     };
 
-    let chat_stream_response = ChatResponse { response: message_response, context: vec![] };
+    let chat_stream_response = ChatResponse { response: message_response, context: vec![], ttft_ms: None };
 
     if tx.send(Ok(Json(chat_stream_response))).await.is_err() {
         return Err(ChatToolError::StreamResponseError("Error streaming response".to_string()));

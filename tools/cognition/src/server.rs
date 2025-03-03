@@ -702,6 +702,7 @@ async fn retrieve(body: web::Json<RetrieveContextRequest>, data: web::Data<AppSt
     )
 )]
 async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResponse {
+    let request_start_time = std::time::Instant::now();
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -841,6 +842,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             // Set up streaming channel with sufficient buffer for chat responses
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
+            // Create atomic flag to track first token
+            let first_token_sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
             // Spawn a task to handle the chat stream processing
             tokio::spawn(async move {
                 let mut conversation = Vec::with_capacity(filtered_messages.len() + 2);
@@ -880,8 +884,23 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
                     match chat_response {
                         Ok(response) => {
-                            let response = ChatResponse { response, context: conversation.clone() };
-                            let _ = tx.send(Ok(Json(response))).await;
+                            // Log TTFT for non-streaming response
+                            if !first_token_sent.load(std::sync::atomic::Ordering::Relaxed) {
+                                let ttft = request_start_time.elapsed();
+                                info!("TTFT: {:?} (non-streaming)", ttft);
+                                first_token_sent.store(true, std::sync::atomic::Ordering::Relaxed);
+
+                                // Add TTFT to the response
+                                let response = ChatResponse {
+                                    response: response.clone(),
+                                    context: conversation.clone(),
+                                    ttft_ms: Some(ttft.as_millis() as u64),
+                                };
+                                let _ = tx.send(Ok(Json(response))).await;
+                            } else {
+                                let response = ChatResponse { response, context: conversation.clone(), ttft_ms: None };
+                                let _ = tx.send(Ok(Json(response))).await;
+                            }
                             return Ok(());
                         }
                         Err(e) => {
@@ -922,6 +941,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                 }
 
                 let chat_with_tools_tx = tx.clone();
+                let first_token_sent_tools = first_token_sent.clone();
+                let request_start_time_tools = request_start_time.clone();
+
                 let tool_call_tree = cognition::chat_with_tools(
                     &user_actor,
                     &data.chat,
@@ -931,6 +953,8 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     chat_with_tools_tx,
                     body.format.clone(),
                     body.stream,
+                    first_token_sent_tools,
+                    request_start_time_tools,
                 )
                 .await;
 
@@ -1110,6 +1134,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     )
 )]
 async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpResponse {
+    let request_start_time = std::time::Instant::now();
     let user_actor = match data.user_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
@@ -1313,6 +1338,9 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
     // Set up streaming channel
     let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
+    // Create atomic flag to track first token
+    let first_token_sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     // Spawn task to handle chat processing
     tokio::spawn(async move {
         let chat_request = ChatMessages {
@@ -1344,10 +1372,21 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
         while let Some(response) = chat_response.next().await {
             match response {
                 Ok(message_response) => {
+                    // Check if this is the first token and log TTFT if it is
+                    let ttft_ms = if !first_token_sent.load(std::sync::atomic::Ordering::Relaxed) {
+                        let ttft = request_start_time.elapsed();
+                        info!("TTFT: {:?}", ttft);
+                        first_token_sent.store(true, std::sync::atomic::Ordering::Relaxed);
+                        Some(ttft.as_millis() as u64)
+                    } else {
+                        None
+                    };
+
                     // Create response with context only on first message
                     let response = ChatResponse {
                         response: message_response,
                         context: if is_first_message { conversation.clone() } else { vec![] },
+                        ttft_ms,
                     };
                     is_first_message = false;
 
