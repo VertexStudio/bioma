@@ -10,6 +10,11 @@ DEFINE INDEX {prefix}_embedding_index ON TABLE {prefix}_embedding
     FIELDS embedding MTREE DIMENSION {dim} DIST COSINE 
     TYPE F32 CAPACITY 40 DOC_IDS_ORDER 1000 DOC_IDS_CACHE 2000 MTREE_CACHE 2000;
 
+-- Index on embedding id for efficient filtered lookups
+-- Used by query planner to iterate specific records rather than full table scans
+-- Critical for performance when filtering embeddings by IDs before vector similarity search
+DEFINE INDEX {prefix}_embedding_id_idx ON {prefix}_embedding FIELDS id;
+
 -- Add Full-Text Search index for the embedding text field
 DEFINE ANALYZER custom_analyzer TOKENIZERS blank FILTERS lowercase, snowball(english);
 DEFINE INDEX {prefix}_embedding_text_search ON {prefix}_embedding FIELDS text SEARCH ANALYZER custom_analyzer BM25 HIGHLIGHTS;
