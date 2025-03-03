@@ -5,6 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RAG Server Chat</title>
 
+    <!-- Prevent details elements from showing before proper state is restored -->
+    <style>
+      .details-transition-fix {
+        visibility: hidden;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      .details-loaded {
+        visibility: visible;
+        opacity: 1;
+      }
+    </style>
+
+    <!-- Inline script to restore details states immediately before rendering -->
+    <script>
+      // Get saved states from localStorage
+      const sourcesDetailsOpen =
+        localStorage.getItem("sourcesDetailsOpen") === "true";
+      const toolsDetailsOpen =
+        localStorage.getItem("toolsDetailsOpen") === "true";
+
+      // Create a style element that sets the initial state via CSS
+      const styleEl = document.createElement("style");
+      document.head.appendChild(styleEl);
+
+      if (sourcesDetailsOpen) {
+        styleEl.sheet.insertRule("#sources-details { open: true; }", 0);
+      }
+
+      if (toolsDetailsOpen) {
+        styleEl.sheet.insertRule("#tools-details { open: true; }", 0);
+      }
+
+      // This will apply the transition after the page loads to avoid flicker
+      document.addEventListener("DOMContentLoaded", () => {
+        setTimeout(() => {
+          document.querySelectorAll(".details").forEach((el) => {
+            el.classList.add("details-loaded");
+          });
+        }, 50);
+      });
+    </script>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.1/markdown-it.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
@@ -1671,7 +1714,7 @@
         </button>
       </div>
 
-      <details id="sources-details" class="details">
+      <details id="sources-details" class="details details-transition-fix">
         <summary>
           <i class="fa-solid fa-book" style="margin-right: 8px"></i>
           Sources
@@ -1732,7 +1775,7 @@
         </div>
       </details>
 
-      <details class="details">
+      <details id="tools-details" class="details details-transition-fix">
         <summary>
           <i class="fas fa-toolbox" style="margin-right: 8px"></i> Tools
         </summary>
@@ -3172,6 +3215,20 @@
           inputContainer.classList.add("sidebar-collapsed");
         }
 
+        // Restore details elements toggle states
+        const sourcesDetailsOpen =
+          localStorage.getItem("sourcesDetailsOpen") === "true";
+        const toolsDetailsOpen =
+          localStorage.getItem("toolsDetailsOpen") === "true";
+
+        if (sourcesDetailsOpen) {
+          document.getElementById("sources-details").open = true;
+        }
+
+        if (toolsDetailsOpen) {
+          document.getElementById("tools-details").open = true;
+        }
+
         // Initialize management
         initializeManagement();
       }
@@ -3215,6 +3272,8 @@
             if (this.open) {
               await fetchAvailableSources();
             }
+            // Save sources details toggle state
+            localStorage.setItem("sourcesDetailsOpen", this.open);
           });
 
         // Load saved tools from localStorage
@@ -3996,6 +4055,36 @@
             }, 2000);
           });
       };
+
+      document.addEventListener("DOMContentLoaded", function () {
+        // Restore details elements toggle states
+        const sourcesDetailsOpen =
+          localStorage.getItem("sourcesDetailsOpen") === "true";
+        const toolsDetailsOpen =
+          localStorage.getItem("toolsDetailsOpen") === "true";
+
+        if (sourcesDetailsOpen) {
+          document.getElementById("sources-details").open = true;
+        }
+
+        if (toolsDetailsOpen) {
+          document.getElementById("tools-details").open = true;
+        }
+
+        // Initialize the sources dropdown
+        updateMermaidDiagrams();
+      });
+
+      // Add toggle event listener for tools details
+      document
+        .getElementById("tools-details")
+        .addEventListener("toggle", function (event) {
+          // Save tools details toggle state
+          localStorage.setItem("toolsDetailsOpen", this.open);
+        });
+
+      // Load saved tools from localStorage
+      loadSavedTools();
     </script>
   </body>
 </html>
