@@ -1631,28 +1631,18 @@
       }
 
       .ttft-display {
-        position: fixed;
-        bottom: 100px;
-        right: 20px;
-        background-color: rgba(25, 25, 29, 0.95);
-        color: var(--primary);
-        padding: 10px 15px;
-        border-radius: 6px;
-        font-size: 1em;
-        font-weight: bold;
-        z-index: 1000;
-        transition: all 0.3s ease-in-out;
-        border: 2px solid var(--primary);
-        box-shadow: 0 0 15px rgba(255, 0, 160, 0.5);
-        font-family: var(--font-family);
-        pointer-events: none;
-        opacity: 0;
-        transform: translateY(20px);
+        font-size: 0.9em;
+        color: var(--text-muted);
+        padding: 5px;
+        display: inline-flex;
+        align-items: center;
+        user-select: none;
+        margin-left: auto;
+        margin-right: 8px;
       }
 
-      .ttft-display.visible {
-        opacity: 1;
-        transform: translateY(0);
+      .ttft-display:hover {
+        color: var(--primary);
       }
     </style>
   </head>
@@ -1964,7 +1954,7 @@
       let sidebarVisible = localStorage.getItem("sidebarVisible") === "true";
       let currentController = null; // Store the AbortController for the current request
       let isGenerating = false; // Track if we're currently generating a response
-      let ttftDisplayed = false; // Track if TTFT has been displayed for the current response
+      let ttftValue = null; // Store TTFT value from the response
 
       const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
@@ -2172,17 +2162,17 @@
                 );
 
                 regularMessages += `
-                        <div class="message ${roleClass}">
-                          <div class="chunk">
-                            <div class="code-block-wrapper">
-                              <button class="copy-button" onclick="copyCode(this)" aria-label="Copy code">
-                                <i class="fas fa-copy"></i>
-                              </button>
-                              <pre><code class="language-json">${highlighted}</code></pre>
-                            </div>
-                          </div>
-                        </div>
-                      `;
+                  <div class="message ${roleClass}">
+                    <div class="chunk">
+                      <div class="code-block-wrapper">
+                        <button class="copy-button" onclick="copyCode(this)" aria-label="Copy code">
+                          <i class="fas fa-copy"></i>
+                        </button>
+                        <pre><code class="language-json">${highlighted}</code></pre>
+                      </div>
+                    </div>
+                  </div>
+                `;
               } catch (e) {
                 // Not valid JSON, use regular message processing
                 const processedContent = processMessageContent(
@@ -2190,10 +2180,10 @@
                   msg.images || []
                 );
                 regularMessages += `
-                        <div class="message ${roleClass}">
-                          <div class="chunk">${processedContent}</div>
-                        </div>
-                      `;
+                  <div class="message ${roleClass}">
+                    <div class="chunk">${processedContent}</div>
+                  </div>
+                `;
               }
             } else {
               const processedContent = processMessageContent(
@@ -2201,10 +2191,10 @@
                 msg.images || []
               );
               regularMessages += `
-                        <div class="message ${roleClass}">
-                          <div class="chunk">${processedContent}</div>
-                        </div>
-                      `;
+                <div class="message ${roleClass}">
+                  <div class="chunk">${processedContent}</div>
+                </div>
+              `;
             }
             console.groupEnd();
           }
@@ -2226,13 +2216,13 @@
               msg.images || []
             );
             systemMessage += `
-                        <div class="message ${roleClass}">
-                          <strong>${
-                            msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
-                          }:</strong>
-                          <div class="chunk">${processedContent}</div>
-                        </div>
-                      `;
+              <div class="message ${roleClass}">
+                <strong>${
+                  msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
+                }:</strong>
+                <div class="chunk">${processedContent}</div>
+              </div>
+            `;
             console.groupEnd();
           }
         });
@@ -2248,42 +2238,50 @@
             lastMsg.images || []
           );
           lastUserMessage = `
-                      <div class="message ${roleClass}">
-                        <strong>${
-                          lastMsg.role.charAt(0).toUpperCase() +
-                          lastMsg.role.slice(1)
-                        }:</strong>
-                        <div class="chunk">${processedContent}</div>
-                      </div>
-                    `;
+            <div class="message ${roleClass}">
+              <strong>${
+                lastMsg.role.charAt(0).toUpperCase() + lastMsg.role.slice(1)
+              }:</strong>
+              <div class="chunk">${processedContent}</div>
+            </div>
+          `;
         }
         console.groupEnd();
 
         const result = `
-                    <div class="context-container" style="margin-top: 0.5rem;">
-                      <div class="context-actions">
-                        <div class="context-toggle" onclick="toggleContext(this)">Show Context ▶</div>
-                        <div class="context-copy" onclick="copyContext(this)" title="Copy raw response">
-                          <i class="fas fa-copy"></i>
-                        </div>
-                      </div>
-                      <div class="context-content">
-                        ${regularMessages}
-                        ${
-                          regularMessages && systemMessage
-                            ? '<div class="source-separator"></div>'
-                            : ""
-                        }
-                        ${systemMessage}
-                        ${
-                          (regularMessages || systemMessage) && lastUserMessage
-                            ? '<div class="source-separator"></div>'
-                            : ""
-                        }
-                        ${lastUserMessage}
-                      </div>
-                    </div>
-                  `;
+          <div class="context-container" style="margin-top: 0.5rem;">
+            <div class="context-actions">
+              <div class="context-toggle" onclick="toggleContext(this)">Show Context ▶</div>
+              <div style="margin-left: auto; display: flex; align-items: center;">
+                ${
+                  ttftValue
+                    ? `<div class="ttft-display" title="Time to first token">⏱️ ${(
+                        ttftValue / 1000
+                      ).toFixed(2)}s</div>`
+                    : ""
+                }
+                <div class="context-copy" onclick="copyContext(this)" title="Copy raw response">
+                  <i class="fas fa-copy"></i>
+                </div>
+              </div>
+            </div>
+            <div class="context-content">
+              ${regularMessages}
+              ${
+                regularMessages && systemMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
+              ${systemMessage}
+              ${
+                (regularMessages || systemMessage) && lastUserMessage
+                  ? '<div class="source-separator"></div>'
+                  : ""
+              }
+              ${lastUserMessage}
+            </div>
+          </div>
+        `;
 
         console.log("Final HTML length:", result.length);
         console.groupEnd();
@@ -2343,7 +2341,14 @@
       }
 
       // Modified sendQuery to handle stopping
-      async function sendQuery(endpoint = "/chat", skipUserAppend = false) {
+      async function sendQuery(endpoint = "/chat", isEdit = false) {
+        // Reset state variables
+        assistantTextBuffer = "";
+        contextSet = false;
+        latestContext = null;
+        ttftValue = null; // Reset TTFT value
+        let errorBuffer = [];
+
         const queryText = queryInput.value.trim();
         if (!queryText) return;
         if (isGenerating) return; // Prevent sending while generating
@@ -2351,11 +2356,9 @@
         // Reset any previous state and setup for new generation
         if (currentController) {
           currentController.abort();
-          currentController = null;
         }
         currentController = new AbortController();
         isGenerating = true;
-        ttftDisplayed = false; // Reset TTFT tracking for new query
 
         // Update button visibility
         const stopButton = document.getElementById("stop-button");
@@ -2363,7 +2366,7 @@
         stopButton.style.display = "flex";
         sendButton.style.display = "none";
 
-        if (!skipUserAppend) {
+        if (!isEdit) {
           appendMessage("User", queryText);
         }
         queryInput.value = "";
@@ -2384,12 +2387,6 @@
         } else if (endpoint === "/chat") {
           createOrUpdateAssistantMessage("");
         }
-
-        // Reset state variables
-        assistantTextBuffer = "";
-        contextSet = false;
-        latestContext = null;
-        let errorBuffer = [];
 
         const toolsActorsList = getActiveTools();
 
@@ -2670,56 +2667,24 @@
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
-                      <div class="error-toggle">▶</div>
-                      <div class="error-header">⚠️ Error Occurred</div>
-                      <div class="error-content">
-                        <div class="error-item">
-                          <i class="fas fa-exclamation-circle"></i>
-                          ${md.render(data.error)}
-                        </div>
-                      </div>
-                    `;
+      <div class="error-toggle">▶</div>
+      <div class="error-header">⚠️ Error Occurred</div>
+      <div class="error-content">
+        <div class="error-item">
+          <i class="fas fa-exclamation-circle"></i>
+          ${md.render(data.error)}
+        </div>
+      </div>
+    `;
           errorDiv.innerHTML = errorContent;
           chatContainer.appendChild(errorDiv);
           initializeErrorToggles(errorDiv);
           return;
         }
 
-        // Extract TTFT if present
-        if (data.ttft_ms || (data.response && data.response.ttft_ms) && !ttftDisplayed) {
-          const ttftMs = data.ttft_ms || data.response.ttft_ms;
-          console.log(`Time to first token: ${ttftMs}ms`);
-          
-          // Create or update TTFT display
-          let ttftDisplay = document.getElementById('ttft-display');
-          let ttftDisplay = document.getElementById("ttft-display");
-          if (!ttftDisplay) {
-            ttftDisplay = document.createElement("div");
-            ttftDisplay.id = "ttft-display";
-            ttftDisplay.className = "ttft-display";
-            document.body.appendChild(ttftDisplay);
-          }
-
-          ttftDisplay.innerHTML = `<i class="fas fa-bolt"></i> TTFT: ${ttftMs}ms`;
-
-          // Use the visible class for better animation
-          setTimeout(() => {
-            ttftDisplay.classList.add("visible");
-          }, 10); // Small delay to ensure the transition works
-
-          // Fade out after 5 seconds
-          setTimeout(() => {
-            ttftDisplay.classList.remove("visible");
-
-            // Remove from DOM after transition completes
-            setTimeout(() => {
-              if (ttftDisplay.parentNode) {
-                ttftDisplay.parentNode.removeChild(ttftDisplay);
-              }
-            }, 300); // Match transition duration
-          }, 5000);
-
-          ttftDisplayed = true;
+        // Store TTFT value when available
+        if (data.ttft_ms !== undefined) {
+          ttftValue = data.ttft_ms;
         }
 
         if (data.context) {
@@ -2747,9 +2712,6 @@
                 });
               }
             }
-
-            // Reset TTFT display flag when response is complete
-            ttftDisplayed = false;
           }
           return;
         }
@@ -2859,9 +2821,6 @@
             }
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
             assistantTextBuffer = "";
-
-            // Reset TTFT display flag when response is complete
-            ttftDisplayed = false;
           }
         }
       }
@@ -3884,9 +3843,13 @@
         const queryInput = document.getElementById("query-input");
 
         inputContainer.addEventListener("click", (e) => {
-          // Always focus the input, but let button clicks still work
+          // If clicking the actual textarea, don't interfere with cursor positioning
+          if (e.target === queryInput) {
+            return;
+          }
+
+          // For clicks outside textarea but inside container, focus and move cursor to end
           queryInput.focus();
-          // Place cursor at the end of the text
           const len = queryInput.value.length;
           queryInput.setSelectionRange(len, len);
 
@@ -3943,7 +3906,6 @@
         const sendButton = document.querySelector(".send-button");
         stopButton.style.display = "none";
         sendButton.style.display = "flex";
-        ttftDisplayed = false; // Reset TTFT tracking when stopping generation
 
         // Check input content to set correct button state
         sendButton.disabled = !queryInput.value.trim();
