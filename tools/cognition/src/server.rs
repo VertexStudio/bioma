@@ -973,9 +973,9 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
             // Stream responses as NDJSON
             HttpResponse::Ok().content_type("application/x-ndjson").streaming::<_, Box<dyn StdError>>(
-                tokio_stream::wrappers::ReceiverStream::new(rx).map(move |result| match result {
+                tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
                     Ok(response) => {
-                        let json = serde_json::to_string(&response.0).unwrap_or_default();
+                        let json = serde_json::to_string(&response).unwrap_or_default();
                         Ok(web::Bytes::from(format!("{}\n", json)))
                     }
                     Err(e) => {
@@ -1404,9 +1404,9 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
 
     // Stream responses as NDJSON
     HttpResponse::Ok().content_type("application/x-ndjson").streaming::<_, Box<dyn StdError>>(
-        tokio_stream::wrappers::ReceiverStream::new(rx).map(move |result| match result {
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(|result| match result {
             Ok(response) => {
-                let json = serde_json::to_string(&response.0).unwrap_or_default();
+                let json = serde_json::to_string(&response).unwrap_or_default();
                 Ok(web::Bytes::from(format!("{}\n", json)))
             }
             Err(e) => {
