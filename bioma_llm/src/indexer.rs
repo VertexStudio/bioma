@@ -269,6 +269,10 @@ pub struct ContentSource {
 #[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
 pub struct DeleteSource {
     pub sources: Vec<String>,
+
+    /// Whether to remove files from disk
+    #[serde(default)]
+    pub delete_from_disk: bool,
 }
 
 #[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
@@ -1061,15 +1065,17 @@ impl Message<DeleteSource> for Indexer {
             .pop()
             .ok_or(IndexerError::Other("No delete result found".to_string()))?;
 
-        // Process file deletions
-        for source in &delete_result.deleted_sources {
-            let local_store_dir = ctx.engine().local_store_dir();
-            let source_path = local_store_dir.join(&source.uri);
-            if source_path.exists() {
-                if source_path.is_dir() {
-                    tokio::fs::remove_dir_all(&source_path).await.ok();
-                } else {
-                    tokio::fs::remove_file(&source_path).await.ok();
+        // Process file deletions only if delete_from_disk is true
+        if message.delete_from_disk {
+            for source in &delete_result.deleted_sources {
+                let local_store_dir = ctx.engine().local_store_dir();
+                let source_path = local_store_dir.join(&source.uri);
+                if source_path.exists() {
+                    if source_path.is_dir() {
+                        tokio::fs::remove_dir_all(&source_path).await.ok();
+                    } else {
+                        tokio::fs::remove_file(&source_path).await.ok();
+                    }
                 }
             }
         }
