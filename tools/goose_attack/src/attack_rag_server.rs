@@ -374,7 +374,7 @@ pub async fn load_test_delete_source(user: &mut GooseUser) -> TransactionResult 
     let variation = get_next_variation(TestType::Delete, &mut variation_state, variations, &mut ordering_state).await;
 
     let file_name = format!("uploads/stress_tests/{}.md", variation.index);
-    let payload = DeleteSource { sources: vec![file_name] };
+    let payload = DeleteSource { sources: vec![file_name], delete_from_disk: true };
 
     make_request(
         user,

@@ -341,7 +341,7 @@ curl -X POST http://localhost:5766/ask \
 ```bash
 curl -X POST http://localhost:5766/delete_source \
     -H "Content-Type: application/json" \
-    -d '{"sources": ["path/to/source1", "path/to/source2"]}'
+    -d '{"sources": ["path/to/source1", "path/to/source2"], "delete_from_disk": false}'
 ```
 
 ### Connect to examples DB:
