@@ -1,4 +1,3 @@
--- TODO: We need to reevaluate our approach to deleting sources with the new indexes on the relation tables.
 BEGIN;
 
 -- Get all sources matching the exact source IDs
