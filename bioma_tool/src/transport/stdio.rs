@@ -12,6 +12,7 @@ use tracing::{debug, error};
 enum StdioMode {
     Server(Arc<Mutex<tokio::io::Stdout>>),
     Client {
+        // Holds the child process to keep it alive
         #[allow(unused)]
         process: Arc<Mutex<Child>>,
         stdin: Arc<Mutex<tokio::process::ChildStdin>>,
