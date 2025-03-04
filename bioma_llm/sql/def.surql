@@ -14,7 +14,6 @@ DEFINE INDEX {prefix}_embedding_text_search ON {prefix}_embedding FIELDS text SE
 -- Define the source table
 DEFINE TABLE source TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
 DEFINE FIELD summary ON source TYPE option<string> PERMISSIONS FULL;
--- TODO: Delete if not gonna perform queries directly on the source table
 DEFINE INDEX source_idx ON source FIELDS id.source;
 -- DEFINE FIELD source ON source TYPE string PERMISSIONS FULL;
 -- DEFINE FIELD uri ON source TYPE string PERMISSIONS FULL;
