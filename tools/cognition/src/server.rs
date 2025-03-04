@@ -1710,7 +1710,8 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                 "/path/to/source1.pdf",
                 "/path/to/source2.md",
                 "/path/to/directory/*"
-            ]
+            ],
+            "delete_from_disk": false
         })))
     )),
     responses(
