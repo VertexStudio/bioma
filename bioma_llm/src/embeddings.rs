@@ -639,11 +639,12 @@ impl Embeddings {
                                         // Send error response
                                         let _ = request.response_tx.send(Err(fastembed_error));
 
-                                        return Ok(());
+                                        continue;
                                     }
 
                                     let text_count = texts.len();
                                     let avg_text_len = total_length as f32 / text_count as f32;
+
                                     match text_embedding.embed(texts, None) {
                                         Ok(embeddings) => {
                                             info!(
