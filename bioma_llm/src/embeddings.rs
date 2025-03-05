@@ -469,7 +469,7 @@ impl Actor for Embeddings {
 }
 
 impl Embeddings {
-    const MAX_TOTAL_INPUT_LENGTH: usize = 8192;
+    const MAX_TOTAL_INPUT_LENGTH: usize = 106_496;
 
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
@@ -630,7 +630,7 @@ impl Embeddings {
                                         let fastembed_error = fastembed::Error::msg(error);
                                         let _ = request.response_tx.send(Err(fastembed_error));
 
-                                        return Ok(());
+                                        continue;
                                     }
 
                                     // Process texts in chunks
