@@ -174,7 +174,6 @@ impl Message<ChatMessages> for Chat {
 
             // Stream responses back to caller
             while let Some(response) = stream.next().await {
-                println!("streaming");
                 match response {
                     Ok(chunk) => {
                         // Send chunk through actor's reply mechanism
