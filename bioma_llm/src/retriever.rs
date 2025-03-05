@@ -265,6 +265,37 @@ impl Message<ListSources> for Retriever {
     }
 }
 
+#[derive(utoipa::ToSchema, Debug, Serialize, Deserialize, Clone)]
+pub struct ContentSourceCount {
+    pub source: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListUniqueSources;
+
+#[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
+pub struct ListedUniqueSources {
+    pub sources: Vec<ContentSourceCount>,
+}
+
+impl Message<ListUniqueSources> for Retriever {
+    type Response = ListedUniqueSources;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListUniqueSources) -> Result<(), RetrieverError> {
+        let query = include_str!("../sql/list_unique_sources.surql");
+        let db = ctx.engine().db();
+
+        let mut results = db.lock().await.query(query).await.map_err(SystemActorError::from)?;
+
+        let sources: Vec<ContentSourceCount> = results.take(0).map_err(SystemActorError::from)?;
+
+        ctx.reply(ListedUniqueSources { sources }).await?;
+        Ok(())
+    }
+}
+
+
 #[derive(bon::Builder, Debug, Serialize, Deserialize, Default)]
 pub struct Retriever {
     #[builder(default)]
@@ -294,6 +325,11 @@ impl Actor for Retriever {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<ListSources>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<ListUniqueSources>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);

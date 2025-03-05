@@ -4,7 +4,7 @@ use bioma_actor::prelude::*;
 use bioma_llm::{
     indexer::{GlobsContent, ImagesContent, TextsContent},
     prelude::*,
-    retriever::ListSources,
+    retriever::{ListSources, ListUniqueSources},
 };
 use serde_json;
 use std::fs;
@@ -285,6 +285,144 @@ async fn test_indexer_delete_source() -> Result<(), TestError> {
         .await?;
 
     assert_eq!(remaining_sources.sources.len(), 0, "Expected no remaining sources");
+
+    // Cleanup
+    indexer_handle.abort();
+    retriever_handle.abort();
+    temp_dir.close()?;
+
+    Ok(())
+}
+
+#[test(tokio::test)]
+async fn test_retriever_list_unique_sources() -> Result<(), TestError> {
+    let engine = ActorEngine::test().await?;
+    let temp_dir = tempfile::tempdir()?;
+
+    // Create test files
+    let test_files = vec![
+        ("source1.txt", "This is content for source 1."),
+        ("source2.txt", "This is content for source 2."),
+        ("source3a.txt", "This is the first document for source 3."),
+        ("source3b.txt", "This is the second document for source 3."),
+    ];
+
+    for (filename, content) in test_files.iter() {
+        let file_path = temp_dir.path().join(filename);
+        fs::write(&file_path, content)?;
+    }
+
+    // Spawn the indexer actor
+    let indexer_id = ActorId::of::<Indexer>("/indexer");
+    let (mut indexer_ctx, mut indexer_actor) =
+        Actor::spawn(engine.clone(), indexer_id.clone(), Indexer::default(), SpawnOptions::default()).await?;
+
+    let indexer_handle = tokio::spawn(async move {
+        if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+            error!("Indexer actor error: {}", e);
+        }
+    });
+
+    // Spawn the retriever actor
+    let retriever_id = ActorId::of::<Retriever>("/retriever");
+    let (mut retriever_ctx, mut retriever_actor) =
+        Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
+
+    let retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Spawn a relay actor
+    let relay_id = ActorId::of::<Relay>("/relay");
+    let (relay_ctx, _relay_actor) =
+        Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
+
+    // Index files with different sources
+    // Source 1
+    let source1_path = temp_dir.path().join("source1.txt").to_string_lossy().into_owned();
+    let source1 = "/test/source1".to_string();
+    let index_result1 = relay_ctx
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs(GlobsContent {
+                    globs: vec![source1_path],
+                    config: TextChunkConfig::default(),
+                }))
+                .source(source1.clone())
+                .build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
+        .await?;
+    assert_eq!(index_result1.indexed, 1, "Expected 1 file to be indexed for source1");
+
+    // Source 2
+    let source2_path = temp_dir.path().join("source2.txt").to_string_lossy().into_owned();
+    let source2 = "/test/source2".to_string();
+    let index_result2 = relay_ctx
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs(GlobsContent {
+                    globs: vec![source2_path],
+                    config: TextChunkConfig::default(),
+                }))
+                .source(source2.clone())
+                .build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
+        .await?;
+    assert_eq!(index_result2.indexed, 1, "Expected 1 file to be indexed for source2");
+
+    // Source 3 (two documents)
+    let source3_paths = vec![
+        temp_dir.path().join("source3a.txt").to_string_lossy().into_owned(),
+        temp_dir.path().join("source3b.txt").to_string_lossy().into_owned(),
+    ];
+    let source3 = "/test/source3".to_string();
+    let index_result3 = relay_ctx
+        .send_and_wait_reply::<Indexer, Index>(
+            Index::builder()
+                .content(IndexContent::Globs(GlobsContent {
+                    globs: source3_paths,
+                    config: TextChunkConfig::default(),
+                }))
+                .source(source3.clone())
+                .build(),
+            &indexer_id,
+            SendOptions::default(),
+        )
+        .await?;
+    assert_eq!(index_result3.indexed, 2, "Expected 2 files to be indexed for source3");
+
+    // Test ListUniqueSources
+    let unique_sources: retriever::ListedUniqueSources = relay_ctx
+        .send_and_wait_reply::<Retriever, ListUniqueSources>(ListUniqueSources, &retriever_id, SendOptions::default())
+        .await?;
+
+    assert_eq!(unique_sources.sources.len(), 3, "Expected 3 unique sources");
+    
+    // Validate document count for each source
+    for source_info in &unique_sources.sources {
+        if source_info.source == source1 {
+            assert_eq!(source_info.count, 1, "Source1 should have 1 document");
+        } else if source_info.source == source2 {
+            assert_eq!(source_info.count, 1, "Source2 should have 1 document");
+        } else if source_info.source == source3 {
+            assert_eq!(source_info.count, 2, "Source3 should have 2 documents");
+        }
+    }
+
+    // Test ListSources to verify total document count
+    let all_sources = relay_ctx
+        .send_and_wait_reply::<Retriever, ListSources>(ListSources, &retriever_id, SendOptions::default())
+        .await?;
+
+    assert_eq!(all_sources.sources.len(), 4, "Expected 4 total documents across all sources");
 
     // Cleanup
     indexer_handle.abort();
