@@ -439,7 +439,7 @@ impl Indexer {
                 Ok(stored_embeddings) => Ok(stored_embeddings.ids),
                 Err(e) => {
                     error!("Failed to generate embeddings: {}", e);
-                    Err(IndexerError::Other(format!("Embedding generation failed: {}", e)))
+                    Err(IndexerError::System(e))
                 }
             }
         };
@@ -447,7 +447,6 @@ impl Indexer {
         // Wait for both operations to complete
         let ((summary_text, summary_ids), embeddings_result) = tokio::join!(summary_future, embeddings_future);
 
-        // Handle embeddings result
         let mut embeddings_ids = embeddings_result?;
 
         // Combine original embeddings with summary embeddings
