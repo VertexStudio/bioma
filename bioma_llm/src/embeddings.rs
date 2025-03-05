@@ -484,6 +484,8 @@ impl Actor for Embeddings {
 }
 
 impl Embeddings {
+    const MAX_TEXT_LENGTH: usize = 8192;
+
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
 
@@ -622,7 +624,19 @@ impl Embeddings {
 
                             match request.content {
                                 EmbeddingContent::Text(texts) => {
-                                    let total_length: usize = texts.iter().map(|text| text.len()).sum();
+                                    // Truncate each text to a maximum of 8192 characters
+                                    let truncated_texts: Vec<String> = texts
+                                        .into_iter()
+                                        .map(|text| {
+                                            if text.len() > Self::MAX_TEXT_LENGTH {
+                                                text.chars().take(Self::MAX_TEXT_LENGTH).collect()
+                                            } else {
+                                                text
+                                            }
+                                        })
+                                        .collect();
+
+                                    let total_length: usize = truncated_texts.iter().map(|text| text.len()).sum();
 
                                     // Prevent GPU memory overload by limiting the total size of text that can be processed at once
                                     if total_length > max_total_input_length {
@@ -642,10 +656,10 @@ impl Embeddings {
                                         continue;
                                     }
 
-                                    let text_count = texts.len();
+                                    let text_count = truncated_texts.len();
                                     let avg_text_len = total_length as f32 / text_count as f32;
 
-                                    match text_embedding.embed(texts, None) {
+                                    match text_embedding.embed(truncated_texts, None) {
                                         Ok(embeddings) => {
                                             info!(
                                                 "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
