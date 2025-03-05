@@ -2707,18 +2707,19 @@
         const data = JSON.parse(json_line);
 
         if (data.error) {
+          // Handle errors
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
-      <div class="error-toggle">▶</div>
-      <div class="error-header">⚠️ Error Occurred</div>
-      <div class="error-content">
-        <div class="error-item">
-          <i class="fas fa-exclamation-circle"></i>
-          ${md.render(data.error)}
-        </div>
-      </div>
-    `;
+            <div class="error-toggle">▶</div>
+            <div class="error-header">⚠️ Error Occurred</div>
+            <div class="error-content">
+              <div class="error-item">
+                <i class="fas fa-exclamation-circle"></i>
+                ${md.render(data.error)}
+              </div>
+            </div>
+          `;
           errorDiv.innerHTML = errorContent;
           chatContainer.appendChild(errorDiv);
           initializeErrorToggles(errorDiv);
@@ -2841,6 +2842,7 @@
             }
           }
 
+          // Update the assistant message incrementally with the new chunk
           if (!isThinkingActive && assistantTextBuffer.length > 0) {
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
@@ -2958,6 +2960,9 @@
             ) {
               assistantBlock.classList.add("expanded");
             }
+
+            // Append the new content to the existing content instead of replacing it
+            assistantContent.innerHTML += md.render(visibleText || "");
           } else {
             assistantBlock = document.createElement("div");
             assistantBlock.className = "message assistant-message";
@@ -2968,6 +2973,7 @@
               assistantBlock.classList.add("expanded");
             }
             assistantContent = document.createElement("div");
+            assistantContent.innerHTML = md.render(visibleText || "");
             assistantBlock.appendChild(assistantContent);
             chatContainer.appendChild(assistantBlock);
           }
@@ -2976,7 +2982,6 @@
             assistantContent.querySelectorAll(".typing-indicator");
           existingIndicators.forEach((indicator) => indicator.remove());
 
-          assistantContent.innerHTML = md.render(visibleText || "");
           const typingIndicator = document.createElement("span");
           typingIndicator.className = "typing-indicator";
 
