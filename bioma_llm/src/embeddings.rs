@@ -223,14 +223,28 @@ pub struct Similarity {
 #[derive(bon::Builder, Debug, Serialize, Deserialize)]
 pub struct Embeddings {
     pub table_name_prefix: Option<String>,
-    #[builder(default = Model::NomicEmbedTextV15)]
+    #[builder(default = default_model())]
     pub model: Model,
-    #[builder(default = ImageModel::NomicEmbedVisionV15)]
+    #[builder(default = default_image_model())]
     pub image_model: ImageModel,
+    #[builder(default = default_max_total_input_length())]
+    max_total_input_length: usize,
     #[serde(skip)]
     embedding_tx: Option<mpsc::Sender<EmbeddingRequest>>,
     #[serde(skip)]
     shared_embedding: Option<StrongSharedEmbedding>,
+}
+
+fn default_model() -> Model {
+    Model::NomicEmbedTextV15
+}
+
+fn default_image_model() -> ImageModel {
+    ImageModel::NomicEmbedVisionV15
+}
+
+fn default_max_total_input_length() -> usize {
+    81_920
 }
 
 #[derive(Deref)]
@@ -248,6 +262,7 @@ impl Clone for Embeddings {
             table_name_prefix: self.table_name_prefix.clone(),
             model: self.model.clone(),
             image_model: self.image_model.clone(),
+            max_total_input_length: self.max_total_input_length,
             embedding_tx: None,
             shared_embedding: None,
         }
@@ -469,8 +484,6 @@ impl Actor for Embeddings {
 }
 
 impl Embeddings {
-    const MAX_TOTAL_INPUT_LENGTH: usize = 81_920;
-
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
 
@@ -568,6 +581,7 @@ impl Embeddings {
                 let text_model = self.model.clone();
                 let image_model = self.image_model.clone();
                 let cache_dir = ctx.engine().huggingface_cache_dir().clone();
+                let max_total_input_length = self.max_total_input_length;
 
                 let _embedding_task: JoinHandle<Result<(), fastembed::Error>> =
                     tokio::task::spawn_blocking(move || {
@@ -608,54 +622,43 @@ impl Embeddings {
 
                             match request.content {
                                 EmbeddingContent::Text(texts) => {
-                                    let text_count = texts.len();
-                                    let mut all_embeddings = Vec::with_capacity(text_count);
-
-                                    // Calculate total input size across all texts
-                                    let total_input_length: usize = texts.iter().map(|text| text.len()).sum();
+                                    let total_length: usize = texts.iter().map(|text| text.len()).sum();
 
                                     // Prevent GPU memory overload by limiting the total size of text that can be processed at once
-                                    if total_input_length > Self::MAX_TOTAL_INPUT_LENGTH {
+                                    if total_length > max_total_input_length {
                                         error!(
                                             "Total text input size too large: {} characters (max: {})",
-                                            total_input_length,
-                                            Self::MAX_TOTAL_INPUT_LENGTH
+                                            total_length, max_total_input_length
                                         );
 
-                                        let error = EmbeddingsError::InputSizeTooLarge(
-                                            total_input_length,
-                                            Self::MAX_TOTAL_INPUT_LENGTH,
-                                        );
+                                        let error =
+                                            EmbeddingsError::InputSizeTooLarge(total_length, max_total_input_length);
 
-                                        let fastembed_error = fastembed::Error::msg(error);
+                                        let fastembed_error = fastembed::Error::msg(error.to_string());
+
+                                        // Send error response
                                         let _ = request.response_tx.send(Err(fastembed_error));
 
-                                        continue;
+                                        return Ok(());
                                     }
 
-                                    // Process texts in chunks
-                                    for chunk in texts.chunks(10) {
-                                        let avg_text_len = chunk.iter().map(|text| text.len() as f32).sum::<f32>()
-                                            / chunk.len() as f32;
-                                        match text_embedding.embed(chunk.to_vec(), None) {
-                                            Ok(mut embeddings) => {
-                                                info!(
-                                                    "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
-                                                    chunk.len(),
-                                                    avg_text_len,
-                                                    start.elapsed()
-                                                );
-                                                all_embeddings.append(&mut embeddings);
-                                            }
-                                            Err(err) => {
-                                                error!("Failed to generate text embeddings: {}", err);
-                                                let _ = request.response_tx.send(Err(err));
-                                                return Ok(());
-                                            }
+                                    let text_count = texts.len();
+                                    let avg_text_len = total_length as f32 / text_count as f32;
+                                    match text_embedding.embed(texts, None) {
+                                        Ok(embeddings) => {
+                                            info!(
+                                                "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
+                                                text_count,
+                                                avg_text_len,
+                                                start.elapsed()
+                                            );
+                                            let _ = request.response_tx.send(Ok(embeddings));
+                                        }
+                                        Err(err) => {
+                                            error!("Failed to generate text embeddings: {}", err);
+                                            let _ = request.response_tx.send(Err(err));
                                         }
                                     }
-
-                                    let _ = request.response_tx.send(Ok(all_embeddings));
                                 }
                                 EmbeddingContent::Image(images) => {
                                     let image_count = images.len();
