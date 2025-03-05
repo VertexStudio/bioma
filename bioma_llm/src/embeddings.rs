@@ -469,7 +469,7 @@ impl Actor for Embeddings {
 }
 
 impl Embeddings {
-    const MAX_TOTAL_INPUT_LENGTH: usize = 106_496;
+    const MAX_TOTAL_INPUT_LENGTH: usize = 81_920;
 
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
