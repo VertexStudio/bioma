@@ -175,6 +175,7 @@ impl Message<ChatMessages> for Chat {
             while let Some(response) = stream.next().await {
                 match response {
                     Ok(chunk) => {
+                        println!("Still streaming...");
                         // Send chunk through actor's reply mechanism
                         ctx.reply(chunk.clone()).await?;
 
