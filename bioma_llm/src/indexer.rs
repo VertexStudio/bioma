@@ -383,7 +383,7 @@ impl Indexer {
         match result {
             Ok(stored_embeddings) => Ok((response.summary, stored_embeddings.ids)),
             Err(e) => {
-                error!("Failed to generate summary embeddings: {} {}", e, source.source);
+                error!("Failed to generate summary embeddings: {}", e);
                 Ok((response.summary, vec![]))
             }
         }
@@ -436,16 +436,18 @@ impl Indexer {
                 .await;
 
             match result {
-                Ok(stored_embeddings) => stored_embeddings.ids,
+                Ok(stored_embeddings) => Ok(stored_embeddings.ids),
                 Err(e) => {
                     error!("Failed to generate embeddings: {}", e);
-                    Vec::new()
+                    Err(IndexerError::System(e))
                 }
             }
         };
 
         // Wait for both operations to complete
-        let ((summary_text, summary_ids), mut embeddings_ids) = tokio::join!(summary_future, embeddings_future);
+        let ((summary_text, summary_ids), embeddings_result) = tokio::join!(summary_future, embeddings_future);
+
+        let mut embeddings_ids = embeddings_result?;
 
         // Combine original embeddings with summary embeddings
         embeddings_ids.extend(summary_ids);
