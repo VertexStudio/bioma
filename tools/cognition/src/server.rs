@@ -70,7 +70,7 @@ impl AppState {
         Ok(ctx)
     }
 
-    async fn chat_actor(&self) -> Result<(ActorId, tokio::task::JoinHandle<()>), ChatError> {
+    async fn chat_actor(&self) -> Result<ActorId, ChatError> {
         let ulid = ulid::Ulid::new();
         let prefix_id = "/rag/chat/";
 
@@ -96,7 +96,7 @@ impl AppState {
             }
         });
 
-        Ok((chat_id, chat_handle))
+        Ok(chat_id)
     }
 }
 
@@ -737,7 +737,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
-    let (chat_actor_id, _) = match data.chat_actor().await {
+    let chat_actor_id = match data.chat_actor().await {
         Ok(actor) => actor,
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
