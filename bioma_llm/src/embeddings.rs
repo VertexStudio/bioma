@@ -52,6 +52,8 @@ pub enum EmbeddingsError {
     ImageFormat(String),
     #[error("Persist error: {0}")]
     Persist(#[from] tempfile::PersistError),
+    #[error("Input size too large: {0} tokens (max: {1})")]
+    InputSizeTooLarge(usize, usize),
 }
 
 impl ActorError for EmbeddingsError {}
@@ -467,6 +469,8 @@ impl Actor for Embeddings {
 }
 
 impl Embeddings {
+    const MAX_TOTAL_INPUT_LENGTH: usize = 8192;
+
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Started", ctx.id());
 
@@ -606,6 +610,32 @@ impl Embeddings {
                                 EmbeddingContent::Text(texts) => {
                                     let text_count = texts.len();
                                     let mut all_embeddings = Vec::with_capacity(text_count);
+
+                                    // Calculate total input size across all texts
+                                    let total_input_length: usize = texts.iter().map(|text| text.len()).sum();
+
+                                    // Check if the total input is too large
+                                    if total_input_length > Self::MAX_TOTAL_INPUT_LENGTH {
+                                        error!(
+                                            "Total text input size too large: {} characters (max: {})",
+                                            total_input_length,
+                                            Self::MAX_TOTAL_INPUT_LENGTH
+                                        );
+
+                                        // Create our custom error
+                                        let error = EmbeddingsError::InputSizeTooLarge(
+                                            total_input_length,
+                                            Self::MAX_TOTAL_INPUT_LENGTH,
+                                        );
+
+                                        // Convert to fastembed::Error
+                                        let fastembed_error = fastembed::Error::msg(error);
+
+                                        // Send error response
+                                        let _ = request.response_tx.send(Err(fastembed_error));
+
+                                        return Ok(());
+                                    }
 
                                     // Process texts in chunks
                                     for chunk in texts.chunks(10) {
