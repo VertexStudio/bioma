@@ -168,6 +168,7 @@ impl Message<ChatMessages> for Chat {
 
         if stream {
             // Get streaming response from Ollama
+
             let mut stream = self.ollama.send_chat_messages_stream(chat_message_request).await?;
             let mut accumulated_content = String::new();
 
