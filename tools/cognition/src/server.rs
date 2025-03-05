@@ -30,7 +30,6 @@ use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use serde::Serialize;
 use serde_json::json;
 use server_config::{Args, ServerConfig};
-use std::borrow::Cow;
 use std::{collections::HashMap, error::Error as StdError, time::Duration};
 use tracing::{debug, error, info};
 use url::Url;
@@ -86,7 +85,7 @@ impl AppState {
     async fn chat_actor(
         &self,
         prefix: &str,
-        model: impl Into<Cow<'static, str>>,
+        model: impl Into<std::borrow::Cow<'static, str>>,
         messages_limit: usize,
         context_length: u32,
     ) -> Result<(ActorId, ChatActorGuard), HttpResponse> {
