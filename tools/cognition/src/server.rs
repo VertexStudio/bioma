@@ -30,6 +30,7 @@ use ollama_rs::generation::{options::GenerationOptions, tools::ToolInfo};
 use serde::Serialize;
 use serde_json::json;
 use server_config::{Args, ServerConfig};
+use std::borrow::Cow;
 use std::{collections::HashMap, error::Error as StdError, time::Duration};
 use tracing::{debug, error, info};
 use url::Url;
@@ -59,7 +60,6 @@ struct AppState {
     retriever: ActorId,
     embeddings: ActorId,
     rerank: ActorId,
-    // chat and think_chat removed as they will be created per request
 }
 
 impl AppState {
@@ -78,6 +78,52 @@ impl AppState {
         )
         .await?;
         Ok(ctx)
+    }
+
+    /// Creates a new chat actor with a unique ID.
+    ///
+    /// Returns the actor ID and a guard that will abort the actor when dropped.
+    async fn chat_actor(
+        &self,
+        prefix: &str,
+        model: impl Into<Cow<'static, str>>,
+        messages_limit: usize,
+        context_length: u32,
+    ) -> Result<(ActorId, ChatActorGuard), HttpResponse> {
+        // Create a unique actor ID
+        let ulid = ulid::Ulid::new();
+        let actor_id = ActorId::of::<Chat>(format!("{}/{}", prefix, ulid.to_string()));
+
+        // Initialize the chat actor
+        let (mut ctx, mut actor) = match Actor::spawn(
+            self.engine.clone(),
+            actor_id.clone(),
+            Chat::builder()
+                .model(model.into())
+                .endpoint(self.config.chat_endpoint.clone())
+                .messages_number_limit(messages_limit)
+                .generation_options(GenerationOptions::default().num_ctx(context_length))
+                .build(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                return Err(HttpResponse::InternalServerError().body(format!("Failed to create chat actor: {}", e)))
+            }
+        };
+
+        // Create a guard that will abort the actor when dropped
+        let guard = ChatActorGuard {
+            handle: tokio::spawn(async move {
+                if let Err(e) = actor.start(&mut ctx).await {
+                    error!("Chat actor error: {}", e);
+                }
+            }),
+        };
+
+        Ok((actor_id, guard))
     }
 }
 
@@ -719,34 +765,17 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
     };
 
     // Create a unique chat actor for this request
-    let ulid = ulid::Ulid::new();
-    let chat_id = ActorId::of::<Chat>(format!("/rag/chat/{}", ulid.to_string()));
-
-    // Initialize the chat actor
-    let (mut chat_ctx, mut chat_actor) = match Actor::spawn(
-        data.engine.clone(),
-        chat_id.clone(),
-        Chat::builder()
-            .model(data.config.chat_model.clone())
-            .endpoint(data.config.chat_endpoint.clone())
-            .messages_number_limit(data.config.chat_messages_limit)
-            .generation_options(GenerationOptions::default().num_ctx(data.config.chat_context_length))
-            .build(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await
+    let (chat_id, chat_actor_guard) = match data
+        .chat_actor(
+            "/rag/chat",
+            data.config.chat_model.clone(),
+            data.config.chat_messages_limit,
+            data.config.chat_context_length,
+        )
+        .await
     {
         Ok(result) => result,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("Failed to create chat actor: {}", e)),
-    };
-
-    // Start the chat actor in the background and create a guard that will abort it when dropped
-    let chat_actor_guard = ChatActorGuard {
-        handle: tokio::spawn(async move {
-            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
-                error!("Chat actor error: {}", e);
-            }
-        }),
+        Err(response) => return response,
     };
 
     let body = body.clone();
@@ -1186,34 +1215,17 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
     };
 
     // Create a unique think chat actor for this request
-    let ulid = ulid::Ulid::new();
-    let think_chat_id = ActorId::of::<Chat>(format!("/rag/think_chat/{}", ulid.to_string()));
-
-    // Initialize the think chat actor
-    let (mut think_chat_ctx, mut think_chat_actor) = match Actor::spawn(
-        data.engine.clone(),
-        think_chat_id.clone(),
-        Chat::builder()
-            .model(data.config.think_model.clone())
-            .endpoint(data.config.chat_endpoint.clone())
-            .messages_number_limit(data.config.think_messages_limit)
-            .generation_options(GenerationOptions::default().num_ctx(data.config.think_context_length))
-            .build(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await
+    let (think_chat_id, think_chat_guard) = match data
+        .chat_actor(
+            "/rag/think",
+            data.config.think_model.clone(),
+            data.config.think_messages_limit,
+            data.config.think_context_length,
+        )
+        .await
     {
         Ok(result) => result,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("Failed to create think chat actor: {}", e)),
-    };
-
-    // Start the think chat actor in the background and create a guard that will abort it when dropped
-    let think_chat_guard = ChatActorGuard {
-        handle: tokio::spawn(async move {
-            if let Err(e) = think_chat_actor.start(&mut think_chat_ctx).await {
-                error!("Think Chat actor error: {}", e);
-            }
-        }),
+        Err(response) => return response,
     };
 
     let query = body
@@ -1621,35 +1633,17 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
     };
 
     // Create a unique chat actor for this request
-    let ulid = ulid::Ulid::new();
-    let chat_id = ActorId::of::<Chat>(format!("/rag/ask_chat/{}", ulid.to_string()));
-
-    // Initialize the chat actor
-    let (mut chat_ctx, mut chat_actor) = match Actor::spawn(
-        data.engine.clone(),
-        chat_id.clone(),
-        Chat::builder()
-            .model(data.config.chat_model.clone())
-            .endpoint(data.config.chat_endpoint.clone())
-            .messages_number_limit(data.config.chat_messages_limit)
-            .generation_options(GenerationOptions::default().num_ctx(data.config.chat_context_length))
-            .build(),
-        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-    )
-    .await
+    let (chat_id, _chat_actor_guard) = match data
+        .chat_actor(
+            "/rag/ask",
+            data.config.chat_model.clone(),
+            data.config.chat_messages_limit,
+            data.config.chat_context_length,
+        )
+        .await
     {
         Ok(result) => result,
-        Err(e) => return HttpResponse::InternalServerError().body(format!("Failed to create chat actor: {}", e)),
-    };
-
-    // Start the chat actor in the background using our drop guard
-    // This will be dropped when the function scope exits, aborting the chat actor task
-    let _chat_actor_guard = ChatActorGuard {
-        handle: tokio::spawn(async move {
-            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
-                error!("Chat actor error: {}", e);
-            }
-        }),
+        Err(response) => return response,
     };
 
     let body = body.clone();
