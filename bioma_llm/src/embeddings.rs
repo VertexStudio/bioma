@@ -614,7 +614,7 @@ impl Embeddings {
                                     // Calculate total input size across all texts
                                     let total_input_length: usize = texts.iter().map(|text| text.len()).sum();
 
-                                    // Check if the total input is too large
+                                    // Prevent GPU memory overload by limiting the total size of text that can be processed at once
                                     if total_input_length > Self::MAX_TOTAL_INPUT_LENGTH {
                                         error!(
                                             "Total text input size too large: {} characters (max: {})",
@@ -622,16 +622,12 @@ impl Embeddings {
                                             Self::MAX_TOTAL_INPUT_LENGTH
                                         );
 
-                                        // Create our custom error
                                         let error = EmbeddingsError::InputSizeTooLarge(
                                             total_input_length,
                                             Self::MAX_TOTAL_INPUT_LENGTH,
                                         );
 
-                                        // Convert to fastembed::Error
                                         let fastembed_error = fastembed::Error::msg(error);
-
-                                        // Send error response
                                         let _ = request.response_tx.send(Err(fastembed_error));
 
                                         return Ok(());
