@@ -1,5 +1,5 @@
 use crate::{
-    schema::{self, CallToolResult, TextContent},
+    schema::{CallToolResult, TextContent},
     tools::{ToolDef, ToolError},
 };
 use rand::Rng;
@@ -8,21 +8,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug, Clone)]
 pub struct RandomNumber;
-
-pub const RANDOM_SCHEMA: &str = r#"{
-    "type": "object",
-    "properties": {
-        "start": {
-            "description": "The smallest value the random number can be",
-            "type": "number"
-        },
-        "end": {
-            "description": "The biggest value the random number can be",
-            "type": "number"
-        }
-    },
-    "required": ["start", "end"]
-}"#;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct RandomNumberArgs {
@@ -40,11 +25,6 @@ impl ToolDef for RandomNumber {
     const NAME: &'static str = "random";
     const DESCRIPTION: &'static str = "Generate a random number";
     type Args = RandomNumberArgs;
-
-    fn def() -> schema::Tool {
-        let input_schema = serde_json::from_str::<schema::ToolInputSchema>(RANDOM_SCHEMA).unwrap();
-        schema::Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
-    }
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         let start = args.start;
@@ -89,5 +69,26 @@ impl RandomNumber {
             is_error: Some(false),
             meta: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::ToolCallHandler;
+
+    #[test]
+    fn test_auto_generated_schema() {
+        let tool = RandomNumber.def();
+        let schema_json = serde_json::to_string_pretty(&tool).unwrap();
+        println!("Tool Schema:\n{}", schema_json);
+    }
+
+    #[tokio::test]
+    async fn test_random_number_tool() {
+        let tool = RandomNumber;
+        let args = RandomNumberArgs { start: 1, end: 10 };
+        let result = tool.call(args).await.unwrap();
+        assert!(result.content[0]["text"].as_str().unwrap().contains("Generated number:"));
     }
 }

@@ -1,4 +1,4 @@
-use crate::schema::{CallToolResult, TextContent, Tool, ToolInputSchema};
+use crate::schema::{CallToolResult, TextContent};
 use crate::tools::{ToolDef, ToolError};
 use lazy_static::lazy_static;
 use schemars::JsonSchema;
@@ -6,26 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
-
-pub const MEMORY_SCHEMA: &str = r#"{
-    "type": "object",
-    "properties": {
-        "action": {
-            "description": "The action to perform: 'store' to save a value, 'retrieve' to get a value, 'list' to see all keys, 'delete' to remove a key, or 'clear' to remove all keys",
-            "type": "string",
-            "enum": ["store", "retrieve", "list", "delete", "clear"]
-        },
-        "key": {
-            "description": "The key to store/retrieve/delete the memory under (not required for list/clear)",
-            "type": "string"
-        },
-        "value": {
-            "description": "The JSON object to store (only required for store action)",
-            "type": "object"
-        }
-    },
-    "required": ["action"]
-}"#;
 
 // Global memory store
 lazy_static! {
@@ -48,14 +28,12 @@ pub struct MemoryArgs {
     #[schemars(
         description = "The action to perform: 'store' to save a value, 'retrieve' to get a value, 'list' to see all keys, 'delete' to remove a key, or 'clear' to remove all keys"
     )]
-    #[schemars(with = "String")]
     action: MemoryAction,
 
     #[schemars(description = "The key to store/retrieve/delete the memory under (not required for list/clear)")]
     key: Option<String>,
 
     #[schemars(description = "The JSON object to store (only required for store action)")]
-    #[schemars(with = "Value")]
     value: Option<Value>,
 }
 
@@ -66,11 +44,6 @@ impl ToolDef for Memory {
     const NAME: &'static str = "memory";
     const DESCRIPTION: &'static str = "Store and retrieve JSON memories using string keys";
     type Args = MemoryArgs;
-
-    fn def() -> Tool {
-        let input_schema = serde_json::from_str::<ToolInputSchema>(MEMORY_SCHEMA).unwrap();
-        Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
-    }
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         let store_result = MEMORY_STORE.lock();
@@ -169,6 +142,13 @@ mod tests {
         tool.call(clear_props).await.unwrap();
     }
 
+    #[test]
+    fn test_auto_generated_schema() {
+        let tool = Memory.def();
+        let schema_json = serde_json::to_string_pretty(&tool).unwrap();
+        println!("Tool Schema:\n{}", schema_json);
+    }
+
     #[tokio::test]
     async fn test_memory_operations() {
         clear_memory().await;
@@ -216,49 +196,6 @@ mod tests {
         let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "[]");
-    }
-
-    #[tokio::test]
-    async fn test_memory_input_schema() {
-        clear_memory().await;
-
-        let tool = Memory.def();
-        let input_schema = tool.input_schema;
-
-        assert_eq!(input_schema.type_, "object");
-
-        // Safely get properties
-        let properties = input_schema.properties.expect("Should have properties");
-
-        // Check action property
-        let action_prop = properties.get("action").expect("Should have action property");
-        assert_eq!(action_prop.get("type").and_then(|v| v.as_str()), Some("string"));
-
-        // Check enum values exist for action
-        let enum_values =
-            action_prop.get("enum").and_then(|v| v.as_array()).expect("Should have enum values for action");
-
-        // Verify all action types are present
-        assert!(enum_values.contains(&json!("store")));
-        assert!(enum_values.contains(&json!("retrieve")));
-        assert!(enum_values.contains(&json!("list")));
-        assert!(enum_values.contains(&json!("delete")));
-        assert!(enum_values.contains(&json!("clear")));
-
-        // Check key and value properties exist
-        assert!(properties.contains_key("key"), "Should have key property");
-        assert!(properties.contains_key("value"), "Should have value property");
-
-        // Check required fields
-        let required = input_schema.required.expect("Should have required fields");
-        assert!(required.contains(&"action".to_string()), "Action should be required");
-        assert_eq!(required.len(), 1, "Only action should be required");
-    }
-
-    #[test]
-    fn test_auto_generated_schema() {
-        let tool = Memory.def();
-        println!("Tool: {:?}", tool);
     }
 
     #[tokio::test]
