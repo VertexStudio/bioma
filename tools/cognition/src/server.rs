@@ -21,7 +21,7 @@ use cognition::{
     health_check::{
         check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
     },
-    ChatResponse, ToolHubMap, ToolsHub, UserActor,
+    ChatResponse, ChatToolError, ToolHubMap, ToolsHub, UserActor,
 };
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -68,6 +68,35 @@ impl AppState {
         )
         .await?;
         Ok(ctx)
+    }
+
+    async fn chat_actor(&self) -> Result<(ActorId, tokio::task::JoinHandle<()>), ChatError> {
+        let ulid = ulid::Ulid::new();
+        let prefix_id = "/rag/chat/";
+
+        let chat_id = ActorId::of::<Chat>(format!("{}{}", prefix_id, ulid.to_string()));
+
+        let (mut chat_ctx, mut chat_actor) = Actor::spawn(
+            self.engine.clone(),
+            chat_id.clone(),
+            Chat::builder()
+                .model(self.config.chat_model.clone())
+                .endpoint(self.config.chat_endpoint.clone())
+                .messages_number_limit(self.config.chat_messages_limit)
+                .generation_options(GenerationOptions::default().num_ctx(self.config.chat_context_length))
+                .build(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
+        )
+        .await?;
+
+        let chat_handle = tokio::spawn(async move {
+            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
+                error!("Chat actor error: {}", e);
+                ChatToolError::SendChatRequestError(e.to_string());
+            }
+        });
+
+        Ok((chat_id, chat_handle))
     }
 }
 
@@ -708,6 +737,11 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
         Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
     };
 
+    let (chat_actor_id, _) = match data.chat_actor().await {
+        Ok(actor) => actor,
+        Err(e) => return HttpResponse::InternalServerError().body(e.to_string()),
+    };
+
     let body = body.clone();
 
     // Combine all user messages into a single query string for the retrieval system.
@@ -877,7 +911,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                                 format: body.format.clone(),
                                 tools: Some(client_tools),
                             },
-                            &data.chat,
+                            &chat_actor_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
                         )
                         .await;
@@ -946,7 +980,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
 
                 let tool_call_tree = cognition::chat_with_tools(
                     &user_actor,
-                    &data.chat,
+                    &chat_actor_id,
                     &conversation,
                     &tools,
                     &tool_hub_map,
