@@ -1910,7 +1910,7 @@
         const fileInput = document.getElementById("file-input");
 
         if (!file) {
-          console.log("No file provided");
+          console.error("No file provided");
         }
 
         let directoryPath = source.path;
@@ -2111,7 +2111,6 @@
                   null,
                   2
                 )}</code></pre>`;
-                console.log("Detected JSON content and formatted as code.");
               } catch (e) {
                 // Not valid JSON; render as Markdown
                 processedContent += md.render(joined);
@@ -2161,12 +2160,7 @@
 
       // Replace the existing createContextSection with this updated version
       function createContextSection(context) {
-        console.group("createContextSection");
-        console.log("Input context:", context);
-
         if (!context?.length) {
-          console.log("No context provided, returning empty string");
-          console.groupEnd();
           return "";
         }
 
@@ -2180,13 +2174,10 @@
           .findIndex((msg) => msg.role === "user");
         const lastMessageIndex =
           lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
-        console.log("Last user message index:", lastMessageIndex);
 
         // Process non-system messages (except the last user message)
-        console.group("Processing regular messages");
         context.forEach((msg, index) => {
           if (msg.role !== "system" && index !== lastMessageIndex) {
-            console.group(`Message ${index} (${msg.role})`);
             const roleClass = msg.role + "-message";
 
             if (msg.role === "tool") {
@@ -2240,16 +2231,12 @@
                 </div>
               `;
             }
-            console.groupEnd();
           }
         });
-        console.groupEnd();
 
         // Process system messages
-        console.group("Processing system messages");
         context.forEach((msg, index) => {
           if (msg.role === "system") {
-            console.group(`System message ${index}`);
             const roleClass = msg.role + "-message";
             let systemContent = msg.content.replace(
               /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
@@ -2267,13 +2254,10 @@
                 <div class="chunk">${processedContent}</div>
               </div>
             `;
-            console.groupEnd();
           }
         });
-        console.groupEnd();
 
         // Process the last user message separately
-        console.group("Processing last user message");
         if (lastMessageIndex !== -1) {
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
@@ -2290,7 +2274,6 @@
             </div>
           `;
         }
-        console.groupEnd();
 
         const result = `
           <div class="context-container" style="margin-top: 0.5rem;">
@@ -2327,8 +2310,6 @@
           </div>
         `;
 
-        console.log("Final HTML length:", result.length);
-        console.groupEnd();
         return result;
       }
 
@@ -2541,7 +2522,6 @@
           }
         } catch (error) {
           if (error.name === "AbortError") {
-            console.log("Request was aborted");
           } else {
             console.error("Error:", error);
             const errorDiv = document.createElement("div");
@@ -2708,14 +2688,6 @@
 
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
-        console.log("Received data:", {
-          hasMessage: !!data.message,
-          messageRole: data.message?.role,
-          isDone: data.done,
-          hasTTFT: data.ttft_ms !== undefined,
-          hasContext: !!data.context,
-          hasError: !!data.error,
-        });
 
         if (data.error) {
           console.error("Error received:", data.error);
@@ -2778,12 +2750,6 @@
 
         if (data.message.role === "assistant") {
           let chunk = data.message.content;
-          console.log("Assistant message received:", {
-            firstChars: chunk.substring(0, 50),
-            isThinkingMessage: chunk.startsWith("<think>"),
-            currentThinkingState: isThinkingActive,
-            bufferLength: assistantTextBuffer.length,
-          });
 
           // Remove any standalone typing indicator if there's content
           if (chunk.trim()) {
@@ -2798,18 +2764,9 @@
           // Check if this is a thinking message (starts with <think>)
           const isThinkingMessage = chunk.startsWith("<think>");
 
-          // Log some debug info
-          console.log("Assistant message received:", {
-            firstChars: chunk.substring(0, Math.min(10, chunk.length)),
-            isThinkingMessage,
-            currentThinkingState: isThinkingActive,
-            bufferLength: assistantTextBuffer.length,
-          });
-
           // If we get a <think> tag, create a new thinking container only if we don't have one already
           if (isThinkingMessage) {
             if (!thinkingDiv) {
-              console.log("Creating new thinking container for <think> tag");
               // Create a new thinking container for the <think> tag
               thinkingDiv = createThinkingProcessContainer();
               chatContainer.appendChild(thinkingDiv);
@@ -2835,7 +2792,6 @@
             !thinkingContentDiv.textContent.trim() &&
             chunk.trim().length > 0
           ) {
-            console.log("Switching from thinking mode to normal message mode");
             // We're in /think endpoint but received regular text - switch to normal message
             createOrUpdateAssistantMessage("");
             // Add this chunk to the assistant buffer
@@ -2892,12 +2848,6 @@
                 thinkingFromEndpoint = false; // This is tag-based thinking
               }
             } else {
-              console.log(
-                "Processing thinking chunk " +
-                  (chunk.includes("</think>")
-                    ? "(has closing tag)"
-                    : "(no closing tag)")
-              );
               const closePos = chunk.indexOf("</think>", idx);
               if (closePos === -1) {
                 const thoughtChunk = chunk.substring(idx);
@@ -2946,10 +2896,6 @@
           }
 
           if (data.done) {
-            console.log("Message stream complete (done=true)", {
-              bufferLength: assistantTextBuffer.length,
-              hasImages: !!data.message?.images,
-            });
             const indicators = document.querySelectorAll(".typing-indicator");
             indicators.forEach((indicator) => indicator.remove());
             if (
@@ -2973,10 +2919,6 @@
       }
 
       function handleSpecialRole(msg) {
-        console.log("Handling special role message:", {
-          role: msg.role,
-          contentLength: msg.content?.length || 0,
-        });
         const lastMessageDiv = chatContainer.lastElementChild;
         const lastMessageRole =
           lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
@@ -4133,18 +4075,6 @@
       }
 
       function createAppropriateMessageContainer(chunk) {
-        console.log("createAppropriateMessageContainer called with:", {
-          chunkFirstChars: chunk.substring(0, 50),
-          isThinkingActive,
-          hasThinkTag: chunk.includes("<think>"),
-          thinkingDivExists: !!thinkingDiv,
-          thinkingContentExists: !!thinkingContentDiv,
-          thinkingContentEmpty: thinkingContentDiv
-            ? !thinkingContentDiv.textContent.trim()
-            : null,
-          bufferLength: assistantTextBuffer.length,
-        });
-
         // If this is regular content but we're showing a thinking container
         // with no actual thinking content, switch to a regular message
         if (
@@ -4153,24 +4083,16 @@
           thinkingDiv &&
           (!thinkingContentDiv || !thinkingContentDiv.textContent.trim())
         ) {
-          console.log(
-            "Switching from thinking container to regular message container"
-          );
           // Create a regular message but don't remove thinking container yet
           createOrUpdateAssistantMessage("");
 
           // Add this chunk to the assistant buffer
           assistantTextBuffer += chunk;
-          console.log("Updated assistant buffer:", {
-            newLength: assistantTextBuffer.length,
-            firstChars: assistantTextBuffer.substring(0, 50),
-          });
 
           // Update the message with our buffer
           createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           return true;
         }
-        console.log("No container switch needed");
         return false;
       }
 
