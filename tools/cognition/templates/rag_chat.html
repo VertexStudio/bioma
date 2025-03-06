@@ -1910,7 +1910,7 @@
         const fileInput = document.getElementById("file-input");
 
         if (!file) {
-          console.log("No file provided");
+          console.error("No file provided");
         }
 
         let directoryPath = source.path;
@@ -1998,6 +1998,7 @@
       let currentController = null; // Store the AbortController for the current request
       let isGenerating = false; // Track if we're currently generating a response
       let ttftValue = null; // Store TTFT value from the response
+      let thinkingFromEndpoint = false;
 
       const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
@@ -2110,7 +2111,6 @@
                   null,
                   2
                 )}</code></pre>`;
-                console.log("Detected JSON content and formatted as code.");
               } catch (e) {
                 // Not valid JSON; render as Markdown
                 processedContent += md.render(joined);
@@ -2160,12 +2160,7 @@
 
       // Replace the existing createContextSection with this updated version
       function createContextSection(context) {
-        console.group("createContextSection");
-        console.log("Input context:", context);
-
         if (!context?.length) {
-          console.log("No context provided, returning empty string");
-          console.groupEnd();
           return "";
         }
 
@@ -2179,13 +2174,10 @@
           .findIndex((msg) => msg.role === "user");
         const lastMessageIndex =
           lastUserIndex !== -1 ? context.length - 1 - lastUserIndex : -1;
-        console.log("Last user message index:", lastMessageIndex);
 
         // Process non-system messages (except the last user message)
-        console.group("Processing regular messages");
         context.forEach((msg, index) => {
           if (msg.role !== "system" && index !== lastMessageIndex) {
-            console.group(`Message ${index} (${msg.role})`);
             const roleClass = msg.role + "-message";
 
             if (msg.role === "tool") {
@@ -2239,16 +2231,12 @@
                 </div>
               `;
             }
-            console.groupEnd();
           }
         });
-        console.groupEnd();
 
         // Process system messages
-        console.group("Processing system messages");
         context.forEach((msg, index) => {
           if (msg.role === "system") {
-            console.group(`System message ${index}`);
             const roleClass = msg.role + "-message";
             let systemContent = msg.content.replace(
               /^\s*#{1,6}\s*ADDITIONAL CONTEXT:/im,
@@ -2266,13 +2254,10 @@
                 <div class="chunk">${processedContent}</div>
               </div>
             `;
-            console.groupEnd();
           }
         });
-        console.groupEnd();
 
         // Process the last user message separately
-        console.group("Processing last user message");
         if (lastMessageIndex !== -1) {
           const lastMsg = context[lastMessageIndex];
           const roleClass = lastMsg.role + "-message";
@@ -2289,7 +2274,6 @@
             </div>
           `;
         }
-        console.groupEnd();
 
         const result = `
           <div class="context-container" style="margin-top: 0.5rem;">
@@ -2326,8 +2310,6 @@
           </div>
         `;
 
-        console.log("Final HTML length:", result.length);
-        console.groupEnd();
         return result;
       }
 
@@ -2427,8 +2409,10 @@
             thinkingText.classList.remove("static");
           }
           isThinkingActive = true;
+          thinkingFromEndpoint = true; // Mark that thinking was activated by endpoint
         } else if (endpoint === "/chat") {
           createOrUpdateAssistantMessage("");
+          thinkingFromEndpoint = false;
         }
 
         const toolsActorsList = getActiveTools();
@@ -2538,7 +2522,6 @@
           }
         } catch (error) {
           if (error.name === "AbortError") {
-            console.log("Request was aborted");
           } else {
             console.error("Error:", error);
             const errorDiv = document.createElement("div");
@@ -2707,6 +2690,7 @@
         const data = JSON.parse(json_line);
 
         if (data.error) {
+          console.error("Error received:", data.error);
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
@@ -2766,9 +2750,8 @@
 
         if (data.message.role === "assistant") {
           let chunk = data.message.content;
-          let idx = 0;
 
-          // If we receive actual content, remove any standalone typing indicator
+          // Remove any standalone typing indicator if there's content
           if (chunk.trim()) {
             const standaloneIndicator = document.querySelector(
               ".standalone-typing-indicator"
@@ -2778,6 +2761,80 @@
             }
           }
 
+          // Check if this is a thinking message (starts with <think>)
+          const isThinkingMessage = chunk.startsWith("<think>");
+
+          // If we get a <think> tag, create a new thinking container only if we don't have one already
+          if (isThinkingMessage) {
+            if (!thinkingDiv) {
+              // Create a new thinking container for the <think> tag
+              thinkingDiv = createThinkingProcessContainer();
+              chatContainer.appendChild(thinkingDiv);
+              thinkingContentDiv =
+                thinkingDiv.querySelector(".thinking-content");
+              thinkingStartTime = Date.now();
+              const thinkingText = thinkingDiv.querySelector(".thinking-text");
+              if (thinkingText) {
+                thinkingText.classList.remove("static");
+              }
+            }
+            isThinkingActive = true;
+            thinkingFromEndpoint = false; // This is tag-based thinking, not endpoint-based
+          }
+
+          // If we get regular content in the /think endpoint and no thinking content has been written yet,
+          // remove the thinking container and switch to normal message mode
+          else if (
+            isThinkingActive &&
+            thinkingFromEndpoint &&
+            !isThinkingMessage &&
+            thinkingDiv &&
+            !thinkingContentDiv.textContent.trim() &&
+            chunk.trim().length > 0
+          ) {
+            // Remove the thinking container completely
+            if (thinkingDiv) {
+              thinkingDiv.remove();
+            }
+
+            // Reset thinking state
+            isThinkingActive = false;
+            thinkingFromEndpoint = false;
+            thinkingDiv = null;
+            thinkingContentDiv = null;
+            thinkingStartTime = null;
+
+            // Create a new normal message
+            createOrUpdateAssistantMessage("");
+
+            // Add this chunk to the assistant buffer
+            assistantTextBuffer += chunk;
+
+            // Update the message with our buffer
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+
+            // Don't process as thinking content
+            return;
+          }
+
+          // If this is a regular message with no thinking tag and we're not in thinking mode
+          if (
+            !isThinkingActive &&
+            !isThinkingMessage &&
+            !chunk.includes("<think>")
+          ) {
+            assistantTextBuffer += chunk;
+            if (assistantTextBuffer.length > 0) {
+              createOrUpdateAssistantMessage(
+                assistantTextBuffer,
+                latestContext
+              );
+            }
+            return;
+          }
+
+          // Thinking parsing logic
+          let idx = 0;
           while (idx < chunk.length) {
             if (!isThinkingActive) {
               const openPos = chunk.indexOf("<think>", idx);
@@ -2791,19 +2848,19 @@
                   assistantTextBuffer += visiblePart;
                 }
                 idx = openPos + 7;
-                if (!thinkingDiv) {
-                  thinkingDiv = createThinkingProcessContainer();
-                  chatContainer.appendChild(thinkingDiv);
-                  thinkingContentDiv =
-                    thinkingDiv.querySelector(".thinking-content");
-                  thinkingStartTime = Date.now();
-                  const thinkingText =
-                    thinkingDiv.querySelector(".thinking-text");
-                  if (thinkingText) {
-                    thinkingText.classList.remove("static");
-                  }
+                // Create a new thinking container for the <think> tag
+                thinkingDiv = createThinkingProcessContainer();
+                chatContainer.appendChild(thinkingDiv);
+                thinkingContentDiv =
+                  thinkingDiv.querySelector(".thinking-content");
+                thinkingStartTime = Date.now();
+                const thinkingText =
+                  thinkingDiv.querySelector(".thinking-text");
+                if (thinkingText) {
+                  thinkingText.classList.remove("static");
                 }
                 isThinkingActive = true;
+                thinkingFromEndpoint = false; // This is tag-based thinking
               }
             } else {
               const closePos = chunk.indexOf("</think>", idx);
@@ -2818,12 +2875,9 @@
                 }
                 idx = closePos + 8;
                 isThinkingActive = false;
-                if (assistantTextBuffer.trim().length > 0) {
-                  createOrUpdateAssistantMessage(
-                    assistantTextBuffer,
-                    latestContext
-                  );
-                }
+                thinkingFromEndpoint = false;
+
+                // Update the thinking UI with duration BEFORE nullifying the reference
                 if (thinkingDiv && thinkingStartTime) {
                   const duration = (
                     (Date.now() - thinkingStartTime) /
@@ -2836,6 +2890,17 @@
                     thinkingText.classList.add("static");
                   }
                   thinkingStartTime = null;
+                }
+
+                // Now reset the references
+                thinkingDiv = null; // Reset thinkingDiv so we create a new one for the next <think> tag
+                thinkingContentDiv = null; // Reset thinkingContentDiv as well
+
+                if (assistantTextBuffer.trim().length > 0) {
+                  createOrUpdateAssistantMessage(
+                    assistantTextBuffer,
+                    latestContext
+                  );
                 }
               }
             }
@@ -3973,6 +4038,7 @@
         // Reset thinking state if active
         if (isThinkingActive) {
           isThinkingActive = false;
+          thinkingFromEndpoint = false;
           if (thinkingDiv) {
             const thinkingText = thinkingDiv.querySelector(".thinking-text");
             if (thinkingText) {
@@ -3985,6 +4051,8 @@
             }
           }
           thinkingStartTime = null;
+          thinkingDiv = null; // Reset thinkingDiv
+          thinkingContentDiv = null; // Reset thinkingContentDiv
         }
 
         // If we have a partial assistant message, finalize it
