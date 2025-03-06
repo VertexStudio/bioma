@@ -1998,6 +1998,7 @@
       let currentController = null; // Store the AbortController for the current request
       let isGenerating = false; // Track if we're currently generating a response
       let ttftValue = null; // Store TTFT value from the response
+      let thinkingFromEndpoint = false;
 
       const md = window.markdownit({ breaks: true });
       const chatContainer = document.getElementById("chat-container");
@@ -2427,8 +2428,10 @@
             thinkingText.classList.remove("static");
           }
           isThinkingActive = true;
+          thinkingFromEndpoint = true; // Mark that thinking was activated by endpoint
         } else if (endpoint === "/chat") {
           createOrUpdateAssistantMessage("");
+          thinkingFromEndpoint = false;
         }
 
         const toolsActorsList = getActiveTools();
@@ -2705,8 +2708,17 @@
 
       function processJsonLine(json_line) {
         const data = JSON.parse(json_line);
+        console.log("Received data:", {
+          hasMessage: !!data.message,
+          messageRole: data.message?.role,
+          isDone: data.done,
+          hasTTFT: data.ttft_ms !== undefined,
+          hasContext: !!data.context,
+          hasError: !!data.error,
+        });
 
         if (data.error) {
+          console.error("Error received:", data.error);
           const errorDiv = document.createElement("div");
           errorDiv.className = "message error-message";
           const errorContent = `
@@ -2766,9 +2778,14 @@
 
         if (data.message.role === "assistant") {
           let chunk = data.message.content;
-          let idx = 0;
+          console.log("Assistant message received:", {
+            firstChars: chunk.substring(0, 50),
+            isThinkingMessage: chunk.startsWith("<think>"),
+            currentThinkingState: isThinkingActive,
+            bufferLength: assistantTextBuffer.length,
+          });
 
-          // If we receive actual content, remove any standalone typing indicator
+          // Remove any standalone typing indicator if there's content
           if (chunk.trim()) {
             const standaloneIndicator = document.querySelector(
               ".standalone-typing-indicator"
@@ -2778,6 +2795,75 @@
             }
           }
 
+          // Check if this is a thinking message (starts with <think>)
+          const isThinkingMessage = chunk.startsWith("<think>");
+
+          // Log some debug info
+          console.log("Assistant message received:", {
+            firstChars: chunk.substring(0, Math.min(10, chunk.length)),
+            isThinkingMessage,
+            currentThinkingState: isThinkingActive,
+            bufferLength: assistantTextBuffer.length,
+          });
+
+          // If we get a <think> tag, create a new thinking container only if we don't have one already
+          if (isThinkingMessage) {
+            if (!thinkingDiv) {
+              console.log("Creating new thinking container for <think> tag");
+              // Create a new thinking container for the <think> tag
+              thinkingDiv = createThinkingProcessContainer();
+              chatContainer.appendChild(thinkingDiv);
+              thinkingContentDiv =
+                thinkingDiv.querySelector(".thinking-content");
+              thinkingStartTime = Date.now();
+              const thinkingText = thinkingDiv.querySelector(".thinking-text");
+              if (thinkingText) {
+                thinkingText.classList.remove("static");
+              }
+            }
+            isThinkingActive = true;
+            thinkingFromEndpoint = false; // This is tag-based thinking, not endpoint-based
+          }
+
+          // If we get regular content in the /think endpoint and no thinking content has been written yet,
+          // switch to normal message mode
+          else if (
+            isThinkingActive &&
+            thinkingFromEndpoint &&
+            !isThinkingMessage &&
+            thinkingDiv &&
+            !thinkingContentDiv.textContent.trim() &&
+            chunk.trim().length > 0
+          ) {
+            console.log("Switching from thinking mode to normal message mode");
+            // We're in /think endpoint but received regular text - switch to normal message
+            createOrUpdateAssistantMessage("");
+            // Add this chunk to the assistant buffer
+            assistantTextBuffer += chunk;
+            // Update the message with our buffer
+            createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+            // Don't process as thinking content
+            return;
+          }
+
+          // If this is a regular message with no thinking tag and we're not in thinking mode
+          if (
+            !isThinkingActive &&
+            !isThinkingMessage &&
+            !chunk.includes("<think>")
+          ) {
+            assistantTextBuffer += chunk;
+            if (assistantTextBuffer.length > 0) {
+              createOrUpdateAssistantMessage(
+                assistantTextBuffer,
+                latestContext
+              );
+            }
+            return;
+          }
+
+          // Thinking parsing logic
+          let idx = 0;
           while (idx < chunk.length) {
             if (!isThinkingActive) {
               const openPos = chunk.indexOf("<think>", idx);
@@ -2791,21 +2877,27 @@
                   assistantTextBuffer += visiblePart;
                 }
                 idx = openPos + 7;
-                if (!thinkingDiv) {
-                  thinkingDiv = createThinkingProcessContainer();
-                  chatContainer.appendChild(thinkingDiv);
-                  thinkingContentDiv =
-                    thinkingDiv.querySelector(".thinking-content");
-                  thinkingStartTime = Date.now();
-                  const thinkingText =
-                    thinkingDiv.querySelector(".thinking-text");
-                  if (thinkingText) {
-                    thinkingText.classList.remove("static");
-                  }
+                // Create a new thinking container for the <think> tag
+                thinkingDiv = createThinkingProcessContainer();
+                chatContainer.appendChild(thinkingDiv);
+                thinkingContentDiv =
+                  thinkingDiv.querySelector(".thinking-content");
+                thinkingStartTime = Date.now();
+                const thinkingText =
+                  thinkingDiv.querySelector(".thinking-text");
+                if (thinkingText) {
+                  thinkingText.classList.remove("static");
                 }
                 isThinkingActive = true;
+                thinkingFromEndpoint = false; // This is tag-based thinking
               }
             } else {
+              console.log(
+                "Processing thinking chunk " +
+                  (chunk.includes("</think>")
+                    ? "(has closing tag)"
+                    : "(no closing tag)")
+              );
               const closePos = chunk.indexOf("</think>", idx);
               if (closePos === -1) {
                 const thoughtChunk = chunk.substring(idx);
@@ -2818,12 +2910,9 @@
                 }
                 idx = closePos + 8;
                 isThinkingActive = false;
-                if (assistantTextBuffer.trim().length > 0) {
-                  createOrUpdateAssistantMessage(
-                    assistantTextBuffer,
-                    latestContext
-                  );
-                }
+                thinkingFromEndpoint = false;
+
+                // Update the thinking UI with duration BEFORE nullifying the reference
                 if (thinkingDiv && thinkingStartTime) {
                   const duration = (
                     (Date.now() - thinkingStartTime) /
@@ -2837,6 +2926,17 @@
                   }
                   thinkingStartTime = null;
                 }
+
+                // Now reset the references
+                thinkingDiv = null; // Reset thinkingDiv so we create a new one for the next <think> tag
+                thinkingContentDiv = null; // Reset thinkingContentDiv as well
+
+                if (assistantTextBuffer.trim().length > 0) {
+                  createOrUpdateAssistantMessage(
+                    assistantTextBuffer,
+                    latestContext
+                  );
+                }
               }
             }
           }
@@ -2846,6 +2946,10 @@
           }
 
           if (data.done) {
+            console.log("Message stream complete (done=true)", {
+              bufferLength: assistantTextBuffer.length,
+              hasImages: !!data.message?.images,
+            });
             const indicators = document.querySelectorAll(".typing-indicator");
             indicators.forEach((indicator) => indicator.remove());
             if (
@@ -2869,6 +2973,10 @@
       }
 
       function handleSpecialRole(msg) {
+        console.log("Handling special role message:", {
+          role: msg.role,
+          contentLength: msg.content?.length || 0,
+        });
         const lastMessageDiv = chatContainer.lastElementChild;
         const lastMessageRole =
           lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
@@ -3973,6 +4081,7 @@
         // Reset thinking state if active
         if (isThinkingActive) {
           isThinkingActive = false;
+          thinkingFromEndpoint = false;
           if (thinkingDiv) {
             const thinkingText = thinkingDiv.querySelector(".thinking-text");
             if (thinkingText) {
@@ -3985,6 +4094,8 @@
             }
           }
           thinkingStartTime = null;
+          thinkingDiv = null; // Reset thinkingDiv
+          thinkingContentDiv = null; // Reset thinkingContentDiv
         }
 
         // If we have a partial assistant message, finalize it
@@ -4019,6 +4130,48 @@
         // Re-enable input
         queryInput.disabled = false;
         queryInput.focus();
+      }
+
+      function createAppropriateMessageContainer(chunk) {
+        console.log("createAppropriateMessageContainer called with:", {
+          chunkFirstChars: chunk.substring(0, 50),
+          isThinkingActive,
+          hasThinkTag: chunk.includes("<think>"),
+          thinkingDivExists: !!thinkingDiv,
+          thinkingContentExists: !!thinkingContentDiv,
+          thinkingContentEmpty: thinkingContentDiv
+            ? !thinkingContentDiv.textContent.trim()
+            : null,
+          bufferLength: assistantTextBuffer.length,
+        });
+
+        // If this is regular content but we're showing a thinking container
+        // with no actual thinking content, switch to a regular message
+        if (
+          isThinkingActive &&
+          !chunk.includes("<think>") &&
+          thinkingDiv &&
+          (!thinkingContentDiv || !thinkingContentDiv.textContent.trim())
+        ) {
+          console.log(
+            "Switching from thinking container to regular message container"
+          );
+          // Create a regular message but don't remove thinking container yet
+          createOrUpdateAssistantMessage("");
+
+          // Add this chunk to the assistant buffer
+          assistantTextBuffer += chunk;
+          console.log("Updated assistant buffer:", {
+            newLength: assistantTextBuffer.length,
+            firstChars: assistantTextBuffer.substring(0, 50),
+          });
+
+          // Update the message with our buffer
+          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+          return true;
+        }
+        console.log("No container switch needed");
+        return false;
       }
 
       // Add input validation for send button
