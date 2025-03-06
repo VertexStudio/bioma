@@ -4089,28 +4089,6 @@
         queryInput.focus();
       }
 
-      function createAppropriateMessageContainer(chunk) {
-        // If this is regular content but we're showing a thinking container
-        // with no actual thinking content, switch to a regular message
-        if (
-          isThinkingActive &&
-          !chunk.includes("<think>") &&
-          thinkingDiv &&
-          (!thinkingContentDiv || !thinkingContentDiv.textContent.trim())
-        ) {
-          // Create a regular message but don't remove thinking container yet
-          createOrUpdateAssistantMessage("");
-
-          // Add this chunk to the assistant buffer
-          assistantTextBuffer += chunk;
-
-          // Update the message with our buffer
-          createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
-          return true;
-        }
-        return false;
-      }
-
       // Add input validation for send button
       queryInput.addEventListener("input", function () {
         const sendButton = document.querySelector(".send-button");
