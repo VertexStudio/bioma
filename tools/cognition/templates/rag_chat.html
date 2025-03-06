@@ -2783,7 +2783,7 @@
           }
 
           // If we get regular content in the /think endpoint and no thinking content has been written yet,
-          // switch to normal message mode
+          // remove the thinking container and switch to normal message mode
           else if (
             isThinkingActive &&
             thinkingFromEndpoint &&
@@ -2792,12 +2792,27 @@
             !thinkingContentDiv.textContent.trim() &&
             chunk.trim().length > 0
           ) {
-            // We're in /think endpoint but received regular text - switch to normal message
+            // Remove the thinking container completely
+            if (thinkingDiv) {
+              thinkingDiv.remove();
+            }
+
+            // Reset thinking state
+            isThinkingActive = false;
+            thinkingFromEndpoint = false;
+            thinkingDiv = null;
+            thinkingContentDiv = null;
+            thinkingStartTime = null;
+
+            // Create a new normal message
             createOrUpdateAssistantMessage("");
+
             // Add this chunk to the assistant buffer
             assistantTextBuffer += chunk;
+
             // Update the message with our buffer
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
+
             // Don't process as thinking content
             return;
           }
