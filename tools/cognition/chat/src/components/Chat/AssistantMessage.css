@@ -1,0 +1,117 @@
+.assistant-message {
+  background-color: transparent;
+  align-self: flex-start;
+  color: var(--text-primary);
+  width: 100%;
+  max-width: 85%;
+  padding: 0px;
+}
+
+.assistant-message p {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-message .chunk > p {
+  margin: 0.5em 0;
+  display: block;
+}
+
+.assistant-message .chunk > ul,
+.assistant-message .chunk > ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+/* Code block styling */
+.code-block-wrapper {
+  position: relative;
+  margin: 1.5em 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 16px 8px 12px;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.code-block-wrapper pre {
+  margin: 0;
+  border-radius: 0;
+}
+
+.code-block-language {
+  font-family: var(--font-family);
+  text-transform: lowercase;
+}
+
+.code-block-actions {
+  display: flex;
+  margin-left: auto;
+}
+
+.code-block-button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 0 6px 12px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+  min-width: 75px;
+  justify-content: flex-end;
+}
+
+.code-block-button:hover {
+  color: var(--primary);
+}
+
+.code-block-button i {
+  font-size: 0.9em;
+}
+
+.copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: 0;
+  z-index: 10;
+}
+
+.code-block-wrapper:hover .copy-button {
+  opacity: 1;
+}
+
+.copy-button.copied {
+  background: var(--primary);
+  color: var(--text-primary);
+}
+
+/* Mermaid diagrams */
+.mermaid {
+  background-color: var(--bg-secondary);
+  padding: 16px;
+  border-radius: 8px;
+  margin: 16px 0;
+  overflow: auto;
+  text-align: center;
+}

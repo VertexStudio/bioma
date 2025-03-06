@@ -12,3 +12,4 @@ uv.lock
 
 *.log
 pyproject.toml
+node_modules

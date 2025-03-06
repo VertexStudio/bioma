@@ -1,0 +1,65 @@
+.thinking-process {
+  margin-bottom: 15px;
+  position: relative;
+  max-width: 100%;
+  align-self: flex-start;
+}
+
+.thinking-header {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  width: 100%;
+}
+
+.thinking-header i {
+  margin-right: 8px;
+  transition: transform 0.2s ease;
+}
+
+.thinking-header.expanded i {
+  transform: rotate(90deg);
+}
+
+.thinking-header .thinking-text {
+  background: linear-gradient(
+    to right,
+    var(--text-muted) 25%,
+    var(--primary) 50%,
+    var(--text-muted) 75%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: sweepingHighlight 2s infinite linear;
+  transition: all 0.2s ease;
+}
+
+.thinking-text.static {
+  background: none;
+  -webkit-text-fill-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.thinking-content {
+  margin-top: 8px;
+  padding: 0 0 0 15px;
+  display: none;
+  white-space: pre-wrap;
+  font-family: var(--font-family);
+  font-size: 0.9em;
+  color: var(--text-muted);
+  line-height: 1.5;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  border-left: 2px solid var(--text-muted);
+}
+
+.thinking-content.visible {
+  display: block;
+  animation: fadeIn 0.2s ease-in-out;
+}

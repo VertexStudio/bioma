@@ -1,0 +1,102 @@
+.context-container {
+  margin-top: 0.5rem;
+}
+
+.context-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.context-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.context-copy {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px;
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.context-copy:hover {
+  color: var(--text-primary);
+}
+
+.ttft-display {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  padding: 5px;
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+  margin-right: 8px;
+}
+
+.ttft-display:hover {
+  color: var(--primary);
+}
+
+.context-content {
+  display: block;
+  margin-top: 10px;
+  padding: 12px;
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  animation: fadeIn 0.3s ease;
+}
+
+.context-content .message {
+  margin: 8px 0;
+  padding: 10px;
+  font-size: 0.9em;
+  max-width: 100%;
+  background-color: var(--bg-main);
+}
+
+.context-content .user-message {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 0, 160, 0.15) 0%,
+    rgba(150, 0, 255, 0.15) 100%
+  );
+  border: 1px solid rgba(255, 0, 160, 0.2);
+  color: var(--text-primary);
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.context-content .assistant-message {
+  background-color: var(--bg-main);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: auto;
+}
+
+.context-content .system-message {
+  background-color: rgba(42, 42, 45, 0.5);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.context-content .tool-message {
+  background-color: rgba(26, 26, 29, 0.8);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.context-content .message strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+}

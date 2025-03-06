@@ -1,0 +1,22 @@
+:root {
+  --primary: #ff00a0;
+  --primary-hover: #e4008e;
+  --text-primary: #ffffff;
+  --text-secondary: #e5e7eb;
+  --text-muted: #a0a0a0;
+  --bg-main: #121214;
+  --bg-secondary: #1c1c1f;
+  --border-color: #2a2a2d;
+  --font-family: "JetBrains Mono", monospace;
+  --sidebar-width: 350px;
+  --sidebar-width-collapsed: 100px;
+  --slider-width: 40px;
+  --slider-height: calc(var(--slider-width) * 0.5);
+  --surrealist-gradient: linear-gradient(
+    135deg,
+    var(--primary) 0%,
+    #9600ff 100%
+  );
+  --code-bg: #1e1e1e;
+  --user-chat-width: 70%;
+}

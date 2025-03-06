@@ -1,0 +1,119 @@
+#chat-container {
+  margin-bottom: 80px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+  overflow-y: auto;
+  max-height: calc(100vh - 100px);
+  padding: 20px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.message {
+  margin-bottom: 15px;
+  padding: 12px;
+  border-radius: 12px;
+  max-width: 85%;
+  position: relative;
+}
+
+.standalone-typing-indicator {
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 15px;
+}
+
+.typing-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--primary);
+  border-radius: 50%;
+  margin-left: 2px;
+  margin-right: 2px;
+  vertical-align: middle;
+  animation: pulse 1s infinite;
+  white-space: pre;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.4;
+  }
+}
+
+/* For the message context popout */
+.context-toggle {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px 10px;
+  background-color: var(--bg-secondary);
+  border-radius: 4px;
+  display: inline-block;
+  user-select: none;
+  transition: background-color 0.2s, color 0.2s;
+  border: 1px solid var(--border-color);
+}
+
+.context-toggle:hover {
+  background: var(--surrealist-gradient);
+  color: var(--text-primary);
+}
+
+.uri {
+  font-family: var(--font-family);
+  color: var(--text-muted);
+  padding: 4px 0;
+  font-size: 0.9em;
+}
+
+.source-separator {
+  border-top: 1px solid var(--border-color);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.message.expanded {
+  max-width: 100%;
+  width: 100%;
+  transition: all 0.3s ease-in-out;
+}
+
+/* Code block styling within messages */
+.message pre {
+  margin: 1em 0;
+  padding: 1em;
+  overflow-x: auto;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.message code {
+  font-family: var(--font-family);
+  font-size: 0.9em;
+  line-height: 1.4;
+  tab-size: 2;
+}
+
+/* Media queries for responsive layout */
+@media (max-width: 768px) {
+  #chat-container {
+    padding: 10px;
+  }
+
+  .message {
+    max-width: 95%;
+  }
+}

@@ -1,0 +1,17 @@
+.system-message {
+  background-color: #2a2a2d;
+  align-self: flex-start;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  max-width: 100%;
+  width: auto;
+}
+
+.system-message a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.system-message a:hover {
+  text-decoration: underline;
+}

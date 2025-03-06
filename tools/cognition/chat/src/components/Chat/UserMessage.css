@@ -1,0 +1,99 @@
+.user-message {
+  background: var(--surrealist-gradient);
+  align-self: flex-end;
+  margin-left: auto;
+  color: var(--text-primary);
+  position: relative;
+  max-width: var(--user-chat-width, 70%);
+  border-radius: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  font-size: 1rem;
+  overflow-wrap: break-word;
+  text-align: start;
+}
+
+.user-message::before {
+  content: "";
+  position: absolute;
+  left: -35px;
+  top: 0;
+  bottom: 0;
+  width: 35px;
+  pointer-events: auto;
+}
+
+.edit-icon {
+  position: absolute;
+  top: 50%;
+  left: -35px;
+  transform: translateY(-50%);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 5px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: none;
+  font-size: 1em;
+  z-index: 100;
+}
+
+.user-message:hover .edit-icon,
+.edit-icon:hover {
+  display: block;
+}
+
+/* Editing mode styles */
+.user-message.editing {
+  background: var(--bg-secondary);
+  padding: 0;
+  max-width: 85%;
+  border: 1px solid var(--border-color);
+}
+
+.edit-container {
+  width: 100%;
+  position: relative;
+}
+
+.edit-textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 12px;
+  margin: 0;
+  box-sizing: border-box;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 8px;
+  font-family: var(--font-family);
+  font-size: 1rem;
+  resize: none;
+  outline: none;
+}
+
+.edit-buttons {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+.edit-button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+}
+
+.edit-button.cancel {
+  background-color: var(--bg-main);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.edit-button.save {
+  background: var(--surrealist-gradient);
+  color: var(--text-primary);
+}

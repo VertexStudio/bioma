@@ -1,0 +1,99 @@
+.utilities-container {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.utilities-container button,
+.action-button,
+.send-button,
+#stop-button {
+  cursor: pointer !important;
+}
+
+.send-button:disabled {
+  cursor: not-allowed !important;
+}
+
+.utilities-left {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.utilities-right {
+  position: relative;
+  width: 48px;
+  height: 48px;
+}
+
+.send-button,
+#stop-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 48px;
+  height: 48px;
+  border: none;
+  border-radius: 50%;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-family);
+}
+
+.send-button {
+  background: var(--surrealist-gradient);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.send-button:disabled {
+  background: var(--bg-secondary);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.send-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+#stop-button {
+  background: linear-gradient(135deg, #ff4444 0%, #ff6b6b 100%);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+#stop-button:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 68, 68, 0.8) 0%,
+    rgba(255, 68, 68, 0.9) 100%
+  );
+}
+
+/* Add effect to send/stop button icons */
+#stop-button svg {
+  animation: pulse 1s infinite;
+}
+
+/* Send button toggle styles */
+#send-button:hover:not(.active),
+#think-button:hover:not(.active) {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 0, 160, 0.2) 0%,
+    rgba(150, 0, 255, 0.2) 100%
+  );
+  border-color: var(--primary);
+}
+
+#send-button:hover:not(.active) i,
+#think-button:hover:not(.active) i {
+  background: var(--surrealist-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

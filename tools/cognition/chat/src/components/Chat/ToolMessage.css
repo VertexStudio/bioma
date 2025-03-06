@@ -1,0 +1,58 @@
+.tool-message {
+  background-color: #1a1a1d;
+  align-self: flex-start;
+  font-family: var(--font-family);
+  position: relative;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  width: 100%;
+}
+
+.tool-toggle {
+  color: var(--text-muted);
+  position: absolute;
+  top: 16px;
+  left: 8px;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  user-select: none;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.tool-toggle:hover {
+  background: var(--surrealist-gradient);
+  color: var(--text-primary);
+}
+
+.tool-header {
+  margin-left: 28px;
+  padding: 4px 0;
+  color: var(--text-muted);
+}
+
+.tool-content {
+  margin-left: 28px;
+  display: block;
+  animation: fadeIn 0.3s ease;
+  padding-top: 8px;
+}
+
+.tool-details pre {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 10px;
+  border-radius: 6px;
+  margin: 6px 0 14px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+}
+
+.tool-details code {
+  font-size: 0.9em;
+  color: #ff80cc;
+}
