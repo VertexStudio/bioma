@@ -2508,12 +2508,13 @@
             const chunk = decoder.decode(value);
             //buffer += chunk;
 
-            const lines = buffer.split("\n");
+            const lines = chunk.split("\n");
             //buffer = lines.pop() || "";
 
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
+                console.log("Received line:", line);
                 processJsonLine(line);
               } catch (e) {
                 console.error("Error processing JSON line:", e);
@@ -2706,6 +2707,7 @@
       }
 
       function processJsonLine(json_line) {
+        console.log("Processing JSON line:", json_line);
         const data = JSON.parse(json_line);
 
         if (data.error) {
