@@ -1,12 +1,16 @@
 services:
   ollama:
-    image: ollama/ollama:0.5.7
+    build:
+      context: ../ollama
+      dockerfile: Dockerfile
     container_name: bioma-ollama
     environment:
       - OLLAMA_ORIGINS=*
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEPALIVE=-1
       - OLLAMA_DEBUG=0
+    entrypoint: ["ollama"]
+    command: ["serve"]
     deploy:
       resources:
         reservations:
@@ -20,6 +24,28 @@ services:
       - "11434:11434"
     networks:
       - bioma-network
+
+  # ollama:
+  #   image: ollama/ollama:0.5.7
+  #   container_name: bioma-ollama
+  #   environment:
+  #     - OLLAMA_ORIGINS=*
+  #     - OLLAMA_HOST=0.0.0.0
+  #     - OLLAMA_KEEPALIVE=-1
+  #     - OLLAMA_DEBUG=0
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   volumes:
+  #     - bioma-ollama_data:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+  #   networks:
+  #     - bioma-network
 
   surrealdb:
     image: surrealdb/surrealdb:v2.2.1
