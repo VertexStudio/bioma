@@ -12,8 +12,15 @@
   box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto;
-  transition: width 0.3s ease;
+  transition: all 0.3s ease;
   z-index: 1000;
+}
+
+/* Force styles for visible sidebar */
+#sidebar[data-visible="true"] {
+  width: var(--sidebar-width);
+  padding: 1.5rem;
+  padding-top: 1rem;
 }
 
 .resizer {
@@ -25,6 +32,66 @@
   top: 0;
   height: 100%;
   z-index: 1001;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+/* Force styles for collapsed sidebar */
+#sidebar.collapsed,
+#sidebar[data-visible="false"] {
+  width: var(
+    --sidebar-width-collapsed
+  ) !important; /* Override inline styles when collapsed */
+  padding: 1rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: visible;
+}
+
+#sidebar.collapsed .resizer,
+#sidebar[data-visible="false"] .resizer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Additional collapsed sidebar styling */
+#sidebar.collapsed .sidebar-header,
+#sidebar[data-visible="false"] .sidebar-header {
+  justify-content: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+  width: 100%;
+  margin: 0 auto;
+}
+
+#sidebar.collapsed details,
+#sidebar.collapsed summary,
+#sidebar.collapsed h2,
+#sidebar.collapsed h3,
+#sidebar.collapsed h4,
+#sidebar.collapsed .source-form,
+#sidebar.collapsed .tools-form,
+#sidebar.collapsed .source-item-name,
+#sidebar.collapsed .source-item-description,
+#sidebar.collapsed .tool-item-name,
+#sidebar.collapsed .tool-item-description,
+#sidebar.collapsed .source-actions,
+#sidebar.collapsed .tool-actions,
+#sidebar[data-visible="false"] details,
+#sidebar[data-visible="false"] summary,
+#sidebar[data-visible="false"] h2,
+#sidebar[data-visible="false"] h3,
+#sidebar[data-visible="false"] h4,
+#sidebar[data-visible="false"] .source-form,
+#sidebar[data-visible="false"] .tools-form,
+#sidebar[data-visible="false"] .source-item-name,
+#sidebar[data-visible="false"] .source-item-description,
+#sidebar[data-visible="false"] .tool-item-name,
+#sidebar[data-visible="false"] .tool-item-description,
+#sidebar[data-visible="false"] .source-actions,
+#sidebar[data-visible="false"] .tool-actions {
+  display: none;
 }
 
 .sidebar-header {
@@ -71,39 +138,6 @@ details[open] {
 summary {
   font-weight: bold;
   cursor: pointer;
-}
-
-#sidebar.collapsed {
-  width: var(--sidebar-width-collapsed);
-  padding: 1rem 0.5rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  overflow-x: visible;
-}
-
-#sidebar.collapsed .sidebar-header {
-  justify-content: center;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-color);
-  width: 100%;
-  margin: 0 auto;
-}
-
-#sidebar.collapsed details,
-#sidebar.collapsed summary,
-#sidebar.collapsed h2,
-#sidebar.collapsed h3,
-#sidebar.collapsed h4,
-#sidebar.collapsed .source-form,
-#sidebar.collapsed .tools-form,
-#sidebar.collapsed .source-item-name,
-#sidebar.collapsed .source-item-description,
-#sidebar.collapsed .tool-item-name,
-#sidebar.collapsed .tool-item-description,
-#sidebar.collapsed .source-actions,
-#sidebar.collapsed .tool-actions {
-  display: none;
 }
 
 #sidebar h3 {

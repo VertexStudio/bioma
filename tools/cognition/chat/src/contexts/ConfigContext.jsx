@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 
 const ConfigContext = createContext();
@@ -27,33 +27,49 @@ export const ConfigProvider = ({ children }) => {
     const newActiveSources = savedSources.sources ? 
       savedSources.sources.filter(source => source.active) : [];
     setActiveSources(newActiveSources);
-  }, [savedSources]);
+  }, [savedSources.sources]);
 
   // Update active tools whenever saved tools change
   useEffect(() => {
     const newActiveTools = savedTools ? 
       savedTools.filter(tool => tool.active) : [];
     setActiveTools(newActiveTools);
-    
+  }, [savedTools]);
+  
+  // Separate effect for disabling tools when none are active
+  useEffect(() => {
     // Disable tools if no tools are active
-    if (newActiveTools.length === 0 && toolsEnabled) {
+    if (activeTools.length === 0 && toolsEnabled) {
       setToolsEnabled(false);
     }
-  }, [savedTools, setToolsEnabled]);
+  }, [activeTools.length, toolsEnabled]);
 
-  const toggleSidebar = () => {
-    setSidebarVisible(!sidebarVisible);
-  };
-
-  const toggleTools = () => {
-    if (activeTools.length > 0) {
-      setToolsEnabled(!toolsEnabled);
+  // Update toggle functions to be more reliable
+  const toggleSidebar = useCallback(() => {
+    // Force the change to be visible immediately
+    const newValue = !sidebarVisible;
+    console.log(`[ConfigContext] Setting sidebarVisible to: ${newValue}`);
+    
+    // Use the function setter to ensure we're working with the latest state
+    setSidebarVisible(newValue);
+    
+    // Also directly update localStorage as a backup in case the hook is failing
+    try {
+      window.localStorage.setItem('sidebarVisible', JSON.stringify(newValue));
+    } catch (e) {
+      console.error('Error saving to localStorage:', e);
     }
-  };
+  }, [sidebarVisible, setSidebarVisible]);
 
-  const toggleThink = () => {
-    setThinkEnabled(!thinkEnabled);
-  };
+  const toggleTools = useCallback(() => {
+    if (activeTools.length > 0) {
+      setToolsEnabled(prevEnabled => !prevEnabled);
+    }
+  }, [activeTools.length]);
+
+  const toggleThink = useCallback(() => {
+    setThinkEnabled(prevEnabled => !prevEnabled);
+  }, []);
 
   // Sources functions
   const addNewSource = (path) => {

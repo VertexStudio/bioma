@@ -1,15 +1,32 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useConfig } from '../../contexts/ConfigContext';
 import './SidebarToggle.css';
 
 const SidebarToggle = () => {
   const { toggleSidebar, sidebarVisible } = useConfig();
+  const [internalVisible, setInternalVisible] = useState(sidebarVisible);
+  
+  // Keep internal state in sync with context
+  useEffect(() => {
+    setInternalVisible(sidebarVisible);
+  }, [sidebarVisible]);
+  
+  const handleToggle = () => {
+    console.log(`[SidebarToggle] Toggle clicked. Current state: ${sidebarVisible ? 'visible' : 'collapsed'}`);
+    
+    // Update internal state immediately for responsiveness
+    setInternalVisible(!sidebarVisible);
+    
+    // Call the actual toggle function from context
+    toggleSidebar();
+  };
   
   return (
     <button 
       id="sidebar-toggle" 
-      onClick={toggleSidebar}
+      onClick={handleToggle}
       aria-label={sidebarVisible ? 'Collapse sidebar' : 'Expand sidebar'}
+      data-visible={sidebarVisible.toString()}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

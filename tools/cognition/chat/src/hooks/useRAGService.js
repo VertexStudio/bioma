@@ -150,16 +150,31 @@ export function useRAGService({ onResponse, onError, onComplete }) {
   }, []);
 
   const fetchAvailableSources = useCallback(async () => {
-    const response = await fetch(`${RAG_ENDPOINT}/sources`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
+    try {
+      const response = await fetch(`${RAG_ENDPOINT}/sources`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch sources: ${await response.text()}`);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch sources: ${response.status} ${response.statusText}`
+        );
+      }
+
+      // Check if content type is JSON
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.warn("Response is not JSON:", contentType);
+        return { sources: [] }; // Return empty sources instead of parsing
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error("Error in fetchAvailableSources:", error);
+      // Return a valid but empty response rather than throwing
+      return { sources: [] };
     }
-
-    return await response.json();
   }, []);
 
   const deleteSource = useCallback(async (sources) => {

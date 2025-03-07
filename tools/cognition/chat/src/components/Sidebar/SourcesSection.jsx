@@ -34,6 +34,13 @@ const SourcesSection = () => {
     try {
       const data = await fetchAvailableSources();
       
+      // Check if we got a valid response
+      if (!data || !data.sources) {
+        console.warn('Invalid response format when fetching sources:', data);
+        setIsLoading(false);
+        return;
+      }
+      
       // Process the sources data
       const mappedSources = data.sources.map(source => ({
         path: source.source,
@@ -63,6 +70,8 @@ const SourcesSection = () => {
       });
     } catch (error) {
       console.error('Error fetching sources:', error);
+      // Don't crash the UI when sources can't be loaded
+      setSavedSources(prev => prev || { sources: [], sourcesExpanded: {} });
     } finally {
       setIsLoading(false);
     }
