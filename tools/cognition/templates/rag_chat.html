@@ -2981,7 +2981,7 @@
             assistantContent.querySelectorAll(".typing-indicator");
           existingIndicators.forEach((indicator) => indicator.remove());
 
-          assistantContent.innerHTML = md.render(visibleText || "");
+          assistantContent.innerHTML += md.render(visibleText || "");
           const typingIndicator = document.createElement("span");
           typingIndicator.className = "typing-indicator";
 
