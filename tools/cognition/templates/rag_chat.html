@@ -2926,6 +2926,9 @@
       }
 
       function createOrUpdateAssistantMessage(visibleText, context = null) {
+        console.log("Creating or updating assistant message");
+        console.log("Visible text:", visibleText);
+
         const lastMessageDiv = chatContainer.lastElementChild;
         const lastMessageRole =
           lastMessageDiv?.className.match(/(\w+)-message/)?.[1];
@@ -3991,6 +3994,7 @@
 
         // If we have a partial assistant message, finalize it
         if (assistantTextBuffer) {
+          console.log("Assistant text buffer:", assistantTextBuffer);
           createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           if (
             !messageHistory.some(
