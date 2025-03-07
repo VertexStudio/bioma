@@ -178,35 +178,19 @@ const SourcesSection = () => {
           </div>
         </details>
         
-        <div id="active-sources-list" className="sources-list">
-          {allSources.filter(source => source.active).map(source => (
-            <SourceItem 
-              key={source.path} 
-              source={source}
-              sourcesExpanded={savedSources.sourcesExpanded}
-              onToggle={(isActive) => handleSourceToggle(source.path, isActive)}
-              onDelete={() => handleDeleteSource(source)}
-              onFileUpload={handleFileUpload}
-            />
-          ))}
-        </div>
-        
         <div className="saved-sources-section">
           <div className="available-header">
             <h3 className="section-inner-title" style={{ marginBottom: '10px' }}>
-              <i className="fas fa-archive"></i> Available Sources
+              Available Sources
             </h3>
             {allSources.length > 0 && (
-              <h4
-                className="delete-all"
-                style={{ marginBottom: '10px' }}
+              <button
+                className="delete-all-btn"
                 onClick={handleDeleteAllSources}
+                title="Delete all sources"
               >
-                <i className="fa-solid fa-trash"></i>
-                <div style={{ marginLeft: '5px' }}>
-                  {isLoading ? 'Deleting...' : 'Delete all'}
-                </div>
-              </h4>
+                Delete all
+              </button>
             )}
           </div>
           
@@ -216,18 +200,16 @@ const SourcesSection = () => {
                 <span>Loading sources...</span>
               </div>
             ) : (
-              allSources
-                .filter(source => !source.active)
-                .map(source => (
-                  <SourceItem 
-                    key={source.path} 
-                    source={source}
-                    sourcesExpanded={savedSources.sourcesExpanded}
-                    onToggle={(isActive) => handleSourceToggle(source.path, isActive)}
-                    onDelete={() => handleDeleteSource(source)}
-                    onFileUpload={handleFileUpload}
-                  />
-                ))
+              allSources.map(source => (
+                <SourceItem 
+                  key={source.path} 
+                  source={source}
+                  sourcesExpanded={savedSources.sourcesExpanded}
+                  onToggle={(isActive) => handleSourceToggle(source.path, isActive)}
+                  onDelete={() => handleDeleteSource(source)}
+                  onFileUpload={handleFileUpload}
+                />
+              ))
             )}
           </div>
         </div>
@@ -248,97 +230,118 @@ const SourceItem = ({ source, sourcesExpanded, onToggle, onDelete, onFileUpload 
     setIsUploading(true);
     try {
       await onFileUpload(file, source.path);
+    } catch (error) {
+      console.error('Error handling file:', error);
     } finally {
       setIsUploading(false);
-      // Clear the file input
+      // Clear the input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
   };
   
-  // Get source items for this path from expanded sources
-  const sourceItems = !source.isLocal && sourcesExpanded && sourcesExpanded[source.path] 
-    ? sourcesExpanded[source.path] 
-    : [];
+  const handleAttachClick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+  
+  const handleDeleteClick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onDelete();
+  };
+  
+  const handleSourceClick = (e) => {
+    // Don't toggle if clicking on any interactive controls
+    if (
+      e.target.classList.contains("source-toggle") ||
+      e.target.closest(".switch") ||
+      e.target.closest(".source-actions") ||
+      e.target.closest(".upload-button") ||
+      e.target.classList.contains("fa-paperclip") ||
+      e.target.tagName === "BUTTON" ||
+      e.target.tagName === "INPUT" ||
+      e.target.closest("button")
+    ) {
+      return;
+    }
+    
+    // Toggle expanded state to show/hide items
+    setExpanded(!expanded);
+  };
+  
+  // Get the items for this source if available
+  const sourceItems = sourcesExpanded?.[source.path] || [];
+  const itemCount = sourceItems.length;
   
   return (
     <div 
       className={`source-item ${source.active ? 'active' : ''}`}
       data-tooltip={source.path}
+      data-source-id={source.id}
+      onClick={handleSourceClick}
     >
       <div className="source-item-header">
-        <span className="source-icon"><i className="fa-solid fa-book"></i></span>
-        <span className="source-item-name">{source.path}</span>
-        <span className="number-of-elements">({sourceItems.length} items)</span>
-        
-        {!source.isLocal && (
-          <label className="switch">
-            <input 
-              type="checkbox" 
-              className="source-toggle" 
-              checked={source.active} 
-              onChange={(e) => onToggle(e.target.checked)}
-            />
-            <span className="slider"></span>
-          </label>
-        )}
-        
+        <span className="source-icon">
+          <i className="fa-solid fa-book"></i>
+        </span>
+        <span 
+          className="source-item-name" 
+          onClick={() => setExpanded(!expanded)}
+        >
+          {source.path}
+        </span>
+        <span className="number-of-elements">
+          ({itemCount} {itemCount === 1 ? 'item' : 'items'})
+        </span>
+        <label className="switch">
+          <input 
+            type="checkbox" 
+            className="source-toggle" 
+            checked={source.active}
+            onChange={(e) => onToggle(e.target.checked)}
+          />
+          <span className="slider"></span>
+        </label>
         <span 
           className="upload-icon upload-button" 
           title="Upload file to source"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={handleAttachClick}
         >
           <i className="fa-solid fa-paperclip"></i>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="file-input"
-            style={{ display: 'none' }}
-            onChange={handleFileSelect}
-          />
         </span>
-        
         {isUploading && (
           <span className="upload-status">Uploading...</span>
         )}
-        
         <div className="source-actions">
           <button 
             className="source-action-btn delete-source" 
             title="Delete"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
+            onClick={handleDeleteClick}
           >
             <i className="fas fa-trash"></i>
           </button>
         </div>
       </div>
       
-      {sourceItems.length > 0 && (
-        <div 
-          className="source-item-list" 
-          style={{ display: expanded ? 'block' : 'none' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <ul>
-            {sourceItems.map((item, index) => (
-              <li key={index}>{item.uri}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="source-item-list" style={{ display: expanded ? 'block' : 'none' }}>
+        <ul>
+          {sourceItems.map((item, index) => (
+            <li key={index}>{item.uri}</li>
+          ))}
+        </ul>
+      </div>
       
-      {sourceItems.length > 0 && (
-        <div 
-          className="source-item-expander"
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded ? 'Hide items' : 'Show items'} ▾
-        </div>
-      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+      />
     </div>
   );
 };

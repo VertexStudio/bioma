@@ -38,7 +38,7 @@ const ToolsSection = () => {
       onToggle={(e) => setToolsDetailsOpen(e.target.open)}
     >
       <summary>
-        <i className="fas fa-toolbox" style={{ marginRight: '8px' }}></i> Tools
+        <i className="fa-solid fa-wrench" style={{ marginRight: '8px' }}></i> Tools
       </summary>
       
       <div className="section tools-section">
@@ -65,29 +65,26 @@ const ToolsSection = () => {
                 className="action-button"
                 onClick={handleAddTool}
               >
-                <i className="fas fa-save"></i> Save
+                Save
               </button>
             </div>
           </div>
         </details>
         
-        <input type="hidden" id="tools-actors-input" value="" />
-        
         <div className="saved-tools-section">
           <div className="available-header">
             <h3 className="section-inner-title" style={{ marginBottom: '10px' }}>
-              <i className="fas fa-archive"></i> Available Tools
+              Available Tools
             </h3>
             {savedTools.length > 0 && (
-              <h4
+              <button
                 id="delete-all-tools"
-                className="delete-all"
-                style={{ marginBottom: '10px' }}
+                className="delete-all-btn"
                 onClick={deleteAllTools}
+                title="Delete all tools"
               >
-                <i className="fa-solid fa-trash"></i>
-                <div style={{ marginLeft: '5px' }}>Delete all</div>
-              </h4>
+                Delete all
+              </button>
             )}
           </div>
           
@@ -111,7 +108,6 @@ const ToolItem = ({ tool, onToggle, onDelete }) => {
   return (
     <div 
       className={`tool-item ${tool.active ? 'active' : ''}`}
-      data-tooltip={tool.actor}
       data-tool-id={tool.id}
     >
       <div className="tool-item-header">

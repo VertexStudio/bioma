@@ -138,6 +138,8 @@ details[open] {
 summary {
   font-weight: bold;
   cursor: pointer;
+  display: flex;
+  align-items: center;
 }
 
 #sidebar h3 {
@@ -152,39 +154,47 @@ summary {
   color: var(--text-secondary);
 }
 
-.source-section-title {
-  border-top: 1px solid var(--border-color);
-  padding-top: 15px !important;
-  margin-top: 5px !important;
+.section {
+  margin-top: 10px;
+  padding: 10px 0;
 }
 
-.sources-header,
-.tools-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  border-top: 1px solid var(--border-color);
-  padding-top: 15px;
-  margin-top: 5px;
+.section-inner-title {
+  font-size: 0.9em;
+  font-weight: bold;
+  color: var(--text-primary);
+  margin-bottom: 10px;
 }
 
-.available-header {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.delete-all {
-  margin-top: 0px !important;
-  font-size: 0.7em !important;
-  display: flex;
-  flex-direction: row;
-}
-
-.delete-all:hover {
-  color: var(--primary-hover) !important;
+/* Custom styling for delete all button */
+.delete-all-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
   cursor: pointer;
-  user-select: none;
+  font-size: 0.9em;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.delete-all-btn:hover {
+  color: #ff3860;
+  background-color: rgba(255, 56, 96, 0.1);
+}
+
+/* Action buttons */
+.action-button {
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: background-color 0.2s;
+}
+
+.action-button:hover {
+  background-color: var(--primary-hover);
 }

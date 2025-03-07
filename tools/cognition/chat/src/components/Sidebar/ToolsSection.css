@@ -87,3 +87,21 @@
   background-color: var(--bg-secondary);
   border-radius: 4px;
 }
+
+#sidebar.collapsed .source-item-name,
+#sidebar.collapsed .tool-item-name,
+#sidebar.collapsed .number-of-elements,
+#sidebar.collapsed .switch,
+#sidebar.collapsed .source-actions,
+#sidebar.collapsed .tool-actions {
+  display: none;
+}
+
+#sidebar.collapsed .source-item.active,
+#sidebar.collapsed .tool-item.active {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 0, 160, 0.5) 0%,
+    rgba(150, 0, 255, 0.5) 100%
+  );
+}

@@ -2,7 +2,7 @@ import { useRef, useCallback } from "react";
 
 export function useRAGService({ onResponse, onError, onComplete }) {
   const controllerRef = useRef(null);
-  const RAG_ENDPOINT = window.location.origin;
+  const RAG_ENDPOINT = "http://localhost:5766";
 
   const sendQuery = useCallback(
     async (endpoint, messages, toolsActors = [], sources = []) => {
