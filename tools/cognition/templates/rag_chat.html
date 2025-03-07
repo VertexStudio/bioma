@@ -2534,6 +2534,8 @@
 
           // Handle any remaining text after streaming
           if (assistantTextBuffer) {
+            console.log("Processing final assistant message");
+            console.log("Assistant text buffer:", assistantTextBuffer);
             createOrUpdateAssistantMessage(assistantTextBuffer, latestContext);
           }
         } catch (error) {
