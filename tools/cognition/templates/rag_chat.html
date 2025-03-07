@@ -2506,7 +2506,7 @@
             if (done) break;
 
             const chunk = decoder.decode(value);
-            buffer += chunk;
+            //buffer += chunk;
 
             const lines = buffer.split("\n");
             buffer = lines.pop() || "";
