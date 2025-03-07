@@ -12,4 +12,7 @@ uv.lock
 
 *.log
 pyproject.toml
+
+# Chat app
 node_modules
+dist

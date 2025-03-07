@@ -1,85 +1,79 @@
-import React, { useEffect } from 'react';
-import { useChat } from '../../contexts/ChatContext';
-import { useConfig } from '../../contexts/ConfigContext';
-import { FaArrowUp, FaStop, FaBrain, FaWrench } from 'react-icons/fa';
-import './UtilitiesContainer.css';
+import React, { useEffect } from "react";
+import { useChat } from "../../contexts/ChatContext";
+import { useConfig } from "../../contexts/ConfigContext";
+import { FaArrowUp, FaStop, FaBrain, FaWrench } from "react-icons/fa";
+import "./UtilitiesContainer.css";
 
-const UtilitiesContainer = () => {
-  const { 
-    inputValue,
-    handleSubmit,
-    isGenerating,
-    stopGeneration
-  } = useChat();
-  
-  const { 
-    toolsEnabled,
-    thinkEnabled,
-    toggleTools,
-    toggleThink,
-    activeTools
-  } = useConfig();
-  
+const UtilitiesContainer: React.FC = () => {
+  const { inputValue, handleSubmit, isGenerating, stopGeneration } = useChat();
+
+  const { toolsEnabled, thinkEnabled, toggleTools, toggleThink, activeTools } =
+    useConfig();
+
   // Add keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent): void => {
       // Ctrl+Enter toggles tools mode
-      if (e.key === 'Enter' && e.ctrlKey) {
+      if (e.key === "Enter" && e.ctrlKey) {
         e.preventDefault();
         if (activeTools.length > 0) {
           toggleTools();
         }
       }
-      
+
       // Alt+Enter toggles think mode
-      if (e.key === 'Enter' && e.altKey) {
+      if (e.key === "Enter" && e.altKey) {
         e.preventDefault();
         toggleThink();
       }
     };
-    
-    document.addEventListener('keydown', handleKeyDown);
-    
+
+    document.addEventListener("keydown", handleKeyDown);
+
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [toggleTools, toggleThink, activeTools]);
-  
-  const handleSendClick = () => {
+
+  const handleSendClick = (): void => {
     if (!isGenerating && inputValue.trim()) {
       handleSubmit();
     }
   };
-  
+
   const hasActiveTools = activeTools.length > 0;
-  
+
   return (
     <div className="utilities-container">
       <div className="utilities-left">
         <button
           id="send-button"
-          className={`action-button ${toolsEnabled ? 'active' : ''}`}
+          className={`action-button ${toolsEnabled ? "active" : ""}`}
           title="Toggle tools mode (Ctrl+Enter)"
           onClick={toggleTools}
           disabled={!hasActiveTools}
-          style={!hasActiveTools ? {
-            opacity: '0.5',
-            cursor: 'not-allowed'
-          } : {}}
+          style={
+            !hasActiveTools
+              ? {
+                  opacity: "0.5",
+                  cursor: "not-allowed",
+                }
+              : {}
+          }
         >
           <FaWrench />
         </button>
-        
+
         <button
           id="think-button"
-          className={`action-button ${thinkEnabled ? 'active' : ''}`}
+          className={`action-button ${thinkEnabled ? "active" : ""}`}
           title="Toggle think mode (Alt+Enter)"
           onClick={toggleThink}
         >
           <FaBrain />
         </button>
       </div>
-      
+
       <div className="utilities-right">
         {isGenerating ? (
           <button

@@ -1,24 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import './ToolMessage.css';
+import React, { useState, useEffect } from "react";
+import "./ToolMessage.css";
 
-const ToolMessage = ({ content }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [toolData, setToolData] = useState(null);
-  
+interface ToolData {
+  tool?: string;
+  call?: {
+    function?: {
+      arguments?: Record<string, any>;
+    };
+  };
+  response?: any;
+}
+
+interface ToolMessageProps {
+  content: string | ToolData;
+}
+
+const ToolMessage: React.FC<ToolMessageProps> = ({ content }) => {
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [toolData, setToolData] = useState<ToolData | null>(null);
+
   useEffect(() => {
     // Parse the tool data from content
     try {
-      const data = typeof content === 'string' ? JSON.parse(content) : content;
+      const data = typeof content === "string" ? JSON.parse(content) : content;
       setToolData(data);
     } catch (error) {
-      console.error('Error parsing tool data:', error);
+      console.error("Error parsing tool data:", error);
     }
   }, [content]);
-  
-  const toggleExpand = () => {
+
+  const toggleExpand = (): void => {
     setIsExpanded(!isExpanded);
   };
-  
+
   if (!toolData) {
     return (
       <div className="message tool-message">
@@ -26,16 +40,16 @@ const ToolMessage = ({ content }) => {
       </div>
     );
   }
-  
+
   return (
     <div className="message tool-message">
       <div className="tool-toggle" onClick={toggleExpand}>
-        {isExpanded ? '▼' : '▶'}
+        {isExpanded ? "▼" : "▶"}
       </div>
       <div className="tool-header">
-        🔧 Tool Call: {toolData.tool || 'Unknown Tool'}
+        🔧 Tool Call: {toolData.tool || "Unknown Tool"}
       </div>
-      
+
       {isExpanded && (
         <div className="tool-content">
           <div className="tool-details">
@@ -49,12 +63,10 @@ const ToolMessage = ({ content }) => {
                 )}
               </code>
             </pre>
-            
+
             <strong>Response:</strong>
             <pre>
-              <code>
-                {JSON.stringify(toolData.response || {}, null, 2)}
-              </code>
+              <code>{JSON.stringify(toolData.response || {}, null, 2)}</code>
             </pre>
           </div>
         </div>
