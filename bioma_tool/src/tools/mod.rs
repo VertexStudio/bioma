@@ -75,7 +75,18 @@ pub trait ToolDef: Serialize {
     ///
     /// Creates a complete tool schema including name, description,
     /// and input parameter definitions based on the `Args` type.
-    fn def() -> schema::Tool;
+    fn def() -> schema::Tool {
+        let mut settings = schemars::gen::SchemaSettings::draft07();
+        settings.inline_subschemas = true;
+        let generator = settings.into_generator();
+        let schema = generator.into_root_schema_for::<Self::Args>();
+
+        schema::Tool {
+            name: Self::NAME.to_string(),
+            description: Some(Self::DESCRIPTION.to_string()),
+            input_schema: schema,
+        }
+    }
 
     /// Executes the tool with strongly-typed arguments
     ///

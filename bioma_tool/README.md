@@ -69,7 +69,7 @@ Examples:
 
 MCP client:
 ```
-cargo run -p bioma_tool --example mcp_client -- target/debug/examples/mcp_server -- --log-file .output/mcp_server-bioma.log --transport stdio
+cargo run -p bioma_tool --example mcp_client -- target/debug/examples/mcp_server --log-file .output/mcp_server-bioma.log --transport stdio
 ```
 
 MCP server:

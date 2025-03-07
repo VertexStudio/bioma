@@ -1212,7 +1212,7 @@ pub struct Tool {
     pub description: Option<String>,
     #[doc = " A JSON Schema object defining the expected parameters for the tool."]
     #[serde(rename = "inputSchema")]
-    pub input_schema: ToolInputSchema,
+    pub input_schema: schemars::schema::RootSchema,
     #[doc = " The name of the tool."]
     pub name: String,
 }

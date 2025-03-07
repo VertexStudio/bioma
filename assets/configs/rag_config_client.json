@@ -11,7 +11,6 @@
     "rag_endpoint": "http://0.0.0.0:5766",
     "tools": [
         {
-            "host": true,
             "server": {
                 "name": "bioma-tool",
                 "enabled": true,
@@ -26,7 +25,6 @@
             }
         },
         {
-            "host": true,
             "server": {
                 "name": "filesystem",
                 "enabled": true,
