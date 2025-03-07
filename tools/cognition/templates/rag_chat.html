@@ -2787,7 +2787,7 @@
               const openPos = chunk.indexOf("<think>", idx);
               if (openPos === -1) {
                 const visiblePart = chunk.substring(idx);
-                assistantTextBuffer += visiblePart;
+                assistantTextBuffer = visiblePart;
                 idx = chunk.length;
               } else {
                 const visiblePart = chunk.substring(idx, openPos);
@@ -3045,8 +3045,6 @@
         }
 
         chatContainer.scrollTop = chatContainer.scrollHeight;
-
-		assistantTextBuffer = "";
       }
 
       function createThinkingProcessContainer() {
