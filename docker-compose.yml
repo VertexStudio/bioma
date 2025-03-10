@@ -1,6 +1,6 @@
 services:
   ollama:
-    image: ollama/ollama:0.5.7
+    image: itvertexstudio/ollama:latest
     container_name: bioma-ollama
     environment:
       - OLLAMA_ORIGINS=*
