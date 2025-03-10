@@ -1,9 +1,12 @@
 use clap::Parser;
 use dotenv::dotenv;
 use regex::Regex;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
+use text_splitter::MarkdownSplitter;
 use tracing::{error, info};
 
 use bioma_actor::prelude::*;
@@ -28,6 +31,8 @@ pub enum DiscordError {
     System(#[from] SystemActorError),
     #[error("Serenity error: {0}")]
     Serenity(#[from] SerenityError),
+    #[error("Parse structured error: {0}")]
+    ParseStructured(String),
 }
 
 impl ActorError for DiscordError {}
@@ -44,32 +49,50 @@ struct Handler {
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
+        // Ignore messages from bots or self
+        if msg.author.bot || msg.author.id == ctx.cache.current_user().id {
+            return;
+        }
+
         info!("Message received: {}", msg.content);
+
+        // Get the author's actor for bioma requests
+        let author_ctx = match self.get_author_user(&msg).await {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                error!("Error getting author context: {:?}", e);
+                return;
+            }
+        };
+
+        // Build conversation history
+        let mut conversation = match self.build_conversation_history(&ctx, &msg).await {
+            Ok(conv) => conv,
+            Err(e) => {
+                error!("Error building conversation history: {:?}", e);
+                return;
+            }
+        };
 
         // Get the bot's own user ID from the context
         let bot_id = ctx.cache.current_user().id;
 
-        // Check if the bot is mentioned in the message
-        if msg.mentions.iter().any(|user| user.id == bot_id) {
-            info!("Bot mentioned in message, generating response...");
-
-            // Get the author's actor for bioma requests
-            let author_ctx = match self.get_author_user(&msg).await {
-                Ok(ctx) => ctx,
+        let bot_mentioned = msg.mentions.iter().any(|user| user.id == bot_id);
+        let bot_needs_to_respond = if bot_mentioned {
+            true
+        } else {
+            match self.does_bot_need_to_respond(&ctx, &msg, &author_ctx, conversation.clone()).await {
+                Ok(response) => response,
                 Err(e) => {
-                    error!("Error getting author context: {:?}", e);
-                    return;
+                    error!("Error determining if bot needs to respond: {:?}", e);
+                    false
                 }
-            };
+            }
+        };
 
-            // Build conversation history
-            let mut conversation = match self.build_conversation_history(&ctx, &msg).await {
-                Ok(conv) => conv,
-                Err(e) => {
-                    error!("Error building conversation history: {:?}", e);
-                    return;
-                }
-            };
+        // Check if bot needs to respond
+        if bot_needs_to_respond {
+            info!("Bot needs to respond, generating response...");
 
             // Retrieve context
             let context = match self.retrieve_context(&author_ctx, &conversation).await {
@@ -98,9 +121,16 @@ impl EventHandler for Handler {
                 }
             };
 
-            // Send the LLM-generated response to the channel
-            if let Err(why) = msg.channel_id.say(&ctx.http, llm_response).await {
-                error!("Error sending message: {why:?}");
+            if !llm_response.is_empty() {
+                // Send the LLM-generated response to the channel
+                // Message content must be under 2000 unicode code points.
+                let splitter = MarkdownSplitter::new(1500);
+                let chunks = splitter.chunks(&llm_response).collect::<Vec<&str>>();
+                for chunk in chunks {
+                    if let Err(why) = msg.channel_id.say(&ctx.http, chunk).await {
+                        error!("Error sending message: {why:?}");
+                    }
+                }
             }
         } else if msg.content == "!ping" {
             if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
@@ -114,13 +144,94 @@ impl EventHandler for Handler {
     }
 }
 
+#[derive(JsonSchema, Debug, Clone, Serialize, Deserialize)]
+struct ShouldRespond {
+    #[schemars(description = "Whether the bot should respond to the message")]
+    should_respond: bool,
+    #[schemars(description = "The reason for the bot's response")]
+    reason: String,
+}
+
 impl Handler {
+    async fn does_bot_need_to_respond(
+        &self,
+        ctx: &Context,
+        msg: &Message,
+        author_ctx: &ActorContext<UserActor>,
+        mut conversation: Vec<ChatMessage>,
+    ) -> Result<bool, DiscordError> {
+        let channel = ctx.http.get_channel(msg.channel_id).await.map_err(|e| DiscordError::Serenity(e))?;
+        let channel_name = channel.guild().map(|c| c.name).unwrap_or_else(|| "unknown-channel".to_string());
+
+        let bot_id = ctx.cache.current_user().id.to_string();
+        let bot_name = ctx.cache.current_user().name.clone();
+
+        let system_prompt = format!(
+            r#"
+            ---
+            Instructions:
+
+            You are in a Discord server, in the group channel #{channel_name}. 
+            This is a multi-user conversation where different people are participating.
+            You are the bot named "{bot_name}" (ID: {bot_id}), and your role is to determine if the current user's message should be responded to by the you, the bot.
+
+            Below is the recent message history leading up to the current user's message.
+            Each message is prefixed with the username of the person who sent it.
+
+            Determine if the current user's message is intended for the bot and should be responded to.
+            ---
+            "#
+        );
+
+        // Replace the current system's message with the system prompt
+        if let Some(first_message) = conversation.first_mut() {
+            if first_message.role == MessageRole::System {
+                first_message.content = system_prompt;
+            }
+        }
+
+        // Force a structured response
+        let format = bioma_llm::chat::Schema::new::<ShouldRespond>();
+
+        let chat_response = author_ctx
+            .send_and_wait_reply::<Chat, ChatMessages>(
+                ChatMessages {
+                    messages: conversation.clone(),
+                    restart: true,
+                    persist: false,
+                    stream: false,
+                    format: Some(format),
+                    tools: None,
+                },
+                &self.chat,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
+            )
+            .await?;
+
+        // Get the response content
+        let response_message = chat_response.message.content;
+
+        // Convert the response to ShouldRespond
+        let should_respond = serde_json::from_str::<ShouldRespond>(&response_message)
+            .map_err(|e| DiscordError::ParseStructured(e.to_string()))?;
+
+        info!("Bot should respond: {}", should_respond.should_respond);
+        info!("Reason: {}", should_respond.reason);
+
+        Ok(should_respond.should_respond)
+    }
+
     async fn generate_llm_response(
         &self,
         author_ctx: &ActorContext<UserActor>,
         conversation: Vec<ChatMessage>,
     ) -> Result<String, DiscordError> {
         info!("Conversation sent to LLM: {:#?}", &conversation);
+
+        // Debug save the conversation to a file
+        // let debug_file = self.engine.output_dir().join("discord-conversation.json");
+        // let conversation_json = serde_json::to_string(&conversation).unwrap();
+        // tokio::fs::write(debug_file, conversation_json).await.unwrap();
 
         let chat_response = author_ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
@@ -136,6 +247,10 @@ impl Handler {
                 SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )
             .await?;
+
+        // Debug save the response to a file
+        // let debug_file = self.engine.output_dir().join("discord-response.md");
+        // tokio::fs::write(debug_file, chat_response.message.content.clone()).await.unwrap();
 
         // Get the response content
         let mut response_message = chat_response.message.content;
@@ -409,7 +524,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut chat_ctx, mut chat_actor) = Actor::spawn(
         engine.clone(),
         chat_id.clone(),
-        Chat::builder().model(config.chat_model.clone()).endpoint(config.chat_endpoint.clone()).build(),
+        Chat::builder()
+            .model(config.chat_model.clone())
+            .endpoint(config.chat_endpoint.clone())
+            // .generation_options(ollama_rs::generation::options::GenerationOptions::default().num_predict(500))
+            .build(),
         SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
     )
     .await?;

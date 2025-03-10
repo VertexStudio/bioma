@@ -117,3 +117,11 @@ ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "d3e4
     "utoipa",
 ] }
 # ollama-rs = { path = "../ollama-rs-vertex/ollama-rs", features = ["stream"] }
+
+# Text Splitter
+text-splitter = { version = "0.19.0", features = ["code", "markdown"] }
+tree-sitter-rust = "0.23.0"
+tree-sitter-python = "0.23.2"
+tree-sitter-cpp = "0.23.0"
+tree-sitter-cue = { git = "https://github.com/rozgo/tree-sitter-cue.git", branch = "main" }
+tree-sitter-csv = { git = "https://github.com/rozgo/tree-sitter-csv.git", branch = "master" }
