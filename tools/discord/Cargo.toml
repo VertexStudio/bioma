@@ -1,0 +1,22 @@
+[package]
+name = "discord"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serenity = "0.12"
+dotenv = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+url = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+
+bioma_actor = { path = "../../bioma_actor" }
+bioma_llm = { path = "../../bioma_llm" }
+bioma_tool = { path = "../../bioma_tool" }

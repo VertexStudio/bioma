@@ -70,6 +70,7 @@ glob = "0.3"
 walkdir = "2.4"
 zip = "2.2"
 tempfile = "3.14"
+dotenv = "0.15"
 
 # CLI and Configuration
 clap = { version = "4.5", features = ["derive"] }
@@ -104,6 +105,7 @@ lazy_static = "1.5"
 base64 = "0.22"
 rand = "0.8"
 indexmap = "2.7"
+regex = "1.11"
 
 # LLM
 # ollama-rs = { git = "https://github.com/pepperoni21/ollama-rs.git", rev = "a1f2bb5c5161d4879b089104e8753990c832ba9c", features = [
