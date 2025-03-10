@@ -44,7 +44,7 @@ struct Handler {
 #[async_trait]
 impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
-        println!("Message received: {}", msg.content);
+        info!("Message received: {}", msg.content);
 
         // Get the bot's own user ID from the context
         let bot_id = ctx.cache.current_user().id;
@@ -52,54 +52,75 @@ impl EventHandler for Handler {
         // Check if the bot is mentioned in the message
         if msg.mentions.iter().any(|user| user.id == bot_id) {
             info!("Bot mentioned in message, generating response...");
-            // Placeholder for LLM response (replace with actual LLM call)
-            let llm_response = self.generate_llm_response(&ctx, &msg).await;
-            let llm_response = llm_response.unwrap();
+
+            // Get the author's actor for bioma requests
+            let author_ctx = match self.get_author_user(&msg).await {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    error!("Error getting author context: {:?}", e);
+                    return;
+                }
+            };
+
+            // Build conversation history
+            let mut conversation = match self.build_conversation_history(&ctx, &msg).await {
+                Ok(conv) => conv,
+                Err(e) => {
+                    error!("Error building conversation history: {:?}", e);
+                    return;
+                }
+            };
+
+            // Retrieve context
+            let context = match self.retrieve_context(&author_ctx, &conversation).await {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    error!("Error retrieving context: {:?}", e);
+                    "".to_string()
+                }
+            };
+
+            // Insert context into system message if available
+            if !context.is_empty() {
+                if let Some(first_message) = conversation.first_mut() {
+                    if first_message.role == MessageRole::System {
+                        first_message.content = format!("---\nContext:\n{}\n\n{}", context, first_message.content);
+                    }
+                }
+            }
+
+            // Generate response with prepared conversation and context
+            let llm_response = match self.generate_llm_response(&author_ctx, conversation).await {
+                Ok(response) => response,
+                Err(e) => {
+                    error!("Error generating LLM response: {:?}", e);
+                    return;
+                }
+            };
 
             // Send the LLM-generated response to the channel
             if let Err(why) = msg.channel_id.say(&ctx.http, llm_response).await {
-                println!("Error sending message: {why:?}");
+                error!("Error sending message: {why:?}");
             }
         } else if msg.content == "!ping" {
             if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
-                println!("Error sending message: {why:?}");
+                error!("Error sending message: {why:?}");
             }
         }
     }
 
     async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+        info!("{} is connected!", ready.user.name);
     }
 }
 
 impl Handler {
-    async fn generate_llm_response(&self, ctx: &Context, msg: &Message) -> Result<String, DiscordError> {
-        // Build conversation history
-        let mut conversation = self.build_conversation_history(ctx, msg).await?;
-
-        // Retrieve context
-        let context = self.retrieve_context(ctx, msg).await?;
-
-        // Insert context into system message if available
-        if !context.is_empty() {
-            if let Some(first_message) = conversation.first_mut() {
-                if first_message.role == MessageRole::System {
-                    first_message.content = format!("---\nContext:\n{}\n\n{}", context, first_message.content);
-                }
-            }
-        }
-
-        // Save conversation to file
-        // let output_dir = self.engine.output_dir();
-        // let conversation_path = output_dir.join("conversation.json");
-        // let conversation_str = serde_json::to_string(&conversation).unwrap();
-        // tokio::fs::write(conversation_path, conversation_str).await.unwrap();
-
-        // Debug the conversation
+    async fn generate_llm_response(
+        &self,
+        author_ctx: &ActorContext<UserActor>,
+        conversation: Vec<ChatMessage>,
+    ) -> Result<String, DiscordError> {
         info!("Conversation sent to LLM: {:#?}", &conversation);
-
-        // Get the author's actor for retrieval request
-        let author_ctx = self.get_discord_user(msg).await?;
 
         let chat_response = author_ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
@@ -118,11 +139,11 @@ impl Handler {
 
         // Get the response content
         let mut response_message = chat_response.message.content;
-        
+
         // Remove <think></think> tags and their content using regex
         let think_tag_regex = Regex::new(r"<think>[\s\S]*?</think>").unwrap();
         response_message = think_tag_regex.replace_all(&response_message, "").to_string();
-        
+
         // Trim any extra whitespace that might be left after removing tags
         response_message = response_message.trim().to_string();
 
@@ -137,7 +158,7 @@ impl Handler {
         let messages = match msg.channel_id.messages(&ctx.http, GetMessages::new().limit(5)).await {
             Ok(messages) => messages,
             Err(why) => {
-                println!("Error fetching messages: {why:?}");
+                error!("Error fetching messages: {why:?}");
                 vec![]
             }
         };
@@ -239,10 +260,11 @@ impl Handler {
         Ok(conversation)
     }
 
-    async fn retrieve_context(&self, ctx: &Context, msg: &Message) -> Result<String, DiscordError> {
-        // Get conversation history
-        let messages = self.build_conversation_history(ctx, msg).await?;
-
+    async fn retrieve_context(
+        &self,
+        author_ctx: &ActorContext<UserActor>,
+        messages: &Vec<ChatMessage>,
+    ) -> Result<String, DiscordError> {
         // Extract user messages to form the query
         let query = messages
             .iter()
@@ -252,9 +274,6 @@ impl Handler {
             .join("\n");
 
         info!("Retrieval query: {:#?}", query);
-
-        // Get the author's actor for retrieval request
-        let author_ctx = self.get_discord_user(msg).await?;
 
         // Send retrieval request
         info!("Sending message to retriever actor");
@@ -281,8 +300,8 @@ impl Handler {
         Ok(context)
     }
 
-    // Helper function to get or create a user actor context
-    async fn get_discord_user(&self, msg: &Message) -> Result<ActorContext<UserActor>, DiscordError> {
+    // Get or create a user actor context for the author of the message
+    async fn get_author_user(&self, msg: &Message) -> Result<ActorContext<UserActor>, DiscordError> {
         let user_actor_id = ActorId::of::<UserActor>(format!("/discord/user/{}", msg.author.id.to_string()));
 
         // Get or create the user actor
@@ -418,7 +437,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = Client::builder(&token, intents).event_handler(handler).await.expect("Err creating client");
 
     if let Err(why) = client.start().await {
-        println!("Client error: {why:?}");
+        error!("Client error: {why:?}");
     }
 
     Ok(())
