@@ -74,24 +74,16 @@ impl EventHandler for Handler {
 
 impl Handler {
     async fn generate_llm_response(&self, ctx: &Context, msg: &Message) -> Result<String, DiscordError> {
-        let author_id = msg.author.id.to_string();
-
         // Build conversation history
         let conversation = self.build_conversation_history(ctx, msg).await?;
 
         // Debug the conversation
         info!("Conversation sent to LLM: {:#?}", &conversation);
 
-        let user_actor_id = ActorId::of::<UserActor>(format!("/discord/user/{}", author_id));
-        let (user_ctx, _user_actor) = Actor::spawn(
-            self.engine.clone(),
-            user_actor_id.clone(),
-            UserActor {},
-            SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
-        )
-        .await?;
+        // Get the author's actor for retrieval request
+        let author_ctx = self.get_discord_user(msg).await?;
 
-        let chat_response = user_ctx
+        let chat_response = author_ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
                 ChatMessages {
                     messages: conversation.clone(),
@@ -218,6 +210,60 @@ impl Handler {
         }
 
         Ok(conversation)
+    }
+
+    async fn retrieve_context(&self, ctx: &Context, msg: &Message) -> Result<String, DiscordError> {
+        // Get conversation history
+        let messages = self.build_conversation_history(ctx, msg).await?;
+
+        // Extract user messages to form the query
+        let query = messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .map(|message| message.content.clone())
+            .collect::<Vec<String>>()
+            .join("\n");
+
+        info!("Retrieval query: {:#?}", query);
+
+        // Get the author's actor for retrieval request
+        let author_ctx = self.get_discord_user(msg).await?;
+
+        // Send retrieval request
+        info!("Sending message to retriever actor");
+        let retrieve_context =
+            RetrieveContext { query: RetrieveQuery::Text(query), limit: 5, threshold: 0.0, sources: vec![] };
+
+        let retrieved = author_ctx
+            .send_and_wait_reply::<Retriever, RetrieveContext>(
+                retrieve_context,
+                &self.retriever,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(200)).build(),
+            )
+            .await?;
+
+        // Format the retrieved context
+        let context = retrieved.to_markdown();
+
+        info!("Retrieved context: {}", if context.is_empty() { "None" } else { "Found" });
+
+        Ok(context)
+    }
+
+    // Helper function to get or create a user actor context
+    async fn get_discord_user(&self, msg: &Message) -> Result<ActorContext<UserActor>, DiscordError> {
+        let user_actor_id = ActorId::of::<UserActor>(format!("/discord/user/{}", msg.author.id.to_string()));
+
+        // Get or create the user actor
+        let (user_ctx, _user_actor) = Actor::spawn(
+            self.engine.clone(),
+            user_actor_id.clone(),
+            UserActor {},
+            SpawnOptions::builder().exists(SpawnExistsOptions::Restore).build(),
+        )
+        .await?;
+
+        Ok(user_ctx)
     }
 }
 
