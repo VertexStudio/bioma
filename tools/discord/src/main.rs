@@ -35,10 +35,10 @@ impl ActorError for DiscordError {}
 struct Handler {
     engine: Engine,
     chat: ActorId,
-    indexer: ActorId,
+    _indexer: ActorId,
     retriever: ActorId,
-    embeddings: ActorId,
-    rerank: ActorId,
+    _embeddings: ActorId,
+    _rerank: ActorId,
 }
 
 #[async_trait]
@@ -75,7 +75,25 @@ impl EventHandler for Handler {
 impl Handler {
     async fn generate_llm_response(&self, ctx: &Context, msg: &Message) -> Result<String, DiscordError> {
         // Build conversation history
-        let conversation = self.build_conversation_history(ctx, msg).await?;
+        let mut conversation = self.build_conversation_history(ctx, msg).await?;
+
+        // Retrieve context
+        let context = self.retrieve_context(ctx, msg).await?;
+
+        // Insert context into system message if available
+        if !context.is_empty() {
+            if let Some(first_message) = conversation.first_mut() {
+                if first_message.role == MessageRole::System {
+                    first_message.content = format!("---\nContext:\n{}\n\n{}", context, first_message.content);
+                }
+            }
+        }
+
+        // Save conversation to file
+        // let output_dir = self.engine.output_dir();
+        // let conversation_path = output_dir.join("conversation.json");
+        // let conversation_str = serde_json::to_string(&conversation).unwrap();
+        // tokio::fs::write(conversation_path, conversation_str).await.unwrap();
 
         // Debug the conversation
         info!("Conversation sent to LLM: {:#?}", &conversation);
@@ -98,7 +116,15 @@ impl Handler {
             )
             .await?;
 
-        let response_message = chat_response.message.content;
+        // Get the response content
+        let mut response_message = chat_response.message.content;
+        
+        // Remove <think></think> tags and their content using regex
+        let think_tag_regex = Regex::new(r"<think>[\s\S]*?</think>").unwrap();
+        response_message = think_tag_regex.replace_all(&response_message, "").to_string();
+        
+        // Trim any extra whitespace that might be left after removing tags
+        response_message = response_message.trim().to_string();
 
         Ok(response_message)
     }
@@ -175,7 +201,8 @@ impl Handler {
         let system_prompt = format!(
             r#"
             ---
-            Context:
+            Instructions:
+
             You are in a Discord server, in the group channel #{channel_name}. 
             This is a multi-user conversation where different people are participating.
             You are the bot named "{bot_name}" (ID: {bot_id}), and your role is to assist users by answering questions and helping with tasks.
@@ -231,8 +258,12 @@ impl Handler {
 
         // Send retrieval request
         info!("Sending message to retriever actor");
-        let retrieve_context =
-            RetrieveContext { query: RetrieveQuery::Text(query), limit: 5, threshold: 0.0, sources: vec![] };
+        let retrieve_context = RetrieveContext {
+            query: RetrieveQuery::Text(query),
+            limit: 5,
+            threshold: 0.0,
+            sources: vec!["/bioma".to_string()],
+        };
 
         let retrieved = author_ctx
             .send_and_wait_reply::<Retriever, RetrieveContext>(
@@ -375,10 +406,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handler = Handler {
         engine,
         chat: chat_id,
-        indexer: indexer_id,
+        _indexer: indexer_id,
         retriever: retriever_id,
-        embeddings: embeddings_id,
-        rerank: rerank_id,
+        _embeddings: embeddings_id,
+        _rerank: rerank_id,
     };
 
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
