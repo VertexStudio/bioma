@@ -32,15 +32,13 @@ pathdiff = "0.2"
 hf-hub = "0.3.2"
 fastembed = "4.3"
 
-text-splitter = { version = "0.19.0", features = ["code", "markdown"] }
-tree-sitter-rust = "0.23.0"
-tree-sitter-python = "0.23.2"
-tree-sitter-cpp = "0.23.0"
-# tree-sitter-html = "0.23.0"
-# tree-sitter-csv = "1.2.0"
-# tree-sitter-typescript = "0.23.0"
-tree-sitter-cue = { git = "https://github.com/rozgo/tree-sitter-cue.git", branch = "main" }
-tree-sitter-csv = { git = "https://github.com/rozgo/tree-sitter-csv.git", branch = "master" }
+text-splitter = { workspace = true, features = ["code", "markdown"] }
+tree-sitter-rust = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-cpp = { workspace = true }
+tree-sitter-cue = { workspace = true }
+tree-sitter-csv = { workspace = true }
+
 mdka = "1.2"
 image = "0.25"
 base64 = "0.22"
