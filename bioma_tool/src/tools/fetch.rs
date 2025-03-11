@@ -1,4 +1,4 @@
-use crate::schema::{CallToolResult, TextContent, Tool, ToolInputSchema};
+use crate::schema::{CallToolResult, TextContent};
 use crate::tools::{ToolDef, ToolError};
 use readability::ExtractOptions;
 use reqwest::header::CONTENT_TYPE;
@@ -6,32 +6,6 @@ use robotstxt::DefaultMatcher;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use url::Url;
-
-const FETCH_SCHEMA: &str = r#"{
-    "type": "object",
-    "properties": {
-        "url": {
-            "description": "URL to fetch",
-            "type": "string"
-        },
-        "max_length": {
-            "description": "Maximum number of characters to return",
-            "type": "integer",
-            "default": 5000
-        },
-        "start_index": {
-            "description": "Start content from this character index",
-            "type": "integer",
-            "default": 0
-        },
-        "raw": {
-            "description": "Get raw content without markdown conversion",
-            "type": "boolean",
-            "default": false
-        }
-    },
-    "required": ["url"]
-}"#;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct FetchArgs {
@@ -65,11 +39,6 @@ impl ToolDef for Fetch {
     const NAME: &'static str = "fetch";
     const DESCRIPTION: &'static str = "Fetches a URL from the internet and extracts its contents as markdown";
     type Args = FetchArgs;
-
-    fn def() -> Tool {
-        let input_schema = serde_json::from_str::<ToolInputSchema>(FETCH_SCHEMA).unwrap();
-        Tool { name: Self::NAME.to_string(), description: Some(Self::DESCRIPTION.to_string()), input_schema }
-    }
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         // Validate URL
@@ -210,6 +179,13 @@ impl Fetch {
 mod tests {
     use super::*;
     use mockito;
+
+    #[test]
+    fn test_auto_generated_schema() {
+        let tool = Fetch::def();
+        let schema_json = serde_json::to_string_pretty(&tool).unwrap();
+        println!("Tool Schema:\n{}", schema_json);
+    }
 
     #[tokio::test]
     async fn test_fetch_with_robots_txt() {

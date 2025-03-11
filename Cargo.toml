@@ -58,7 +58,7 @@ color-backtrace = "0.6"
 # ID Generation
 uuid = "1.10"
 ulid = "1.1"
-hostname = "0.4.0"
+hostname = "0.4"
 
 # Time Handling
 humantime = "2.1"
@@ -69,7 +69,7 @@ chrono = "0.4"
 glob = "0.3"
 walkdir = "2.4"
 zip = "2.2"
-tempfile = "3.14.0"
+tempfile = "3.14"
 
 # CLI and Configuration
 clap = { version = "4.5", features = ["derive"] }
@@ -81,13 +81,13 @@ readability-rs = "0.5"
 robotstxt = "0.3"
 
 # Web Framework
-actix-web = "4.9.0"
-actix-cors = "0.7.0"
-actix-multipart = "0.7.2"
+actix-web = "4.9"
+actix-cors = "0.7"
+actix-multipart = "0.7"
 actix-files = "0.6"
 
 # Documentation
-utoipa = "5.3.1"
+utoipa = "5.3"
 
 # Template Engine
 askama = "0.12"

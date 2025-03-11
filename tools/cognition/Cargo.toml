@@ -21,7 +21,6 @@ zip = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 ollama-rs = { workspace = true }
-schemars = { workspace = true }
 utoipa = { workspace = true }
 url = { workspace = true }
 reqwest = { workspace = true }

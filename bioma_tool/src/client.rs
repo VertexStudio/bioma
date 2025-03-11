@@ -29,7 +29,6 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientConfig {
-    pub host: bool,
     pub server: ServerConfig,
 }
 
