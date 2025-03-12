@@ -74,19 +74,12 @@ impl EventHandler for Handler {
             }
         };
 
-        // Get the bot's own user ID from the context
-        let bot_id = ctx.cache.current_user().id;
-
-        let bot_mentioned = msg.mentions.iter().any(|user| user.id == bot_id);
-        let bot_needs_to_respond = if bot_mentioned {
-            true
-        } else {
-            match self.does_bot_need_to_respond(&ctx, &msg, &author_ctx, conversation.clone()).await {
-                Ok(response) => response,
-                Err(e) => {
-                    error!("Error determining if bot needs to respond: {:?}", e);
-                    false
-                }
+        // Check if bot needs to respond
+        let bot_needs_to_respond = match self.does_bot_need_to_respond(&ctx, &msg, &author_ctx, conversation.clone()).await {
+            Ok(response) => response,
+            Err(e) => {
+                error!("Error determining if bot needs to respond: {:?}", e);
+                false
             }
         };
 
@@ -113,7 +106,7 @@ impl EventHandler for Handler {
             }
 
             // Generate response with prepared conversation and context
-            let llm_response = match self.generate_llm_response(&author_ctx, conversation).await {
+            let llm_response = match self.generate_llm_response(&ctx, &author_ctx, conversation).await {
                 Ok(response) => response,
                 Err(e) => {
                     error!("Error generating LLM response: {:?}", e);
@@ -160,6 +153,20 @@ impl Handler {
         author_ctx: &ActorContext<UserActor>,
         mut conversation: Vec<ChatMessage>,
     ) -> Result<bool, DiscordError> {
+        // Check if this is a DM - always respond to DMs
+        if msg.guild_id.is_none() {
+            info!("Message is a DM, bot will respond");
+            return Ok(true);
+        }
+        
+        // Check if bot is mentioned - always respond when mentioned
+        let bot_id = ctx.cache.current_user().id;
+        if msg.mentions.iter().any(|user| user.id == bot_id) {
+            info!("Bot was mentioned, bot will respond");
+            return Ok(true);
+        }
+
+        // For other cases, use LLM to determine if response is needed
         let channel = ctx.http.get_channel(msg.channel_id).await.map_err(|e| DiscordError::Serenity(e))?;
         let channel_name = channel.guild().map(|c| c.name).unwrap_or_else(|| "unknown-channel".to_string());
 
@@ -223,6 +230,7 @@ impl Handler {
 
     async fn generate_llm_response(
         &self,
+        ctx: &Context,
         author_ctx: &ActorContext<UserActor>,
         conversation: Vec<ChatMessage>,
     ) -> Result<String, DiscordError> {
@@ -261,6 +269,11 @@ impl Handler {
 
         // Trim any extra whitespace that might be left after removing tags
         response_message = response_message.trim().to_string();
+
+        // Remove bot name prefix if present
+        let bot_name = ctx.cache.current_user().name.clone();
+        let bot_prefix_regex = Regex::new(&format!(r"^{}\s*:\s*", regex::escape(&bot_name))).unwrap();
+        response_message = bot_prefix_regex.replace(&response_message, "").to_string();
 
         Ok(response_message)
     }
@@ -346,6 +359,13 @@ impl Handler {
             Below is the recent message history leading up to the current user's message.
             Each message is prefixed with the username of the person who sent it.
             Respond naturally as "{bot_name}" and address users by their usernames when relevant.
+
+            IMPORTANT: Do NOT prefix your responses with your own name. 
+            DO NOT write responses like:
+            "{bot_name}: This is my response."
+            
+            Instead, just write your response directly:
+            "This is my response."
             ---
             "#
         );
