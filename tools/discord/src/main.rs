@@ -359,13 +359,6 @@ impl Handler {
             Below is the recent message history leading up to the current user's message.
             Each message is prefixed with the username of the person who sent it.
             Respond naturally as "{bot_name}" and address users by their usernames when relevant.
-
-            IMPORTANT: Do NOT prefix your responses with your own name. 
-            DO NOT write responses like:
-            "{bot_name}: This is my response."
-            
-            Instead, just write your response directly:
-            "This is my response."
             ---
             "#
         );
