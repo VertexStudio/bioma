@@ -52,13 +52,5 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting SSE server on {}", bind_address.as_ref().unwrap());
 
     // Start the server with SSE transport
-    start_with_transport::<ExampleServer>("example-server", "sse", bind_address).await?;
-
-    // Keep the main thread running indefinitely
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-    }
-
-    #[allow(unreachable_code)]
-    Ok(())
+    start_with_transport::<ExampleServer>("example-server", "sse", bind_address).await
 }

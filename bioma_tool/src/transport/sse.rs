@@ -12,8 +12,6 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
-// ===== Message Types =====
-
 /// Endpoint message sent from server to client on connection
 #[derive(Serialize, Deserialize)]
 struct EndpointMessage {
@@ -29,8 +27,6 @@ impl EndpointMessage {
         Self { message_type: "endpoint".to_string(), uri: "/message".to_string(), client_id: client_id.to_string() }
     }
 }
-
-// ===== Type definitions for improved type safety =====
 
 /// Client identifier type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -64,10 +60,6 @@ impl ServerUrl {
     fn events_endpoint(&self) -> String {
         format!("{}/events", self.0)
     }
-
-    fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 /// Post URL for client to send messages
@@ -84,8 +76,6 @@ impl PostUrl {
         &self.0
     }
 }
-
-// ===== Custom error type =====
 
 #[derive(Debug, thiserror::Error)]
 pub enum SseError {
@@ -119,8 +109,6 @@ pub enum SseError {
 
 // Create a Result type alias for our custom error
 type Result<T> = std::result::Result<T, SseError>;
-
-// ===== SSE mode variants =====
 
 /// Represents SSE transport mode (client or server)
 enum SseMode {
@@ -159,8 +147,6 @@ impl Default for SseTimeoutConfig {
     }
 }
 
-// ===== Main transport implementation =====
-
 #[derive(Clone)]
 pub struct SseTransport {
     mode: Arc<RwLock<SseMode>>,
@@ -198,7 +184,6 @@ impl SseTransport {
     }
 }
 
-// Transport trait implementation
 impl Transport for SseTransport {
     async fn start(&mut self, request_tx: mpsc::Sender<String>) -> std::result::Result<(), anyhow::Error> {
         let mode = self.mode.read().await;
@@ -228,8 +213,6 @@ impl Transport for SseTransport {
         .map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
-
-// ===== Server implementation methods =====
 
 impl SseTransport {
     /// Start the SSE server
@@ -353,8 +336,6 @@ impl SseTransport {
     }
 }
 
-// ===== Client implementation methods =====
-
 impl SseTransport {
     /// Start the SSE client
     async fn start_client(
@@ -433,9 +414,7 @@ impl SseTransport {
     }
 }
 
-// ===== Actix-web handlers =====
-
-/// Handler for SSE connections - this implements the MCP SSE endpoint requirement
+/// Handler for SSE connections
 #[get("/events")]
 async fn sse_handler(
     _req: HttpRequest,
@@ -459,8 +438,6 @@ async fn message_handler(request_tx: web::Data<mpsc::Sender<String>>, body: web:
 
     HttpResponse::Ok().finish()
 }
-
-// ===== SSE Client Connection Handling =====
 
 /// Connect to an SSE endpoint and process incoming events
 async fn connect_and_process_sse(
@@ -551,7 +528,7 @@ async fn process_sse_buffer(
     Ok(())
 }
 
-/// Process an SSE event according to MCP specification
+/// Process an SSE event
 async fn process_sse_event(
     event: String,
     post_url: &Arc<RwLock<Option<PostUrl>>>,
@@ -576,8 +553,6 @@ async fn process_sse_event(
 
     Ok(())
 }
-
-// ===== SSE Event Parsing and Handling =====
 
 /// Parse an SSE event into its type and data
 fn parse_sse_event(event: &str) -> Result<(&str, Option<&str>)> {
@@ -628,7 +603,7 @@ async fn handle_endpoint_event(data: &str, post_url: &Arc<RwLock<Option<PostUrl>
     Ok(())
 }
 
-/// Handle a message event from the server
+/// Handle a message event
 async fn handle_message_event(data: &str, request_tx: &mpsc::Sender<String>) -> Result<()> {
     debug!("Received SSE message: {}", data);
 
