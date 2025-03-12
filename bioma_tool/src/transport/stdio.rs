@@ -9,6 +9,7 @@ use tokio::{
 };
 use tracing::{debug, error};
 
+#[derive(Debug, Clone)]
 enum StdioMode {
     Server(Arc<Mutex<tokio::io::Stdout>>),
     Client {
@@ -20,7 +21,7 @@ enum StdioMode {
     },
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StdioTransport {
     mode: Arc<StdioMode>,
 }

@@ -4,7 +4,7 @@ use crate::schema::{
     ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
-use crate::transport::{stdio::StdioTransport, Transport, TransportType};
+use crate::transport::{Transport, TransportType};
 use bioma_actor::prelude::*;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
@@ -56,20 +56,8 @@ impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
         let (tx, rx) = mpsc::channel::<String>(1);
 
-        let transport = StdioTransport::new_client(&server);
-        let transport = match transport {
-            Ok(transport) => transport,
-            Err(e) => return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into())),
-        };
-
-        let transport = match server.transport.as_str() {
-            "stdio" => TransportType::Stdio(transport),
-            _ => {
-                return Err(ModelContextProtocolClientError::Transport(
-                    format!("Invalid transport type: {}", server.transport.as_str()).into(),
-                ))
-            }
-        };
+        let transport = crate::transport::create_transport(&server.transport, Some(&server))
+            .map_err(|e| ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into()))?;
 
         // Start transport once during initialization
         let mut transport_clone = transport.clone();

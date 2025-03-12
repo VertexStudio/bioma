@@ -266,3 +266,22 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
 
     Ok(())
 }
+
+/// Create and start a model context protocol server with the specified transport
+pub async fn start_with_transport<T: ModelContextProtocolServer>(
+    name: &str,
+    transport_type: &str,
+    bind_address: Option<String>,
+) -> Result<()> {
+    let transport = if transport_type == "sse" && bind_address.is_some() {
+        // Parse socket address for SSE
+        let addr = bind_address.unwrap().parse().context("Invalid socket address for SSE server")?;
+
+        crate::transport::TransportType::Sse(crate::transport::sse::SseTransport::new_server(addr))
+    } else {
+        // Use the factory function for other cases
+        crate::transport::create_transport(transport_type, None)?
+    };
+
+    start::<T>(name, transport).await
+}

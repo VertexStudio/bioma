@@ -17,10 +17,18 @@ lazy_static = { workspace = true }
 reqwest = { workspace = true }
 html2md = { workspace = true }
 readability-rs = { workspace = true }
-rand ={ workspace = true}
+rand = { workspace = true }
 url = { workspace = true }
 robotstxt = { workspace = true }
 schemars = { workspace = true }
+# SSE dependencies
+# axum = "0.6.20"
+actix-web = "4.4.0"
+actix = "0.13.1"
+actix-http = "3.4.0"
+actix-web-lab = "0.20.0"
+async-stream = "0.3.5"
+uuid = { version = "1.3", features = ["v4"] }
 
 bioma_actor = { path = "../bioma_actor" }
 
