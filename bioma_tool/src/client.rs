@@ -18,8 +18,10 @@ use tracing::{debug, error, info};
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ServerConfig {
     pub name: String,
+    #[serde(default = "default_version")]
     #[builder(default = default_version())]
     pub version: String,
+    #[serde(default = "default_request_timeout")]
     #[builder(default = default_request_timeout())]
     pub request_timeout: u64,
     #[serde(flatten)]
