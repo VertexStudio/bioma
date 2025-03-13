@@ -557,12 +557,10 @@ impl Transport for SseTransport {
                         let mut requests_map = requests.lock().await;
                         requests_map.remove(&jsonrpc_id);
                     } else {
-                        // Fallback to broadcasting if we don't have a client mapping
-                        error!("No client found for JSON-RPC ID: {}, message will not be delivered", jsonrpc_id);
+                        return Err(SseError::Other(format!("No client found for JSON-RPC ID: {}", jsonrpc_id)).into());
                     }
                 } else {
-                    // For messages without JSON-RPC ID, don't send them
-                    error!("Message has no JSON-RPC ID, cannot route properly");
+                    return Err(SseError::Other("Message has no JSON-RPC ID, cannot route properly".to_string()).into());
                 }
 
                 Ok(())
