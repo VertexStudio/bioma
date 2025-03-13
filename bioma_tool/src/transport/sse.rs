@@ -180,7 +180,7 @@ impl SseTransport {
     /// Create a new SSE transport in server mode
     pub fn new_server(config: SseServerConfig) -> Self {
         let clients = Arc::new(Mutex::new(HashMap::new()));
-        let requests = Arc::new(Mutex::new(HashMap::new())); // New request registry
+        let requests = Arc::new(Mutex::new(HashMap::new()));
 
         Self {
             mode: Arc::new(SseMode::Server {
