@@ -4,7 +4,7 @@ use crate::schema::{
     ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
-use crate::transport::sse::{SseServerConfig, SseTransport};
+use crate::transport::sse::{SseClientConfig, SseTransport};
 use crate::transport::stdio::StdioServerConfig;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use bioma_actor::prelude::*;
@@ -15,12 +15,12 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ServerConfig {
     pub name: String,
-    #[serde(default = "default_version")]
+    #[builder(default = default_version())]
     pub version: String,
-    #[serde(default = "default_request_timeout")]
+    #[builder(default = default_request_timeout())]
     pub request_timeout: u64,
     #[serde(flatten)]
     pub transport: TransportConfig,
@@ -29,10 +29,10 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransportConfig {
     Stdio(StdioServerConfig),
-    Sse(SseServerConfig),
+    Sse(SseClientConfig),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ClientConfig {
     pub server: ServerConfig,
 }
@@ -64,7 +64,7 @@ impl ModelContextProtocolClient {
                     .map_err(|e| ModelContextProtocolClientError::Transport(format!("Stdio init: {}", e).into()))?,
             ),
             TransportConfig::Sse(config) => TransportType::Sse(
-                SseTransport::new_client(config)
+                SseTransport::new_client(config.clone())
                     .map_err(|e| ModelContextProtocolClientError::Transport(format!("SSE init: {}", e).into()))?,
             ),
         };

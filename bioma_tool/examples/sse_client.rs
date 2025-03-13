@@ -2,7 +2,7 @@ use anyhow::Result;
 use bioma_tool::{
     client::{ModelContextProtocolClient, ServerConfig, TransportConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
-    transport::sse::SseServerConfig,
+    transport::sse::SseClientConfig,
 };
 use clap::Parser;
 use std::net::SocketAddr;
@@ -35,12 +35,10 @@ async fn main() -> Result<()> {
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
 
-    let server = ServerConfig {
-        name: "bioma-tool".to_string(),
-        transport: TransportConfig::Sse(SseServerConfig { url: addr }),
-        version: "0.1.0".to_string(),
-        request_timeout: 5,
-    };
+    let server = ServerConfig::builder()
+        .name(addr.to_string())
+        .transport(TransportConfig::Sse(SseClientConfig::builder().server_url(addr).build()))
+        .build();
 
     // Create client
     let mut client = ModelContextProtocolClient::new(server).await?;

@@ -8,7 +8,11 @@ use bioma_tool::{
     },
     server::ModelContextProtocolServer,
     tools::{self, ToolCallHandler},
-    transport::{sse::SseTransport, stdio::StdioTransport, TransportType},
+    transport::{
+        sse::{SseServerConfig, SseTransport},
+        stdio::StdioTransport,
+        TransportType,
+    },
 };
 use clap::Parser;
 use std::net::SocketAddr;
@@ -117,7 +121,7 @@ async fn main() -> Result<()> {
         "stdio" => TransportType::Stdio(StdioTransport::new_server()),
         "sse" => {
             let url: SocketAddr = args.url.parse().context("Failed to parse server address")?;
-            TransportType::Sse(SseTransport::new_server(url))
+            TransportType::Sse(SseTransport::new_server(SseServerConfig { url, ..Default::default() }))
         }
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };

@@ -1,5 +1,6 @@
 use super::Transport;
 use anyhow::{Context, Result};
+use bon::Builder;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http_body_util::{BodyExt, Empty};
@@ -11,65 +12,325 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 use url::Url;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Unique identifier for SSE clients
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ClientId(String);
+
+impl ClientId {
+    /// Create a new unique client ID
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+}
+
+impl AsRef<str> for ClientId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Transport message type
+#[derive(Debug, Clone)]
+pub struct TransportMessage(String);
+
+impl TransportMessage {
+    /// Create a new transport message
+    pub fn new(content: String) -> Self {
+        Self(content)
+    }
+
+    /// Consume the message and return the inner string
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for TransportMessage {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// SSE-specific error types
+#[derive(Debug, thiserror::Error)]
+pub enum SseError {
+    #[error("Failed to establish connection: {0}")]
+    ConnectionError(#[from] reqwest::Error),
+
+    #[error("Failed to parse URL: {0}")]
+    UrlParseError(#[from] url::ParseError),
+
+    #[error("HTTP error: {0}")]
+    HttpError(StatusCode),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("JSON serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+
+    #[error("Channel error: {0}")]
+    ChannelError(String),
+
+    #[error("Hyper error: {0}")]
+    HyperError(#[from] hyper::Error),
+
+    #[error("HTTP builder error: {0}")]
+    HttpBuilderError(#[from] hyper::http::Error),
+
+    #[error("SSE error: {0}")]
+    Other(String),
+}
+
+fn default_server_url() -> SocketAddr {
+    "127.0.0.1:8080".parse().unwrap()
+}
+
+/// Server configuration with builder pattern
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
 pub struct SseServerConfig {
+    #[builder(default = default_server_url())]
     pub url: SocketAddr,
+    #[builder(default = default_channel_capacity())]
+    pub channel_capacity: usize,
+    #[builder(default = default_keep_alive())]
+    pub keep_alive: bool,
 }
 
+fn default_channel_capacity() -> usize {
+    32
+}
+
+fn default_keep_alive() -> bool {
+    true
+}
+
+impl Default for SseServerConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Client configuration with builder pattern
+#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+pub struct SseClientConfig {
+    #[builder(default = default_server_url())]
+    pub server_url: SocketAddr,
+    #[builder(default = default_retry_count())]
+    pub retry_count: usize,
+    #[builder(default = default_retry_delay())]
+    pub retry_delay: Duration,
+}
+
+fn default_retry_count() -> usize {
+    3
+}
+
+fn default_retry_delay() -> Duration {
+    Duration::from_secs(5)
+}
+
+impl Default for SseClientConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Client registry type for SSE server
+type ClientRegistry = Arc<Mutex<HashMap<ClientId, mpsc::Sender<TransportMessage>>>>;
+
+/// SSE transport operating mode
 enum SseMode {
-    Server { clients: Arc<Mutex<HashMap<String, mpsc::Sender<String>>>>, url: SocketAddr },
-    Client { sse_url: Url, endpoint_url: Arc<Mutex<Option<String>>>, http_client: Client },
+    /// Server mode with connected clients and binding address
+    Server { clients: ClientRegistry, url: SocketAddr, channel_capacity: usize },
+
+    /// Client mode connecting to a server
+    Client {
+        sse_url: Url,
+        endpoint_url: Arc<Mutex<Option<String>>>,
+        http_client: Client,
+        retry_count: usize,
+        retry_delay: Duration,
+    },
 }
 
+/// Format data as an SSE event with a specific type
+fn format_sse_event(event_type: &str, data: &str) -> String {
+    format!("event: {}\ndata: {}\n\n", event_type, data)
+}
+
+/// Server-Sent Events (SSE) transport implementation
 #[derive(Clone)]
 pub struct SseTransport {
     mode: Arc<SseMode>,
 }
 
 impl SseTransport {
-    pub fn new_server(url: SocketAddr) -> Self {
+    /// Create a new SSE transport in server mode
+    pub fn new_server(config: SseServerConfig) -> Self {
         let clients = Arc::new(Mutex::new(HashMap::new()));
 
-        Self { mode: Arc::new(SseMode::Server { clients, url }) }
+        Self { mode: Arc::new(SseMode::Server { clients, url: config.url, channel_capacity: config.channel_capacity }) }
     }
 
-    pub fn new_client(server: &SseServerConfig) -> Result<Self> {
+    /// Create a new SSE transport in client mode
+    pub fn new_client(config: SseClientConfig) -> Result<Self> {
         let http_client = ClientBuilder::new().build().context("Failed to create HTTP client")?;
-        let sse_url = Url::parse(&format!("http://{}", server.url)).context("Failed to create SSE URL")?;
+        let sse_url = Url::parse(&format!("http://{}", config.server_url)).context("Failed to parse server URL")?;
 
-        Ok(Self { mode: Arc::new(SseMode::Client { sse_url, endpoint_url: Arc::new(Mutex::new(None)), http_client }) })
+        Ok(Self {
+            mode: Arc::new(SseMode::Client {
+                sse_url,
+                endpoint_url: Arc::new(Mutex::new(None)),
+                http_client,
+                retry_count: config.retry_count,
+                retry_delay: config.retry_delay,
+            }),
+        })
     }
-}
 
-// Helper to format SSE events
-fn format_sse_event(event_type: &str, data: &str) -> String {
-    format!("event: {}\ndata: {}\n\n", event_type, data)
+    /// Set standard SSE headers on a response
+    fn set_sse_headers<T>(response: &mut Response<T>) {
+        response.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/event-stream"));
+        response.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-cache"));
+        response.headers_mut().insert(header::CONNECTION, header::HeaderValue::from_static("keep-alive"));
+    }
+
+    /// Parse an SSE event string into (type, data) components
+    fn parse_sse_event(event: &str) -> (Option<String>, Option<String>) {
+        let mut event_type = None;
+        let mut event_data = None;
+
+        for line in event.lines() {
+            if let Some(data) = line.strip_prefix("data: ") {
+                event_data = Some(data.to_string());
+            } else if let Some(typ) = line.strip_prefix("event: ") {
+                event_type = Some(typ.to_string());
+            }
+        }
+
+        (event_type, event_data)
+    }
+
+    /// Helper method to broadcast a message to all clients
+    async fn broadcast_to_clients(clients: &ClientRegistry, message: TransportMessage) -> Result<()> {
+        let sse_message = format_sse_event("message", message.as_ref());
+        let mut disconnected = Vec::new();
+
+        // Send to all connected clients
+        let clients_map = clients.lock().await;
+
+        for (client_id, tx) in clients_map.iter() {
+            if tx.send(TransportMessage::new(sse_message.clone())).await.is_err() {
+                debug!("Client {} disconnected", client_id.as_ref());
+                disconnected.push(client_id.clone());
+            }
+        }
+
+        // TODO: drop the lock,
+        // then reacquire it and remove disconnected clients
+
+        Ok(())
+    }
+
+    /// Connect to an SSE endpoint and process events
+    async fn connect_to_sse(
+        sse_url: &Url,
+        http_client: &Client,
+        endpoint_url: &Arc<Mutex<Option<String>>>,
+        request_tx: mpsc::Sender<String>,
+    ) -> Result<()> {
+        // Connect to SSE endpoint
+        let response = http_client
+            .get(sse_url.to_string())
+            .header("Accept", "text/event-stream")
+            .send()
+            .await
+            .context("Failed to connect to SSE endpoint")?;
+
+        if !response.status().is_success() {
+            return Err(SseError::HttpError(response.status()).into());
+        }
+
+        info!("Connected to SSE endpoint");
+
+        // Process SSE events from stream
+        let mut buffer = String::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.context("Failed to read SSE chunk")?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+
+            buffer.push_str(&chunk_str);
+
+            // Process complete events (double newline is the delimiter)
+            while let Some(pos) = buffer.find("\n\n") {
+                let event = buffer[..pos + 2].to_string();
+                buffer = buffer[pos + 2..].to_string();
+
+                // Extract event data using the helper function
+                let (event_type, event_data) = Self::parse_sse_event(&event);
+
+                match (event_type, event_data) {
+                    // Handle endpoint event - get the URL for sending messages
+                    (Some(typ), Some(data)) if typ == "endpoint" => {
+                        debug!("Received endpoint event: {}", data);
+
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                            if let Some(url) = json.get("url").and_then(|v| v.as_str()) {
+                                let mut endpoint_guard = endpoint_url.lock().await;
+                                *endpoint_guard = Some(url.to_string());
+
+                                debug!("Endpoint URL set to: {}", url);
+                            }
+                        }
+                    }
+                    // Handle message event - forward to handler
+                    (Some(typ), Some(data)) if typ == "message" => {
+                        debug!("Received message event: {}", data);
+
+                        if request_tx.send(data).await.is_err() {
+                            error!("Failed to forward message");
+                            return Err(SseError::ChannelError("Message channel closed".to_string()).into());
+                        }
+                    }
+                    // Ignore other event types
+                    _ => {}
+                }
+            }
+        }
+
+        Err(SseError::Other("SSE connection closed unexpectedly".to_string()).into())
+    }
 }
 
 impl Transport for SseTransport {
     async fn start(&mut self, request_tx: mpsc::Sender<String>) -> Result<()> {
         match &*self.mode {
-            SseMode::Server { clients, url } => {
+            SseMode::Server { clients, url, channel_capacity } => {
                 info!("Starting SSE server on {}", url);
 
                 // Start HTTP server
-                let listener = tokio::net::TcpListener::bind(*url).await?;
+                let listener = tokio::net::TcpListener::bind(*url).await.context("Failed to bind to socket")?;
 
                 // Process incoming connections
                 loop {
-                    let (stream, _) = listener.accept().await?;
+                    let (stream, _) = listener.accept().await.context("Failed to accept connection")?;
                     let io = TokioIo::new(stream);
 
                     // Clone everything needed for the connection handler
                     let clients_clone = clients.clone();
                     let request_tx_clone = request_tx.clone();
                     let url_clone = *url;
+                    let capacity = *channel_capacity;
 
                     // Spawn a task to serve the connection
                     tokio::task::spawn(async move {
@@ -86,32 +347,38 @@ impl Transport for SseTransport {
                                         debug!("New SSE client connected");
 
                                         // Create a channel for sending messages to this client
-                                        let (client_tx, mut client_rx) = mpsc::channel::<String>(32);
-                                        let client_id = Uuid::new_v4().to_string();
+                                        let (client_tx, mut client_rx) = mpsc::channel::<TransportMessage>(capacity);
+                                        let client_id = ClientId::new();
 
                                         // Register client
                                         {
                                             let mut clients_map = clients.lock().await;
-                                            clients_map.insert(client_id.clone(), client_tx.clone());
+                                            clients_map.insert(client_id.clone(), client_tx);
                                         }
 
                                         // Create a new channel for the streaming response
                                         let (response_tx, response_rx) =
-                                            mpsc::channel::<Result<Frame<Bytes>, std::io::Error>>(32);
+                                            mpsc::channel::<Result<Frame<Bytes>, std::io::Error>>(capacity);
 
                                         // Spawn a task to handle sending SSE events to the client
                                         tokio::spawn(async move {
                                             // Send initial endpoint event
                                             let endpoint_url = format!("http://{}/message", url);
                                             let endpoint_data = serde_json::json!({ "url": endpoint_url });
-                                            let endpoint_event = format_sse_event(
-                                                "endpoint",
-                                                &serde_json::to_string(&endpoint_data).unwrap_or_default(),
-                                            );
+
+                                            let endpoint_event = match serde_json::to_string(&endpoint_data) {
+                                                Ok(json) => format_sse_event("endpoint", &json),
+                                                Err(err) => {
+                                                    error!("Failed to serialize endpoint data: {}", err);
+                                                    return;
+                                                }
+                                            };
 
                                             // Send the initial event to the client via the response channel
-                                            if let Err(_) =
-                                                response_tx.send(Ok(Frame::data(Bytes::from(endpoint_event)))).await
+                                            if response_tx
+                                                .send(Ok(Frame::data(Bytes::from(endpoint_event))))
+                                                .await
+                                                .is_err()
                                             {
                                                 error!("Failed to send initial endpoint event to response stream");
                                                 return;
@@ -119,8 +386,10 @@ impl Transport for SseTransport {
 
                                             // Process incoming events from the client_rx channel
                                             while let Some(event) = client_rx.recv().await {
-                                                if let Err(_) =
-                                                    response_tx.send(Ok(Frame::data(Bytes::from(event)))).await
+                                                if response_tx
+                                                    .send(Ok(Frame::data(Bytes::from(event.into_inner()))))
+                                                    .await
+                                                    .is_err()
                                                 {
                                                     error!("Client disconnected, stopping event stream");
                                                     break;
@@ -135,52 +404,45 @@ impl Transport for SseTransport {
                                         let body = http_body_util::StreamBody::new(stream);
                                         let mut response = Response::new(http_body_util::Either::Left(body));
 
-                                        response.headers_mut().insert(
-                                            header::CONTENT_TYPE,
-                                            header::HeaderValue::from_static("text/event-stream"),
-                                        );
+                                        // Set SSE headers
+                                        Self::set_sse_headers(&mut response);
 
-                                        // Add standard SSE headers for best practices
-                                        response.headers_mut().insert(
-                                            header::CACHE_CONTROL,
-                                            header::HeaderValue::from_static("no-cache"),
-                                        );
-                                        response
-                                            .headers_mut()
-                                            .insert(header::CONNECTION, header::HeaderValue::from_static("keep-alive"));
-
-                                        Ok::<_, anyhow::Error>(response)
+                                        Ok::<_, SseError>(response)
                                     }
                                     // Message endpoint for receiving client messages
                                     (&Method::POST, "/message") => {
                                         // Get message from request body
                                         let body = req.into_body();
-                                        let bytes = body.collect().await?.to_bytes();
+                                        let bytes = body
+                                            .collect()
+                                            .await
+                                            .map_err(|e| SseError::HyperError(e.into()))?
+                                            .to_bytes();
                                         let message = String::from_utf8_lossy(&bytes).to_string();
 
                                         debug!("Received client message: {}", message);
 
                                         // Forward to message handler
-                                        if let Err(e) = request_tx.send(message).await {
-                                            error!("Failed to forward message: {}", e);
+                                        if request_tx.send(message).await.is_err() {
+                                            error!("Failed to forward message");
                                         }
 
                                         // Return OK response
                                         let response = Response::builder()
                                             .status(StatusCode::OK)
                                             .body(http_body_util::Either::Right(Empty::new()))
-                                            .unwrap();
+                                            .map_err(|e| SseError::HttpBuilderError(e))?;
 
-                                        Ok::<_, anyhow::Error>(response)
+                                        Ok::<_, SseError>(response)
                                     }
                                     // Any other endpoint
                                     _ => {
                                         let response = Response::builder()
                                             .status(StatusCode::NOT_FOUND)
                                             .body(http_body_util::Either::Right(Empty::new()))
-                                            .unwrap();
+                                            .map_err(|e| SseError::HttpBuilderError(e))?;
 
-                                        Ok::<_, anyhow::Error>(response)
+                                        Ok::<_, SseError>(response)
                                     }
                                 }
                             }
@@ -194,84 +456,30 @@ impl Transport for SseTransport {
                     });
                 }
             }
-            SseMode::Client { sse_url, endpoint_url, http_client } => {
+            SseMode::Client { sse_url, endpoint_url, http_client, retry_count, retry_delay } => {
                 info!("Starting SSE client, connecting to {}", sse_url);
 
-                // Connect to SSE endpoint
-                let response = http_client
-                    .get(sse_url.to_string())
-                    .header("Accept", "text/event-stream")
-                    .send()
-                    .await
-                    .context("Failed to connect to SSE endpoint")?;
+                let mut attempts = 0;
+                let mut last_error = None;
 
-                if !response.status().is_success() {
-                    return Err(anyhow::anyhow!("Failed to connect to SSE endpoint: HTTP {}", response.status()));
-                }
+                // Implement retry logic
+                while attempts < *retry_count {
+                    attempts += 1;
 
-                info!("Connected to SSE endpoint");
-
-                // Process SSE events from stream
-                let mut buffer = String::new();
-                let mut stream = response.bytes_stream();
-
-                while let Some(chunk_result) = stream.next().await {
-                    let chunk = chunk_result.context("Failed to read SSE chunk")?;
-                    let chunk_str = String::from_utf8_lossy(&chunk);
-
-                    buffer.push_str(&chunk_str);
-
-                    // Process complete events (double newline is the delimiter)
-                    while let Some(pos) = buffer.find("\n\n") {
-                        let event = buffer[..pos + 2].to_string();
-                        buffer = buffer[pos + 2..].to_string();
-
-                        // Parse event fields
-                        let mut event_type = None;
-                        let mut event_data = None;
-
-                        for line in event.lines() {
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                event_data = Some(data.to_string());
-                            } else if let Some(typ) = line.strip_prefix("event: ") {
-                                event_type = Some(typ.to_string());
-                            }
-                        }
-
-                        match (event_type, event_data) {
-                            // Handle endpoint event - get the URL for sending messages
-                            (Some(typ), Some(data)) if typ == "endpoint" => {
-                                debug!("Received endpoint event: {}", data);
-
-                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                                    if let Some(url) = json.get("url").and_then(|v| v.as_str()) {
-                                        let mut endpoint_guard = endpoint_url.lock().await;
-                                        *endpoint_guard = Some(url.to_string());
-
-                                        debug!("Endpoint URL set to: {}", url);
-                                    }
-                                }
-                            }
-                            // Handle message event - forward to handler
-                            (Some(typ), Some(data)) if typ == "message" => {
-                                debug!("Received message event: {}", data);
-
-                                if let Err(e) = request_tx.send(data).await {
-                                    error!("Failed to forward message: {}", e);
-                                    break;
-                                }
-                            }
-                            // Ignore other event types
-                            _ => {}
+                    match Self::connect_to_sse(sse_url, http_client, endpoint_url, request_tx.clone()).await {
+                        Ok(_) => return Ok(()),
+                        Err(e) => {
+                            last_error = Some(e);
+                            info!(
+                                "Connection attempt {}/{} failed, retrying in {:?}",
+                                attempts, retry_count, retry_delay
+                            );
+                            tokio::time::sleep(*retry_delay).await;
                         }
                     }
                 }
 
-                error!("SSE connection closed");
-
-                // In a production implementation, would attempt to reconnect
-
-                Ok(())
+                Err(last_error.unwrap_or_else(|| SseError::Other("Failed to connect after retries".to_string()).into()))
             }
         }
     }
@@ -280,25 +488,7 @@ impl Transport for SseTransport {
         match &*self.mode {
             SseMode::Server { clients, .. } => {
                 debug!("Server sending [sse]: {}", message);
-
-                // Format as SSE message event
-                let sse_message = format_sse_event("message", &message);
-
-                // Send to all connected clients
-                let clients_map = clients.lock().await;
-                let mut disconnected = Vec::new();
-
-                for (client_id, tx) in clients_map.iter() {
-                    if let Err(_) = tx.send(sse_message.clone()).await {
-                        debug!("Client {} disconnected", client_id);
-                        disconnected.push(client_id.clone());
-                    }
-                }
-
-                // In a production implementation, would clean up disconnected clients
-                // This would require dropping the lock first and acquiring it again
-
-                Ok(())
+                Self::broadcast_to_clients(clients, TransportMessage::new(message)).await
             }
             SseMode::Client { endpoint_url, http_client, .. } => {
                 debug!("Client sending [sse]: {}", message);
@@ -309,9 +499,10 @@ impl Transport for SseTransport {
                     match &*endpoint_guard {
                         Some(url) => url.clone(),
                         None => {
-                            return Err(anyhow::anyhow!(
-                                "No endpoint URL available yet. Wait for the SSE connection to establish."
-                            ));
+                            return Err(SseError::Other(
+                                "No endpoint URL available yet. Wait for the SSE connection to establish.".to_string(),
+                            )
+                            .into());
                         }
                     }
                 };
@@ -326,7 +517,7 @@ impl Transport for SseTransport {
                     .context("Failed to send message")?;
 
                 if !response.status().is_success() {
-                    return Err(anyhow::anyhow!("Failed to send message: HTTP {}", response.status()));
+                    return Err(SseError::HttpError(response.status()).into());
                 }
 
                 debug!("Message sent successfully");
