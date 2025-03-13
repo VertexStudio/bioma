@@ -4,6 +4,8 @@ use crate::schema::{
     ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
+use crate::transport::sse::{SseServerConfig, SseTransport};
+use crate::transport::stdio::StdioServerConfig;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use bioma_actor::prelude::*;
 use jsonrpc_core::Params;
@@ -18,13 +20,16 @@ pub struct ServerConfig {
     pub name: String,
     #[serde(default = "default_version")]
     pub version: String,
-    #[serde(default = "default_transport")]
-    pub transport: String,
-    pub command: String,
-    pub args: Vec<String>,
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
-    pub enabled: bool,
+    #[serde(flatten)]
+    pub transport: TransportConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TransportConfig {
+    Stdio(StdioServerConfig),
+    Sse(SseServerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,10 +39,6 @@ pub struct ClientConfig {
 
 fn default_version() -> String {
     "0.1.0".to_string()
-}
-
-fn default_transport() -> String {
-    "stdio".to_string()
 }
 
 fn default_request_timeout() -> u64 {
@@ -56,19 +57,16 @@ impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
         let (tx, rx) = mpsc::channel::<String>(1);
 
-        let transport = StdioTransport::new_client(&server);
-        let transport = match transport {
-            Ok(transport) => transport,
-            Err(e) => return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into())),
-        };
-
-        let transport = match server.transport.as_str() {
-            "stdio" => TransportType::Stdio(transport),
-            _ => {
-                return Err(ModelContextProtocolClientError::Transport(
-                    format!("Invalid transport type: {}", server.transport.as_str()).into(),
-                ))
-            }
+        // Create the appropriate transport based on configuration
+        let transport = match &server.transport {
+            TransportConfig::Stdio(config) => TransportType::Stdio(
+                StdioTransport::new_client(config)
+                    .map_err(|e| ModelContextProtocolClientError::Transport(format!("Stdio init: {}", e).into()))?,
+            ),
+            TransportConfig::Sse(config) => TransportType::Sse(
+                SseTransport::new_client(config)
+                    .map_err(|e| ModelContextProtocolClientError::Transport(format!("SSE init: {}", e).into()))?,
+            ),
         };
 
         // Start transport once during initialization

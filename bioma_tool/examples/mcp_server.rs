@@ -8,9 +8,10 @@ use bioma_tool::{
     },
     server::ModelContextProtocolServer,
     tools::{self, ToolCallHandler},
-    transport::{stdio::StdioTransport, TransportType},
+    transport::{sse::SseTransport, stdio::StdioTransport, TransportType},
 };
 use clap::Parser;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -20,12 +21,16 @@ use tracing_subscriber::fmt::format::FmtSpan;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the log file
-    #[arg(long, default_value = "mcp_server.log")]
+    #[arg(long, short, default_value = "mcp_server.log")]
     log_file: PathBuf,
 
     /// Transport type (stdio or websocket)
-    #[arg(long, default_value = "stdio")]
+    #[arg(long, short, default_value = "stdio")]
     transport: String,
+
+    /// Server address for SSE transport
+    #[arg(long, default_value = "127.0.0.1:8090")]
+    url: String,
 }
 
 struct McpServer {
@@ -110,6 +115,10 @@ async fn main() -> Result<()> {
 
     let transport = match args.transport.as_str() {
         "stdio" => TransportType::Stdio(StdioTransport::new_server()),
+        "sse" => {
+            let url: SocketAddr = args.url.parse().context("Failed to parse server address")?;
+            TransportType::Sse(SseTransport::new_server(url))
+        }
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 

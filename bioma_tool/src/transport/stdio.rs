@@ -1,6 +1,6 @@
 use super::Transport;
-use crate::client::ServerConfig;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -8,6 +8,12 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 use tracing::{debug, error};
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct StdioServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+}
 
 enum StdioMode {
     Server(Arc<Mutex<tokio::io::Stdout>>),
@@ -30,7 +36,7 @@ impl StdioTransport {
         Self { mode: Arc::new(StdioMode::Server(Arc::new(Mutex::new(tokio::io::stdout())))) }
     }
 
-    pub fn new_client(server: &ServerConfig) -> Result<Self> {
+    pub fn new_client(server: &StdioServerConfig) -> Result<Self> {
         let mut child = Command::new(&server.command)
             .args(&server.args)
             .stdin(std::process::Stdio::piped())
