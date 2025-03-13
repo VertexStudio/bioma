@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -522,7 +522,7 @@ impl Transport for SseTransport {
                         Ok(_) => return Ok(()),
                         Err(e) => {
                             last_error = Some(e);
-                            info!(
+                            warn!(
                                 "Connection attempt {}/{} failed, retrying in {:?}",
                                 attempts, retry_count, retry_delay
                             );
