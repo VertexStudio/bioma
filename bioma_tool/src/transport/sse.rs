@@ -217,7 +217,7 @@ impl SseTransport {
     }
 
     /// Parse an SSE event string into (type, data) components
-    fn parse_sse_event(event: &str) -> (Option<String>, Option<String>) {
+    pub fn parse_sse_event(event: &str) -> (Option<String>, Option<String>) {
         let mut event_type = None;
         let mut event_data = None;
 
@@ -233,7 +233,7 @@ impl SseTransport {
     }
 
     /// Parse JSON-RPC ID from a message
-    fn extract_jsonrpc_id(message: &str) -> Option<String> {
+    pub fn extract_jsonrpc_id(message: &str) -> Option<String> {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(message) {
             if let Some(id) = json.get("id") {
                 if let Some(id_str) = id.as_str() {
