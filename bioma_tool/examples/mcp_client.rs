@@ -30,15 +30,13 @@ async fn main() -> Result<()> {
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
 
-    let server = ServerConfig {
-        name: "bioma-tool".to_string(),
-        transport: TransportConfig::Stdio(StdioServerConfig {
+    let server = ServerConfig::builder()
+        .name("bioma-tool".to_string())
+        .transport(TransportConfig::Stdio(StdioServerConfig {
             command: args.command,
             args: args.args.unwrap_or_default(),
-        }),
-        version: "0.1.0".to_string(),
-        request_timeout: 5,
-    };
+        }))
+        .build();
 
     // Create client
     let mut client = ModelContextProtocolClient::new(server).await?;

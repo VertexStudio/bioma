@@ -29,6 +29,7 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum TransportConfig {
     Stdio(StdioServerConfig),
     Sse(SseClientConfig),
