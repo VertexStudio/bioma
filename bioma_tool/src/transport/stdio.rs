@@ -11,7 +11,7 @@ use tokio::{
 use tracing::{debug, error};
 
 enum StdioMode {
-    Server(Arc<Mutex<tokio::io::Stdout>>),
+    Server(Mutex<tokio::io::Stdout>),
     Client {
         // Holds the child process to keep it alive
         #[allow(unused)]
@@ -28,7 +28,7 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     pub fn new_server() -> Self {
-        Self { mode: Arc::new(StdioMode::Server(Arc::new(Mutex::new(tokio::io::stdout())))) }
+        Self { mode: Arc::new(StdioMode::Server(Mutex::new(tokio::io::stdout()))) }
     }
 
     pub fn new_client(server: &ServerConfig) -> Result<Self> {
@@ -103,5 +103,29 @@ impl Transport for StdioTransport {
             }
         }
         Ok(())
+    }
+
+    fn close(&mut self) -> impl std::future::Future<Output = Result<()>> {
+        async move {
+            match &*self.mode {
+                StdioMode::Server(stdout) => {
+                    debug!("Closing server stdio transport");
+                    let mut stdout = stdout.lock().await;
+                    stdout.flush().await.context("Failed to flush stdout on close")?;
+                }
+                StdioMode::Client { stdin, process, .. } => {
+                    debug!("Closing client stdio transport");
+                    let mut stdin = stdin.lock().await;
+                    stdin.flush().await.context("Failed to flush stdin on close")?;
+
+                    // Graceful termination of the child process
+                    let mut child = process.lock().await;
+                    if let Err(e) = child.start_kill() {
+                        debug!("Failed to kill child process: {}", e);
+                    }
+                }
+            }
+            Ok(())
+        }
     }
 }
