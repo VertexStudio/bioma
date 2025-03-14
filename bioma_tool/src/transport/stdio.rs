@@ -1,4 +1,4 @@
-use super::Transport;
+use super::{Transport, TransportMetadata};
 use crate::client::StdioConfig;
 use crate::JsonRpcMessage;
 use anyhow::{Context, Error, Result};
@@ -10,6 +10,10 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, error};
+
+pub struct StdioMetadata {}
+
+impl TransportMetadata for StdioMetadata {}
 
 enum StdioMode {
     Server(Mutex<tokio::io::Stdout>),
@@ -110,7 +114,7 @@ impl Transport for StdioTransport {
         Ok(handle)
     }
 
-    async fn send(&mut self, message: JsonRpcMessage) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, _metadata: Option<&dyn TransportMetadata>) -> Result<()> {
         let message_str = serde_json::to_string(&message)?;
         match &*self.mode {
             StdioMode::Server(stdout) => {

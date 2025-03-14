@@ -229,7 +229,7 @@ impl ModelContextProtocolClient {
         };
 
         // Send request
-        if let Err(e) = self.transport.send(request.into()).await {
+        if let Err(e) = self.transport.send(request.into(), None).await {
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
@@ -282,7 +282,7 @@ impl ModelContextProtocolClient {
 
         // Send notification without waiting for response
         self.transport
-            .send(notification.into())
+            .send(notification.into(), None)
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
     }

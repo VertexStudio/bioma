@@ -6,6 +6,7 @@ use crate::schema::{
     ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
+use crate::transport::sse::{SseServerConfig, SseTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::{Context, Result};
@@ -262,6 +263,8 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     });
 
     let (on_message_tx, mut on_message_rx) = mpsc::channel(32);
+    let (on_sse_message_tx, on_sse_message_rx) = mpsc::channel(32);
+
     let (on_error_tx, _on_error_rx) = mpsc::channel(32);
     let (on_close_tx, _on_close_rx) = mpsc::channel(32);
 
@@ -271,7 +274,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
             TransportType::Stdio(transport)
         }
         TransportConfig::Sse(_config) => {
-            unimplemented!("SSE transport not implemented");
+            let transport =
+                SseTransport::new_server(SseServerConfig::default(), on_sse_message_tx, on_error_tx, on_close_tx);
+            TransportType::Sse(transport)
         }
         TransportConfig::Websocket(_config) => {
             unimplemented!("Websocket transport not implemented");
