@@ -240,7 +240,7 @@ impl SseTransport {
 
     /// Create a new SSE transport in client mode
     pub fn new_client(
-        config: SseClientConfig,
+        config: &SseClientConfig,
         on_message: mpsc::Sender<JsonRpcMessage>,
         on_error: mpsc::Sender<Error>,
         on_close: mpsc::Sender<()>,

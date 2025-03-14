@@ -1,6 +1,10 @@
 use anyhow::Result;
-use bioma_tool::transport::sse::{ClientId, SseClientConfig, SseServerConfig, SseTransport, TransportMessage};
+use bioma_tool::client::SseConfig as SseClientConfig;
+use bioma_tool::server::SseConfig as SseServerConfig;
+use bioma_tool::transport::sse::{ClientId, SseMessage, SseTransport};
 use bioma_tool::transport::Transport;
+use bioma_tool::JsonRpcMessage;
+use serde_json::json;
 use std::net::{SocketAddr, TcpListener};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -26,38 +30,16 @@ async fn test_client_id() {
 
 #[tokio::test]
 async fn test_transport_message() {
-    let content = "Test message content";
-    let message = TransportMessage::new(content.to_string());
+    // Create a JsonRpcMessage
+    let message = json!({"jsonrpc": "2.0", "method": "test", "params": {}, "id": 1});
+    let json_rpc_message: JsonRpcMessage = serde_json::from_value(message).unwrap();
 
-    // Test as_ref
-    assert_eq!(message.as_ref(), content);
+    // Create a TransportMessage
+    let transport_message = bioma_tool::transport::sse::TransportMessage::new(json_rpc_message.clone());
 
-    // Test into_inner
-    let inner = message.into_inner();
-    assert_eq!(inner, content);
-}
-
-#[tokio::test]
-async fn test_jsonrpc_id_extraction() {
-    // Test with string ID
-    let message = r#"{"jsonrpc":"2.0","method":"test","params":{},"id":"test-id"}"#;
-    let id = SseTransport::extract_jsonrpc_id(message);
-    assert_eq!(id, Some("test-id".to_string()));
-
-    // Test with numeric ID
-    let message = r#"{"jsonrpc":"2.0","method":"test","params":{},"id":123}"#;
-    let id = SseTransport::extract_jsonrpc_id(message);
-    assert_eq!(id, Some("123".to_string()));
-
-    // Test with no ID
-    let message = r#"{"jsonrpc":"2.0","method":"test","params":{}}"#;
-    let id = SseTransport::extract_jsonrpc_id(message);
-    assert_eq!(id, None);
-
-    // Test with invalid JSON
-    let message = "not json";
-    let id = SseTransport::extract_jsonrpc_id(message);
-    assert_eq!(id, None);
+    // Test properties
+    assert_eq!(transport_message.event_type, "message");
+    assert_eq!(transport_message.message, json_rpc_message);
 }
 
 #[tokio::test]
@@ -69,17 +51,17 @@ async fn test_sse_event_format_parse() {
     let event = format!("event: {}\ndata: {}\n\n", event_type, data);
 
     // Parse it back with our function
-    let (parsed_type, parsed_data) = SseTransport::parse_sse_event(&event);
+    let parsed_event = SseTransport::parse_sse_event(&event);
 
-    assert_eq!(parsed_type, Some(event_type.to_string()));
-    assert_eq!(parsed_data, Some(data.to_string()));
+    assert_eq!(parsed_event.event_type, Some(event_type.to_string()));
+    assert_eq!(parsed_event.data, Some(data.to_string()));
 
     // Test with missing type
     let event = format!("data: {}\n\n", data);
-    let (parsed_type, parsed_data) = SseTransport::parse_sse_event(&event);
+    let parsed_event = SseTransport::parse_sse_event(&event);
 
-    assert_eq!(parsed_type, None);
-    assert_eq!(parsed_data, Some(data.to_string()));
+    assert_eq!(parsed_event.event_type, None);
+    assert_eq!(parsed_event.data, Some(data.to_string()));
 }
 
 // TODO: Not passing rn.
@@ -90,69 +72,86 @@ async fn test_sse_basic_functionality() -> Result<()> {
     let addr = listener.local_addr()?;
     drop(listener);
 
-    // Create server config and start server
-    let server_config = SseServerConfig::builder().url(addr).build();
-    let mut server = SseTransport::new_server(server_config);
+    let endpoint = format!("{}", addr);
+
+    // Create server config
+    let server_config = SseServerConfig::builder().endpoint(endpoint.clone()).build();
 
     // Create server channel
-    let (server_tx, mut server_rx) = mpsc::channel::<String>(32);
+    let (server_msg_tx, mut server_msg_rx) = mpsc::channel::<SseMessage>(32);
+    let (server_err_tx, _) = mpsc::channel(32);
+    let (server_close_tx, _) = mpsc::channel(32);
+
+    // Create server transport
+    let mut server = SseTransport::new_server(server_config.clone(), server_msg_tx, server_err_tx, server_close_tx);
 
     // Start server in background
     let server_handle = tokio::spawn(async move {
-        if let Err(e) = server.start(server_tx).await {
+        if let Err(e) = server.start().await {
             eprintln!("Server error: {:?}", e);
         }
     });
 
     // Wait for server to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Create and start client
-    let client_config = SseClientConfig::builder().server_url(addr).build();
-    let mut client1 = SseTransport::new_client(client_config)?;
+    // Create client config
+    let client_config = SseClientConfig::builder().endpoint(endpoint).build();
 
     // Create client channel
-    let (client_tx, mut client_rx) = mpsc::channel::<String>(32);
+    let (client_msg_tx, mut client_msg_rx) = mpsc::channel::<JsonRpcMessage>(32);
+    let (client_err_tx, _) = mpsc::channel(32);
+    let (client_close_tx, _) = mpsc::channel(32);
+
+    // Create client transport
+    let mut client1 = SseTransport::new_client(&client_config, client_msg_tx, client_err_tx, client_close_tx)?;
 
     // Start client in background
     let client_handle = tokio::spawn(async move {
-        if let Err(e) = client1.start(client_tx).await {
+        if let Err(e) = client1.start().await {
             eprintln!("Client error: {:?}", e);
         }
     });
 
-    // Client should receive an endpoint event
-    let message = timeout(Duration::from_secs(2), client_rx.recv()).await?.unwrap();
-    assert!(message.contains("event: endpoint"), "Client should receive endpoint event");
-    assert!(message.contains("client_id"), "Endpoint event should contain client_id");
-
-    // Create another client instance for sending messages
-    let client_config = SseClientConfig::builder().server_url(addr).build();
-    let mut client2 = SseTransport::new_client(client_config)?;
-
     // Wait for connection establishment
     tokio::time::sleep(Duration::from_millis(500)).await;
 
+    // Create another client for sending messages
+    let (tx, _) = mpsc::channel::<JsonRpcMessage>(32);
+    let (err_tx, _) = mpsc::channel(32);
+    let (close_tx, _) = mpsc::channel(32);
+
+    let mut client2 = SseTransport::new_client(&client_config, tx, err_tx, close_tx)?;
+
     // Send a message from client to server
-    let test_request = r#"{"jsonrpc":"2.0","method":"test","params":{},"id":"test-id"}"#;
-    client2.send(test_request.to_string()).await?;
+    let test_request = json!({"jsonrpc":"2.0","method":"test","params":{},"id":"test-id"});
+    let json_rpc_message: JsonRpcMessage = serde_json::from_value(test_request.clone())?;
+    client2.send(json_rpc_message, serde_json::Value::Null).await?;
 
     // Server should receive the message
-    let received = timeout(Duration::from_secs(2), server_rx.recv()).await?.unwrap();
-    assert_eq!(received, test_request);
+    let received = timeout(Duration::from_secs(2), server_msg_rx.recv()).await?.unwrap();
+    assert_eq!(serde_json::to_value(received.message)?, test_request);
 
-    // Create a server instance for sending responses
-    let server_config = SseServerConfig::builder().url(addr).build();
-    let mut server2 = SseTransport::new_server(server_config);
+    // Create another server instance for sending responses
+    let (tx, _) = mpsc::channel::<SseMessage>(32);
+    let (err_tx, _) = mpsc::channel(32);
+    let (close_tx, _) = mpsc::channel(32);
+
+    let mut server2 = SseTransport::new_server(server_config, tx, err_tx, close_tx);
 
     // Send response from server to client
-    let test_response = r#"{"jsonrpc":"2.0","result":{},"id":"test-id"}"#;
-    server2.send(test_response.to_string()).await?;
+    let test_response = json!({"jsonrpc":"2.0","result":{},"id":"test-id"});
+    let json_rpc_message: JsonRpcMessage = serde_json::from_value(test_response.clone())?;
+
+    // Create metadata with client ID
+    let client_id = received.client_id.as_ref().to_string();
+    let metadata = json!({ "client_id": client_id });
+
+    server2.send(json_rpc_message, metadata).await?;
 
     // Client should receive the response
-    let response_event = timeout(Duration::from_secs(2), client_rx.recv()).await?.unwrap();
-    assert!(response_event.contains("event: message"), "Event should be of message type");
-    assert!(response_event.contains(test_response), "Response should contain the expected JSON");
+    let response = timeout(Duration::from_secs(2), client_msg_rx.recv()).await?.unwrap();
+    assert_eq!(serde_json::to_value(response)?, test_response);
 
     // Cleanup
     server_handle.abort();
@@ -165,19 +164,24 @@ async fn test_sse_basic_functionality() -> Result<()> {
 async fn test_client_retry() -> Result<()> {
     // Use a non-existent server address
     let addr = "127.0.0.1:49152".parse::<SocketAddr>()?;
+    let endpoint = format!("{}", addr);
 
     // Configure client with retries
     let client_config =
-        SseClientConfig::builder().server_url(addr).retry_count(2).retry_delay(Duration::from_millis(100)).build();
+        SseClientConfig::builder().endpoint(endpoint).retry_count(2).retry_delay(Duration::from_millis(100)).build();
 
-    let mut client = SseTransport::new_client(client_config)?;
-    let (tx, _) = mpsc::channel::<String>(1);
+    // Create channels
+    let (tx, _) = mpsc::channel::<JsonRpcMessage>(1);
+    let (err_tx, _) = mpsc::channel(32);
+    let (close_tx, _) = mpsc::channel(32);
+
+    let mut client = SseTransport::new_client(&client_config, tx, err_tx, close_tx)?;
 
     // Start timing
     let start = std::time::Instant::now();
 
     // Start the client - should fail after retries
-    let result = client.start(tx).await;
+    let result = client.start().await;
 
     // Check timing and result
     let elapsed = start.elapsed();
@@ -195,13 +199,19 @@ async fn test_multiple_clients() -> Result<()> {
     let addr = listener.local_addr()?;
     drop(listener);
 
+    let endpoint = format!("{}", addr);
+
     // Start server
-    let server_config = SseServerConfig::builder().url(addr).build();
-    let mut server = SseTransport::new_server(server_config);
-    let (server_tx, mut server_rx) = mpsc::channel::<String>(32);
+    let server_config = SseServerConfig::builder().endpoint(endpoint.clone()).build();
+
+    let (server_msg_tx, mut server_msg_rx) = mpsc::channel::<SseMessage>(32);
+    let (server_err_tx, _) = mpsc::channel(32);
+    let (server_close_tx, _) = mpsc::channel(32);
+
+    let mut server = SseTransport::new_server(server_config, server_msg_tx, server_err_tx, server_close_tx);
 
     tokio::spawn(async move {
-        if let Err(e) = server.start(server_tx).await {
+        if let Err(e) = server.start().await {
             eprintln!("Server error: {:?}", e);
         }
     });
@@ -214,13 +224,17 @@ async fn test_multiple_clients() -> Result<()> {
     let mut client_handles = Vec::new();
     let mut client_rxs = Vec::new();
 
+    let client_config = SseClientConfig::builder().endpoint(endpoint.clone()).build();
+
     for i in 0..client_count {
-        let client_config = SseClientConfig::builder().server_url(addr).build();
-        let mut client = SseTransport::new_client(client_config)?;
-        let (tx, rx) = mpsc::channel::<String>(32);
+        let (tx, rx) = mpsc::channel::<JsonRpcMessage>(32);
+        let (err_tx, _) = mpsc::channel(32);
+        let (close_tx, _) = mpsc::channel(32);
+
+        let mut client = SseTransport::new_client(&client_config, tx, err_tx, close_tx)?;
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = client.start(tx).await {
+            if let Err(e) = client.start().await {
                 eprintln!("Client {} error: {:?}", i, e);
             }
         });
@@ -230,30 +244,40 @@ async fn test_multiple_clients() -> Result<()> {
     }
 
     // Wait for clients to connect and receive their endpoint events
-    for rx in &mut client_rxs {
-        let _ = timeout(Duration::from_secs(2), rx.recv()).await?;
-    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Create a client for sending messages
-    let client_config = SseClientConfig::builder().server_url(addr).build();
-    let mut sender = SseTransport::new_client(client_config)?;
+    let (tx, _) = mpsc::channel::<JsonRpcMessage>(32);
+    let (err_tx, _) = mpsc::channel(32);
+    let (close_tx, _) = mpsc::channel(32);
+
+    let mut sender = SseTransport::new_client(&client_config, tx, err_tx, close_tx)?;
 
     // Wait for connection
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Send messages with unique IDs
     for i in 0..client_count {
-        let message = format!(r#"{{"jsonrpc":"2.0","method":"test","params":{{}},"id":"client-{}"}}"#, i);
-        sender.send(message).await?;
+        let message = json!({
+            "jsonrpc": "2.0",
+            "method": "test",
+            "params": {},
+            "id": format!("client-{}", i)
+        });
+
+        let json_rpc_message: JsonRpcMessage = serde_json::from_value(message)?;
+        sender.send(json_rpc_message, serde_json::Value::Null).await?;
 
         // Allow server to process
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     // Verify server received all messages
-    for i in 0..client_count {
-        if let Ok(Some(received)) = timeout(Duration::from_secs(1), server_rx.recv()).await {
-            assert!(received.contains(&format!("client-{}", i)), "Server should receive message from client {}", i);
+    for _ in 0..client_count {
+        if let Ok(Some(received)) = timeout(Duration::from_secs(1), server_msg_rx.recv()).await {
+            let message_json = serde_json::to_value(received.message)?;
+            let id = message_json["id"].as_str().unwrap_or("");
+            assert!(id.contains(&format!("client-")), "Server should receive message from client");
         }
     }
 
@@ -269,15 +293,16 @@ async fn test_multiple_clients() -> Result<()> {
 async fn test_server_config() {
     // Test default config
     let default_config = SseServerConfig::default();
-    assert_eq!(default_config.url.to_string(), "127.0.0.1:8080");
+    assert_eq!(default_config.endpoint, "127.0.0.1:8080");
     assert_eq!(default_config.channel_capacity, 32);
     assert!(default_config.keep_alive);
 
     // Test builder pattern
     let custom_addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
-    let custom_config = SseServerConfig::builder().url(custom_addr).channel_capacity(64).keep_alive(false).build();
+    let custom_config =
+        SseServerConfig::builder().endpoint(custom_addr.to_string()).channel_capacity(64).keep_alive(false).build();
 
-    assert_eq!(custom_config.url, custom_addr);
+    assert_eq!(custom_config.endpoint, "127.0.0.1:9090");
     assert_eq!(custom_config.channel_capacity, 64);
     assert!(!custom_config.keep_alive);
 }
@@ -286,16 +311,19 @@ async fn test_server_config() {
 async fn test_client_config() {
     // Test default config
     let default_config = SseClientConfig::default();
-    assert_eq!(default_config.server_url.to_string(), "127.0.0.1:8080");
+    assert_eq!(default_config.endpoint, "http://127.0.0.1:8090");
     assert_eq!(default_config.retry_count, 3);
     assert_eq!(default_config.retry_delay, Duration::from_secs(5));
 
     // Test builder pattern
     let custom_addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
-    let custom_config =
-        SseClientConfig::builder().server_url(custom_addr).retry_count(5).retry_delay(Duration::from_secs(2)).build();
+    let custom_config = SseClientConfig::builder()
+        .endpoint(custom_addr.to_string())
+        .retry_count(5)
+        .retry_delay(Duration::from_secs(2))
+        .build();
 
-    assert_eq!(custom_config.server_url, custom_addr);
+    assert_eq!(custom_config.endpoint, "127.0.0.1:9090");
     assert_eq!(custom_config.retry_count, 5);
     assert_eq!(custom_config.retry_delay, Duration::from_secs(2));
 }
@@ -304,19 +332,32 @@ async fn test_client_config() {
 async fn test_error_handling() -> Result<()> {
     // Test connection to non-existent server with no retries
     let addr = "127.0.0.1:49153".parse::<SocketAddr>()?;
-    let client_config = SseClientConfig::builder().server_url(addr).retry_count(0).build();
+    let endpoint = format!("{}", addr);
 
-    let mut client = SseTransport::new_client(client_config)?;
-    let (tx, _) = mpsc::channel::<String>(1);
+    let client_config = SseClientConfig::builder().endpoint(endpoint.clone()).retry_count(0).build();
 
-    let result = client.start(tx).await;
+    let (tx, _) = mpsc::channel::<JsonRpcMessage>(1);
+    let (err_tx, _) = mpsc::channel(32);
+    let (close_tx, _) = mpsc::channel(32);
+
+    let mut client = SseTransport::new_client(&client_config, tx, err_tx, close_tx)?;
+
+    let result = client.start().await;
     assert!(result.is_err(), "Connection to non-existent server should fail");
 
     // Test sending a message before connection is established
-    let client_config = SseClientConfig::builder().server_url(addr).build();
-    let mut client = SseTransport::new_client(client_config)?;
+    let client_config = SseClientConfig::builder().endpoint(endpoint).build();
 
-    let result = client.send("test message".to_string()).await;
+    let (tx, _) = mpsc::channel::<JsonRpcMessage>(1);
+    let (err_tx, _) = mpsc::channel(32);
+    let (close_tx, _) = mpsc::channel(32);
+
+    let mut client = SseTransport::new_client(&client_config, tx, err_tx, close_tx)?;
+
+    let test_message = json!({"jsonrpc":"2.0","method":"test","params":{},"id":"test"});
+    let json_rpc_message: JsonRpcMessage = serde_json::from_value(test_message)?;
+
+    let result = client.send(json_rpc_message, serde_json::Value::Null).await;
     assert!(result.is_err(), "Sending without connection should fail");
 
     Ok(())

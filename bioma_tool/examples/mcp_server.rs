@@ -6,7 +6,7 @@ use bioma_tool::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{ModelContextProtocolServer, StdioConfig, TransportConfig},
+    server::{ModelContextProtocolServer, SseConfig, StdioConfig, TransportConfig},
     tools::{self, ToolCallHandler},
 };
 use clap::Parser;
@@ -27,8 +27,8 @@ struct Args {
     transport: String,
 
     /// Server address for SSE transport
-    #[arg(long, default_value = "127.0.0.1:8090")]
-    url: String,
+    #[arg(long, short, default_value = "127.0.0.1:8090")]
+    endpoint: String,
 }
 
 struct McpServer {
@@ -113,6 +113,7 @@ async fn main() -> Result<()> {
 
     let transport = match args.transport.as_str() {
         "stdio" => TransportConfig::Stdio(StdioConfig {}),
+        "sse" => TransportConfig::Sse(SseConfig::builder().endpoint(args.endpoint).build()),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 

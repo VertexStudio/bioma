@@ -10,7 +10,7 @@ use tracing::{error, info};
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Server URL (e.g. http://127.0.0.1:8090)
-    #[arg(long, default_value = "http://127.0.0.1:8090")]
+    #[arg(long, short, default_value = "http://127.0.0.1:8090")]
     endpoint: String,
 }
 

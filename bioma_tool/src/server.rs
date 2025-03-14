@@ -52,6 +52,12 @@ fn default_keep_alive() -> bool {
     true
 }
 
+impl Default for SseConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
 pub struct WebsocketConfig {}
 
 pub enum TransportConfig {

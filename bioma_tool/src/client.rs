@@ -4,6 +4,7 @@ use crate::schema::{
     ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
+use crate::transport::sse::SseTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::Error;
@@ -116,8 +117,15 @@ impl ModelContextProtocolClient {
                 };
                 TransportType::Stdio(transport)
             }
-            TransportConfig::Sse(_config) => {
-                unimplemented!("SSE transport not implemented");
+            TransportConfig::Sse(config) => {
+                let transport = SseTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into()))
+                    }
+                };
+                TransportType::Sse(transport)
             }
         };
 
