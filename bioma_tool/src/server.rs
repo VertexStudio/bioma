@@ -7,6 +7,7 @@ use crate::schema::{
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::{Transport, TransportType};
+use crate::JsonRpcMessage;
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use tokio::sync::mpsc;
@@ -247,20 +248,24 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
 
     // Handle incoming messages
     while let Some(request) = rx.recv().await {
-        let response = io_handler.handle_request(&request, ServerMetadata::default()).await.unwrap_or_else(|| {
-            if !request.contains(r#""method":"notifications/"#) && !request.contains(r#""method":"cancelled"#) {
-                error!("Error handling request");
-                return r#"{"jsonrpc": "2.0", "error": {"code": -32603, "message": "Internal error"}, "id": null}"#
-                    .to_string();
+        match &request {
+            JsonRpcMessage::Request(request) => {
+                match request {
+                    jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                        let Some(response) = io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
+                        else {
+                            continue;
+                        };
+                        if let Err(e) = transport.send(response.into()).await {
+                            error!("Failed to send response: {}", e);
+                            return Err(e).context("Failed to send response");
+                        }
+                    }
+                    jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
+                    _ => {}
+                }
             }
-            String::new()
-        });
-
-        if !response.is_empty() {
-            if let Err(e) = transport.send(response).await {
-                error!("Failed to send response: {}", e);
-                return Err(e).context("Failed to send response");
-            }
+            JsonRpcMessage::Response(_) => {}
         }
     }
 

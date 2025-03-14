@@ -1,5 +1,6 @@
 use super::Transport;
 use crate::client::ServerConfig;
+use crate::JsonRpcMessage;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::{
@@ -52,14 +53,15 @@ impl StdioTransport {
 }
 
 impl Transport for StdioTransport {
-    async fn start(&mut self, request_tx: mpsc::Sender<String>) -> Result<()> {
+    async fn start(&mut self, request_tx: mpsc::Sender<JsonRpcMessage>) -> Result<()> {
         match &*self.mode {
             StdioMode::Server(_stdout) => {
                 let stdin = tokio::io::stdin();
                 let mut lines = BufReader::new(stdin).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("Server received [stdio]: {}", line);
-                    if request_tx.send(line).await.is_err() {
+                    let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
+                    if request_tx.send(request).await.is_err() {
                         error!("Failed to send request through channel");
                         break;
                     }
@@ -71,7 +73,8 @@ impl Transport for StdioTransport {
                 let mut lines = BufReader::new(&mut *stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("Client received [stdio]: {}", line);
-                    if request_tx.send(line).await.is_err() {
+                    let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
+                    if request_tx.send(request).await.is_err() {
                         debug!("Request channel closed - stopping read loop");
                         break;
                     }
@@ -81,19 +84,20 @@ impl Transport for StdioTransport {
         }
     }
 
-    async fn send(&mut self, message: String) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage) -> Result<()> {
+        let message_str = serde_json::to_string(&message)?;
         match &*self.mode {
             StdioMode::Server(stdout) => {
-                debug!("Server sending [stdio]: {}", message);
+                debug!("Server sending [stdio]: {}", message_str);
                 let mut stdout = stdout.lock().await;
-                stdout.write_all(message.as_bytes()).await.context("Failed to write message")?;
+                stdout.write_all(message_str.as_bytes()).await.context("Failed to write message")?;
                 stdout.write_all(b"\n").await.context("Failed to write newline")?;
                 stdout.flush().await.context("Failed to flush stdout")?;
             }
             StdioMode::Client { stdin, .. } => {
-                debug!("Client sending [stdio]: {}", message);
+                debug!("Client sending [stdio]: {}", message_str);
                 let mut stdin = stdin.lock().await;
-                stdin.write_all(message.as_bytes()).await.context("Failed to write message")?;
+                stdin.write_all(message_str.as_bytes()).await.context("Failed to write message")?;
                 stdin.write_all(b"\n").await.context("Failed to write newline")?;
                 stdin.flush().await.context("Failed to flush stdin")?;
             }
