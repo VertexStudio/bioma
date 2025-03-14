@@ -1,12 +1,13 @@
 use super::Transport;
-use crate::client::ServerConfig;
+use crate::client::StdioConfig;
 use crate::JsonRpcMessage;
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use std::sync::Arc;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
     sync::{mpsc, Mutex},
+    task::JoinHandle,
 };
 use tracing::{debug, error};
 
@@ -16,6 +17,7 @@ enum StdioMode {
         // Holds the child process to keep it alive
         #[allow(unused)]
         process: Arc<Mutex<Child>>,
+        // Mutexes need to be independent as we need to lock them separately
         stdin: Arc<Mutex<tokio::process::ChildStdin>>,
         stdout: Arc<Mutex<tokio::process::ChildStdout>>,
     },
@@ -24,16 +26,30 @@ enum StdioMode {
 #[derive(Clone)]
 pub struct StdioTransport {
     mode: Arc<StdioMode>,
+    on_message: mpsc::Sender<JsonRpcMessage>,
+    #[allow(unused)]
+    on_error: mpsc::Sender<Error>,
+    #[allow(unused)]
+    on_close: mpsc::Sender<()>,
 }
 
 impl StdioTransport {
-    pub fn new_server() -> Self {
-        Self { mode: Arc::new(StdioMode::Server(Mutex::new(tokio::io::stdout()))) }
+    pub fn new_server(
+        on_message: mpsc::Sender<JsonRpcMessage>,
+        on_error: mpsc::Sender<Error>,
+        on_close: mpsc::Sender<()>,
+    ) -> Self {
+        Self { mode: Arc::new(StdioMode::Server(Mutex::new(tokio::io::stdout()))), on_message, on_error, on_close }
     }
 
-    pub fn new_client(server: &ServerConfig) -> Result<Self> {
-        let mut child = Command::new(&server.command)
-            .args(&server.args)
+    pub async fn new_client(
+        config: &StdioConfig,
+        on_message: mpsc::Sender<JsonRpcMessage>,
+        on_error: mpsc::Sender<Error>,
+        on_close: mpsc::Sender<()>,
+    ) -> Result<Self> {
+        let mut child = Command::new(&config.command)
+            .args(&config.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -48,40 +64,50 @@ impl StdioTransport {
                 stdin: Arc::new(Mutex::new(stdin)),
                 stdout: Arc::new(Mutex::new(stdout)),
             }),
+            on_message,
+            on_error,
+            on_close,
         })
     }
 }
 
 impl Transport for StdioTransport {
-    async fn start(&mut self, request_tx: mpsc::Sender<JsonRpcMessage>) -> Result<()> {
-        match &*self.mode {
-            StdioMode::Server(_stdout) => {
-                let stdin = tokio::io::stdin();
-                let mut lines = BufReader::new(stdin).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    debug!("Server received [stdio]: {}", line);
-                    let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
-                    if request_tx.send(request).await.is_err() {
-                        error!("Failed to send request through channel");
-                        break;
+    async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
+        // Clone the necessary parts to avoid moving self
+        let mode = self.mode.clone();
+        let on_message = self.on_message.clone();
+
+        let handle = tokio::spawn(async move {
+            match &*mode {
+                StdioMode::Server(_stdout) => {
+                    let stdin = tokio::io::stdin();
+                    let mut lines = BufReader::new(stdin).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        debug!("Server received [stdio]: {}", line);
+                        let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
+                        if on_message.send(request).await.is_err() {
+                            error!("Failed to send request through channel");
+                            break;
+                        }
                     }
+                    Ok(())
                 }
-                Ok(())
-            }
-            StdioMode::Client { stdout, .. } => {
-                let mut stdout = stdout.lock().await;
-                let mut lines = BufReader::new(&mut *stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    debug!("Client received [stdio]: {}", line);
-                    let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
-                    if request_tx.send(request).await.is_err() {
-                        debug!("Request channel closed - stopping read loop");
-                        break;
+                StdioMode::Client { stdout, .. } => {
+                    let mut stdout = stdout.lock().await;
+                    let mut lines = BufReader::new(&mut *stdout).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        debug!("Client received [stdio]: {}", line);
+                        let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
+                        if on_message.send(request).await.is_err() {
+                            debug!("Request channel closed - stopping read loop");
+                            break;
+                        }
                     }
+                    Ok(())
                 }
-                Ok(())
             }
-        }
+        });
+        Ok(handle)
     }
 
     async fn send(&mut self, message: JsonRpcMessage) -> Result<()> {

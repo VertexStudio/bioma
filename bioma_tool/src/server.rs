@@ -6,9 +6,9 @@ use crate::schema::{
     ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
-use crate::transport::{Transport, TransportType};
+use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -25,7 +25,19 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
 }
 
-pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: TransportType) -> Result<()> {
+pub struct StdioConfig {}
+
+pub struct SseConfig {}
+
+pub struct WebsocketConfig {}
+
+pub enum TransportConfig {
+    Stdio(StdioConfig),
+    Sse(SseConfig),
+    Websocket(WebsocketConfig),
+}
+
+pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
     debug!("Starting ModelContextProtocol server: {}", name);
 
     let server = std::sync::Arc::new(T::new());
@@ -249,18 +261,31 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
         }
     });
 
-    let (tx, mut rx) = mpsc::channel(32);
+    let (on_message_tx, mut on_message_rx) = mpsc::channel(32);
+    let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+    let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+    let mut transport = match transport {
+        TransportConfig::Stdio(_config) => {
+            let transport = StdioTransport::new_server(on_message_tx, on_error_tx, on_close_tx);
+            TransportType::Stdio(transport)
+        }
+        TransportConfig::Sse(_config) => {
+            unimplemented!("SSE transport not implemented");
+        }
+        TransportConfig::Websocket(_config) => {
+            unimplemented!("Websocket transport not implemented");
+        }
+    };
 
     // Spawn the transport reader
-    let mut transport_reader = transport.clone();
-    tokio::spawn(async move {
-        if let Err(e) = transport_reader.start(tx).await {
-            error!("Transport error: {}", e);
-        }
-    });
+    if let Err(e) = transport.start().await {
+        error!("Transport error: {}", e);
+        return Err(e).context("Failed to start transport");
+    }
 
     // Handle incoming messages
-    while let Some(request) = rx.recv().await {
+    while let Some(request) = on_message_rx.recv().await {
         match &request {
             JsonRpcMessage::Request(request) => match request {
                 jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
