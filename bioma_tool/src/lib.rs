@@ -14,8 +14,8 @@ pub use server::ModelContextProtocolServer;
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
 pub enum JsonRpcMessage {
-    Request(jsonrpc_core::Request),
     Response(jsonrpc_core::Response),
+    Request(jsonrpc_core::Request),
 }
 
 impl From<jsonrpc_core::Request> for JsonRpcMessage {
