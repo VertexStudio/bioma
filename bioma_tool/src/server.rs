@@ -7,6 +7,7 @@ use crate::schema::{
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::{Transport, TransportType};
+use crate::JsonRpcMessage;
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use tokio::sync::mpsc;
@@ -247,20 +248,32 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
 
     // Handle incoming messages
     while let Some(request) = rx.recv().await {
-        let response = io_handler.handle_request(&request, ServerMetadata::default()).await.unwrap_or_else(|| {
-            if !request.contains(r#""method":"notifications/"#) && !request.contains(r#""method":"cancelled"#) {
-                error!("Error handling request");
-                return r#"{"jsonrpc": "2.0", "error": {"code": -32603, "message": "Internal error"}, "id": null}"#
-                    .to_string();
-            }
-            String::new()
-        });
+        let Ok(request_str) = serde_json::to_string(&request) else {
+            error!("Failed to serialize request");
+            continue;
+        };
 
-        if !response.is_empty() {
-            if let Err(e) = transport.send(response).await {
-                error!("Failed to send response: {}", e);
-                return Err(e).context("Failed to send response");
+        let Some(response_str) = io_handler.handle_request(&request_str, ServerMetadata::default()).await else {
+            debug!("Nothing to do for request");
+            continue;
+        };
+
+        let response = serde_json::from_str::<jsonrpc_core::Response>(&response_str);
+        let Ok(response) = response else {
+            error!("Failed to parse JSON-RPC response: {}", response_str);
+            continue;
+        };
+
+        match request {
+            JsonRpcMessage::Request(jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call))) => {
+                if let Err(e) = transport.send(response.into()).await {
+                    error!("Failed to send response: {}", e);
+                    return Err(e).context("Failed to send response");
+                }
             }
+            JsonRpcMessage::Request(jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification))) => {
+            }
+            _ => {}
         }
     }
 

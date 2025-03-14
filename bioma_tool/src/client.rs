@@ -5,6 +5,7 @@ use crate::schema::{
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
+use crate::JsonRpcMessage;
 use bioma_actor::prelude::*;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
@@ -49,12 +50,12 @@ pub struct ModelContextProtocolClient {
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
-    response_rx: mpsc::Receiver<String>,
+    response_rx: mpsc::Receiver<JsonRpcMessage>,
 }
 
 impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
-        let (tx, rx) = mpsc::channel::<String>(1);
+        let (tx, rx) = mpsc::channel::<JsonRpcMessage>(1);
 
         let transport = StdioTransport::new_client(&server);
         let transport = match transport {
@@ -166,7 +167,7 @@ impl ModelContextProtocolClient {
         method: String,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, ModelContextProtocolClientError> {
-        let mut counter = self.request_counter.write().await;
+        let mut counter: tokio::sync::RwLockWriteGuard<'_, u64> = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
 
@@ -179,8 +180,7 @@ impl ModelContextProtocolClient {
         };
 
         // Send request
-        let request_str = serde_json::to_string(&request)?;
-        if let Err(e) = self.transport.send(request_str).await {
+        if let Err(e) = self.transport.send(request.into()).await {
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
@@ -189,9 +189,8 @@ impl ModelContextProtocolClient {
             .await
         {
             Ok(Some(response)) => {
-                let response: jsonrpc_core::Response = serde_json::from_str(&response)?;
                 match response {
-                    jsonrpc_core::Response::Single(output) => match output {
+                    JsonRpcMessage::Response(jsonrpc_core::Response::Single(output)) => match output {
                         jsonrpc_core::Output::Success(success) => {
                             // Verify that response ID matches request ID
                             if success.id != jsonrpc_core::Id::Num(id) {
@@ -222,7 +221,7 @@ impl ModelContextProtocolClient {
         method: String,
         params: serde_json::Value,
     ) -> Result<(), ModelContextProtocolClientError> {
-        // Create JSON-RPC 2.0 notification (no id)
+        // Create JSON-RPC 2.0 notification
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
@@ -230,9 +229,8 @@ impl ModelContextProtocolClient {
         };
 
         // Send notification without waiting for response
-        let request_str = serde_json::to_string(&notification)?;
         self.transport
-            .send(request_str)
+            .send(notification.into())
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
     }
