@@ -1,20 +1,17 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::{ModelContextProtocolClient, ServerConfig, TransportConfig},
+    client::{ModelContextProtocolClient, ServerConfig, SseConfig, TransportConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
-    transport::sse::SseClientConfig,
 };
 use clap::Parser;
-use std::net::SocketAddr;
 use tracing::{error, info};
-use url;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Server URL (e.g. http://127.0.0.1:8090)
     #[arg(long, default_value = "http://127.0.0.1:8090")]
-    url: String,
+    endpoint: String,
 }
 
 #[tokio::main]
@@ -26,18 +23,12 @@ async fn main() -> Result<()> {
     info!("Starting MCP client...");
     let args = Args::parse();
 
-    // Parse URL and extract host and port
-    let parsed_url = url::Url::parse(&args.url)?;
-    let host = parsed_url.host_str().unwrap_or("127.0.0.1");
-    let port = parsed_url.port().unwrap_or(8090);
-    let addr = format!("{}:{}", host, port).parse::<SocketAddr>()?;
-
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
 
     let server = ServerConfig::builder()
-        .name(addr.to_string())
-        .transport(TransportConfig::Sse(SseClientConfig::builder().server_url(addr).build()))
+        .name(args.endpoint.to_string())
+        .transport(TransportConfig::Sse(SseConfig::builder().endpoint(args.endpoint).build()))
         .build();
 
     // Create client

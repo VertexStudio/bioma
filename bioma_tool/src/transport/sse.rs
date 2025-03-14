@@ -1,5 +1,7 @@
+use crate::JsonRpcMessage;
+
 use super::Transport;
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use bon::Builder;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -14,6 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -174,11 +177,21 @@ fn format_sse_event(event_type: &str, data: &str) -> String {
 #[derive(Clone)]
 pub struct SseTransport {
     mode: Arc<SseMode>,
+    on_message: mpsc::Sender<JsonRpcMessage>,
+    #[allow(unused)]
+    on_error: mpsc::Sender<Error>,
+    #[allow(unused)]
+    on_close: mpsc::Sender<()>,
 }
 
 impl SseTransport {
     /// Create a new SSE transport in server mode
-    pub fn new_server(config: SseServerConfig) -> Self {
+    pub fn new_server(
+        config: SseServerConfig,
+        on_message: mpsc::Sender<JsonRpcMessage>,
+        on_error: mpsc::Sender<Error>,
+        on_close: mpsc::Sender<()>,
+    ) -> Self {
         let clients = Arc::new(Mutex::new(HashMap::new()));
         let requests = Arc::new(Mutex::new(HashMap::new()));
 
@@ -189,11 +202,19 @@ impl SseTransport {
                 url: config.url,
                 channel_capacity: config.channel_capacity,
             }),
+            on_message,
+            on_error,
+            on_close,
         }
     }
 
     /// Create a new SSE transport in client mode
-    pub fn new_client(config: SseClientConfig) -> Result<Self> {
+    pub fn new_client(
+        config: SseClientConfig,
+        on_message: mpsc::Sender<JsonRpcMessage>,
+        on_error: mpsc::Sender<Error>,
+        on_close: mpsc::Sender<()>,
+    ) -> Result<Self> {
         let http_client = ClientBuilder::new().build().context("Failed to create HTTP client")?;
         let sse_url = Url::parse(&format!("http://{}", config.server_url)).context("Failed to parse server URL")?;
 
@@ -206,6 +227,9 @@ impl SseTransport {
                 retry_delay: config.retry_delay,
                 client_id: Arc::new(Mutex::new(None)),
             }),
+            on_message,
+            on_error,
+            on_close,
         })
     }
 
@@ -269,7 +293,7 @@ impl SseTransport {
         http_client: &Client,
         endpoint_url: &Arc<Mutex<Option<String>>>,
         client_id: &Arc<Mutex<Option<String>>>,
-        request_tx: mpsc::Sender<String>,
+        on_message: mpsc::Sender<JsonRpcMessage>,
     ) -> Result<()> {
         // Connect to SSE endpoint
         let response = http_client
@@ -327,9 +351,16 @@ impl SseTransport {
                     (Some(typ), Some(data)) if typ == "message" => {
                         debug!("Received message event: {}", data);
 
-                        if request_tx.send(data).await.is_err() {
-                            error!("Failed to forward message");
-                            return Err(SseError::ChannelError("Message channel closed".to_string()).into());
+                        match serde_json::from_str::<JsonRpcMessage>(&data) {
+                            Ok(message) => {
+                                if on_message.send(message).await.is_err() {
+                                    error!("Failed to forward message");
+                                    return Err(SseError::ChannelError("Message channel closed".to_string()).into());
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to parse message: {}", e);
+                            }
                         }
                     }
                     // Ignore other event types
@@ -343,276 +374,384 @@ impl SseTransport {
 }
 
 impl Transport for SseTransport {
-    async fn start(&mut self, request_tx: mpsc::Sender<String>) -> Result<()> {
-        match &*self.mode {
-            SseMode::Server { clients, requests, url, channel_capacity } => {
-                info!("Starting SSE server on {}", url);
+    fn start(&mut self) -> impl std::future::Future<Output = Result<JoinHandle<Result<()>>>> {
+        let on_message = self.on_message.clone();
+        let mode = self.mode.clone();
 
-                // Start HTTP server
-                let listener = tokio::net::TcpListener::bind(*url).await.context("Failed to bind to socket")?;
+        async move {
+            match *mode {
+                SseMode::Server { ref clients, ref requests, url, channel_capacity } => {
+                    let clients = clients.clone();
+                    let requests = requests.clone();
 
-                // Process incoming connections
-                loop {
-                    let (stream, _) = listener.accept().await.context("Failed to accept connection")?;
-                    let io = TokioIo::new(stream);
+                    info!("Starting SSE server on {}", url);
 
-                    // Clone everything needed for the connection handler
-                    let clients_clone = clients.clone();
-                    let requests_clone = requests.clone();
-                    let request_tx_clone = request_tx.clone();
-                    let url_clone = *url;
-                    let capacity = *channel_capacity;
+                    // Start HTTP server
+                    let listener = tokio::net::TcpListener::bind(url).await.context("Failed to bind to socket")?;
 
-                    // Spawn a task to serve the connection
-                    tokio::task::spawn(async move {
-                        // Create HTTP service to handle SSE connections and message receiving
-                        let service = service_fn(move |req: Request<hyper::body::Incoming>| {
-                            let clients = clients_clone.clone();
-                            let requests = requests_clone.clone();
-                            let request_tx = request_tx_clone.clone();
-                            let url = url_clone;
+                    // Create a task to handle connections
+                    let server_handle = tokio::spawn(async move {
+                        loop {
+                            let (stream, _) = match listener.accept().await {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    error!("Failed to accept connection: {}", e);
+                                    continue;
+                                }
+                            };
+                            let io = TokioIo::new(stream);
 
-                            async move {
-                                match (req.method(), req.uri().path()) {
-                                    // SSE endpoint for clients to connect and receive events
-                                    (&Method::GET, "/") => {
-                                        debug!("New SSE client connected");
+                            // Clone everything needed for the connection handler
+                            let clients_clone = clients.clone();
+                            let requests_clone = requests.clone();
+                            let on_message_clone = on_message.clone();
+                            let url_clone = url;
+                            let capacity = channel_capacity;
 
-                                        // Create a channel for sending messages to this client
-                                        let (client_tx, mut client_rx) = mpsc::channel::<TransportMessage>(capacity);
-                                        let client_id = ClientId::new();
+                            // Spawn a task to serve the connection
+                            tokio::task::spawn(async move {
+                                // Create HTTP service to handle SSE connections and message receiving
+                                let service = service_fn(move |req: Request<hyper::body::Incoming>| {
+                                    let clients = clients_clone.clone();
+                                    let requests = requests_clone.clone();
+                                    let on_message = on_message_clone.clone();
+                                    let url = url_clone;
 
-                                        // Register client
-                                        {
-                                            let mut clients_map = clients.lock().await;
-                                            clients_map.insert(client_id.clone(), client_tx);
-                                        }
+                                    async move {
+                                        match (req.method(), req.uri().path()) {
+                                            // SSE endpoint for clients to connect and receive events
+                                            (&Method::GET, "/") => {
+                                                debug!("New SSE client connected");
 
-                                        // Create a new channel for the streaming response
-                                        let (response_tx, response_rx) =
-                                            mpsc::channel::<Result<Frame<Bytes>, std::io::Error>>(capacity);
+                                                // Create a channel for sending messages to this client
+                                                let (client_tx, mut client_rx) =
+                                                    mpsc::channel::<TransportMessage>(capacity);
+                                                let client_id = ClientId::new();
 
-                                        // Spawn a task to handle sending SSE events to the client
-                                        tokio::spawn(async move {
-                                            // Send initial endpoint event with client_id
-                                            let endpoint_url = format!("http://{}/message", url);
-                                            let endpoint_data = serde_json::json!({
-                                                "url": endpoint_url,
-                                                "client_id": client_id.as_ref()
-                                            });
-
-                                            let endpoint_event = match serde_json::to_string(&endpoint_data) {
-                                                Ok(json) => format_sse_event("endpoint", &json),
-                                                Err(err) => {
-                                                    error!("Failed to serialize endpoint data: {}", err);
-                                                    return;
-                                                }
-                                            };
-
-                                            // Send the initial event to the client via the response channel
-                                            if response_tx
-                                                .send(Ok(Frame::data(Bytes::from(endpoint_event))))
-                                                .await
-                                                .is_err()
-                                            {
-                                                error!("Failed to send initial endpoint event to response stream");
-                                                return;
-                                            }
-
-                                            // Process incoming events from the client_rx channel
-                                            while let Some(event) = client_rx.recv().await {
-                                                if response_tx
-                                                    .send(Ok(Frame::data(Bytes::from(event.into_inner()))))
-                                                    .await
-                                                    .is_err()
+                                                // Register client
                                                 {
-                                                    error!("Client disconnected, stopping event stream");
-                                                    break;
+                                                    let mut clients_map = clients.lock().await;
+                                                    clients_map.insert(client_id.clone(), client_tx);
                                                 }
+
+                                                // Create a new channel for the streaming response
+                                                let (response_tx, response_rx) =
+                                                    mpsc::channel::<Result<Frame<Bytes>, std::io::Error>>(capacity);
+
+                                                // Spawn a task to handle sending SSE events to the client
+                                                tokio::spawn(async move {
+                                                    // Send initial endpoint event with client_id
+                                                    let endpoint_url = format!("http://{}/message", url);
+                                                    let endpoint_data = serde_json::json!({
+                                                        "url": endpoint_url,
+                                                        "client_id": client_id.as_ref()
+                                                    });
+
+                                                    let endpoint_event = match serde_json::to_string(&endpoint_data) {
+                                                        Ok(json) => format_sse_event("endpoint", &json),
+                                                        Err(err) => {
+                                                            error!("Failed to serialize endpoint data: {}", err);
+                                                            return;
+                                                        }
+                                                    };
+
+                                                    // Send the initial event to the client via the response channel
+                                                    if response_tx
+                                                        .send(Ok(Frame::data(Bytes::from(endpoint_event))))
+                                                        .await
+                                                        .is_err()
+                                                    {
+                                                        error!(
+                                                            "Failed to send initial endpoint event to response stream"
+                                                        );
+                                                        return;
+                                                    }
+
+                                                    // Process incoming events from the client_rx channel
+                                                    while let Some(event) = client_rx.recv().await {
+                                                        if response_tx
+                                                            .send(Ok(Frame::data(Bytes::from(event.into_inner()))))
+                                                            .await
+                                                            .is_err()
+                                                        {
+                                                            error!("Client disconnected, stopping event stream");
+                                                            break;
+                                                        }
+                                                    }
+                                                });
+
+                                                // Create a stream from the receiver
+                                                let stream = ReceiverStream::new(response_rx);
+
+                                                // Build SSE response with the stream
+                                                let body = http_body_util::StreamBody::new(stream);
+                                                let mut response = Response::new(http_body_util::Either::Left(body));
+
+                                                // Set SSE headers
+                                                Self::set_sse_headers(&mut response);
+
+                                                Ok::<_, SseError>(response)
                                             }
-                                        });
+                                            // Message endpoint for receiving client messages
+                                            (&Method::POST, "/message") => {
+                                                // Extract client ID from headers
+                                                let client_id_header = req
+                                                    .headers()
+                                                    .get("X-Client-ID")
+                                                    .and_then(|h| h.to_str().ok())
+                                                    .map(|s| ClientId(s.to_string()));
 
-                                        // Create a stream from the receiver
-                                        let stream = ReceiverStream::new(response_rx);
+                                                // Get message from request body
+                                                let body = req.into_body();
+                                                let bytes = body
+                                                    .collect()
+                                                    .await
+                                                    .map_err(|e| SseError::HyperError(e.into()))?
+                                                    .to_bytes();
+                                                let message_str = String::from_utf8_lossy(&bytes).to_string();
 
-                                        // Build SSE response with the stream
-                                        let body = http_body_util::StreamBody::new(stream);
-                                        let mut response = Response::new(http_body_util::Either::Left(body));
+                                                debug!("Received client message: {}", message_str);
 
-                                        // Set SSE headers
-                                        Self::set_sse_headers(&mut response);
+                                                // Extract JSON-RPC ID from message
+                                                if let Some(jsonrpc_id) = Self::extract_jsonrpc_id(&message_str) {
+                                                    // Store mapping of jsonrpc_id to client_id if we have a client_id
+                                                    if let Some(client_id) = client_id_header {
+                                                        let mut requests_map = requests.lock().await;
+                                                        requests_map.insert(jsonrpc_id, client_id);
+                                                    }
+                                                }
 
-                                        Ok::<_, SseError>(response)
-                                    }
-                                    // Message endpoint for receiving client messages
-                                    (&Method::POST, "/message") => {
-                                        // Extract client ID from headers
-                                        let client_id_header = req
-                                            .headers()
-                                            .get("X-Client-ID")
-                                            .and_then(|h| h.to_str().ok())
-                                            .map(|s| ClientId(s.to_string()));
+                                                // Forward to message handler
+                                                match serde_json::from_str::<JsonRpcMessage>(&message_str) {
+                                                    Ok(message) => {
+                                                        if on_message.send(message).await.is_err() {
+                                                            error!("Failed to forward message");
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        error!("Failed to parse message: {}", e);
+                                                    }
+                                                }
 
-                                        // Get message from request body
-                                        let body = req.into_body();
-                                        let bytes = body
-                                            .collect()
-                                            .await
-                                            .map_err(|e| SseError::HyperError(e.into()))?
-                                            .to_bytes();
-                                        let message = String::from_utf8_lossy(&bytes).to_string();
+                                                // Return OK response
+                                                let response = Response::builder()
+                                                    .status(StatusCode::OK)
+                                                    .body(http_body_util::Either::Right(Empty::new()))
+                                                    .map_err(|e| SseError::HttpBuilderError(e))?;
 
-                                        debug!("Received client message: {}", message);
+                                                Ok::<_, SseError>(response)
+                                            }
+                                            // Any other endpoint
+                                            _ => {
+                                                let response = Response::builder()
+                                                    .status(StatusCode::NOT_FOUND)
+                                                    .body(http_body_util::Either::Right(Empty::new()))
+                                                    .map_err(|e| SseError::HttpBuilderError(e))?;
 
-                                        // Extract JSON-RPC ID from message
-                                        if let Some(jsonrpc_id) = Self::extract_jsonrpc_id(&message) {
-                                            // Store mapping of jsonrpc_id to client_id if we have a client_id
-                                            if let Some(client_id) = client_id_header {
-                                                let mut requests_map = requests.lock().await;
-                                                requests_map.insert(jsonrpc_id, client_id);
+                                                Ok::<_, SseError>(response)
                                             }
                                         }
-
-                                        // Forward to message handler
-                                        if request_tx.send(message).await.is_err() {
-                                            error!("Failed to forward message");
-                                        }
-
-                                        // Return OK response
-                                        let response = Response::builder()
-                                            .status(StatusCode::OK)
-                                            .body(http_body_util::Either::Right(Empty::new()))
-                                            .map_err(|e| SseError::HttpBuilderError(e))?;
-
-                                        Ok::<_, SseError>(response)
                                     }
-                                    // Any other endpoint
-                                    _ => {
-                                        let response = Response::builder()
-                                            .status(StatusCode::NOT_FOUND)
-                                            .body(http_body_util::Either::Right(Empty::new()))
-                                            .map_err(|e| SseError::HttpBuilderError(e))?;
+                                });
 
-                                        Ok::<_, SseError>(response)
+                                if let Err(err) =
+                                    HyperServerBuilder::new(TokioExecutor::new()).serve_connection(io, service).await
+                                {
+                                    error!("Error serving connection: {:?}", err);
+                                }
+                            });
+                        }
+
+                        #[allow(unreachable_code)]
+                        Ok(())
+                    });
+
+                    Ok(server_handle)
+                }
+                SseMode::Client {
+                    ref sse_url,
+                    ref endpoint_url,
+                    ref http_client,
+                    retry_count,
+                    retry_delay,
+                    ref client_id,
+                } => {
+                    let sse_url = sse_url.clone();
+                    let endpoint_url = endpoint_url.clone();
+                    let http_client = http_client.clone();
+                    let client_id = client_id.clone();
+
+                    info!("Starting SSE client, connecting to {}", sse_url);
+
+                    let client_mode_handle = tokio::spawn({
+                        async move {
+                            let mut attempts = 0;
+                            let mut last_error = None;
+
+                            // Implement retry logic
+                            while attempts < retry_count {
+                                attempts += 1;
+
+                                match Self::connect_to_sse(
+                                    &sse_url,
+                                    &http_client,
+                                    &endpoint_url,
+                                    &client_id,
+                                    on_message.clone(),
+                                )
+                                .await
+                                {
+                                    Ok(_) => return Ok(()),
+                                    Err(e) => {
+                                        last_error = Some(e);
+                                        warn!(
+                                            "Connection attempt {}/{} failed, retrying in {:?}",
+                                            attempts, retry_count, retry_delay
+                                        );
+                                        tokio::time::sleep(retry_delay).await;
                                     }
                                 }
                             }
-                        });
 
-                        if let Err(err) =
-                            HyperServerBuilder::new(TokioExecutor::new()).serve_connection(io, service).await
-                        {
-                            error!("Error serving connection: {:?}", err);
+                            Err(last_error.unwrap_or_else(|| {
+                                SseError::Other("Failed to connect after retries".to_string()).into()
+                            }))
                         }
                     });
+
+                    Ok(client_mode_handle)
                 }
-            }
-            SseMode::Client { sse_url, endpoint_url, http_client, retry_count, retry_delay, client_id } => {
-                info!("Starting SSE client, connecting to {}", sse_url);
-
-                let mut attempts = 0;
-                let mut last_error = None;
-
-                // Implement retry logic
-                while attempts < *retry_count {
-                    attempts += 1;
-
-                    match Self::connect_to_sse(sse_url, http_client, endpoint_url, client_id, request_tx.clone()).await
-                    {
-                        Ok(_) => return Ok(()),
-                        Err(e) => {
-                            last_error = Some(e);
-                            warn!(
-                                "Connection attempt {}/{} failed, retrying in {:?}",
-                                attempts, retry_count, retry_delay
-                            );
-                            tokio::time::sleep(*retry_delay).await;
-                        }
-                    }
-                }
-
-                Err(last_error.unwrap_or_else(|| SseError::Other("Failed to connect after retries".to_string()).into()))
             }
         }
     }
 
-    async fn send(&mut self, message: String) -> Result<()> {
-        match &*self.mode {
-            SseMode::Server { clients, requests, .. } => {
-                debug!("Server sending [sse]: {}", message);
+    fn send(&mut self, message: JsonRpcMessage) -> impl std::future::Future<Output = Result<()>> {
+        let mode = self.mode.clone();
+        let message_str = serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string());
 
-                // Extract JSON-RPC ID from message
-                if let Some(jsonrpc_id) = Self::extract_jsonrpc_id(&message) {
-                    // Find the client_id for this JSON-RPC ID
-                    let client_id = {
-                        let requests_map = requests.lock().await;
-                        requests_map.get(&jsonrpc_id).cloned()
+        async move {
+            match &*mode {
+                SseMode::Server { clients, requests, .. } => {
+                    debug!("Server sending [sse]: {}", message_str);
+
+                    // Extract JSON-RPC ID from message
+                    if let Some(jsonrpc_id) = Self::extract_jsonrpc_id(&message_str) {
+                        // Find the client_id for this JSON-RPC ID
+                        let client_id = {
+                            let requests_map = requests.lock().await;
+                            requests_map.get(&jsonrpc_id).cloned()
+                        };
+
+                        if let Some(client_id) = client_id {
+                            // Send message to the specific client
+                            Self::send_to_client(clients, &client_id, TransportMessage::new(message_str)).await?;
+
+                            // Clean up the request map entry after sending
+                            let mut requests_map = requests.lock().await;
+                            requests_map.remove(&jsonrpc_id);
+                        } else {
+                            return Err(
+                                SseError::Other(format!("No client found for JSON-RPC ID: {}", jsonrpc_id)).into()
+                            );
+                        }
+                    } else {
+                        return Err(
+                            SseError::Other("Message has no JSON-RPC ID, cannot route properly".to_string()).into()
+                        );
+                    }
+
+                    Ok(())
+                }
+                SseMode::Client { endpoint_url, http_client, client_id, .. } => {
+                    debug!("Client sending [sse]: {}", message_str);
+
+                    // Get endpoint URL
+                    let url = {
+                        let endpoint_guard = endpoint_url.lock().await;
+                        match &*endpoint_guard {
+                            Some(url) => url.clone(),
+                            None => {
+                                return Err(SseError::Other(
+                                    "No endpoint URL available yet. Wait for the SSE connection to establish."
+                                        .to_string(),
+                                )
+                                .into());
+                            }
+                        }
                     };
 
-                    if let Some(client_id) = client_id {
-                        // Send message to the specific client
-                        Self::send_to_client(clients, &client_id, TransportMessage::new(message)).await?;
+                    // Get client_id
+                    let client_id_value = {
+                        let client_id_guard = client_id.lock().await;
+                        match &*client_id_guard {
+                            Some(id) => id.clone(),
+                            None => {
+                                return Err(SseError::Other(
+                                    "No client ID available yet. Wait for the SSE connection to establish.".to_string(),
+                                )
+                                .into());
+                            }
+                        }
+                    };
 
-                        // Clean up the request map entry after sending
-                        let mut requests_map = requests.lock().await;
-                        requests_map.remove(&jsonrpc_id);
-                    } else {
-                        return Err(SseError::Other(format!("No client found for JSON-RPC ID: {}", jsonrpc_id)).into());
+                    // Send HTTP POST request with client_id header
+                    let response = http_client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .header("X-Client-ID", client_id_value)
+                        .body(message_str)
+                        .send()
+                        .await
+                        .context("Failed to send message")?;
+
+                    if !response.status().is_success() {
+                        return Err(SseError::HttpError(response.status()).into());
                     }
-                } else {
-                    return Err(SseError::Other("Message has no JSON-RPC ID, cannot route properly".to_string()).into());
-                }
 
-                Ok(())
+                    debug!("Message sent successfully");
+
+                    Ok(())
+                }
             }
-            SseMode::Client { endpoint_url, http_client, client_id, .. } => {
-                debug!("Client sending [sse]: {}", message);
+        }
+    }
 
-                // Get endpoint URL
-                let url = {
-                    let endpoint_guard = endpoint_url.lock().await;
-                    match &*endpoint_guard {
-                        Some(url) => url.clone(),
-                        None => {
-                            return Err(SseError::Other(
-                                "No endpoint URL available yet. Wait for the SSE connection to establish.".to_string(),
-                            )
-                            .into());
+    fn close(&mut self) -> impl std::future::Future<Output = Result<()>> {
+        let mode = self.mode.clone();
+
+        async move {
+            match &*mode {
+                SseMode::Server { clients, .. } => {
+                    info!("Initiating SSE server shutdown");
+
+                    let mut clients_map = clients.lock().await;
+
+                    // Send a shutdown event to all connected clients
+                    for (client_id, tx) in clients_map.drain() {
+                        debug!("Sending shutdown event to client {}", client_id.as_ref());
+
+                        let shutdown_event = format_sse_event("shutdown", "Server is shutting down");
+
+                        // Send the shutdown event to the client
+                        if let Err(_) = tx.send(TransportMessage::new(shutdown_event)).await {
+                            debug!("Client {} already disconnected", client_id.as_ref());
                         }
+
+                        // The client connection will be closed when tx is dropped
                     }
-                };
 
-                // Get client_id
-                let client_id_value = {
-                    let client_id_guard = client_id.lock().await;
-                    match &*client_id_guard {
-                        Some(id) => id.clone(),
-                        None => {
-                            return Err(SseError::Other(
-                                "No client ID available yet. Wait for the SSE connection to establish.".to_string(),
-                            )
-                            .into());
-                        }
-                    }
-                };
-
-                // Send HTTP POST request with client_id header
-                let response = http_client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .header("X-Client-ID", client_id_value)
-                    .body(message)
-                    .send()
-                    .await
-                    .context("Failed to send message")?;
-
-                if !response.status().is_success() {
-                    return Err(SseError::HttpError(response.status()).into());
+                    info!("SSE server shutdown completed");
+                    Ok(())
                 }
+                SseMode::Client { sse_url, .. } => {
+                    // Client mode: log the shutdown request
+                    info!("Closing SSE client connection to {}", sse_url);
 
-                debug!("Message sent successfully");
+                    // The SSE connection will be closed when the task is dropped
+                    // No explicit closure is needed
 
-                Ok(())
+                    Ok(())
+                }
             }
         }
     }

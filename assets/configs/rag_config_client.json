@@ -1,43 +1,27 @@
 {
-    "engine": {
-        "endpoint": "ws://0.0.0.0:9123",
-        "namespace": "dev",
-        "database": "bioma",
-        "username": "root",
-        "output_dir": ".output",
-        "local_store_dir": ".output/store",
-        "hf_cache_dir": ".output/cache/huggingface/hub"
-    },
-    "rag_endpoint": "http://0.0.0.0:5766",
-    "tools": [
-        {
-            "server": {
-                "name": "bioma-tool",
-                "enabled": true,
-                "command": "target/release/examples/mcp_server",
-                "args": [
-                    "--transport",
-                    "stdio",
-                    "--log-file",
-                    ".output/mcp_server-bioma.log"
-                ]
-            }
-        },
-        {
-            "server": {
-                "name": "filesystem",
-                "enabled": true,
-                "command": "docker",
-                "args": [
-                    "run",
-                    "-i",
-                    "--rm",
-                    "--mount",
-                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/Users/rozgo/BiomaAI",
-                    "mcp/filesystem",
-                    "/Users/rozgo/BiomaAI"
-                ]
-            }
-        }
-    ]
+  "engine": {
+    "endpoint": "ws://0.0.0.0:9123",
+    "namespace": "dev",
+    "database": "bioma",
+    "username": "root",
+    "output_dir": ".output",
+    "local_store_dir": ".output/store",
+    "hf_cache_dir": ".output/cache/huggingface/hub"
+  },
+  "rag_endpoint": "http://0.0.0.0:5766",
+  "tools": [
+    {
+      "server": {
+        "name": "bioma-tool",
+        "enabled": true,
+        "command": "target/release/examples/mcp_server",
+        "args": [
+          "--transport",
+          "stdio",
+          "--log-file",
+          ".output/mcp_server-bioma.log"
+        ]
+      }
+    }
+  ]
 }

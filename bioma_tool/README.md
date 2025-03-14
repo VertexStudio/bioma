@@ -73,25 +73,25 @@ Examples:
 MCP client:
 
 ```
-cargo run -p bioma_tool --example mcp_client -- target/debug/examples/mcp_server --log-file .output/mcp_server-bioma.log --transport stdio
+cargo run --release -p bioma_tool --example mcp_client -- target/release/examples/mcp_server
 ```
 
 MCP server:
 
 ```
-cargo build -p bioma_tool --example mcp_server
+cargo build --release -p bioma_tool --example mcp_server
 ```
 
 Inspect example server:
 
 ```
-npx github:VertexStudio/inspector#feature/ui-ux ./target/debug/examples/mcp_server --log-file .output/mcp_server-inspector.log
+npx github:VertexStudio/inspector#feature/ui-ux ./target/release/examples/mcp_server --log-file .output/mcp_server-inspector.log
 ```
 
 Connecting to docker server:
 
 ```
-./target/debug/examples/mcp_client -- docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
+./target/release/examples/mcp_client -- docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
 ```
 
 MCP client with SSE transport:

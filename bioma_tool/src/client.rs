@@ -4,16 +4,61 @@ use crate::schema::{
     ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
-use crate::transport::sse::{SseClientConfig, SseTransport};
-use crate::transport::stdio::StdioServerConfig;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
+use crate::JsonRpcMessage;
+use anyhow::Error;
 use bioma_actor::prelude::*;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StdioConfig {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct SseConfig {
+    #[builder(default = default_server_url())]
+    pub endpoint: String,
+    #[builder(default = default_retry_count())]
+    pub retry_count: usize,
+    #[builder(default = default_retry_delay())]
+    pub retry_delay: Duration,
+}
+
+fn default_server_url() -> String {
+    "http://127.0.0.1:8090".to_string()
+}
+
+fn default_retry_count() -> usize {
+    3
+}
+
+fn default_retry_delay() -> Duration {
+    Duration::from_secs(5)
+}
+
+impl Default for SseConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "transport")]
+pub enum TransportConfig {
+    #[serde(rename = "stdio")]
+    Stdio(StdioConfig),
+    #[serde(rename = "sse")]
+    Sse(SseConfig),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ServerConfig {
@@ -21,18 +66,10 @@ pub struct ServerConfig {
     #[serde(default = "default_version")]
     #[builder(default = default_version())]
     pub version: String,
+    pub transport: TransportConfig,
     #[serde(default = "default_request_timeout")]
     #[builder(default = default_request_timeout())]
     pub request_timeout: u64,
-    #[serde(flatten)]
-    pub transport: TransportConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum TransportConfig {
-    Stdio(StdioServerConfig),
-    Sse(SseClientConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
@@ -53,39 +90,51 @@ pub struct ModelContextProtocolClient {
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
-    response_rx: mpsc::Receiver<String>,
+    start_handle: JoinHandle<Result<(), Error>>,
+    on_message_rx: mpsc::Receiver<JsonRpcMessage>,
+    #[allow(unused)]
+    on_error_rx: mpsc::Receiver<Error>,
+    #[allow(unused)]
+    on_close_rx: mpsc::Receiver<()>,
 }
 
 impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
-        let (tx, rx) = mpsc::channel::<String>(1);
+        let (on_message_tx, on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
+        let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
+        let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
 
-        // Create the appropriate transport based on configuration
-        let transport = match &server.transport {
-            TransportConfig::Stdio(config) => TransportType::Stdio(
-                StdioTransport::new_client(config)
-                    .map_err(|e| ModelContextProtocolClientError::Transport(format!("Stdio init: {}", e).into()))?,
-            ),
-            TransportConfig::Sse(config) => TransportType::Sse(
-                SseTransport::new_client(config.clone())
-                    .map_err(|e| ModelContextProtocolClientError::Transport(format!("SSE init: {}", e).into()))?,
-            ),
+        let mut transport = match &server.transport {
+            TransportConfig::Stdio(config) => {
+                let transport = StdioTransport::new_client(&config, on_message_tx, on_error_tx, on_close_tx).await;
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into()))
+                    }
+                };
+                TransportType::Stdio(transport)
+            }
+            TransportConfig::Sse(_config) => {
+                unimplemented!("SSE transport not implemented");
+            }
         };
 
         // Start transport once during initialization
-        let mut transport_clone = transport.clone();
-        tokio::spawn(async move {
-            if let Err(e) = transport_clone.start(tx).await {
-                error!("Transport error: {}", e);
-            }
-        });
+        let start_handle = transport
+            .start()
+            .await
+            .map_err(|e| ModelContextProtocolClientError::Transport(format!("Start: {}", e).into()))?;
 
         Ok(Self {
             server,
             transport,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
-            response_rx: rx,
+            start_handle,
+            on_message_rx,
+            on_error_rx,
+            on_close_rx,
         })
     }
 
@@ -167,7 +216,7 @@ impl ModelContextProtocolClient {
         method: String,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, ModelContextProtocolClientError> {
-        let mut counter = self.request_counter.write().await;
+        let mut counter: tokio::sync::RwLockWriteGuard<'_, u64> = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
 
@@ -180,19 +229,20 @@ impl ModelContextProtocolClient {
         };
 
         // Send request
-        let request_str = serde_json::to_string(&request)?;
-        if let Err(e) = self.transport.send(request_str).await {
+        if let Err(e) = self.transport.send(request.into()).await {
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
         // Wait for response with timeout
-        match tokio::time::timeout(std::time::Duration::from_secs(self.server.request_timeout), self.response_rx.recv())
-            .await
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(self.server.request_timeout),
+            self.on_message_rx.recv(),
+        )
+        .await
         {
             Ok(Some(response)) => {
-                let response: jsonrpc_core::Response = serde_json::from_str(&response)?;
                 match response {
-                    jsonrpc_core::Response::Single(output) => match output {
+                    JsonRpcMessage::Response(jsonrpc_core::Response::Single(output)) => match output {
                         jsonrpc_core::Output::Success(success) => {
                             // Verify that response ID matches request ID
                             if success.id != jsonrpc_core::Id::Num(id) {
@@ -223,7 +273,7 @@ impl ModelContextProtocolClient {
         method: String,
         params: serde_json::Value,
     ) -> Result<(), ModelContextProtocolClientError> {
-        // Create JSON-RPC 2.0 notification (no id)
+        // Create JSON-RPC 2.0 notification
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
@@ -231,11 +281,19 @@ impl ModelContextProtocolClient {
         };
 
         // Send notification without waiting for response
-        let request_str = serde_json::to_string(&notification)?;
         self.transport
-            .send(request_str)
+            .send(notification.into())
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
+    }
+
+    pub async fn close(&mut self) -> Result<(), ModelContextProtocolClientError> {
+        self.transport
+            .close()
+            .await
+            .map_err(|e| ModelContextProtocolClientError::Transport(format!("Close: {}", e).into()))?;
+        self.start_handle.abort();
+        Ok(())
     }
 }
 

@@ -6,16 +6,10 @@ use bioma_tool::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::ModelContextProtocolServer,
+    server::{ModelContextProtocolServer, StdioConfig, TransportConfig},
     tools::{self, ToolCallHandler},
-    transport::{
-        sse::{SseServerConfig, SseTransport},
-        stdio::StdioTransport,
-        TransportType,
-    },
 };
 use clap::Parser;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::{info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -118,11 +112,7 @@ async fn main() -> Result<()> {
     setup_logging(args.log_file)?;
 
     let transport = match args.transport.as_str() {
-        "stdio" => TransportType::Stdio(StdioTransport::new_server()),
-        "sse" => {
-            let url: SocketAddr = args.url.parse().context("Failed to parse server address")?;
-            TransportType::Sse(SseTransport::new_server(SseServerConfig { url, ..Default::default() }))
-        }
+        "stdio" => TransportConfig::Stdio(StdioConfig {}),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 
