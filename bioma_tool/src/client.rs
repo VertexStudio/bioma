@@ -23,6 +23,7 @@ pub struct StdioConfig {
     pub args: Vec<String>,
 }
 
+/// Client configuration with builder pattern
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
     #[builder(default = default_server_url())]
@@ -229,7 +230,7 @@ impl ModelContextProtocolClient {
         };
 
         // Send request
-        if let Err(e) = self.transport.send(request.into(), None).await {
+        if let Err(e) = self.transport.send(request.into(), serde_json::Value::Null).await {
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
@@ -282,7 +283,7 @@ impl ModelContextProtocolClient {
 
         // Send notification without waiting for response
         self.transport
-            .send(notification.into(), None)
+            .send(notification.into(), serde_json::Value::Null)
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
     }

@@ -1,8 +1,9 @@
+use crate::client::SseConfig as SseClientConfig;
+use crate::server::SseConfig as SseServerConfig;
 use crate::JsonRpcMessage;
 
-use super::{Transport, TransportMetadata};
+use super::Transport;
 use anyhow::{Context, Error, Result};
-use bon::Builder;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use http_body_util::{BodyExt, Empty};
@@ -12,7 +13,6 @@ use hyper_util::server::conn::auto::Builder as HyperServerBuilder;
 use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
@@ -39,11 +39,10 @@ impl AsRef<str> for ClientId {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SseMetadata {
     pub client_id: String,
 }
-
-impl TransportMetadata for SseMetadata {}
 
 /// Transport message type that carries a JsonRpcMessage
 #[derive(Debug, Clone)]
@@ -132,60 +131,6 @@ pub enum SseError {
     Other(String),
 }
 
-fn default_server_url() -> SocketAddr {
-    "127.0.0.1:8080".parse().unwrap()
-}
-
-/// Server configuration with builder pattern
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
-pub struct SseServerConfig {
-    #[builder(default = default_server_url())]
-    pub url: SocketAddr,
-    #[builder(default = default_channel_capacity())]
-    pub channel_capacity: usize,
-    #[builder(default = default_keep_alive())]
-    pub keep_alive: bool,
-}
-
-fn default_channel_capacity() -> usize {
-    32
-}
-
-fn default_keep_alive() -> bool {
-    true
-}
-
-impl Default for SseServerConfig {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
-/// Client configuration with builder pattern
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
-pub struct SseClientConfig {
-    #[builder(default = default_server_url())]
-    pub server_url: SocketAddr,
-    #[builder(default = default_retry_count())]
-    pub retry_count: usize,
-    #[builder(default = default_retry_delay())]
-    pub retry_delay: Duration,
-}
-
-fn default_retry_count() -> usize {
-    3
-}
-
-fn default_retry_delay() -> Duration {
-    Duration::from_secs(5)
-}
-
-impl Default for SseClientConfig {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 /// Type for sending SSE events to clients - can be either a TransportMessage or SystemMessage
 #[derive(Debug)]
 pub enum SseEvent {
@@ -208,19 +153,10 @@ impl SseEvent {
 /// Client registry type for SSE server - maps ClientId to message sender
 type ClientRegistry = Arc<Mutex<HashMap<ClientId, mpsc::Sender<SseEvent>>>>;
 
-/// Request registry type - maps JSONRPC message IDs to ClientId
-type RequestRegistry = Arc<Mutex<HashMap<String, ClientId>>>;
-
 /// SSE transport operating mode
 enum SseMode {
-    /// Server mode with connected clients, request registry, and binding address
-    Server {
-        clients: ClientRegistry,
-        requests: RequestRegistry,
-        url: SocketAddr,
-        channel_capacity: usize,
-        on_message: mpsc::Sender<SseMessage>,
-    },
+    /// Server mode with connected clients, binding address, and channel capacity
+    Server { clients: ClientRegistry, endpoint: String, channel_capacity: usize, on_message: mpsc::Sender<SseMessage> },
 
     /// Client mode connecting to a server
     Client {
@@ -265,7 +201,7 @@ impl ParsedSseEvent {
     }
 }
 
-struct SseMessage {
+pub struct SseMessage {
     pub message: JsonRpcMessage,
     pub client_id: ClientId,
 }
@@ -289,13 +225,11 @@ impl SseTransport {
         on_close: mpsc::Sender<()>,
     ) -> Self {
         let clients = Arc::new(Mutex::new(HashMap::new()));
-        let requests = Arc::new(Mutex::new(HashMap::new()));
 
         Self {
             mode: Arc::new(SseMode::Server {
                 clients,
-                requests,
-                url: config.url,
+                endpoint: config.endpoint,
                 channel_capacity: config.channel_capacity,
                 on_message,
             }),
@@ -312,7 +246,7 @@ impl SseTransport {
         on_close: mpsc::Sender<()>,
     ) -> Result<Self> {
         let http_client = ClientBuilder::new().build().context("Failed to create HTTP client")?;
-        let sse_url = Url::parse(&format!("http://{}", config.server_url)).context("Failed to parse server URL")?;
+        let sse_url = Url::parse(&format!("http://{}", config.endpoint)).context("Failed to parse server URL")?;
 
         Ok(Self {
             mode: Arc::new(SseMode::Client {
@@ -352,27 +286,6 @@ impl SseTransport {
         ParsedSseEvent { event_type, data: event_data }
     }
 
-    /// Extract the ID from a JsonRpcMessage
-    pub fn extract_jsonrpc_id(message: &JsonRpcMessage) -> Option<String> {
-        // This function would need to be implemented based on the actual JsonRpcMessage structure
-        // For example, if JsonRpcMessage has an id field:
-        message.id.as_ref().map(|id| id.to_string())
-    }
-
-    /// Extract the ID from a JSON-RPC message string
-    pub fn extract_jsonrpc_id_from_str(message: &str) -> Option<String> {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(message) {
-            if let Some(id) = json.get("id") {
-                if let Some(id_str) = id.as_str() {
-                    return Some(id_str.to_string());
-                } else if let Some(id_num) = id.as_i64() {
-                    return Some(id_num.to_string());
-                }
-            }
-        }
-        None
-    }
-
     /// Helper method to send a message to a specific client
     async fn send_to_client(clients: &ClientRegistry, client_id: &ClientId, event: SseEvent) -> Result<()> {
         let clients_map = clients.lock().await;
@@ -384,6 +297,7 @@ impl SseTransport {
             }
         } else {
             debug!("Client {} not found", client_id.as_ref());
+            return Err(SseError::Other(format!("Client {} not found", client_id.as_ref())).into());
         }
 
         Ok(())
@@ -480,14 +394,16 @@ impl Transport for SseTransport {
 
         async move {
             match *mode {
-                SseMode::Server { ref clients, ref requests, url, channel_capacity, ref on_message } => {
+                SseMode::Server { ref clients, ref endpoint, channel_capacity, ref on_message } => {
                     let clients = clients.clone();
                     let on_message = on_message.clone();
+                    let endpoint = endpoint.clone();
 
-                    info!("Starting SSE server on {}", url);
+                    info!("Starting SSE server on {}", endpoint);
 
                     // Start HTTP server
-                    let listener = tokio::net::TcpListener::bind(url).await.context("Failed to bind to socket")?;
+                    let listener =
+                        tokio::net::TcpListener::bind(endpoint.clone()).await.context("Failed to bind to socket")?;
 
                     // Create a task to handle connections
                     let server_handle = tokio::spawn(async move {
@@ -504,7 +420,7 @@ impl Transport for SseTransport {
                             // Clone everything needed for the connection handler
                             let clients_clone = clients.clone();
                             let on_message_clone = on_message.clone();
-                            let url_clone = url;
+                            let endpoint_clone = endpoint.clone();
                             let capacity = channel_capacity;
 
                             // Spawn a task to serve the connection
@@ -513,7 +429,7 @@ impl Transport for SseTransport {
                                 let service = service_fn(move |req: Request<hyper::body::Incoming>| {
                                     let clients = clients_clone.clone();
                                     let on_message = on_message_clone.clone();
-                                    let url = url_clone;
+                                    let endpoint = endpoint_clone.clone();
 
                                     async move {
                                         match (req.method(), req.uri().path()) {
@@ -538,7 +454,7 @@ impl Transport for SseTransport {
                                                 // Spawn a task to handle sending SSE events to the client
                                                 tokio::spawn(async move {
                                                     // Send initial endpoint event with client_id
-                                                    let endpoint_url = format!("http://{}/message", url);
+                                                    let endpoint_url = format!("http://{}/message", endpoint);
                                                     let endpoint_message = SystemMessage::Endpoint {
                                                         url: endpoint_url,
                                                         client_id: client_id.as_ref().to_string(),
@@ -736,43 +652,29 @@ impl Transport for SseTransport {
     fn send(
         &mut self,
         message: JsonRpcMessage,
-        metadata: Option<TransportMetadata>,
+        metadata: serde_json::Value,
     ) -> impl std::future::Future<Output = Result<()>> {
         let mode = self.mode.clone();
 
         async move {
             match &*mode {
-                SseMode::Server { clients, requests, .. } => {
+                SseMode::Server { clients, .. } => {
                     debug!("Server sending [sse] JsonRpcMessage");
 
-                    // Extract JSON-RPC ID from message
-                    if let Some(jsonrpc_id) = Self::extract_jsonrpc_id(&message) {
-                        // Find the client_id for this JSON-RPC ID
-                        let client_id = {
-                            let requests_map = requests.lock().await;
-                            requests_map.get(&jsonrpc_id).cloned()
-                        };
+                    // Get client_id from metadata
 
-                        if let Some(client_id) = client_id {
-                            // Create TransportMessage and wrap in SseEvent
-                            let transport_message = TransportMessage::new(message);
-                            let sse_event = SseEvent::Transport(transport_message);
+                    // Since we know metadata is SseMetadata for SSE transport
+                    if let Some(sse_metadata) = serde_json::from_value::<SseMetadata>(metadata).ok() {
+                        let client_id = ClientId(sse_metadata.client_id.clone());
 
-                            // Send event to the specific client
-                            Self::send_to_client(clients, &client_id, sse_event).await?;
+                        // Create TransportMessage and wrap in SseEvent
+                        let transport_message = TransportMessage::new(message);
+                        let sse_event = SseEvent::Transport(transport_message);
 
-                            // Clean up the request map entry after sending
-                            let mut requests_map = requests.lock().await;
-                            requests_map.remove(&jsonrpc_id);
-                        } else {
-                            return Err(
-                                SseError::Other(format!("No client found for JSON-RPC ID: {}", jsonrpc_id)).into()
-                            );
-                        }
+                        // Send event to the specific client
+                        Self::send_to_client(clients, &client_id, sse_event).await?;
                     } else {
-                        return Err(
-                            SseError::Other("Message has no JSON-RPC ID, cannot route properly".to_string()).into()
-                        );
+                        return Err(SseError::Other("Invalid metadata type provided".to_string()).into());
                     }
 
                     Ok(())

@@ -6,18 +6,12 @@ use anyhow::Result;
 use std::future::Future;
 use tokio::task::JoinHandle;
 
-pub trait TransportMetadata: Send + Sync {}
-
 pub trait Transport {
     // Start processing messages
     fn start(&mut self) -> impl Future<Output = Result<JoinHandle<Result<()>>>>;
 
     // Send a JSON-RPC message with optional metadata
-    fn send(
-        &mut self,
-        message: JsonRpcMessage,
-        metadata: Option<&dyn TransportMetadata>,
-    ) -> impl Future<Output = Result<()>>;
+    fn send(&mut self, message: JsonRpcMessage, metadata: serde_json::Value) -> impl Future<Output = Result<()>>;
 
     // Close the connection
     fn close(&mut self) -> impl Future<Output = Result<()>>;
@@ -37,7 +31,7 @@ impl Transport for TransportType {
         }
     }
 
-    async fn send(&mut self, message: JsonRpcMessage, metadata: Option<&dyn TransportMetadata>) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, metadata: serde_json::Value) -> Result<()> {
         match self {
             TransportType::Stdio(t) => t.send(message, metadata).await,
             TransportType::Sse(t) => t.send(message, metadata).await,

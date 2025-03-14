@@ -6,11 +6,12 @@ use crate::schema::{
     ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
-use crate::transport::sse::{SseServerConfig, SseTransport};
+use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
@@ -28,7 +29,28 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
 
 pub struct StdioConfig {}
 
-pub struct SseConfig {}
+/// Server configuration with builder pattern
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct SseConfig {
+    #[builder(default = default_server_url())]
+    pub endpoint: String,
+    #[builder(default = default_channel_capacity())]
+    pub channel_capacity: usize,
+    #[builder(default = default_keep_alive())]
+    pub keep_alive: bool,
+}
+
+fn default_server_url() -> String {
+    "127.0.0.1:8080".to_string()
+}
+
+fn default_channel_capacity() -> usize {
+    32
+}
+
+fn default_keep_alive() -> bool {
+    true
+}
 
 pub struct WebsocketConfig {}
 
@@ -262,52 +284,84 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    let (on_message_tx, mut on_message_rx) = mpsc::channel(32);
-    let (on_sse_message_tx, on_sse_message_rx) = mpsc::channel(32);
-
-    let (on_error_tx, _on_error_rx) = mpsc::channel(32);
-    let (on_close_tx, _on_close_rx) = mpsc::channel(32);
-
-    let mut transport = match transport {
+    match transport {
         TransportConfig::Stdio(_config) => {
+            let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
             let transport = StdioTransport::new_server(on_message_tx, on_error_tx, on_close_tx);
-            TransportType::Stdio(transport)
+            let mut transport_type = TransportType::Stdio(transport);
+
+            if let Err(e) = transport_type.start().await {
+                error!("Transport error: {}", e);
+                return Err(e).context("Failed to start transport");
+            }
+
+            while let Some(request) = on_message_rx.recv().await {
+                match &request {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                            let Some(response) =
+                                io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
+                            else {
+                                continue;
+                            };
+
+                            // Send response without metadata for stdio transport
+                            if let Err(e) = transport_type.send(response.into(), serde_json::Value::Null).await {
+                                error!("Failed to send response: {}", e);
+                                return Err(e).context("Failed to send response");
+                            }
+                        }
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
+                        _ => {}
+                    },
+                    JsonRpcMessage::Response(_) => {}
+                }
+            }
         }
-        TransportConfig::Sse(_config) => {
-            let transport =
-                SseTransport::new_server(SseServerConfig::default(), on_sse_message_tx, on_error_tx, on_close_tx);
-            TransportType::Sse(transport)
+        TransportConfig::Sse(config) => {
+            let (on_message_tx, mut on_message_rx) = mpsc::channel::<SseMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+            let transport = SseTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
+            let mut transport_type = TransportType::Sse(transport);
+
+            if let Err(e) = transport_type.start().await {
+                error!("Transport error: {}", e);
+                return Err(e).context("Failed to start transport");
+            }
+
+            while let Some(sse_message) = on_message_rx.recv().await {
+                match &sse_message.message {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                            let Some(response) =
+                                io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
+                            else {
+                                continue;
+                            };
+
+                            let sse_metadata = SseMetadata { client_id: sse_message.client_id.as_ref().to_string() };
+
+                            if let Err(e) = transport_type
+                                .send(response.into(), serde_json::to_value(&sse_metadata).unwrap_or_default())
+                                .await
+                            {
+                                error!("Failed to send SSE response: {}", e);
+                                return Err(e).context("Failed to send SSE response");
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
         }
         TransportConfig::Websocket(_config) => {
             unimplemented!("Websocket transport not implemented");
-        }
-    };
-
-    // Spawn the transport reader
-    if let Err(e) = transport.start().await {
-        error!("Transport error: {}", e);
-        return Err(e).context("Failed to start transport");
-    }
-
-    // Handle incoming messages
-    while let Some(request) = on_message_rx.recv().await {
-        match &request {
-            JsonRpcMessage::Request(request) => match request {
-                jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                    let Some(response) =
-                        io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
-                    else {
-                        continue;
-                    };
-                    if let Err(e) = transport.send(response.into()).await {
-                        error!("Failed to send response: {}", e);
-                        return Err(e).context("Failed to send response");
-                    }
-                }
-                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
-                _ => {}
-            },
-            JsonRpcMessage::Response(_) => {}
         }
     }
 
