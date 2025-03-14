@@ -19,7 +19,6 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, warn};
-use url::Url;
 use uuid::Uuid;
 
 /// Unique identifier for SSE clients
@@ -160,8 +159,8 @@ enum SseMode {
 
     /// Client mode connecting to a server
     Client {
-        sse_url: Url,
-        endpoint_url: Arc<Mutex<Option<String>>>,
+        sse_endpoint: String,
+        message_endpoint: Arc<Mutex<Option<String>>>,
         http_client: Client,
         retry_count: usize,
         retry_delay: Duration,
@@ -246,12 +245,11 @@ impl SseTransport {
         on_close: mpsc::Sender<()>,
     ) -> Result<Self> {
         let http_client = ClientBuilder::new().build().context("Failed to create HTTP client")?;
-        let sse_url = Url::parse(&format!("http://{}", config.endpoint)).context("Failed to parse server URL")?;
 
         Ok(Self {
             mode: Arc::new(SseMode::Client {
-                sse_url,
-                endpoint_url: Arc::new(Mutex::new(None)),
+                sse_endpoint: config.endpoint.clone(),
+                message_endpoint: Arc::new(Mutex::new(None)),
                 http_client,
                 retry_count: config.retry_count,
                 retry_delay: config.retry_delay,
@@ -305,15 +303,15 @@ impl SseTransport {
 
     /// Connect to an SSE endpoint and process events
     async fn connect_to_sse(
-        sse_url: &Url,
+        sse_endpoint: &str,
         http_client: &Client,
-        endpoint_url: &Arc<Mutex<Option<String>>>,
+        message_endpoint: &Arc<Mutex<Option<String>>>,
         client_id: &Arc<Mutex<Option<String>>>,
         on_message: mpsc::Sender<JsonRpcMessage>,
     ) -> Result<()> {
         // Connect to SSE endpoint
         let response = http_client
-            .get(sse_url.to_string())
+            .get(sse_endpoint)
             .header("Accept", "text/event-stream")
             .send()
             .await
@@ -351,8 +349,8 @@ impl SseTransport {
                         {
                             if let SystemMessage::Endpoint { url, client_id: id } = system_message {
                                 // Set the endpoint URL
-                                let mut endpoint_guard = endpoint_url.lock().await;
-                                *endpoint_guard = Some(url);
+                                let mut message_endpoint_guard = message_endpoint.lock().await;
+                                *message_endpoint_guard = Some(url);
 
                                 // Set the client ID
                                 let mut client_id_guard = client_id.lock().await;
@@ -591,21 +589,21 @@ impl Transport for SseTransport {
                     Ok(server_handle)
                 }
                 SseMode::Client {
-                    ref sse_url,
-                    ref endpoint_url,
+                    ref sse_endpoint,
+                    ref message_endpoint,
                     ref http_client,
                     retry_count,
                     retry_delay,
                     ref client_id,
                     ref on_message,
                 } => {
-                    let sse_url = sse_url.clone();
-                    let endpoint_url = endpoint_url.clone();
+                    let sse_endpoint = sse_endpoint.clone();
+                    let message_endpoint = message_endpoint.clone();
                     let http_client = http_client.clone();
                     let client_id = client_id.clone();
                     let on_message = on_message.clone();
 
-                    info!("Starting SSE client, connecting to {}", sse_url);
+                    info!("Starting SSE client, connecting to {}", sse_endpoint);
 
                     let client_mode_handle = tokio::spawn({
                         async move {
@@ -617,9 +615,9 @@ impl Transport for SseTransport {
                                 attempts += 1;
 
                                 match Self::connect_to_sse(
-                                    &sse_url,
+                                    &sse_endpoint,
                                     &http_client,
-                                    &endpoint_url,
+                                    &message_endpoint,
                                     &client_id,
                                     on_message.clone(),
                                 )
@@ -679,13 +677,13 @@ impl Transport for SseTransport {
 
                     Ok(())
                 }
-                SseMode::Client { endpoint_url, http_client, client_id, .. } => {
+                SseMode::Client { message_endpoint, http_client, client_id, .. } => {
                     debug!("Client sending [sse] JsonRpcMessage");
 
                     // Get endpoint URL
                     let url = {
-                        let endpoint_guard = endpoint_url.lock().await;
-                        match &*endpoint_guard {
+                        let message_endpoint_guard = message_endpoint.lock().await;
+                        match &*message_endpoint_guard {
                             Some(url) => url.clone(),
                             None => {
                                 return Err(SseError::Other(
@@ -768,9 +766,9 @@ impl Transport for SseTransport {
                     info!("SSE server shutdown completed");
                     Ok(())
                 }
-                SseMode::Client { sse_url, .. } => {
+                SseMode::Client { sse_endpoint, .. } => {
                     // Client mode: log the shutdown request
-                    info!("Closing SSE client connection to {}", sse_url);
+                    info!("Closing SSE client connection to {}", sse_endpoint);
 
                     // The SSE connection will be closed when the task is dropped
                     // No explicit closure is needed
