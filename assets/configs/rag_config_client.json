@@ -23,23 +23,6 @@
                     ".output/mcp_server-bioma.log"
                 ]
             }
-        },
-        {
-            "server": {
-                "name": "filesystem",
-                "enabled": true,
-                "transport": "stdio",
-                "command": "docker",
-                "args": [
-                    "run",
-                    "-i",
-                    "--rm",
-                    "--mount",
-                    "type=bind,src=/Users/rozgo/BiomaAI,dst=/Users/rozgo/BiomaAI",
-                    "mcp/filesystem",
-                    "/Users/rozgo/BiomaAI"
-                ]
-            }
         }
     ]
 }

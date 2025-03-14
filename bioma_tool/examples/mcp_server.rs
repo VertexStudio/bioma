@@ -6,9 +6,8 @@ use bioma_tool::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::ModelContextProtocolServer,
+    server::{ModelContextProtocolServer, StdioConfig, TransportConfig},
     tools::{self, ToolCallHandler},
-    transport::{stdio::StdioTransport, TransportType},
 };
 use clap::Parser;
 use std::path::PathBuf;
@@ -109,7 +108,7 @@ async fn main() -> Result<()> {
     setup_logging(args.log_file)?;
 
     let transport = match args.transport.as_str() {
-        "stdio" => TransportType::Stdio(StdioTransport::new_server()),
+        "stdio" => TransportConfig::Stdio(StdioConfig {}),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 
