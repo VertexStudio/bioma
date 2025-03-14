@@ -248,32 +248,24 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
 
     // Handle incoming messages
     while let Some(request) = rx.recv().await {
-        let Ok(request_str) = serde_json::to_string(&request) else {
-            error!("Failed to serialize request");
-            continue;
-        };
-
-        let Some(response_str) = io_handler.handle_request(&request_str, ServerMetadata::default()).await else {
-            debug!("Nothing to do for request");
-            continue;
-        };
-
-        let response = serde_json::from_str::<jsonrpc_core::Response>(&response_str);
-        let Ok(response) = response else {
-            error!("Failed to parse JSON-RPC response: {}", response_str);
-            continue;
-        };
-
-        match request {
-            JsonRpcMessage::Request(jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call))) => {
-                if let Err(e) = transport.send(response.into()).await {
-                    error!("Failed to send response: {}", e);
-                    return Err(e).context("Failed to send response");
+        match &request {
+            JsonRpcMessage::Request(request) => {
+                match request {
+                    jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                        let Some(response) = io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
+                        else {
+                            continue;
+                        };
+                        if let Err(e) = transport.send(response.into()).await {
+                            error!("Failed to send response: {}", e);
+                            return Err(e).context("Failed to send response");
+                        }
+                    }
+                    jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
+                    _ => {}
                 }
             }
-            JsonRpcMessage::Request(jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification))) => {
-            }
-            _ => {}
+            JsonRpcMessage::Response(_) => {}
         }
     }
 
