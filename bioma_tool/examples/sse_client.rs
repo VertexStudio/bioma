@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::{ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
+    client::{ModelContextProtocolClient, ServerConfig, SseConfig, TransportConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
 };
 use clap::Parser;
@@ -9,12 +9,9 @@ use tracing::{error, info};
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the MCP server executable
-    command: String,
-
-    /// Args to pass to the MCP server
-    #[arg(num_args = 0.., value_delimiter = ' ')]
-    args: Option<Vec<String>>,
+    /// Server URL (e.g. http://127.0.0.1:8090)
+    #[arg(long, short, default_value = "http://127.0.0.1:8090")]
+    endpoint: String,
 }
 
 #[tokio::main]
@@ -30,12 +27,15 @@ async fn main() -> Result<()> {
     info!("Starting MCP server process...");
 
     let server = ServerConfig::builder()
-        .name("bioma-tool".to_string())
-        .transport(TransportConfig::Stdio(StdioConfig { command: args.command, args: args.args.unwrap_or_default() }))
+        .name(args.endpoint.to_string())
+        .transport(TransportConfig::Sse(SseConfig::builder().endpoint(args.endpoint).build()))
         .build();
 
     // Create client
     let mut client = ModelContextProtocolClient::new(server).await?;
+
+    // Wait to open SSE connection
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     // Initialize the client
     info!("Initializing client...");
@@ -94,21 +94,25 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // Make an echo tool call
-    info!("Making echo tool call...");
-    let echo_args = serde_json::json!({
-        "message": "Hello from MCP client!"
+    // Make a list_directory tool call
+    info!("Making list_directory tool call...");
+    let tree_args = serde_json::json!({
+        "path": "/data/BiomaAI"
     });
-    let echo_args =
-        CallToolRequestParams { name: "echo".to_string(), arguments: serde_json::from_value(echo_args).unwrap() };
-    let echo_result = client.call_tool(echo_args).await?;
-    info!("Echo response: {:?}", echo_result);
+    let tree_args = CallToolRequestParams {
+        name: "list_directory".to_string(),
+        arguments: Some(serde_json::from_value(tree_args).unwrap()),
+    };
+    let tree_result = client.call_tool(tree_args).await;
+    match tree_result {
+        Ok(result) => info!("list_directory response: {:?}", result),
+        Err(e) => error!("Error calling list_directory: {:?}", e),
+    }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     // Shutdown the client
     info!("Shutting down client...");
-    client.close().await?;
 
     Ok(())
 }

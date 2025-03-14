@@ -6,7 +6,7 @@ use bioma_tool::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{ModelContextProtocolServer, StdioConfig, TransportConfig},
+    server::{ModelContextProtocolServer, SseConfig, StdioConfig, TransportConfig},
     tools::{self, ToolCallHandler},
 };
 use clap::Parser;
@@ -19,12 +19,16 @@ use tracing_subscriber::fmt::format::FmtSpan;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the log file
-    #[arg(long, default_value = "mcp_server.log")]
+    #[arg(long, short, default_value = "mcp_server.log")]
     log_file: PathBuf,
 
     /// Transport type (stdio or websocket)
-    #[arg(long, default_value = "stdio")]
+    #[arg(long, short, default_value = "stdio")]
     transport: String,
+
+    /// Server address for SSE transport
+    #[arg(long, short, default_value = "127.0.0.1:8090")]
+    endpoint: String,
 }
 
 struct McpServer {
@@ -109,6 +113,7 @@ async fn main() -> Result<()> {
 
     let transport = match args.transport.as_str() {
         "stdio" => TransportConfig::Stdio(StdioConfig {}),
+        "sse" => TransportConfig::Sse(SseConfig::builder().endpoint(args.endpoint).build()),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 

@@ -4,6 +4,7 @@ use crate::schema::{
     ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
+use crate::transport::sse::SseTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::Error;
@@ -12,6 +13,7 @@ use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
@@ -22,9 +24,33 @@ pub struct StdioConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Client configuration with builder pattern
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
+    #[builder(default = default_server_url())]
     pub endpoint: String,
+    #[builder(default = default_retry_count())]
+    pub retry_count: usize,
+    #[builder(default = default_retry_delay())]
+    pub retry_delay: Duration,
+}
+
+fn default_server_url() -> String {
+    "http://127.0.0.1:8090".to_string()
+}
+
+fn default_retry_count() -> usize {
+    3
+}
+
+fn default_retry_delay() -> Duration {
+    Duration::from_secs(5)
+}
+
+impl Default for SseConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,18 +62,19 @@ pub enum TransportConfig {
     Sse(SseConfig),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ServerConfig {
     pub name: String,
     #[serde(default = "default_version")]
+    #[builder(default = default_version())]
     pub version: String,
     pub transport: TransportConfig,
     #[serde(default = "default_request_timeout")]
+    #[builder(default = default_request_timeout())]
     pub request_timeout: u64,
-    pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ClientConfig {
     pub server: ServerConfig,
 }
@@ -90,8 +117,15 @@ impl ModelContextProtocolClient {
                 };
                 TransportType::Stdio(transport)
             }
-            TransportConfig::Sse(_config) => {
-                unimplemented!("SSE transport not implemented");
+            TransportConfig::Sse(config) => {
+                let transport = SseTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into()))
+                    }
+                };
+                TransportType::Sse(transport)
             }
         };
 
@@ -204,7 +238,7 @@ impl ModelContextProtocolClient {
         };
 
         // Send request
-        if let Err(e) = self.transport.send(request.into()).await {
+        if let Err(e) = self.transport.send(request.into(), serde_json::Value::Null).await {
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
@@ -257,7 +291,7 @@ impl ModelContextProtocolClient {
 
         // Send notification without waiting for response
         self.transport
-            .send(notification.into())
+            .send(notification.into(), serde_json::Value::Null)
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
     }

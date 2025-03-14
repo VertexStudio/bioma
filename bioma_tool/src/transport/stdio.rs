@@ -110,7 +110,7 @@ impl Transport for StdioTransport {
         Ok(handle)
     }
 
-    async fn send(&mut self, message: JsonRpcMessage) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, _metadata: serde_json::Value) -> Result<()> {
         let message_str = serde_json::to_string(&message)?;
         match &*self.mode {
             StdioMode::Server(stdout) => {
