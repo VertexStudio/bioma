@@ -28,40 +28,35 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
 pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: TransportType) -> Result<()> {
     debug!("Starting ModelContextProtocol server: {}", name);
 
-    let server = T::new();
+    let server = std::sync::Arc::new(T::new());
     let mut io_handler = MetaIoHandler::default();
 
-    let server = std::sync::Arc::new(server);
-    let server_tools = server.clone();
-    let server_resources = server.clone();
-    let server_prompts = server.clone();
-    let server_call = server.clone();
-    let server_get_prompt = server.clone();
-    let server_read_resource = server.clone();
-
-    io_handler.add_method_with_meta("initialize", move |params: Params, _meta: ServerMetadata| {
+    io_handler.add_method_with_meta("initialize", {
         let server = server.clone();
-        debug!("Handling initialize request");
+        move |params: Params, _meta: ServerMetadata| {
+            let server = server.clone();
+            debug!("Handling initialize request");
 
-        async move {
-            let init_params: InitializeRequestParams = params.parse().map_err(|e| {
-                error!("Failed to parse initialize parameters: {}", e);
-                jsonrpc_core::Error::invalid_params(e.to_string())
-            })?;
+            async move {
+                let init_params: InitializeRequestParams = params.parse().map_err(|e| {
+                    error!("Failed to parse initialize parameters: {}", e);
+                    jsonrpc_core::Error::invalid_params(e.to_string())
+                })?;
 
-            let result = InitializeResult {
-                capabilities: server.get_capabilities(),
-                protocol_version: init_params.protocol_version,
-                server_info: Implementation { name: "bioma-mcp-server".to_string(), version: "0.1.0".to_string() },
-                instructions: Some("Bioma MCP server".to_string()),
-                meta: None,
-            };
+                let result = InitializeResult {
+                    capabilities: server.get_capabilities(),
+                    protocol_version: init_params.protocol_version,
+                    server_info: Implementation { name: "bioma-mcp-server".to_string(), version: "0.1.0".to_string() },
+                    instructions: Some("Bioma MCP server".to_string()),
+                    meta: None,
+                };
 
-            info!("Successfully handled initialize request");
-            Ok(serde_json::to_value(result).map_err(|e| {
-                error!("Failed to serialize initialize result: {}", e);
-                jsonrpc_core::Error::invalid_params(e.to_string())
-            })?)
+                info!("Successfully handled initialize request");
+                Ok(serde_json::to_value(result).map_err(|e| {
+                    error!("Failed to serialize initialize result: {}", e);
+                    jsonrpc_core::Error::invalid_params(e.to_string())
+                })?)
+            }
         }
     });
 
@@ -93,144 +88,162 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
         }
     });
 
-    io_handler.add_method("resources/list", move |_params| {
-        let server = server_resources.clone();
-        debug!("Handling resources/list request");
+    io_handler.add_method("resources/list", {
+        let server = server.clone();
+        move |_params| {
+            let server = server.clone();
+            debug!("Handling resources/list request");
 
-        let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
+            let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
 
-        async move {
-            let response = ListResourcesResult { next_cursor: None, resources, meta: None };
+            async move {
+                let response = ListResourcesResult { next_cursor: None, resources, meta: None };
 
-            info!("Successfully handled resources/list request");
-            Ok(serde_json::to_value(response).unwrap_or_default())
+                info!("Successfully handled resources/list request");
+                Ok(serde_json::to_value(response).unwrap_or_default())
+            }
         }
     });
 
-    io_handler.add_method("resources/read", move |params: Params| {
-        let server = server_read_resource.clone();
-        debug!("Handling resources/read request");
+    io_handler.add_method("resources/read", {
+        let server = server.clone();
+        move |params: Params| {
+            let server = server.clone();
+            debug!("Handling resources/read request");
 
-        async move {
-            let params: ReadResourceRequestParams = params.parse().map_err(|e| {
-                error!("Failed to parse resource read parameters: {}", e);
-                jsonrpc_core::Error::invalid_params(e.to_string())
-            })?;
+            async move {
+                let params: ReadResourceRequestParams = params.parse().map_err(|e| {
+                    error!("Failed to parse resource read parameters: {}", e);
+                    jsonrpc_core::Error::invalid_params(e.to_string())
+                })?;
 
-            let resources = server.get_resources();
-            let resource = resources.iter().find(|resource| resource.def().uri == params.uri);
+                let resources = server.get_resources();
+                let resource = resources.iter().find(|resource| resource.def().uri == params.uri);
 
-            match resource {
-                Some(resource) => {
-                    let result = resource.read_boxed(params.uri.clone()).await.map_err(|e| {
-                        error!("Resource read failed: {}", e);
-                        jsonrpc_core::Error::internal_error()
-                    })?;
+                match resource {
+                    Some(resource) => {
+                        let result = resource.read_boxed(params.uri.clone()).await.map_err(|e| {
+                            error!("Resource read failed: {}", e);
+                            jsonrpc_core::Error::internal_error()
+                        })?;
 
-                    info!("Successfully handled resources/read request for: {}", params.uri);
-                    Ok(serde_json::to_value(result).unwrap_or_default())
-                }
-                None => {
-                    error!("Unknown resource requested: {}", params.uri);
-                    Err(jsonrpc_core::Error::method_not_found())
+                        info!("Successfully handled resources/read request for: {}", params.uri);
+                        Ok(serde_json::to_value(result).unwrap_or_default())
+                    }
+                    None => {
+                        error!("Unknown resource requested: {}", params.uri);
+                        Err(jsonrpc_core::Error::method_not_found())
+                    }
                 }
             }
         }
     });
 
-    io_handler.add_method("prompts/list", move |_params| {
-        let server = server_prompts.clone();
-        debug!("Handling prompts/list request");
+    io_handler.add_method("prompts/list", {
+        let server = server.clone();
+        move |_params| {
+            let server = server.clone();
+            debug!("Handling prompts/list request");
 
-        let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
+            let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
 
-        async move {
-            let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
+            async move {
+                let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
 
-            info!("Successfully handled prompts/list request");
-            Ok(serde_json::to_value(response).unwrap_or_default())
+                info!("Successfully handled prompts/list request");
+                Ok(serde_json::to_value(response).unwrap_or_default())
+            }
         }
     });
 
-    io_handler.add_method("prompts/get", move |params: Params| {
-        let server = server_get_prompt.clone();
-        debug!("Handling prompts/get request");
+    io_handler.add_method("prompts/get", {
+        let server = server.clone();
+        move |params: Params| {
+            let server = server.clone();
+            debug!("Handling prompts/get request");
 
-        async move {
-            let params: GetPromptRequestParams = params.parse().map_err(|e| {
-                error!("Failed to parse prompt get parameters: {}", e);
-                jsonrpc_core::Error::invalid_params(e.to_string())
-            })?;
+            async move {
+                let params: GetPromptRequestParams = params.parse().map_err(|e| {
+                    error!("Failed to parse prompt get parameters: {}", e);
+                    jsonrpc_core::Error::invalid_params(e.to_string())
+                })?;
 
-            // Find the requested prompt
-            let prompts = server.get_prompts();
-            let prompt = prompts.iter().find(|p| p.def().name == params.name);
+                // Find the requested prompt
+                let prompts = server.get_prompts();
+                let prompt = prompts.iter().find(|p| p.def().name == params.name);
 
-            match prompt {
-                Some(prompt) => {
-                    let result = prompt.get_boxed(params.arguments).await.map_err(|e| {
-                        error!("Prompt execution failed: {}", e);
-                        jsonrpc_core::Error::internal_error()
-                    })?;
+                match prompt {
+                    Some(prompt) => {
+                        let result = prompt.get_boxed(params.arguments).await.map_err(|e| {
+                            error!("Prompt execution failed: {}", e);
+                            jsonrpc_core::Error::internal_error()
+                        })?;
 
-                    info!("Successfully handled prompts/get request for: {}", params.name);
-                    Ok(serde_json::to_value(result).map_err(|e| {
-                        error!("Failed to serialize prompt result: {}", e);
-                        jsonrpc_core::Error::invalid_params(e.to_string())
-                    })?)
-                }
-                None => {
-                    error!("Unknown prompt requested: {}", params.name);
-                    Err(jsonrpc_core::Error::method_not_found())
+                        info!("Successfully handled prompts/get request for: {}", params.name);
+                        Ok(serde_json::to_value(result).map_err(|e| {
+                            error!("Failed to serialize prompt result: {}", e);
+                            jsonrpc_core::Error::invalid_params(e.to_string())
+                        })?)
+                    }
+                    None => {
+                        error!("Unknown prompt requested: {}", params.name);
+                        Err(jsonrpc_core::Error::method_not_found())
+                    }
                 }
             }
         }
     });
 
-    io_handler.add_method("tools/list", move |_params| {
-        let server = server_tools.clone();
-        debug!("Handling tools/list request");
+    io_handler.add_method("tools/list", {
+        let server = server.clone();
+        move |_params| {
+            let server = server.clone();
+            debug!("Handling tools/list request");
 
-        let tools = server.get_tools().iter().map(|tool| tool.def()).collect::<Vec<_>>();
+            let tools = server.get_tools().iter().map(|tool| tool.def()).collect::<Vec<_>>();
 
-        async move {
-            let response = ListToolsResult { next_cursor: None, tools, meta: None };
+            async move {
+                let response = ListToolsResult { next_cursor: None, tools, meta: None };
 
-            info!("Successfully handled tools/list request");
-            Ok(serde_json::to_value(response).unwrap_or_default())
+                info!("Successfully handled tools/list request");
+                Ok(serde_json::to_value(response).unwrap_or_default())
+            }
         }
     });
 
-    io_handler.add_method("tools/call", move |params: Params| {
-        let server = server_call.clone();
-        debug!("Handling tools/call request");
+    io_handler.add_method("tools/call", {
+        let server = server.clone();
+        move |params: Params| {
+            let server = server.clone();
+            debug!("Handling tools/call request");
 
-        async move {
-            let params: CallToolRequestParams = params.parse().map_err(|e| {
-                error!("Failed to parse tool call parameters: {}", e);
-                jsonrpc_core::Error::invalid_params(e.to_string())
-            })?;
+            async move {
+                let params: CallToolRequestParams = params.parse().map_err(|e| {
+                    error!("Failed to parse tool call parameters: {}", e);
+                    jsonrpc_core::Error::invalid_params(e.to_string())
+                })?;
 
-            // Find the requested tool
-            let tools = server.get_tools();
-            let tool = tools.iter().find(|t| t.def().name == params.name);
+                // Find the requested tool
+                let tools = server.get_tools();
+                let tool = tools.iter().find(|t| t.def().name == params.name);
 
-            match tool {
-                Some(tool) => {
-                    let result = tool.call_boxed(params.arguments).await.map_err(|e| {
-                        error!("Tool execution failed: {}", e);
-                        jsonrpc_core::Error::internal_error()
-                    })?;
+                match tool {
+                    Some(tool) => {
+                        let result = tool.call_boxed(params.arguments).await.map_err(|e| {
+                            error!("Tool execution failed: {}", e);
+                            jsonrpc_core::Error::internal_error()
+                        })?;
 
-                    info!("Successfully handled tool call for: {}", params.name);
-                    Ok(serde_json::to_value(result).map_err(|e| {
-                        error!("Failed to serialize tool call result: {}", e);
-                        jsonrpc_core::Error::invalid_params(e.to_string())
-                    })?)
-                }
-                None => {
-                    error!("Unknown tool requested: {}", params.name);
-                    Err(jsonrpc_core::Error::method_not_found())
+                        info!("Successfully handled tool call for: {}", params.name);
+                        Ok(serde_json::to_value(result).map_err(|e| {
+                            error!("Failed to serialize tool call result: {}", e);
+                            jsonrpc_core::Error::invalid_params(e.to_string())
+                        })?)
+                    }
+                    None => {
+                        error!("Unknown tool requested: {}", params.name);
+                        Err(jsonrpc_core::Error::method_not_found())
+                    }
                 }
             }
         }
@@ -249,22 +262,21 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, mut transport: Tra
     // Handle incoming messages
     while let Some(request) = rx.recv().await {
         match &request {
-            JsonRpcMessage::Request(request) => {
-                match request {
-                    jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                        let Some(response) = io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
-                        else {
-                            continue;
-                        };
-                        if let Err(e) = transport.send(response.into()).await {
-                            error!("Failed to send response: {}", e);
-                            return Err(e).context("Failed to send response");
-                        }
+            JsonRpcMessage::Request(request) => match request {
+                jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                    let Some(response) =
+                        io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
+                    else {
+                        continue;
+                    };
+                    if let Err(e) = transport.send(response.into()).await {
+                        error!("Failed to send response: {}", e);
+                        return Err(e).context("Failed to send response");
                     }
-                    jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
-                    _ => {}
                 }
-            }
+                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
+                _ => {}
+            },
             JsonRpcMessage::Response(_) => {}
         }
     }
