@@ -18,7 +18,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// Metadata for SSE transport
@@ -171,8 +171,6 @@ enum SseMode {
         sse_endpoint: String,
         message_endpoint: Arc<Mutex<Option<String>>>,
         http_client: Client,
-        retry_count: usize,
-        retry_delay: Duration,
         on_message: mpsc::Sender<JsonRpcMessage>,
     },
 }
@@ -223,8 +221,6 @@ impl SseTransport {
                 sse_endpoint: config.endpoint.clone(),
                 message_endpoint: Arc::new(Mutex::new(None)),
                 http_client,
-                retry_count: config.retry_count,
-                retry_delay: config.retry_delay,
                 on_message,
             }),
             on_error,
@@ -547,14 +543,7 @@ impl Transport for SseTransport {
 
                     Ok(server_handle)
                 }
-                SseMode::Client {
-                    ref sse_endpoint,
-                    ref message_endpoint,
-                    ref http_client,
-                    retry_count,
-                    retry_delay,
-                    ref on_message,
-                } => {
+                SseMode::Client { ref sse_endpoint, ref message_endpoint, ref http_client, ref on_message } => {
                     let sse_endpoint = sse_endpoint.clone();
                     let message_endpoint = message_endpoint.clone();
                     let http_client = http_client.clone();
@@ -573,37 +562,21 @@ impl Transport for SseTransport {
                         let endpoint_notifier = endpoint_notifier.clone();
 
                         async move {
-                            let mut attempts = 0;
-                            let mut last_error = None;
-
-                            // Implement retry logic
-                            while attempts < retry_count {
-                                attempts += 1;
-
-                                match Self::connect_to_sse(
-                                    &sse_endpoint,
-                                    &http_client,
-                                    &message_endpoint,
-                                    on_message.clone(),
-                                    endpoint_notifier.clone(),
-                                )
-                                .await
-                                {
-                                    Ok(_) => return Ok(()),
-                                    Err(e) => {
-                                        last_error = Some(e);
-                                        warn!(
-                                            "Connection attempt {}/{} failed, retrying in {:?}",
-                                            attempts, retry_count, retry_delay
-                                        );
-                                        tokio::time::sleep(retry_delay).await;
-                                    }
+                            match Self::connect_to_sse(
+                                &sse_endpoint,
+                                &http_client,
+                                &message_endpoint,
+                                on_message.clone(),
+                                endpoint_notifier.clone(),
+                            )
+                            .await
+                            {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    error!("Failed to connect to SSE endpoint: {}", e);
+                                    Err(e)
                                 }
                             }
-
-                            Err(last_error.unwrap_or_else(|| {
-                                SseError::Connection("Failed to connect after retries".to_string()).into()
-                            }))
                         }
                     });
 

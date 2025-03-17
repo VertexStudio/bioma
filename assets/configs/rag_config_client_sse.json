@@ -14,12 +14,7 @@
       "server": {
         "name": "bioma-tool",
         "transport": "sse",
-        "endpoint": "http://127.0.0.1:8090",
-        "retry_count": 3,
-        "retry_delay": {
-          "secs": 5,
-          "nanos": 0
-        }
+        "endpoint": "http://127.0.0.1:8090"
       }
     }
   ]

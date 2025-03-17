@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -32,24 +31,10 @@ pub struct SseConfig {
     #[serde(default = "default_server_url")]
     #[builder(default = default_server_url())]
     pub endpoint: String,
-    #[serde(default = "default_retry_count")]
-    #[builder(default = default_retry_count())]
-    pub retry_count: usize,
-    #[serde(default = "default_retry_delay")]
-    #[builder(default = default_retry_delay())]
-    pub retry_delay: Duration,
 }
 
 fn default_server_url() -> String {
     "http://127.0.0.1:8090".to_string()
-}
-
-fn default_retry_count() -> usize {
-    3
-}
-
-fn default_retry_delay() -> Duration {
-    Duration::from_secs(5)
 }
 
 impl Default for SseConfig {
