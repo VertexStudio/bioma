@@ -161,17 +161,8 @@ impl Message<ChatMessages> for Chat {
         }
 
         // Add generation options
-        chat_message_request = chat_message_request.options(self.generation_options.clone());
-
-        if request.context_length < self.max_context_length {
-            println!("Setting context length to {}", request.context_length);
-            chat_message_request =
-                chat_message_request.options(self.generation_options.clone().num_ctx(request.context_length));
-        } else {
-            println!("Setting context length to {}", self.max_context_length);
-            chat_message_request =
-                chat_message_request.options(self.generation_options.clone().num_ctx(self.max_context_length));
-        }
+        let context_length = std::cmp::min(request.context_length, self.max_context_length);
+        chat_message_request = chat_message_request.options(self.generation_options.clone().num_ctx(context_length));
 
         // Add format
         if let Some(format) = &request.format {
