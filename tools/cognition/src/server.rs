@@ -769,7 +769,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
             "/rag/chat",
             data.config.chat_model.clone(),
             data.config.chat_messages_limit,
-            data.config.chat_context_length,
+            data.config.chat_max_context_length,
         )
         .await
     {
@@ -945,6 +945,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                                 stream: false,
                                 format: body.format.clone(),
                                 tools: Some(client_tools),
+                                context_length: body.context_length,
                             },
                             &chat_id,
                             SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
@@ -1022,6 +1023,7 @@ async fn chat(body: web::Json<ChatQuery>, data: web::Data<AppState>) -> HttpResp
                     chat_with_tools_tx,
                     body.format.clone(),
                     body.stream,
+                    body.context_length,
                     first_token_sent_tools,
                     request_start_time_tools,
                 )
@@ -1219,7 +1221,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
             "/rag/think",
             data.config.think_model.clone(),
             data.config.think_messages_limit,
-            data.config.think_context_length,
+            data.config.think_max_context_length,
         )
         .await
     {
@@ -1437,6 +1439,7 @@ async fn think(body: web::Json<ThinkQuery>, data: web::Data<AppState>) -> HttpRe
             stream: body.stream,
             format: body.format.clone(),
             tools: None,
+            context_length: body.context_length,
         };
 
         let mut chat_response = match user_actor
@@ -1637,7 +1640,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
             "/rag/ask",
             data.config.chat_model.clone(),
             data.config.chat_messages_limit,
-            data.config.chat_context_length,
+            data.config.chat_max_context_length,
         )
         .await
     {
@@ -1781,6 +1784,7 @@ async fn ask(body: web::Json<AskQuery>, data: web::Data<AppState>) -> HttpRespon
                         stream: false,
                         format: body.format.clone(),
                         tools: None,
+                        context_length: body.context_length,
                     },
                     &chat_id,
                     SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),

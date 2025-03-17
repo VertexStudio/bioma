@@ -60,6 +60,7 @@ pub async fn chat_with_tools(
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
     stream: bool,
+    context_length: u32,
     first_token_sent: std::sync::Arc<std::sync::atomic::AtomicBool>,
     request_start_time: std::time::Instant,
 ) -> Result<(), ChatToolError> {
@@ -71,6 +72,7 @@ pub async fn chat_with_tools(
         stream,
         format: format.clone(),
         tools: if tools.is_empty() { None } else { Some(tools.clone()) },
+        context_length,
     };
 
     info!("chat_with_tools: {} tools, {} messages, actor: {}", tools.len(), messages.len(), chat_actor);
@@ -144,6 +146,7 @@ pub async fn chat_with_tools(
                         tx.clone(),
                         format.clone(),
                         stream,
+                        context_length,
                         first_token_sent.clone(),
                         request_start_time,
                     ))

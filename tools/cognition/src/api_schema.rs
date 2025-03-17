@@ -37,10 +37,18 @@ pub struct ChatQuery {
     /// Whether to stream the response
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
+
+    /// The maximum context length for this chat query
+    #[serde(default = "default_chat_max_context_length")]
+    pub context_length: u32,
 }
 
 fn default_chat_stream() -> bool {
     true
+}
+
+fn default_chat_max_context_length() -> u32 {
+    4096
 }
 
 /// Request schema for think operation
@@ -68,10 +76,18 @@ pub struct ThinkQuery {
     /// Whether to stream the response
     #[serde(default = "default_think_stream")]
     pub stream: bool,
+
+    /// The maximum context length for this think query
+    #[serde(default = "default_think_max_context_length")]
+    pub context_length: u32,
 }
 
 fn default_think_stream() -> bool {
     true
+}
+
+fn default_think_max_context_length() -> u32 {
+    4096
 }
 
 /// Request schema for asking a question
@@ -87,6 +103,14 @@ pub struct AskQuery {
 
     /// Optional schema for structured output format
     pub format: Option<chat::Schema>,
+
+    /// The maximum context length for this ask query
+    #[serde(default = "default_ask_max_context_length")]
+    pub context_length: u32,
+}
+
+fn default_ask_max_context_length() -> u32 {
+    4096
 }
 
 //------------------------------------------------------------------------------

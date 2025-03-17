@@ -203,14 +203,13 @@ impl Handler {
 
         let chat_response = author_ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
-                ChatMessages {
-                    messages: conversation.clone(),
-                    restart: true,
-                    persist: false,
-                    stream: false,
-                    format: Some(format),
-                    tools: None,
-                },
+                ChatMessages::builder()
+                    .messages(conversation.clone())
+                    .restart(true)
+                    .persist(false)
+                    .stream(false)
+                    .format(format)
+                    .build(),
                 &self.chat,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )
@@ -244,14 +243,12 @@ impl Handler {
 
         let chat_response = author_ctx
             .send_and_wait_reply::<Chat, ChatMessages>(
-                ChatMessages {
-                    messages: conversation.clone(),
-                    restart: true,
-                    persist: false,
-                    stream: false,
-                    format: None,
-                    tools: None,
-                },
+                ChatMessages::builder()
+                    .messages(conversation.clone())
+                    .restart(true)
+                    .persist(false)
+                    .stream(false)
+                    .build(),
                 &self.chat,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )

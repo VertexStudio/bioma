@@ -275,7 +275,8 @@ curl -X 'POST' \
                     "content": "Why is the sky blue?"
                 }
             ],
-            "sources": ["/bioma"]
+            "sources": ["/bioma"],
+            "context_length": 4096
     }'
 ```
 
@@ -292,7 +293,8 @@ curl -X POST http://localhost:5766/chat \
                 "role": "user",
                 "content": "Why is the sky blue?"
             }
-        ]
+        ],
+        "context_length": 4096
     }'
 ```
 
@@ -310,6 +312,7 @@ curl -X POST http://localhost:5766/ask \
                 "content": "Tell me about Puerto Rico."
             }
         ],
+        "context_length": 4096,
         "format": {
             "title": "PuertoRicoInfo",
             "type": "object",
