@@ -72,14 +72,10 @@ impl TransportMessage {
 
 /// System message types that don't contain JsonRpcMessage
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum SystemMessage {
     /// Endpoint information message with connection details
-    Endpoint {
-        /// URL for sending messages
-        url: String,
-        /// Client identifier
-        client_id: String,
-    },
+    Endpoint(String),
     /// Server shutdown notification
     Shutdown {
         /// Reason for shutdown
@@ -164,7 +160,6 @@ enum SseMode {
         http_client: Client,
         retry_count: usize,
         retry_delay: Duration,
-        client_id: Arc<Mutex<Option<String>>>,
         on_message: mpsc::Sender<JsonRpcMessage>,
     },
 }
@@ -253,7 +248,6 @@ impl SseTransport {
                 http_client,
                 retry_count: config.retry_count,
                 retry_delay: config.retry_delay,
-                client_id: Arc::new(Mutex::new(None)),
                 on_message,
             }),
             on_error,
@@ -306,7 +300,6 @@ impl SseTransport {
         sse_endpoint: &str,
         http_client: &Client,
         message_endpoint: &Arc<Mutex<Option<String>>>,
-        client_id: &Arc<Mutex<Option<String>>>,
         on_message: mpsc::Sender<JsonRpcMessage>,
     ) -> Result<()> {
         // Connect to SSE endpoint
@@ -342,21 +335,18 @@ impl SseTransport {
                 let parsed_event = Self::parse_sse_event(&event);
 
                 match parsed_event.event_type.as_deref() {
-                    // Handle endpoint event - get the URL for sending messages and client ID
+                    // Handle endpoint event - get the URL for sending messages
                     Some("endpoint") => {
-                        if let Some(system_message) =
-                            parsed_event.parse_system_message().context("Failed to parse system message").ok().flatten()
+                        if let Some(system_message) = parsed_event.parse_system_message()
+                            .context("Failed to parse system message")
+                            .ok()
+                            .flatten()
                         {
-                            if let SystemMessage::Endpoint { url, client_id: id } = system_message {
+                            if let SystemMessage::Endpoint(url) = system_message {
                                 // Set the endpoint URL
                                 let mut message_endpoint_guard = message_endpoint.lock().await;
                                 *message_endpoint_guard = Some(url);
-
-                                // Set the client ID
-                                let mut client_id_guard = client_id.lock().await;
-                                *client_id_guard = Some(id);
-
-                                debug!("Connection established - endpoint URL and client ID set");
+                                debug!("Connection established - endpoint URL set");
                             }
                         }
                     }
@@ -452,11 +442,8 @@ impl Transport for SseTransport {
                                                 // Spawn a task to handle sending SSE events to the client
                                                 tokio::spawn(async move {
                                                     // Send initial endpoint event with client_id
-                                                    let endpoint_url = format!("http://{}/message", endpoint);
-                                                    let endpoint_message = SystemMessage::Endpoint {
-                                                        url: endpoint_url,
-                                                        client_id: client_id.as_ref().to_string(),
-                                                    };
+                                                    let endpoint_url = format!("http://{}/message/{}", endpoint, client_id.as_ref());
+                                                    let endpoint_message = SystemMessage::Endpoint(endpoint_url);
 
                                                     // Convert to SSE event string
                                                     let endpoint_event = match endpoint_message.to_sse_event() {
@@ -512,13 +499,17 @@ impl Transport for SseTransport {
                                                 Ok::<_, SseError>(response)
                                             }
                                             // Message endpoint for receiving client messages
-                                            (&Method::POST, "/message") => {
-                                                // Extract client ID from headers
-                                                let client_id_header = req
-                                                    .headers()
-                                                    .get("X-Client-ID")
-                                                    .and_then(|h| h.to_str().ok())
-                                                    .map(|s| ClientId(s.to_string()));
+                                            (&Method::POST, path) => {
+                                                // Extract client ID from URL path
+                                                let client_id = if let Some(id) = path.strip_prefix("/message/") {
+                                                    ClientId(id.to_string())
+                                                } else {
+                                                    let response = Response::builder()
+                                                        .status(StatusCode::BAD_REQUEST)
+                                                        .body(http_body_util::Either::Right(Empty::new()))
+                                                        .map_err(|e| SseError::HttpBuilderError(e))?;
+                                                    return Ok(response);
+                                                };
 
                                                 // Get message from request body
                                                 let body = req.into_body();
@@ -529,23 +520,21 @@ impl Transport for SseTransport {
                                                     .to_bytes();
                                                 let message_str = String::from_utf8_lossy(&bytes).to_string();
 
-                                                debug!("Received client message: {}", message_str);
+                                                debug!("Received client message from {}: {}", client_id.as_ref(), message_str);
 
                                                 // Parse to JsonRpcMessage
                                                 match serde_json::from_str::<JsonRpcMessage>(&message_str) {
                                                     Ok(json_rpc_message) => {
-                                                        if let Some(client_id) = client_id_header {
-                                                            // Forward the parsed message
-                                                            if on_message
-                                                                .send(SseMessage {
-                                                                    message: json_rpc_message,
-                                                                    client_id,
-                                                                })
-                                                                .await
-                                                                .is_err()
-                                                            {
-                                                                error!("Failed to forward message - channel closed");
-                                                            }
+                                                        // Forward the parsed message
+                                                        if on_message
+                                                            .send(SseMessage {
+                                                                message: json_rpc_message,
+                                                                client_id,
+                                                            })
+                                                            .await
+                                                            .is_err()
+                                                        {
+                                                            error!("Failed to forward message - channel closed");
                                                         }
                                                     }
                                                     Err(e) => {
@@ -594,13 +583,11 @@ impl Transport for SseTransport {
                     ref http_client,
                     retry_count,
                     retry_delay,
-                    ref client_id,
                     ref on_message,
                 } => {
                     let sse_endpoint = sse_endpoint.clone();
                     let message_endpoint = message_endpoint.clone();
                     let http_client = http_client.clone();
-                    let client_id = client_id.clone();
                     let on_message = on_message.clone();
 
                     info!("Starting SSE client, connecting to {}", sse_endpoint);
@@ -618,7 +605,6 @@ impl Transport for SseTransport {
                                     &sse_endpoint,
                                     &http_client,
                                     &message_endpoint,
-                                    &client_id,
                                     on_message.clone(),
                                 )
                                 .await
@@ -677,7 +663,7 @@ impl Transport for SseTransport {
 
                     Ok(())
                 }
-                SseMode::Client { message_endpoint, http_client, client_id, .. } => {
+                SseMode::Client { message_endpoint, http_client, .. } => {
                     debug!("Client sending [sse] JsonRpcMessage");
 
                     // Get endpoint URL
@@ -695,28 +681,13 @@ impl Transport for SseTransport {
                         }
                     };
 
-                    // Get client_id
-                    let client_id_value = {
-                        let client_id_guard = client_id.lock().await;
-                        match &*client_id_guard {
-                            Some(id) => id.clone(),
-                            None => {
-                                return Err(SseError::Other(
-                                    "No client ID available yet. Wait for the SSE connection to establish.".to_string(),
-                                )
-                                .into());
-                            }
-                        }
-                    };
-
                     // Serialize the message
                     let message_str = serde_json::to_string(&message).context("Failed to serialize JsonRpcMessage")?;
 
-                    // Send HTTP POST request with client_id header
+                    // Send HTTP POST request
                     let response = http_client
                         .post(&url)
                         .header("Content-Type", "application/json")
-                        .header("X-Client-ID", client_id_value)
                         .body(message_str)
                         .send()
                         .await
