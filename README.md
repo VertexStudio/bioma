@@ -110,8 +110,11 @@ python assets/scripts/rerank_server.py
 # Launch with default configuration
 cargo run --release -p cognition --bin cognition-server
 
-# Launch with custom tools configuration
-cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server.json
+# Launch with custom tools configuration (stdio)
+cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server_stdio.json
+
+# Launch with custom tools configuration (sse)
+cargo run --release -p cognition --bin cognition-server assets/configs/rag_tools_config_server_sse.json
 ```
 
 ### Swagger-ui documentation

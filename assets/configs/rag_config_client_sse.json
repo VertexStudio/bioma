@@ -13,15 +13,8 @@
     {
       "server": {
         "name": "bioma-tool",
-        "enabled": true,
-        "transport": "stdio",
-        "command": "target/release/examples/mcp_server",
-        "args": [
-          "--transport",
-          "stdio",
-          "--log-file",
-          ".output/mcp_server-bioma.log"
-        ]
+        "transport": "sse",
+        "endpoint": "http://127.0.0.1:8090"
       }
     }
   ]

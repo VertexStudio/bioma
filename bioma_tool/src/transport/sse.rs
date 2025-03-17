@@ -18,7 +18,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// Metadata for SSE transport
@@ -171,8 +171,6 @@ enum SseMode {
         sse_endpoint: String,
         message_endpoint: Arc<Mutex<Option<String>>>,
         http_client: Client,
-        retry_count: usize,
-        retry_delay: Duration,
         on_message: mpsc::Sender<JsonRpcMessage>,
     },
 }
@@ -223,8 +221,6 @@ impl SseTransport {
                 sse_endpoint: config.endpoint.clone(),
                 message_endpoint: Arc::new(Mutex::new(None)),
                 http_client,
-                retry_count: config.retry_count,
-                retry_delay: config.retry_delay,
                 on_message,
             }),
             on_error,
@@ -256,12 +252,13 @@ impl SseTransport {
         Ok(())
     }
 
-    /// Connect to an SSE endpoint and process events
+    /// Modified connect function that uses the Arc<Mutex<>> pattern to share the notifier
     async fn connect_to_sse(
         sse_endpoint: &str,
         http_client: &Client,
         message_endpoint: &Arc<Mutex<Option<String>>>,
         on_message: mpsc::Sender<JsonRpcMessage>,
+        sse_endpoint_ready_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     ) -> Result<()> {
         // Connect to SSE endpoint
         let response = http_client
@@ -280,6 +277,7 @@ impl SseTransport {
         // Process SSE events from stream
         let mut buffer = String::new();
         let mut stream = response.bytes_stream();
+        let mut sse_endpoint_ready_sent = false;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.context("Failed to read SSE chunk")?;
@@ -302,6 +300,16 @@ impl SseTransport {
                             *message_endpoint_guard = Some(endpoint_url);
 
                             debug!("Connection established - endpoint URL set");
+
+                            // Notify that endpoint is set
+                            if !sse_endpoint_ready_sent {
+                                let mut notifier_guard = sse_endpoint_ready_tx.lock().await;
+                                if let Some(notifier) = notifier_guard.take() {
+                                    // We don't care if receiver is dropped
+                                    let _ = notifier.send(());
+                                }
+                                sse_endpoint_ready_sent = true;
+                            }
                         }
                         // Handle message event - forward to handler
                         SseEvent::Message(json_rpc_message) => {
@@ -535,14 +543,7 @@ impl Transport for SseTransport {
 
                     Ok(server_handle)
                 }
-                SseMode::Client {
-                    ref sse_endpoint,
-                    ref message_endpoint,
-                    ref http_client,
-                    retry_count,
-                    retry_delay,
-                    ref on_message,
-                } => {
+                SseMode::Client { ref sse_endpoint, ref message_endpoint, ref http_client, ref on_message } => {
                     let sse_endpoint = sse_endpoint.clone();
                     let message_endpoint = message_endpoint.clone();
                     let http_client = http_client.clone();
@@ -550,42 +551,49 @@ impl Transport for SseTransport {
 
                     info!("Starting SSE client, connecting to {}", sse_endpoint);
 
-                    let client_mode_handle = tokio::spawn({
+                    // We'll create a notification channel to directly communicate when SSE endpoint is ready
+                    let (sse_endpoint_ready_tx, sse_endpoint_ready_rx) = tokio::sync::oneshot::channel();
+
+                    // Store this in a wrapper we can send to our connection function
+                    let sse_endpoint_ready_tx = Arc::new(Mutex::new(Some(sse_endpoint_ready_tx)));
+
+                    // Create the client connection task
+                    let client_handle = tokio::spawn({
                         async move {
-                            let mut attempts = 0;
-                            let mut last_error = None;
-
-                            // Implement retry logic
-                            while attempts < retry_count {
-                                attempts += 1;
-
-                                match Self::connect_to_sse(
-                                    &sse_endpoint,
-                                    &http_client,
-                                    &message_endpoint,
-                                    on_message.clone(),
-                                )
-                                .await
-                                {
-                                    Ok(_) => return Ok(()),
-                                    Err(e) => {
-                                        last_error = Some(e);
-                                        warn!(
-                                            "Connection attempt {}/{} failed, retrying in {:?}",
-                                            attempts, retry_count, retry_delay
-                                        );
-                                        tokio::time::sleep(retry_delay).await;
-                                    }
+                            match Self::connect_to_sse(
+                                &sse_endpoint,
+                                &http_client,
+                                &message_endpoint,
+                                on_message.clone(),
+                                sse_endpoint_ready_tx,
+                            )
+                            .await
+                            {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    error!("Failed to connect to SSE endpoint: {}", e);
+                                    Err(e)
                                 }
                             }
-
-                            Err(last_error.unwrap_or_else(|| {
-                                SseError::Connection("Failed to connect after retries".to_string()).into()
-                            }))
                         }
                     });
 
-                    Ok(client_mode_handle)
+                    // Wait for the endpoint to be set (with timeout)
+                    let timeout = tokio::time::timeout(Duration::from_secs(30), sse_endpoint_ready_rx).await;
+
+                    match timeout {
+                        Ok(Ok(_)) => {
+                            debug!("Endpoint URL set, client connection ready");
+                            Ok(client_handle)
+                        }
+                        Ok(Err(_)) => {
+                            Err(SseError::Connection("Endpoint notification channel closed unexpectedly".to_string())
+                                .into())
+                        }
+                        Err(_) => {
+                            Err(SseError::Connection("Timed out waiting for endpoint to be set".to_string()).into())
+                        }
+                    }
                 }
             }
         }

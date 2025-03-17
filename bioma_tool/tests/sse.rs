@@ -87,8 +87,7 @@ async fn test_client_retry() -> Result<()> {
     let endpoint = "http://127.0.0.1:49153".to_string();
 
     // Configure client with retries
-    let client_config =
-        SseClientConfig::builder().endpoint(endpoint).retry_count(2).retry_delay(Duration::from_millis(100)).build();
+    let client_config = SseClientConfig::builder().endpoint(endpoint).build();
 
     // Create channels
     let (tx, _) = mpsc::channel::<JsonRpcMessage>(1);
@@ -135,20 +134,12 @@ async fn test_client_config() {
     // Test default config
     let default_config = SseClientConfig::default();
     assert_eq!(default_config.endpoint, "http://127.0.0.1:8090");
-    assert_eq!(default_config.retry_count, 3);
-    assert_eq!(default_config.retry_delay, Duration::from_secs(5));
 
     // Test builder pattern
     let custom_addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
-    let custom_config = SseClientConfig::builder()
-        .endpoint(custom_addr.to_string())
-        .retry_count(5)
-        .retry_delay(Duration::from_secs(2))
-        .build();
+    let custom_config = SseClientConfig::builder().endpoint(custom_addr.to_string()).build();
 
     assert_eq!(custom_config.endpoint, "127.0.0.1:9090");
-    assert_eq!(custom_config.retry_count, 5);
-    assert_eq!(custom_config.retry_delay, Duration::from_secs(2));
 }
 
 #[tokio::test]
@@ -156,7 +147,7 @@ async fn test_error_handling() -> Result<()> {
     // Test connection to non-existent server with no retries
     let endpoint = "http://127.0.0.1:49153".to_string();
 
-    let client_config = SseClientConfig::builder().endpoint(endpoint.clone()).retry_count(0).build();
+    let client_config = SseClientConfig::builder().endpoint(endpoint.clone()).build();
 
     let (tx, _) = mpsc::channel::<JsonRpcMessage>(1);
     let (err_tx, _) = mpsc::channel(32);
