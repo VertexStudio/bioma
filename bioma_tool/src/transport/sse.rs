@@ -39,65 +39,95 @@ impl AsRef<str> for ClientId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SseMetadata {
+struct SseMetadata {
     pub client_id: String,
 }
 
-/// Transport message type that carries a JsonRpcMessage
+/// SSE event type that handles both transport and system messages
+/// 
+/// event: message
+/// data: {"jsonrpc": "2.0", ...}
+/// 
+/// event: endpoint
+/// data: "http://..."
+/// 
+/// event: shutdown
+/// data: "Server is shutting down"
+/// 
 #[derive(Debug, Clone)]
-pub struct TransportMessage {
-    /// The JSON-RPC message being transported
-    pub message: JsonRpcMessage,
-    /// The event type for SSE
-    pub event_type: String,
+enum SseEvent {
+    /// Transport message containing JSON-RPC content
+    Transport {
+        /// The JSON-RPC message being transported
+        message: JsonRpcMessage,
+        /// The event type for SSE (defaults to "message")
+        event_type: String,
+    },
+    /// System message for control operations
+    System(SystemMessageType),
 }
 
-impl TransportMessage {
-    /// Create a new transport message with standard "message" event type
-    pub fn new(message: JsonRpcMessage) -> Self {
-        Self { message, event_type: "message".to_string() }
-    }
-
-    /// Create a transport message with a custom event type
-    pub fn with_event_type(message: JsonRpcMessage, event_type: impl Into<String>) -> Self {
-        Self { message, event_type: event_type.into() }
-    }
-
-    /// Format as an SSE event string
-    pub fn to_sse_event(&self) -> Result<String> {
-        let data = serde_json::to_string(&self.message).context("Failed to serialize JsonRpcMessage")?;
-        Ok(format!("event: {}\ndata: {}\n\n", self.event_type, data))
-    }
-}
-
-/// System message types that don't contain JsonRpcMessage
+/// Types of system messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SystemMessage {
-    /// Endpoint information message with connection details
+enum SystemMessageType {
+    /// Endpoint information message
     Endpoint(String),
     /// Server shutdown notification
-    Shutdown {
-        /// Reason for shutdown
-        reason: String,
-    },
+    Shutdown { reason: String },
 }
 
-impl SystemMessage {
-    /// Format as an SSE event string
-    pub fn to_sse_event(&self) -> Result<String> {
-        let (event_type, data) = match self {
-            SystemMessage::Endpoint { .. } => ("endpoint", serde_json::to_string(self)?),
-            SystemMessage::Shutdown { .. } => ("shutdown", serde_json::to_string(self)?),
-        };
+impl SseEvent {
+    /// Create a new transport event with standard "message" event type
+    fn new_transport(message: JsonRpcMessage) -> Self {
+        Self::Transport { 
+            message, 
+            event_type: "message".to_string() 
+        }
+    }
 
-        Ok(format!("event: {}\ndata: {}\n\n", event_type, data))
+    /// Create a transport event with a custom event type
+    fn transport_with_event_type(message: JsonRpcMessage, event_type: impl Into<String>) -> Self {
+        Self::Transport { 
+            message, 
+            event_type: event_type.into() 
+        }
+    }
+    
+    /// Create an endpoint system event
+    fn endpoint(url: impl Into<String>) -> Self {
+        Self::System(SystemMessageType::Endpoint(url.into()))
+    }
+    
+    /// Create a shutdown system event
+    fn shutdown(reason: impl Into<String>) -> Self {
+        Self::System(SystemMessageType::Shutdown { reason: reason.into() })
+    }
+
+    /// Format as an SSE event string
+    fn to_sse_event(&self) -> Result<String> {
+        match self {
+            Self::Transport { message, event_type } => {
+                let data = serde_json::to_string(message)
+                    .context("Failed to serialize JsonRpcMessage")?;
+                Ok(format!("event: {}\ndata: {}\n\n", event_type, data))
+            },
+            Self::System(system_msg) => {
+                match system_msg {
+                    SystemMessageType::Endpoint(url) => {
+                        Ok(format!("event: endpoint\ndata: {}\n\n", url))
+                    },
+                    SystemMessageType::Shutdown { reason } => {
+                        Ok(format!("event: shutdown\ndata: {}\n\n", reason))
+                    },
+                }
+            }
+        }
     }
 }
 
 /// SSE-specific error types
 #[derive(Debug, thiserror::Error)]
-pub enum SseError {
+enum SseError {
     #[error("Failed to establish connection: {0}")]
     ConnectionError(#[from] reqwest::Error),
 
@@ -124,25 +154,6 @@ pub enum SseError {
 
     #[error("SSE error: {0}")]
     Other(String),
-}
-
-/// Type for sending SSE events to clients - can be either a TransportMessage or SystemMessage
-#[derive(Debug)]
-pub enum SseEvent {
-    /// Transport message containing a JsonRpcMessage
-    Transport(TransportMessage),
-    /// System message for control events
-    System(SystemMessage),
-}
-
-impl SseEvent {
-    /// Convert an SSE event to a formatted string
-    pub fn to_string(&self) -> Result<String> {
-        match self {
-            SseEvent::Transport(msg) => msg.to_sse_event(),
-            SseEvent::System(msg) => msg.to_sse_event(),
-        }
-    }
 }
 
 /// Client registry type for SSE server - maps ClientId to message sender
@@ -185,9 +196,9 @@ impl ParsedSseEvent {
     }
 
     /// Try to parse the data as a SystemMessage
-    pub fn parse_system_message(&self) -> Result<Option<SystemMessage>> {
+    pub fn parse_system_message(&self) -> Result<Option<SystemMessageType>> {
         if let Some(data) = &self.data {
-            let message = serde_json::from_str::<SystemMessage>(data)?;
+            let message = serde_json::from_str::<SystemMessageType>(data)?;
             Ok(Some(message))
         } else {
             Ok(None)
@@ -342,7 +353,7 @@ impl SseTransport {
                             .ok()
                             .flatten()
                         {
-                            if let SystemMessage::Endpoint(url) = system_message {
+                            if let SystemMessageType::Endpoint(url) = system_message {
                                 // Set the endpoint URL
                                 let mut message_endpoint_guard = message_endpoint.lock().await;
                                 *message_endpoint_guard = Some(url);
@@ -443,10 +454,7 @@ impl Transport for SseTransport {
                                                 tokio::spawn(async move {
                                                     // Send initial endpoint event with client_id
                                                     let endpoint_url = format!("http://{}/message/{}", endpoint, client_id.as_ref());
-                                                    let endpoint_message = SystemMessage::Endpoint(endpoint_url);
-
-                                                    // Convert to SSE event string
-                                                    let endpoint_event = match endpoint_message.to_sse_event() {
+                                                    let endpoint_event = match SseEvent::endpoint(endpoint_url).to_sse_event() {
                                                         Ok(event) => event,
                                                         Err(err) => {
                                                             error!("Failed to serialize endpoint data: {}", err);
@@ -466,7 +474,7 @@ impl Transport for SseTransport {
 
                                                     // Process incoming events from the client_rx channel
                                                     while let Some(event) = client_rx.recv().await {
-                                                        match event.to_string() {
+                                                        match event.to_sse_event() {
                                                             Ok(event_str) => {
                                                                 if response_tx
                                                                     .send(Ok(Frame::data(Bytes::from(event_str))))
@@ -652,8 +660,7 @@ impl Transport for SseTransport {
                         let client_id = ClientId(sse_metadata.client_id.clone());
 
                         // Create TransportMessage and wrap in SseEvent
-                        let transport_message = TransportMessage::new(message);
-                        let sse_event = SseEvent::Transport(transport_message);
+                        let sse_event = SseEvent::new_transport(message);
 
                         // Send event to the specific client
                         Self::send_to_client(clients, &client_id, sse_event).await?;
@@ -719,12 +726,8 @@ impl Transport for SseTransport {
                     for (client_id, tx) in clients_map.drain() {
                         debug!("Sending shutdown event to client {}", client_id.as_ref());
 
-                        // Create shutdown system message
-                        let shutdown_message =
-                            SystemMessage::Shutdown { reason: "Server is shutting down".to_string() };
-
-                        // Wrap in SseEvent
-                        let shutdown_event = SseEvent::System(shutdown_message);
+                        // Create shutdown system message and wrap in SseEvent
+                        let shutdown_event = SseEvent::shutdown("Server is shutting down");
 
                         // Send the shutdown event to the client
                         if tx.send(shutdown_event).await.is_err() {
