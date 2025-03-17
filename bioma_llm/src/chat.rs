@@ -3,10 +3,10 @@ use ollama_rs::{
     error::OllamaError,
     generation::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse},
-        options::GenerationOptions,
         parameters::{FormatType, JsonStructure},
         tools::ToolInfo,
     },
+    models::ModelOptions,
     Ollama,
 };
 use schemars::JsonSchema;
@@ -15,10 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use tracing::{error, info};
 use url::Url;
-
-const DEFAULT_MODEL_NAME: &str = "llama3.2";
-const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
-const DEFAULT_MESSAGES_NUMBER_LIMIT: usize = 10;
 
 /// Enumerates the types of errors that can occur in LLM
 #[derive(thiserror::Error, Debug)]
@@ -55,18 +51,35 @@ impl ActorError for ChatError {}
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Chat {
-    #[builder(default = DEFAULT_MODEL_NAME.into())]
+    #[builder(default = default_model_name())]
     pub model: Cow<'static, str>,
-    pub generation_options: Option<GenerationOptions>,
-    #[builder(default = Url::parse(DEFAULT_ENDPOINT).unwrap())]
+    #[builder(default = default_endpoint())]
     pub endpoint: Url,
-    #[builder(default = DEFAULT_MESSAGES_NUMBER_LIMIT)]
+    #[builder(default = default_messages_number_limit())]
     pub messages_number_limit: usize,
     #[builder(default)]
     pub history: Vec<ChatMessage>,
+    #[builder(default = default_max_context_length())]
+    pub max_context_length: u64,
     #[serde(skip)]
     #[builder(default)]
     ollama: Ollama,
+}
+
+fn default_model_name() -> Cow<'static, str> {
+    "llama3.2:3b".into()
+}
+
+fn default_endpoint() -> Url {
+    Url::parse("http://localhost:11434").unwrap()
+}
+
+fn default_messages_number_limit() -> usize {
+    10
+}
+
+fn default_max_context_length() -> u64 {
+    4096
 }
 
 impl Default for Chat {
@@ -109,6 +122,7 @@ pub struct ChatMessages {
     pub stream: bool,
     pub format: Option<Schema>,
     pub tools: Option<Vec<ToolInfo>>,
+    pub options: Option<ModelOptions>,
 }
 
 impl Message<ChatMessages> for Chat {
@@ -140,8 +154,13 @@ impl Message<ChatMessages> for Chat {
         }
 
         // Add generation options
-        if let Some(generation_options) = &self.generation_options {
-            chat_message_request = chat_message_request.options(generation_options.clone());
+        if let Some(options) = &request.options {
+            chat_message_request = chat_message_request.options(
+                options
+                    .num_ctx
+                    .map(|num_ctx| std::cmp::min(num_ctx, self.max_context_length))
+                    .map_or_else(|| options.clone(), |context_length| options.clone().num_ctx(context_length)),
+            );
         }
 
         // Add format

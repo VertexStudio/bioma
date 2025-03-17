@@ -29,12 +29,12 @@ pub struct ServerConfig {
     pub summary_image_prompt: Cow<'static, str>,
     #[serde(default = "default_chat_messages_limit")]
     pub chat_messages_limit: usize,
-    #[serde(default = "default_chat_context_length")]
-    pub chat_context_length: u32,
+    #[serde(default = "default_chat_max_context_length")]
+    pub chat_max_context_length: u64,
     #[serde(default = "default_think_messages_limit")]
     pub think_messages_limit: usize,
-    #[serde(default = "default_think_context_length")]
-    pub think_context_length: u32,
+    #[serde(default = "default_think_max_context_length")]
+    pub think_max_context_length: u64,
     #[serde(default = "default_retrieve_limit")]
     pub retrieve_limit: usize,
 }
@@ -107,7 +107,7 @@ fn default_chat_messages_limit() -> usize {
     10
 }
 
-fn default_chat_context_length() -> u32 {
+fn default_chat_max_context_length() -> u64 {
     4096
 }
 
@@ -115,7 +115,7 @@ fn default_think_messages_limit() -> usize {
     10
 }
 
-fn default_think_context_length() -> u32 {
+fn default_think_max_context_length() -> u64 {
     4096
 }
 
@@ -136,9 +136,9 @@ impl Default for ServerConfig {
             summary_text_prompt: default_summary_text_prompt(),
             summary_image_prompt: default_summary_image_prompt(),
             chat_messages_limit: default_chat_messages_limit(),
-            chat_context_length: default_chat_context_length(),
+            chat_max_context_length: default_chat_max_context_length(),
             think_messages_limit: default_think_messages_limit(),
-            think_context_length: default_think_context_length(),
+            think_max_context_length: default_think_max_context_length(),
             retrieve_limit: default_retrieve_limit(),
         }
     }
@@ -181,9 +181,9 @@ impl Args {
         info!("├─ Summary Text Prompt: {}...", config.summary_text_prompt.chars().take(50).collect::<String>());
         info!("├─ Summary Image Prompt: {}...", config.summary_image_prompt.chars().take(50).collect::<String>());
         info!("├─ Chat Messages Limit: {}", config.chat_messages_limit);
-        info!("├─ Chat Context Length: {}", config.chat_context_length);
+        info!("├─ Chat Max Context Length: {}", config.chat_max_context_length);
         info!("├─ Think Messages Limit: {}", config.think_messages_limit);
-        info!("├─ Think Context Length: {}", config.think_context_length);
+        info!("├─ Think Max Context Length: {}", config.think_max_context_length);
         info!("└─ Retrieve Limit: {}", config.retrieve_limit);
 
         Ok(config)

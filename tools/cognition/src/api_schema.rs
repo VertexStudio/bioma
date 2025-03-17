@@ -5,7 +5,7 @@ use bioma_llm::{
     prelude::{ChatMessage, GlobsContent, Index, IndexContent, RetrieveContext, RetrieveQuery, TextChunkConfig},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
-use ollama_rs::generation::tools::ToolInfo;
+use ollama_rs::{generation::tools::ToolInfo, models::ModelOptions};
 use serde::{Deserialize, Serialize};
 
 //------------------------------------------------------------------------------
@@ -37,6 +37,9 @@ pub struct ChatQuery {
     /// Whether to stream the response
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
+
+    /// Generation options
+    pub options: Option<ModelOptions>,
 }
 
 fn default_chat_stream() -> bool {
@@ -68,6 +71,9 @@ pub struct ThinkQuery {
     /// Whether to stream the response
     #[serde(default = "default_think_stream")]
     pub stream: bool,
+
+    /// Generation options
+    pub options: Option<ModelOptions>,
 }
 
 fn default_think_stream() -> bool {
@@ -87,6 +93,9 @@ pub struct AskQuery {
 
     /// Optional schema for structured output format
     pub format: Option<chat::Schema>,
+
+    /// Generation options
+    pub options: Option<ModelOptions>,
 }
 
 //------------------------------------------------------------------------------

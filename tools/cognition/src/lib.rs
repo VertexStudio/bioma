@@ -3,9 +3,12 @@ use std::collections::HashMap;
 use actix_web::web::Json;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
-use ollama_rs::generation::{
-    chat::ChatMessageResponse,
-    tools::{ToolCall, ToolInfo},
+use ollama_rs::{
+    generation::{
+        chat::ChatMessageResponse,
+        tools::{ToolCall, ToolInfo},
+    },
+    models::ModelOptions,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -60,6 +63,7 @@ pub async fn chat_with_tools(
     tx: tokio::sync::mpsc::Sender<Result<Json<ChatResponse>, String>>,
     format: Option<chat::Schema>,
     stream: bool,
+    options: Option<ModelOptions>,
     first_token_sent: std::sync::Arc<std::sync::atomic::AtomicBool>,
     request_start_time: std::time::Instant,
 ) -> Result<(), ChatToolError> {
@@ -71,6 +75,7 @@ pub async fn chat_with_tools(
         stream,
         format: format.clone(),
         tools: if tools.is_empty() { None } else { Some(tools.clone()) },
+        options: options.clone(),
     };
 
     info!("chat_with_tools: {} tools, {} messages, actor: {}", tools.len(), messages.len(), chat_actor);
@@ -144,6 +149,7 @@ pub async fn chat_with_tools(
                         tx.clone(),
                         format.clone(),
                         stream,
+                        options.clone(),
                         first_token_sent.clone(),
                         request_start_time,
                     ))

@@ -17,8 +17,8 @@
   "summary_text_prompt": "Provide a concise summary of the following text. Focus on the key points and main ideas:\n\n",
   "summary_image_prompt": "Provide a concise description of this image. Focus on the key visual elements, subjects, and overall composition.",
   "chat_messages_limit": 10,
-  "chat_context_length": 4096,
+  "chat_max_context_length": 4096,
   "think_messages_limit": 10,
-  "think_context_length": 4096,
+  "think_max_context_length": 4096,
   "retrieve_limit": 5
 }
