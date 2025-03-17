@@ -580,7 +580,7 @@ impl Transport for SseTransport {
                             while attempts < retry_count {
                                 attempts += 1;
 
-                                match SseTransport::connect_to_sse(
+                                match Self::connect_to_sse(
                                     &sse_endpoint,
                                     &http_client,
                                     &message_endpoint,
