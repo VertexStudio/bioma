@@ -38,7 +38,7 @@ pub struct SseConfig {
 }
 
 fn default_server_url() -> String {
-    "http://127.0.0.1:8090".to_string()
+    "http://127.0.0.1:8090/sse".to_string()
 }
 
 fn default_retry_count() -> usize {

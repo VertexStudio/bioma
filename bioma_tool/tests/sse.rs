@@ -1,9 +1,9 @@
 use anyhow::Result;
 use bioma_tool::client::SseConfig as SseClientConfig;
 use bioma_tool::server::SseConfig as SseServerConfig;
-use bioma_tool::transport::sse::{ClientId, SseTransport};
+use bioma_tool::transport::sse::{SseEvent, SseTransport};
 use bioma_tool::transport::Transport;
-use bioma_tool::JsonRpcMessage;
+use bioma_tool::{ClientId, JsonRpcMessage};
 use serde_json::json;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -18,7 +18,7 @@ async fn test_client_id() {
     assert_ne!(id1, id2, "Generated IDs should be unique");
 
     // Test string conversion
-    let id_str = id1.as_ref();
+    let id_str = id1.to_string();
     assert!(!id_str.is_empty(), "ID string should not be empty");
     assert_eq!(id_str.len(), 36, "Client ID should be a UUID (36 chars)");
 
@@ -28,39 +28,57 @@ async fn test_client_id() {
 }
 
 #[tokio::test]
-async fn test_transport_message() {
+async fn test_sse_event() {
     // Create a JsonRpcMessage
     let message = json!({"jsonrpc": "2.0", "method": "test", "params": {}, "id": 1});
     let json_rpc_message: JsonRpcMessage = serde_json::from_value(message).unwrap();
 
-    // Create a TransportMessage
-    let transport_message = bioma_tool::transport::sse::TransportMessage::new(json_rpc_message.clone());
+    // Create an SSE event
+    let event = SseEvent::Message(json_rpc_message.clone());
 
-    // Test properties
-    assert_eq!(transport_message.event_type, "message");
-    assert_eq!(transport_message.message, json_rpc_message);
+    // Test event type
+    let event_str = event.to_sse_string().unwrap();
+    assert!(event_str.contains("event: message"), "Event type should be 'message'");
+
+    // Test endpoint event
+    let endpoint = "http://example.com";
+    let endpoint_event = SseEvent::Endpoint(endpoint.to_string());
+    let endpoint_str = endpoint_event.to_sse_string().unwrap();
+    assert!(endpoint_str.contains("event: endpoint"), "Event type should be 'endpoint'");
+    assert!(endpoint_str.contains(endpoint), "Event should contain the endpoint URL");
+
+    // Test shutdown event
+    let shutdown_event =
+        SseEvent::Shutdown(bioma_tool::transport::sse::Shutdown { reason: "test shutdown".to_string() });
+    let shutdown_str = shutdown_event.to_sse_string().unwrap();
+    assert!(shutdown_str.contains("event: shutdown"), "Event type should be 'shutdown'");
+    assert!(shutdown_str.contains("test shutdown"), "Event should contain the shutdown reason");
 }
 
 #[tokio::test]
-async fn test_sse_event_format_parse() {
-    let event_type = "test_event";
-    let data = r#"{"key":"value"}"#;
+async fn test_sse_event_parsing() {
+    // Test message event parsing
+    let message = json!({"jsonrpc": "2.0", "method": "test", "params": {}, "id": 1});
+    let event_str = format!("event: message\ndata: {}\n\n", message);
+    let parsed = SseEvent::from_sse_string(&event_str).unwrap().unwrap();
+    assert!(matches!(parsed, SseEvent::Message(_)), "Should parse as message event");
 
-    // Create event string manually to test parse_sse_event
-    let event = format!("event: {}\ndata: {}\n\n", event_type, data);
+    // Test endpoint event parsing
+    let endpoint = "http://example.com";
+    let event_str = format!("event: endpoint\ndata: \"{}\"\n\n", endpoint);
+    let parsed = SseEvent::from_sse_string(&event_str).unwrap().unwrap();
+    assert!(matches!(parsed, SseEvent::Endpoint(_)), "Should parse as endpoint event");
 
-    // Parse it back with our function
-    let parsed_event = SseTransport::parse_sse_event(&event);
+    // Test shutdown event parsing
+    let shutdown = json!({"reason": "test shutdown"});
+    let event_str = format!("event: shutdown\ndata: {}\n\n", shutdown);
+    let parsed = SseEvent::from_sse_string(&event_str).unwrap().unwrap();
+    assert!(matches!(parsed, SseEvent::Shutdown(_)), "Should parse as shutdown event");
 
-    assert_eq!(parsed_event.event_type, Some(event_type.to_string()));
-    assert_eq!(parsed_event.data, Some(data.to_string()));
-
-    // Test with missing type
-    let event = format!("data: {}\n\n", data);
-    let parsed_event = SseTransport::parse_sse_event(&event);
-
-    assert_eq!(parsed_event.event_type, None);
-    assert_eq!(parsed_event.data, Some(data.to_string()));
+    // Test invalid event parsing
+    let invalid_event = "invalid event format\n\n";
+    let parsed = SseEvent::from_sse_string(invalid_event).unwrap();
+    assert!(parsed.is_none(), "Should return None for invalid event");
 }
 
 #[tokio::test]
@@ -98,7 +116,7 @@ async fn test_client_retry() -> Result<()> {
 async fn test_server_config() {
     // Test default config
     let default_config = SseServerConfig::default();
-    assert_eq!(default_config.endpoint, "127.0.0.1:8090");
+    assert_eq!(default_config.endpoint, "127.0.0.1:8090/sse");
     assert_eq!(default_config.channel_capacity, 32);
     assert!(default_config.keep_alive);
 
@@ -116,7 +134,7 @@ async fn test_server_config() {
 async fn test_client_config() {
     // Test default config
     let default_config = SseClientConfig::default();
-    assert_eq!(default_config.endpoint, "http://127.0.0.1:8090");
+    assert_eq!(default_config.endpoint, "http://127.0.0.1:8090/sse");
     assert_eq!(default_config.retry_count, 3);
     assert_eq!(default_config.retry_delay, Duration::from_secs(5));
 

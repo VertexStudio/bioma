@@ -26,8 +26,8 @@ enum Transport {
     },
     /// Use SSE transport
     Sse {
-        /// Server URL (e.g. http://127.0.0.1:8090)
-        #[arg(long, short, default_value = "http://127.0.0.1:8090")]
+        /// Server URL (e.g. http://127.0.0.1:8090/sse)
+        #[arg(long, short, default_value = "http://127.0.0.1:8090/sse")]
         endpoint: String,
     },
 }

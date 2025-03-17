@@ -27,7 +27,7 @@ struct Args {
     transport: String,
 
     /// Server address for SSE transport
-    #[arg(long, short, default_value = "127.0.0.1:8090")]
+    #[arg(long, short, default_value = "127.0.0.1:8090/sse")]
     endpoint: String,
 }
 
@@ -38,10 +38,7 @@ struct McpServer {
 
 impl ModelContextProtocolServer for McpServer {
     fn new() -> Self {
-        Self {
-            resources: vec![Box::new(resources::readme::Readme)],
-            prompts: vec![Box::new(prompts::greet::Greet)],
-        }
+        Self { resources: vec![Box::new(resources::readme::Readme)], prompts: vec![Box::new(prompts::greet::Greet)] }
     }
 
     fn get_capabilities(&self) -> ServerCapabilities {
