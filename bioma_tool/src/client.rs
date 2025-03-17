@@ -393,6 +393,8 @@ impl Actor for ModelContextProtocolClientActor {
 
         let mut client = ModelContextProtocolClient::new(self.server.clone()).await?;
 
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
         // Initialize the client
         let init_result =
             client.initialize(Implementation { name: self.server.name.clone(), version: "0.1.0".to_string() }).await?;
