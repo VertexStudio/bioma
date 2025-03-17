@@ -29,10 +29,13 @@ pub struct StdioConfig {
 /// Client configuration with builder pattern
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
+    #[serde(default = "default_server_url")]
     #[builder(default = default_server_url())]
     pub endpoint: String,
+    #[serde(default = "default_retry_count")]
     #[builder(default = default_retry_count())]
     pub retry_count: usize,
+    #[serde(default = "default_retry_delay")]
     #[builder(default = default_retry_delay())]
     pub retry_delay: Duration,
 }
