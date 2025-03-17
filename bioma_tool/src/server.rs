@@ -12,12 +12,14 @@ use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
 
 #[derive(Clone)]
-struct ServerMetadata {
-    client_id: Option<ClientId>,
+pub struct ServerMetadata {
+    pub client_id: ClientId,
 }
 
 impl Metadata for ServerMetadata {}
@@ -27,7 +29,7 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_capabilities(&self) -> ServerCapabilities;
     fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>>;
     fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>>;
-    fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
+    fn create_tools(&self) -> Vec<Box<dyn ToolCallHandler>>;
 }
 
 pub struct StdioConfig {}
@@ -73,15 +75,24 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     debug!("Starting ModelContextProtocol server: {}", name);
 
     let server = std::sync::Arc::new(T::new());
+    let client_tools: Arc<RwLock<HashMap<ClientId, Vec<Box<dyn ToolCallHandler>>>>> =
+        Arc::new(RwLock::new(HashMap::new()));
+
     let mut io_handler = MetaIoHandler::default();
 
     io_handler.add_method_with_meta("initialize", {
         let server = server.clone();
-        move |params: Params, _meta: ServerMetadata| {
+        let client_tools = client_tools.clone();
+
+        move |params: Params, meta: ServerMetadata| {
+            let client_tools = client_tools.clone();
             let server = server.clone();
             debug!("Handling initialize request");
 
             async move {
+                let tools = server.create_tools();
+                client_tools.write().await.insert(meta.client_id, tools);
+
                 let init_params: InitializeRequestParams = params.parse().map_err(|e| {
                     error!("Failed to parse initialize parameters: {}", e);
                     jsonrpc_core::Error::invalid_params(e.to_string())
@@ -239,16 +250,18 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     });
 
     io_handler.add_method_with_meta("tools/list", {
-        let server = server.clone();
-        move |_params, _meta: ServerMetadata| {
-            let server = server.clone();
+        let client_tools = client_tools.clone();
+        move |_params, meta: ServerMetadata| {
             debug!("Handling tools/list request");
-
-            let tools = server.get_tools().iter().map(|tool| tool.def()).collect::<Vec<_>>();
+            let client_tools = client_tools.clone();
 
             async move {
+                let tools = if let Some(tools) = client_tools.read().await.get(&meta.client_id) {
+                    tools.iter().map(|tool| tool.def()).collect::<Vec<_>>()
+                } else {
+                    vec![]
+                };
                 let response = ListToolsResult { next_cursor: None, tools, meta: None };
-
                 info!("Successfully handled tools/list request");
                 Ok(serde_json::to_value(response).unwrap_or_default())
             }
@@ -256,10 +269,10 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     });
 
     io_handler.add_method_with_meta("tools/call", {
-        let server = server.clone();
-        move |params: Params, _meta: ServerMetadata| {
-            let server = server.clone();
+        let client_tools = client_tools.clone();
+        move |params: Params, meta: ServerMetadata| {
             debug!("Handling tools/call request");
+            let client_tools = client_tools.clone();
 
             async move {
                 let params: CallToolRequestParams = params.parse().map_err(|e| {
@@ -267,9 +280,12 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                     jsonrpc_core::Error::invalid_params(e.to_string())
                 })?;
 
-                // Find the requested tool
-                let tools = server.get_tools();
-                let tool = tools.iter().find(|t| t.def().name == params.name);
+                let tool = client_tools.read().await;
+                let tool = if let Some(tools) = tool.get(&meta.client_id) {
+                    tools.iter().find(|t| t.def().name == params.name)
+                } else {
+                    None
+                };
 
                 match tool {
                     Some(tool) => {
@@ -307,18 +323,20 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                 return Err(e).context("Failed to start transport");
             }
 
+            // Generate a fixed client ID for stdio transport
+            let client_id = ClientId::new();
+
             while let Some(request) = on_message_rx.recv().await {
                 match &request {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
                             let Some(response) = io_handler
-                                .handle_rpc_request(request.clone(), ServerMetadata { client_id: None })
+                                .handle_rpc_request(request.clone(), ServerMetadata { client_id: client_id.clone() })
                                 .await
                             else {
                                 continue;
                             };
 
-                            // Send response without metadata for stdio transport
                             if let Err(e) = transport_type.send(response.into(), serde_json::Value::Null).await {
                                 error!("Failed to send response: {}", e);
                                 return Err(e).context("Failed to send response");
@@ -348,7 +366,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                 match &sse_message.message {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                            let metadata = ServerMetadata { client_id: Some(sse_message.client_id.clone()) };
+                            let metadata = ServerMetadata { client_id: sse_message.client_id.clone() };
 
                             let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await else {
                                 continue;

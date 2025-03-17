@@ -32,7 +32,6 @@ struct Args {
 }
 
 struct McpServer {
-    tools: Vec<Box<dyn ToolCallHandler>>,
     resources: Vec<Box<dyn ResourceReadHandler>>,
     prompts: Vec<Box<dyn PromptGetHandler>>,
 }
@@ -40,12 +39,6 @@ struct McpServer {
 impl ModelContextProtocolServer for McpServer {
     fn new() -> Self {
         Self {
-            tools: vec![
-                Box::new(tools::echo::Echo),
-                Box::new(tools::memory::Memory),
-                Box::new(tools::fetch::Fetch::default()),
-                Box::new(tools::random::RandomNumber),
-            ],
             resources: vec![Box::new(resources::readme::Readme)],
             prompts: vec![Box::new(prompts::greet::Greet)],
         }
@@ -70,8 +63,13 @@ impl ModelContextProtocolServer for McpServer {
         &self.prompts
     }
 
-    fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>> {
-        &self.tools
+    fn create_tools(&self) -> Vec<Box<dyn ToolCallHandler>> {
+        vec![
+            Box::new(tools::echo::Echo),
+            Box::new(tools::memory::Memory),
+            Box::new(tools::fetch::Fetch::default()),
+            Box::new(tools::random::RandomNumber),
+        ]
     }
 }
 
