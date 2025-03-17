@@ -252,13 +252,13 @@ impl SseTransport {
         Ok(())
     }
 
-    /// Connect to an SSE endpoint and process events
+    /// Modified connect function that uses the Arc<Mutex<>> pattern to share the notifier
     async fn connect_to_sse(
         sse_endpoint: &str,
         http_client: &Client,
         message_endpoint: &Arc<Mutex<Option<String>>>,
         on_message: mpsc::Sender<JsonRpcMessage>,
-        endpoint_notifier: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+        sse_endpoint_ready_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     ) -> Result<()> {
         // Connect to SSE endpoint
         let response = http_client
@@ -277,7 +277,7 @@ impl SseTransport {
         // Process SSE events from stream
         let mut buffer = String::new();
         let mut stream = response.bytes_stream();
-        let mut endpoint_notified = false;
+        let mut sse_endpoint_ready_sent = false;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.context("Failed to read SSE chunk")?;
@@ -302,13 +302,13 @@ impl SseTransport {
                             debug!("Connection established - endpoint URL set");
 
                             // Notify that endpoint is set
-                            if !endpoint_notified {
-                                let mut notifier_guard = endpoint_notifier.lock().await;
+                            if !sse_endpoint_ready_sent {
+                                let mut notifier_guard = sse_endpoint_ready_tx.lock().await;
                                 if let Some(notifier) = notifier_guard.take() {
                                     // We don't care if receiver is dropped
                                     let _ = notifier.send(());
                                 }
-                                endpoint_notified = true;
+                                sse_endpoint_ready_sent = true;
                             }
                         }
                         // Handle message event - forward to handler
@@ -551,23 +551,21 @@ impl Transport for SseTransport {
 
                     info!("Starting SSE client, connecting to {}", sse_endpoint);
 
-                    // We'll create a notification channel to directly communicate when endpoint is set
-                    let (endpoint_set_tx, endpoint_set_rx) = tokio::sync::oneshot::channel();
+                    // We'll create a notification channel to directly communicate when SSE endpoint is ready
+                    let (sse_endpoint_ready_tx, sse_endpoint_ready_rx) = tokio::sync::oneshot::channel();
 
                     // Store this in a wrapper we can send to our connection function
-                    let endpoint_notifier = Arc::new(Mutex::new(Some(endpoint_set_tx)));
+                    let sse_endpoint_ready_tx = Arc::new(Mutex::new(Some(sse_endpoint_ready_tx)));
 
                     // Create the client connection task
                     let client_handle = tokio::spawn({
-                        let endpoint_notifier = endpoint_notifier.clone();
-
                         async move {
                             match Self::connect_to_sse(
                                 &sse_endpoint,
                                 &http_client,
                                 &message_endpoint,
                                 on_message.clone(),
-                                endpoint_notifier.clone(),
+                                sse_endpoint_ready_tx,
                             )
                             .await
                             {
@@ -581,7 +579,7 @@ impl Transport for SseTransport {
                     });
 
                     // Wait for the endpoint to be set (with timeout)
-                    let timeout = tokio::time::timeout(Duration::from_secs(30), endpoint_set_rx).await;
+                    let timeout = tokio::time::timeout(Duration::from_secs(30), sse_endpoint_ready_rx).await;
 
                     match timeout {
                         Ok(Ok(_)) => {
