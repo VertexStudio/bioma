@@ -1,20 +1,35 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::{ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
+    client::{ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
 };
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tracing::{error, info};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the MCP server executable
-    command: String,
+    #[command(subcommand)]
+    transport: Transport,
+}
 
-    /// Args to pass to the MCP server
-    #[arg(num_args = 0.., value_delimiter = ' ')]
-    args: Option<Vec<String>>,
+#[derive(Subcommand)]
+enum Transport {
+    /// Use stdio transport
+    Stdio {
+        /// Path to the MCP server executable
+        command: String,
+
+        /// Args to pass to the MCP server
+        #[arg(num_args = 0.., value_delimiter = ' ')]
+        args: Option<Vec<String>>,
+    },
+    /// Use SSE transport
+    Sse {
+        /// Server URL (e.g. http://127.0.0.1:8090)
+        #[arg(long, short, default_value = "http://127.0.0.1:8090")]
+        endpoint: String,
+    },
 }
 
 #[tokio::main]
@@ -29,13 +44,27 @@ async fn main() -> Result<()> {
     // Configure and start the MCP server process
     info!("Starting MCP server process...");
 
-    let server = ServerConfig::builder()
-        .name("bioma-tool".to_string())
-        .transport(TransportConfig::Stdio(StdioConfig { command: args.command, args: args.args.unwrap_or_default() }))
-        .build();
+    let server = match &args.transport {
+        Transport::Stdio { command, args } => ServerConfig::builder()
+            .name("bioma-tool".to_string())
+            .transport(TransportConfig::Stdio(StdioConfig {
+                command: command.clone(),
+                args: args.clone().unwrap_or_default(),
+            }))
+            .build(),
+        Transport::Sse { endpoint } => ServerConfig::builder()
+            .name(endpoint.clone())
+            .transport(TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()))
+            .build(),
+    };
 
     // Create client
     let mut client = ModelContextProtocolClient::new(server).await?;
+
+    // Wait to open SSE connection if using SSE transport
+    if matches!(&args.transport, Transport::Sse { .. }) {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
 
     // Initialize the client
     info!("Initializing client...");

@@ -70,10 +70,16 @@ schemafy-cli src | rustfmt | tee src/schema.rs
 
 Examples:
 
-MCP client:
+MCP client with stdio transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client -- target/release/examples/mcp_server
+cargo run --release -p bioma_tool --example mcp_client -- stdio target/release/examples/mcp_server
+```
+
+MCP client with SSE transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_client -- sse --endpoint http://127.0.0.1:8090
 ```
 
 MCP server:
@@ -91,13 +97,7 @@ npx github:VertexStudio/inspector#feature/ui-ux ./target/release/examples/mcp_se
 Connecting to docker server:
 
 ```
-./target/release/examples/mcp_client -- docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
-```
-
-MCP client with SSE transport:
-
-```
-cargo run -p bioma_tool --example sse_client -- --url http://127.0.0.1:8090
+cargo run --release -p bioma_tool --example mcp_client -- stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
 ```
 
 MCP server with SSE transport:
