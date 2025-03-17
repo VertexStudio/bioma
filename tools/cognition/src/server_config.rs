@@ -30,11 +30,11 @@ pub struct ServerConfig {
     #[serde(default = "default_chat_messages_limit")]
     pub chat_messages_limit: usize,
     #[serde(default = "default_chat_max_context_length")]
-    pub chat_max_context_length: u32,
+    pub chat_max_context_length: u64,
     #[serde(default = "default_think_messages_limit")]
     pub think_messages_limit: usize,
     #[serde(default = "default_think_max_context_length")]
-    pub think_max_context_length: u32,
+    pub think_max_context_length: u64,
     #[serde(default = "default_retrieve_limit")]
     pub retrieve_limit: usize,
 }
@@ -107,7 +107,7 @@ fn default_chat_messages_limit() -> usize {
     10
 }
 
-fn default_chat_max_context_length() -> u32 {
+fn default_chat_max_context_length() -> u64 {
     4096
 }
 
@@ -115,7 +115,7 @@ fn default_think_messages_limit() -> usize {
     10
 }
 
-fn default_think_max_context_length() -> u32 {
+fn default_think_max_context_length() -> u64 {
     4096
 }
 

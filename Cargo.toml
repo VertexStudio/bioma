@@ -36,7 +36,7 @@ schemars = "0.8"
 bon = "3.1"
 
 # Error Handling and Utilities
-thiserror = "2.0"
+thiserror = "2.0.12"
 anyhow = "1.0"
 derive_more = "0.99"
 
@@ -112,7 +112,7 @@ regex = "1.11"
 #     "function-calling",
 #     "stream",
 # ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "d3e45ff4ebad353f3abe88f2c1a3fdb6fa525b15", features = [
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "047bea58f3a6ee009c3948e676ec2321dcfa24a8", features = [
     "stream",
     "utoipa",
 ] }

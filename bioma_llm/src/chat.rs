@@ -3,10 +3,10 @@ use ollama_rs::{
     error::OllamaError,
     generation::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse},
-        options::GenerationOptions,
         parameters::{FormatType, JsonStructure},
         tools::ToolInfo,
     },
+    models::ModelOptions,
     Ollama,
 };
 use schemars::JsonSchema;
@@ -53,8 +53,6 @@ impl ActorError for ChatError {}
 pub struct Chat {
     #[builder(default = default_model_name())]
     pub model: Cow<'static, str>,
-    #[builder(default)]
-    pub generation_options: GenerationOptions,
     #[builder(default = default_endpoint())]
     pub endpoint: Url,
     #[builder(default = default_messages_number_limit())]
@@ -62,7 +60,7 @@ pub struct Chat {
     #[builder(default)]
     pub history: Vec<ChatMessage>,
     #[builder(default = default_max_context_length())]
-    pub max_context_length: u32,
+    pub max_context_length: u64,
     #[serde(skip)]
     #[builder(default)]
     ollama: Ollama,
@@ -80,7 +78,7 @@ fn default_messages_number_limit() -> usize {
     10
 }
 
-fn default_max_context_length() -> u32 {
+fn default_max_context_length() -> u64 {
     4096
 }
 
@@ -124,12 +122,7 @@ pub struct ChatMessages {
     pub stream: bool,
     pub format: Option<Schema>,
     pub tools: Option<Vec<ToolInfo>>,
-    #[builder(default = default_context_length())]
-    pub context_length: u32,
-}
-
-fn default_context_length() -> u32 {
-    4096
+    pub options: Option<ModelOptions>,
 }
 
 impl Message<ChatMessages> for Chat {
@@ -161,8 +154,14 @@ impl Message<ChatMessages> for Chat {
         }
 
         // Add generation options
-        let context_length = std::cmp::min(request.context_length, self.max_context_length);
-        chat_message_request = chat_message_request.options(self.generation_options.clone().num_ctx(context_length));
+        if let Some(options) = &request.options {
+            chat_message_request = chat_message_request.options(
+                options
+                    .num_ctx
+                    .map(|num_ctx| std::cmp::min(num_ctx, self.max_context_length))
+                    .map_or_else(|| options.clone(), |context_length| options.clone().num_ctx(context_length)),
+            );
+        }
 
         // Add format
         if let Some(format) = &request.format {

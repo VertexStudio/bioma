@@ -276,7 +276,12 @@ curl -X 'POST' \
                 }
             ],
             "sources": ["/bioma"],
-            "context_length": 4096
+            "options": {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "num_predict": 1024,
+                "num_ctx": 4096
+            }
     }'
 ```
 
@@ -294,7 +299,12 @@ curl -X POST http://localhost:5766/chat \
                 "content": "Why is the sky blue?"
             }
         ],
-        "context_length": 4096
+        "options": {
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "num_predict": 1024,
+            "num_ctx": 4096
+        }
     }'
 ```
 
@@ -312,7 +322,12 @@ curl -X POST http://localhost:5766/ask \
                 "content": "Tell me about Puerto Rico."
             }
         ],
-        "context_length": 4096,
+        "options": {
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "num_predict": 2048,
+            "num_ctx": 4096
+        },
         "format": {
             "title": "PuertoRicoInfo",
             "type": "object",

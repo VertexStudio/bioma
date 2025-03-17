@@ -5,7 +5,7 @@ use bioma_llm::{
     prelude::{ChatMessage, GlobsContent, Index, IndexContent, RetrieveContext, RetrieveQuery, TextChunkConfig},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
-use ollama_rs::generation::tools::ToolInfo;
+use ollama_rs::{generation::tools::ToolInfo, models::ModelOptions};
 use serde::{Deserialize, Serialize};
 
 //------------------------------------------------------------------------------
@@ -38,17 +38,12 @@ pub struct ChatQuery {
     #[serde(default = "default_chat_stream")]
     pub stream: bool,
 
-    /// The maximum context length for this chat query
-    #[serde(default = "default_chat_context_length")]
-    pub context_length: u32,
+    /// Generation options
+    pub options: Option<ModelOptions>,
 }
 
 fn default_chat_stream() -> bool {
     true
-}
-
-fn default_chat_context_length() -> u32 {
-    4096
 }
 
 /// Request schema for think operation
@@ -77,17 +72,12 @@ pub struct ThinkQuery {
     #[serde(default = "default_think_stream")]
     pub stream: bool,
 
-    /// The maximum context length for this think query
-    #[serde(default = "default_think_context_length")]
-    pub context_length: u32,
+    /// Generation options
+    pub options: Option<ModelOptions>,
 }
 
 fn default_think_stream() -> bool {
     true
-}
-
-fn default_think_context_length() -> u32 {
-    4096
 }
 
 /// Request schema for asking a question
@@ -104,13 +94,8 @@ pub struct AskQuery {
     /// Optional schema for structured output format
     pub format: Option<chat::Schema>,
 
-    /// The maximum context length for this ask query
-    #[serde(default = "default_ask_context_length")]
-    pub context_length: u32,
-}
-
-fn default_ask_context_length() -> u32 {
-    4096
+    /// Generation options
+    pub options: Option<ModelOptions>,
 }
 
 //------------------------------------------------------------------------------
