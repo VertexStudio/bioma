@@ -11,4 +11,3 @@ impl Actor for UserActor {
         Ok(())
     }
 }
-

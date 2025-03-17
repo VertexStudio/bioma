@@ -282,7 +282,11 @@ pub struct ListedUniqueSources {
 impl Message<ListUniqueSources> for Retriever {
     type Response = ListedUniqueSources;
 
-    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &ListUniqueSources) -> Result<(), RetrieverError> {
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        _message: &ListUniqueSources,
+    ) -> Result<(), RetrieverError> {
         let query = include_str!("../sql/list_unique_sources.surql");
         let db = ctx.engine().db();
 
@@ -294,7 +298,6 @@ impl Message<ListUniqueSources> for Retriever {
         Ok(())
     }
 }
-
 
 #[derive(bon::Builder, Debug, Serialize, Deserialize, Default)]
 pub struct Retriever {

@@ -387,10 +387,7 @@ async fn test_retriever_list_unique_sources() -> Result<(), TestError> {
     let index_result3 = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             Index::builder()
-                .content(IndexContent::Globs(GlobsContent {
-                    globs: source3_paths,
-                    config: TextChunkConfig::default(),
-                }))
+                .content(IndexContent::Globs(GlobsContent { globs: source3_paths, config: TextChunkConfig::default() }))
                 .source(source3.clone())
                 .build(),
             &indexer_id,
@@ -405,7 +402,7 @@ async fn test_retriever_list_unique_sources() -> Result<(), TestError> {
         .await?;
 
     assert_eq!(unique_sources.sources.len(), 3, "Expected 3 unique sources");
-    
+
     // Validate document count for each source
     for source_info in &unique_sources.sources {
         if source_info.source == source1 {

@@ -75,13 +75,14 @@ impl EventHandler for Handler {
         };
 
         // Check if bot needs to respond
-        let bot_needs_to_respond = match self.does_bot_need_to_respond(&ctx, &msg, &author_ctx, conversation.clone()).await {
-            Ok(response) => response,
-            Err(e) => {
-                error!("Error determining if bot needs to respond: {:?}", e);
-                false
-            }
-        };
+        let bot_needs_to_respond =
+            match self.does_bot_need_to_respond(&ctx, &msg, &author_ctx, conversation.clone()).await {
+                Ok(response) => response,
+                Err(e) => {
+                    error!("Error determining if bot needs to respond: {:?}", e);
+                    false
+                }
+            };
 
         // Check if bot needs to respond
         if bot_needs_to_respond {
@@ -158,7 +159,7 @@ impl Handler {
             info!("Message is a DM, bot will respond");
             return Ok(true);
         }
-        
+
         // Check if bot is mentioned - always respond when mentioned
         let bot_id = ctx.cache.current_user().id;
         if msg.mentions.iter().any(|user| user.id == bot_id) {
