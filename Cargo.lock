@@ -1034,6 +1034,7 @@ dependencies = [
  "bon",
  "bytes",
  "clap",
+ "derive_more",
  "futures",
  "futures-util",
  "html2md",

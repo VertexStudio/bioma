@@ -8,15 +8,18 @@ use crate::schema::{
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
-use crate::JsonRpcMessage;
+use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
-#[derive(Default, Clone)]
-struct ServerMetadata;
+#[derive(Clone)]
+struct ServerMetadata {
+    client_id: Option<ClientId>,
+}
+
 impl Metadata for ServerMetadata {}
 
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
@@ -120,7 +123,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("ping", move |_params| {
+    io_handler.add_method_with_meta("ping", move |_params, _meta: ServerMetadata| {
         debug!("Handling ping request");
 
         async move {
@@ -129,9 +132,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("resources/list", {
+    io_handler.add_method_with_meta("resources/list", {
         let server = server.clone();
-        move |_params| {
+        move |_params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling resources/list request");
 
@@ -146,9 +149,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("resources/read", {
+    io_handler.add_method_with_meta("resources/read", {
         let server = server.clone();
-        move |params: Params| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling resources/read request");
 
@@ -180,9 +183,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("prompts/list", {
+    io_handler.add_method_with_meta("prompts/list", {
         let server = server.clone();
-        move |_params| {
+        move |_params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling prompts/list request");
 
@@ -197,9 +200,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("prompts/get", {
+    io_handler.add_method_with_meta("prompts/get", {
         let server = server.clone();
-        move |params: Params| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling prompts/get request");
 
@@ -235,9 +238,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("tools/list", {
+    io_handler.add_method_with_meta("tools/list", {
         let server = server.clone();
-        move |_params| {
+        move |_params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling tools/list request");
 
@@ -252,9 +255,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("tools/call", {
+    io_handler.add_method_with_meta("tools/call", {
         let server = server.clone();
-        move |params: Params| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling tools/call request");
 
@@ -308,8 +311,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                 match &request {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                            let Some(response) =
-                                io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
+                            let Some(response) = io_handler
+                                .handle_rpc_request(request.clone(), ServerMetadata { client_id: None })
+                                .await
                             else {
                                 continue;
                             };
@@ -344,13 +348,13 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                 match &sse_message.message {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                            let Some(response) =
-                                io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
-                            else {
+                            let metadata = ServerMetadata { client_id: Some(sse_message.client_id.clone()) };
+
+                            let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await else {
                                 continue;
                             };
 
-                            let sse_metadata = SseMetadata { client_id: sse_message.client_id.as_ref().to_string() };
+                            let sse_metadata = SseMetadata { client_id: sse_message.client_id.clone() };
 
                             if let Err(e) = transport_type
                                 .send(response.into(), serde_json::to_value(&sse_metadata).unwrap_or_default())
