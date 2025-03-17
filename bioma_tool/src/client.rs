@@ -393,6 +393,7 @@ impl Actor for ModelContextProtocolClientActor {
 
         let mut client = ModelContextProtocolClient::new(self.server.clone()).await?;
 
+        // Wait for the client to connect to the server (SSE)
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         // Initialize the client
