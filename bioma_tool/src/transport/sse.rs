@@ -370,7 +370,7 @@ impl Transport for SseTransport {
                                     async move {
                                         match (req.method(), req.uri().path()) {
                                             // SSE endpoint for clients to connect and receive events
-                                            (&Method::GET, "/sse") => {
+                                            (&Method::GET, "/") => {
                                                 debug!("New SSE client connected");
 
                                                 // Create a channel for sending messages to this client

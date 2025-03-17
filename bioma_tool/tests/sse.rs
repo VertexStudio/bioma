@@ -116,7 +116,7 @@ async fn test_client_retry() -> Result<()> {
 async fn test_server_config() {
     // Test default config
     let default_config = SseServerConfig::default();
-    assert_eq!(default_config.endpoint, "127.0.0.1:8090/sse");
+    assert_eq!(default_config.endpoint, "127.0.0.1:8090");
     assert_eq!(default_config.channel_capacity, 32);
     assert!(default_config.keep_alive);
 
@@ -134,7 +134,7 @@ async fn test_server_config() {
 async fn test_client_config() {
     // Test default config
     let default_config = SseClientConfig::default();
-    assert_eq!(default_config.endpoint, "http://127.0.0.1:8090/sse");
+    assert_eq!(default_config.endpoint, "http://127.0.0.1:8090");
     assert_eq!(default_config.retry_count, 3);
     assert_eq!(default_config.retry_delay, Duration::from_secs(5));
 

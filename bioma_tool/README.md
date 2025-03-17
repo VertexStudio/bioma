@@ -79,7 +79,7 @@ cargo run --release -p bioma_tool --example mcp_client -- stdio target/release/e
 MCP client with SSE transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client -- sse --endpoint http://127.0.0.1:8090/sse
+cargo run --release -p bioma_tool --example mcp_client -- sse --endpoint http://127.0.0.1:8090
 ```
 
 MCP server:
@@ -91,7 +91,7 @@ cargo build --release -p bioma_tool --example mcp_server
 MCP server with SSE transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_server -- --transport sse --url 127.0.0.1:8090/sse
+cargo run --release -p bioma_tool --example mcp_server -- --transport sse --url 127.0.0.1:8090
 ```
 
 Inspect example server:

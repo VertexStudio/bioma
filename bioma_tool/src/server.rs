@@ -46,7 +46,7 @@ pub struct SseConfig {
 }
 
 fn default_server_url() -> String {
-    "127.0.0.1:8090/sse".to_string()
+    "127.0.0.1:8090".to_string()
 }
 
 fn default_channel_capacity() -> usize {

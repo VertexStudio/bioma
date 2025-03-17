@@ -27,7 +27,7 @@ struct Args {
     transport: String,
 
     /// Server address for SSE transport
-    #[arg(long, short, default_value = "127.0.0.1:8090/sse")]
+    #[arg(long, short, default_value = "127.0.0.1:8090")]
     endpoint: String,
 }
 
