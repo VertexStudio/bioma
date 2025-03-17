@@ -88,6 +88,12 @@ MCP server:
 cargo build --release -p bioma_tool --example mcp_server
 ```
 
+MCP server with SSE transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_server -- --transport sse --url 127.0.0.1:8090/sse
+```
+
 Inspect example server:
 
 ```
@@ -98,10 +104,4 @@ Connecting to docker server:
 
 ```
 cargo run --release -p bioma_tool --example mcp_client -- stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
-```
-
-MCP server with SSE transport:
-
-```
-cargo run -p bioma_tool --example mcp_server -- --transport sse --url 127.0.0.1:8090/sse
 ```

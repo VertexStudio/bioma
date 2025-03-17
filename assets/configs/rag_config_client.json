@@ -14,6 +14,7 @@
       "server": {
         "name": "bioma-tool",
         "enabled": true,
+        "transport": "stdio",
         "command": "target/release/examples/mcp_server",
         "args": [
           "--transport",

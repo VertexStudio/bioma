@@ -70,6 +70,7 @@ pub struct ServerConfig {
     #[serde(default = "default_version")]
     #[builder(default = default_version())]
     pub version: String,
+    #[serde(flatten)]
     pub transport: TransportConfig,
     #[serde(default = "default_request_timeout")]
     #[builder(default = default_request_timeout())]
