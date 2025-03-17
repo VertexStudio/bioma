@@ -6,7 +6,7 @@ use bioma_tool::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{ModelContextProtocolServer, StdioConfig, TransportConfig},
+    server::{ModelContextProtocolServer, SseConfig, StdioConfig, TransportConfig},
     tools::{self, ToolCallHandler},
 };
 use clap::Parser;
@@ -19,32 +19,26 @@ use tracing_subscriber::fmt::format::FmtSpan;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the log file
-    #[arg(long, default_value = "mcp_server.log")]
+    #[arg(long, short, default_value = "mcp_server.log")]
     log_file: PathBuf,
 
     /// Transport type (stdio or websocket)
-    #[arg(long, default_value = "stdio")]
+    #[arg(long, short, default_value = "stdio")]
     transport: String,
+
+    /// Server address for SSE transport
+    #[arg(long, short, default_value = "127.0.0.1:8090")]
+    endpoint: String,
 }
 
 struct McpServer {
-    tools: Vec<Box<dyn ToolCallHandler>>,
     resources: Vec<Box<dyn ResourceReadHandler>>,
     prompts: Vec<Box<dyn PromptGetHandler>>,
 }
 
 impl ModelContextProtocolServer for McpServer {
     fn new() -> Self {
-        Self {
-            tools: vec![
-                Box::new(tools::echo::Echo),
-                Box::new(tools::memory::Memory),
-                Box::new(tools::fetch::Fetch::default()),
-                Box::new(tools::random::RandomNumber),
-            ],
-            resources: vec![Box::new(resources::readme::Readme)],
-            prompts: vec![Box::new(prompts::greet::Greet)],
-        }
+        Self { resources: vec![Box::new(resources::readme::Readme)], prompts: vec![Box::new(prompts::greet::Greet)] }
     }
 
     fn get_capabilities(&self) -> ServerCapabilities {
@@ -66,8 +60,13 @@ impl ModelContextProtocolServer for McpServer {
         &self.prompts
     }
 
-    fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>> {
-        &self.tools
+    fn create_tools(&self) -> Vec<Box<dyn ToolCallHandler>> {
+        vec![
+            Box::new(tools::echo::Echo),
+            Box::new(tools::memory::Memory),
+            Box::new(tools::fetch::Fetch::default()),
+            Box::new(tools::random::RandomNumber),
+        ]
     }
 }
 
@@ -109,6 +108,7 @@ async fn main() -> Result<()> {
 
     let transport = match args.transport.as_str() {
         "stdio" => TransportConfig::Stdio(StdioConfig {}),
+        "sse" => TransportConfig::Sse(SseConfig::builder().endpoint(args.endpoint).build()),
         _ => return Err(anyhow::anyhow!("Invalid transport type")),
     };
 

@@ -6,15 +6,22 @@ use crate::schema::{
     ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
+use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
-use crate::JsonRpcMessage;
-use anyhow::{Context, Error, Result};
+use crate::{ClientId, JsonRpcMessage};
+use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
-use tokio::sync::mpsc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
 
-#[derive(Default, Clone)]
-struct ServerMetadata;
+#[derive(Clone)]
+pub struct ServerMetadata {
+    pub client_id: ClientId,
+}
+
 impl Metadata for ServerMetadata {}
 
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
@@ -22,12 +29,39 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_capabilities(&self) -> ServerCapabilities;
     fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>>;
     fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>>;
-    fn get_tools(&self) -> &Vec<Box<dyn ToolCallHandler>>;
+    fn create_tools(&self) -> Vec<Box<dyn ToolCallHandler>>;
 }
 
 pub struct StdioConfig {}
 
-pub struct SseConfig {}
+/// Server configuration with builder pattern
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct SseConfig {
+    #[builder(default = default_server_url())]
+    pub endpoint: String,
+    #[builder(default = default_channel_capacity())]
+    pub channel_capacity: usize,
+    #[builder(default = default_keep_alive())]
+    pub keep_alive: bool,
+}
+
+fn default_server_url() -> String {
+    "127.0.0.1:8090".to_string()
+}
+
+fn default_channel_capacity() -> usize {
+    32
+}
+
+fn default_keep_alive() -> bool {
+    true
+}
+
+impl Default for SseConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
 
 pub struct WebsocketConfig {}
 
@@ -41,15 +75,24 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     debug!("Starting ModelContextProtocol server: {}", name);
 
     let server = std::sync::Arc::new(T::new());
+    let client_tools: Arc<RwLock<HashMap<ClientId, Vec<Box<dyn ToolCallHandler>>>>> =
+        Arc::new(RwLock::new(HashMap::new()));
+
     let mut io_handler = MetaIoHandler::default();
 
     io_handler.add_method_with_meta("initialize", {
         let server = server.clone();
-        move |params: Params, _meta: ServerMetadata| {
+        let client_tools = client_tools.clone();
+
+        move |params: Params, meta: ServerMetadata| {
+            let client_tools = client_tools.clone();
             let server = server.clone();
             debug!("Handling initialize request");
 
             async move {
+                let tools = server.create_tools();
+                client_tools.write().await.insert(meta.client_id, tools);
+
                 let init_params: InitializeRequestParams = params.parse().map_err(|e| {
                     error!("Failed to parse initialize parameters: {}", e);
                     jsonrpc_core::Error::invalid_params(e.to_string())
@@ -91,7 +134,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("ping", move |_params| {
+    io_handler.add_method_with_meta("ping", move |_params, _meta: ServerMetadata| {
         debug!("Handling ping request");
 
         async move {
@@ -100,9 +143,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("resources/list", {
+    io_handler.add_method_with_meta("resources/list", {
         let server = server.clone();
-        move |_params| {
+        move |_params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling resources/list request");
 
@@ -117,9 +160,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("resources/read", {
+    io_handler.add_method_with_meta("resources/read", {
         let server = server.clone();
-        move |params: Params| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling resources/read request");
 
@@ -151,9 +194,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("prompts/list", {
+    io_handler.add_method_with_meta("prompts/list", {
         let server = server.clone();
-        move |_params| {
+        move |_params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling prompts/list request");
 
@@ -168,9 +211,9 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("prompts/get", {
+    io_handler.add_method_with_meta("prompts/get", {
         let server = server.clone();
-        move |params: Params| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling prompts/get request");
 
@@ -206,28 +249,30 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method("tools/list", {
-        let server = server.clone();
-        move |_params| {
-            let server = server.clone();
+    io_handler.add_method_with_meta("tools/list", {
+        let client_tools = client_tools.clone();
+        move |_params, meta: ServerMetadata| {
             debug!("Handling tools/list request");
-
-            let tools = server.get_tools().iter().map(|tool| tool.def()).collect::<Vec<_>>();
+            let client_tools = client_tools.clone();
 
             async move {
+                let tools = if let Some(tools) = client_tools.read().await.get(&meta.client_id) {
+                    tools.iter().map(|tool| tool.def()).collect::<Vec<_>>()
+                } else {
+                    vec![]
+                };
                 let response = ListToolsResult { next_cursor: None, tools, meta: None };
-
                 info!("Successfully handled tools/list request");
                 Ok(serde_json::to_value(response).unwrap_or_default())
             }
         }
     });
 
-    io_handler.add_method("tools/call", {
-        let server = server.clone();
-        move |params: Params| {
-            let server = server.clone();
+    io_handler.add_method_with_meta("tools/call", {
+        let client_tools = client_tools.clone();
+        move |params: Params, meta: ServerMetadata| {
             debug!("Handling tools/call request");
+            let client_tools = client_tools.clone();
 
             async move {
                 let params: CallToolRequestParams = params.parse().map_err(|e| {
@@ -235,9 +280,12 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                     jsonrpc_core::Error::invalid_params(e.to_string())
                 })?;
 
-                // Find the requested tool
-                let tools = server.get_tools();
-                let tool = tools.iter().find(|t| t.def().name == params.name);
+                let tool = client_tools.read().await;
+                let tool = if let Some(tools) = tool.get(&meta.client_id) {
+                    tools.iter().find(|t| t.def().name == params.name)
+                } else {
+                    None
+                };
 
                 match tool {
                     Some(tool) => {
@@ -261,48 +309,87 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    let (on_message_tx, mut on_message_rx) = mpsc::channel(32);
-    let (on_error_tx, _on_error_rx) = mpsc::channel(32);
-    let (on_close_tx, _on_close_rx) = mpsc::channel(32);
-
-    let mut transport = match transport {
+    match transport {
         TransportConfig::Stdio(_config) => {
+            let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
             let transport = StdioTransport::new_server(on_message_tx, on_error_tx, on_close_tx);
-            TransportType::Stdio(transport)
+            let mut transport_type = TransportType::Stdio(transport);
+
+            if let Err(e) = transport_type.start().await {
+                error!("Transport error: {}", e);
+                return Err(e).context("Failed to start transport");
+            }
+
+            // Generate a fixed client ID for stdio transport
+            let client_id = ClientId::new();
+
+            while let Some(request) = on_message_rx.recv().await {
+                match &request {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                            let Some(response) = io_handler
+                                .handle_rpc_request(request.clone(), ServerMetadata { client_id: client_id.clone() })
+                                .await
+                            else {
+                                continue;
+                            };
+
+                            if let Err(e) = transport_type.send(response.into(), serde_json::Value::Null).await {
+                                error!("Failed to send response: {}", e);
+                                return Err(e).context("Failed to send response");
+                            }
+                        }
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
+                        _ => {}
+                    },
+                    JsonRpcMessage::Response(_) => {}
+                }
+            }
         }
-        TransportConfig::Sse(_config) => {
-            unimplemented!("SSE transport not implemented");
+        TransportConfig::Sse(config) => {
+            let (on_message_tx, mut on_message_rx) = mpsc::channel::<SseMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+            let transport = SseTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
+            let mut transport_type = TransportType::Sse(transport);
+
+            if let Err(e) = transport_type.start().await {
+                error!("Transport error: {}", e);
+                return Err(e).context("Failed to start transport");
+            }
+
+            while let Some(sse_message) = on_message_rx.recv().await {
+                match &sse_message.message {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                            let metadata = ServerMetadata { client_id: sse_message.client_id.clone() };
+
+                            let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await else {
+                                continue;
+                            };
+
+                            let sse_metadata = SseMetadata { client_id: sse_message.client_id.clone() };
+
+                            if let Err(e) = transport_type
+                                .send(response.into(), serde_json::to_value(&sse_metadata).unwrap_or_default())
+                                .await
+                            {
+                                error!("Failed to send SSE response: {}", e);
+                                return Err(e).context("Failed to send SSE response");
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
         }
         TransportConfig::Websocket(_config) => {
             unimplemented!("Websocket transport not implemented");
-        }
-    };
-
-    // Spawn the transport reader
-    if let Err(e) = transport.start().await {
-        error!("Transport error: {}", e);
-        return Err(e).context("Failed to start transport");
-    }
-
-    // Handle incoming messages
-    while let Some(request) = on_message_rx.recv().await {
-        match &request {
-            JsonRpcMessage::Request(request) => match request {
-                jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                    let Some(response) =
-                        io_handler.handle_rpc_request(request.clone(), ServerMetadata::default()).await
-                    else {
-                        continue;
-                    };
-                    if let Err(e) = transport.send(response.into()).await {
-                        error!("Failed to send response: {}", e);
-                        return Err(e).context("Failed to send response");
-                    }
-                }
-                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_notification)) => {}
-                _ => {}
-            },
-            JsonRpcMessage::Response(_) => {}
         }
     }
 

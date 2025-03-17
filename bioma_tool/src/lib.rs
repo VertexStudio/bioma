@@ -1,4 +1,6 @@
+use derive_more::Deref;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 pub mod client;
 pub mod prompts;
@@ -9,6 +11,15 @@ pub mod tools;
 pub mod transport;
 
 pub use server::ModelContextProtocolServer;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Deref)]
+pub struct ClientId(Uuid);
+
+impl ClientId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -14,7 +14,7 @@ Model Context Protocol (MCP) is an open protocol designed to enable seamless int
 ### Key Features
 
 - **Standardized Communication**: Built on JSON-RPC 2.0, providing a reliable and well-understood foundation for client-server communication
-- **Flexible Transport**: Supports both WebSocket and stdio transports for versatile integration options
+- **Flexible Transport**: Supports WebSocket, SSE, and stdio transports for versatile integration options
 - **Tool Integration**: Define and execute custom tools with structured input/output schemas
 - **Resource Management**: Access and manipulate external resources with a unified interface
 - **Progress Tracking**: Monitor long-running operations with built-in progress notifications
@@ -33,11 +33,13 @@ The implementation includes several built-in tools:
 To start a basic MCP server:
 
 Configure the claude_config.json file. In macOS, it is located in the following path:
+
 ```
 ~/Library/Application Support/Claude/claude_desktop_config.json
 ```
 
 Add the following to the file:
+
 ```
 {
     "mcpServers": {
@@ -55,34 +57,51 @@ Add the following to the file:
 ```
 
 Test servers using [mcp-cli](https://github.com/wong2/mcp-cli):
+
 ```
 npx @wong2/mcp-cli
 ```
 
-
 Generate the schema.es from MCP schema.json
+
 ```
 schemafy-cli src | rustfmt | tee src/schema.rs
 ```
 
 Examples:
 
-MCP client:
+MCP client with stdio transport:
+
 ```
-cargo run --release -p bioma_tool --example mcp_client -- target/release/examples/mcp_server
+cargo run --release -p bioma_tool --example mcp_client -- stdio target/release/examples/mcp_server
+```
+
+MCP client with SSE transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_client -- sse --endpoint http://127.0.0.1:8090
 ```
 
 MCP server:
+
 ```
 cargo build --release -p bioma_tool --example mcp_server
 ```
 
+MCP server with SSE transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_server -- --transport sse --url 127.0.0.1:8090
+```
+
 Inspect example server:
+
 ```
 npx github:VertexStudio/inspector#feature/ui-ux ./target/release/examples/mcp_server --log-file .output/mcp_server-inspector.log
 ```
 
 Connecting to docker server:
+
 ```
-./target/release/examples/mcp_client -- docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
+cargo run --release -p bioma_tool --example mcp_client -- stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
 ```
