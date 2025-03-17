@@ -12,8 +12,10 @@ use bioma_actor::prelude::*;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
@@ -87,13 +89,19 @@ fn default_request_timeout() -> u64 {
     5
 }
 
+type RequestId = u64;
+type ResponseSender = oneshot::Sender<Result<serde_json::Value, ModelContextProtocolClientError>>;
+type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+
 pub struct ModelContextProtocolClient {
     server: ServerConfig,
     transport: TransportType,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
-    on_message_rx: mpsc::Receiver<JsonRpcMessage>,
+    #[allow(unused)]
+    message_handler: JoinHandle<()>,
+    pending_requests: PendingRequests,
     #[allow(unused)]
     on_error_rx: mpsc::Receiver<Error>,
     #[allow(unused)]
@@ -102,7 +110,7 @@ pub struct ModelContextProtocolClient {
 
 impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
-        let (on_message_tx, on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
+        let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
         let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
         let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
 
@@ -135,13 +143,49 @@ impl ModelContextProtocolClient {
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Start: {}", e).into()))?;
 
+        let pending_requests = Arc::new(Mutex::new(HashMap::<u64, ResponseSender>::new()));
+        let pending_requests_clone = pending_requests.clone();
+
+        // Create message handler task
+        let message_handler = tokio::spawn({
+            let pending_requests = pending_requests_clone;
+            async move {
+                while let Some(message) = on_message_rx.recv().await {
+                    match message {
+                        JsonRpcMessage::Response(jsonrpc_core::Response::Single(output)) => match output {
+                            jsonrpc_core::Output::Success(success) => {
+                                if let jsonrpc_core::Id::Num(id) = success.id {
+                                    let mut requests = pending_requests.lock().await;
+                                    if let Some(sender) = requests.remove(&id) {
+                                        let _ = sender.send(Ok(success.result));
+                                    }
+                                }
+                            }
+                            jsonrpc_core::Output::Failure(failure) => {
+                                if let jsonrpc_core::Id::Num(id) = failure.id {
+                                    let mut requests = pending_requests.lock().await;
+                                    if let Some(sender) = requests.remove(&id) {
+                                        let _ = sender.send(Err(ModelContextProtocolClientError::Request(
+                                            format!("RPC error: {:?}", failure.error).into(),
+                                        )));
+                                    }
+                                }
+                            }
+                        },
+                        _ => {} // Handle other message types if needed
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             server,
             transport,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
             start_handle,
-            on_message_rx,
+            message_handler,
+            pending_requests,
             on_error_rx,
             on_close_rx,
         })
@@ -225,7 +269,7 @@ impl ModelContextProtocolClient {
         method: String,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, ModelContextProtocolClientError> {
-        let mut counter: tokio::sync::RwLockWriteGuard<'_, u64> = self.request_counter.write().await;
+        let mut counter = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
 
@@ -237,43 +281,35 @@ impl ModelContextProtocolClient {
             id: jsonrpc_core::Id::Num(id),
         };
 
+        // Create response channel
+        let (response_tx, response_rx) = oneshot::channel();
+
+        // Register pending request
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.insert(id, response_tx);
+        }
+
         // Send request
         if let Err(e) = self.transport.send(request.into(), serde_json::Value::Null).await {
+            // Clean up pending request on send error
+            let mut pending = self.pending_requests.lock().await;
+            pending.remove(&id);
             return Err(ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()));
         }
 
         // Wait for response with timeout
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(self.server.request_timeout),
-            self.on_message_rx.recv(),
-        )
-        .await
-        {
-            Ok(Some(response)) => {
-                match response {
-                    JsonRpcMessage::Response(jsonrpc_core::Response::Single(output)) => match output {
-                        jsonrpc_core::Output::Success(success) => {
-                            // Verify that response ID matches request ID
-                            if success.id != jsonrpc_core::Id::Num(id) {
-                                return Err(ModelContextProtocolClientError::ResponseIdMismatch {
-                                    expected: id,
-                                    actual: success.id,
-                                });
-                            }
-                            Ok(success.result)
-                        }
-                        jsonrpc_core::Output::Failure(failure) => {
-                            error!("RPC error: {:?}", failure.error);
-                            Err(ModelContextProtocolClientError::Request(
-                                format!("RPC error: {:?}", failure.error).into(),
-                            ))
-                        }
-                    },
-                    _ => Err(ModelContextProtocolClientError::Request("Unexpected response type".into())),
-                }
+        match tokio::time::timeout(std::time::Duration::from_secs(self.server.request_timeout), response_rx).await {
+            Ok(response) => match response {
+                Ok(result) => result,
+                Err(_) => Err(ModelContextProtocolClientError::Request("Response channel closed".into())),
+            },
+            Err(_) => {
+                // Clean up pending request on timeout
+                let mut pending = self.pending_requests.lock().await;
+                pending.remove(&id);
+                Err(ModelContextProtocolClientError::Request("Request timed out".into()))
             }
-            Ok(None) => Err(ModelContextProtocolClientError::Request("No response received".into())),
-            Err(_) => Err(ModelContextProtocolClientError::Request("Request timed out".into())),
         }
     }
 
