@@ -66,6 +66,7 @@ impl ModelContextProtocolServer for McpServer {
             Box::new(tools::memory::Memory),
             Box::new(tools::fetch::Fetch::default()),
             Box::new(tools::random::RandomNumber),
+            Box::new(tools::workflow::Workflow::new(true, None)),
         ]
     }
 }
