@@ -1,0 +1,428 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Rust Code Guidelines
+
+This guide combines best practices for writing idiomatic, efficient, and maintainable Rust code with specific guidance for our project standards.
+
+## Structure and Organization
+
+### Project Structure
+- Follow the standard Rust project layout:
+  - `src/main.rs` for binaries
+  - `src/lib.rs` for libraries
+  - `examples/` for example code
+  - `benches/` for benchmarks
+  - `tests/` for integration tests
+- Use modules to organize related code
+- Prefer small, focused crates over monoliths
+
+### Module Organization
+```rust
+// Preferred
+mod authentication;
+mod database;
+mod models;
+
+// Use pub(crate) for items only needed within the crate
+pub(crate) mod internal;
+```
+
+## Error Handling
+
+### Use Result and Option
+- Return `Result<T, E>` for operations that might fail
+- Use `Option<T>` for values that might be absent
+- Avoid using `unwrap()` and `expect()` in production code
+
+```rust
+// Good
+fn parse_config(path: &str) -> Result<Config, ConfigError> {
+    // implementation
+}
+
+// Bad
+fn parse_config(path: &str) -> Config {
+    // implementation with unwrap()
+}
+```
+
+### Error Propagation
+- Use the `?` operator for concise error propagation
+- Create custom error types for libraries
+- Implement the `std::error::Error` trait for your error types
+
+```rust
+fn read_and_parse() -> Result<Data, MyError> {
+    let content = std::fs::read_to_string("config.json")?;
+    let config: Config = serde_json::from_str(&content)?;
+    Ok(process_config(config)?)
+}
+```
+
+### Custom Errors
+```rust
+#[derive(Debug, thiserror::Error)]
+enum AppError {
+    #[error("Failed to read config: {0}")]
+    ConfigReadError(#[from] std::io::Error),
+    
+    #[error("Failed to parse config: {0}")]
+    ConfigParseError(#[from] serde_json::Error),
+    
+    #[error("Invalid configuration: {0}")]
+    ValidationError(String),
+}
+```
+
+## Memory Management
+
+### Ownership Patterns
+- Prefer passing references over transferring ownership when possible
+- Use clone() sparingly and intentionally
+- Consider using Cow<T> for conditional ownership transfer
+
+```rust
+// Prefer
+fn process(data: &[u8]) -> Result<(), Error> {
+    // Use data by reference
+}
+
+// Instead of
+fn process(data: Vec<u8>) -> Result<(), Error> {
+    // Takes ownership
+}
+```
+
+### Smart Pointers
+- Use `Box<T>` for heap allocation
+- Use `Rc<T>` for shared ownership in single-threaded contexts
+- Use `Arc<T>` for shared ownership across threads
+- Use `RefCell<T>` and `Mutex<T>` for interior mutability
+
+## Type System
+
+### Leverage Strong Types
+- Create newtype wrappers to distinguish between similar types
+- Use enums for states and variants
+- Utilize type aliases for complex types
+
+```rust
+// Newtype pattern
+struct UserId(u64);
+struct GroupId(u64);
+
+// Instead of using u64 directly
+fn add_user_to_group(user: UserId, group: GroupId) {
+    // Implementation
+}
+```
+
+### Use Traits for Abstraction
+- Define behavior with traits
+- Implement generic functions that operate on traits
+- Compose small, focused traits rather than large ones
+
+```rust
+trait Repository {
+    type Error;
+    fn save(&self, item: &Item) -> Result<(), Self::Error>;
+    fn find(&self, id: ItemId) -> Result<Option<Item>, Self::Error>;
+}
+
+struct PostgresRepository;
+struct InMemoryRepository;
+
+impl Repository for PostgresRepository {
+    // Implementation
+}
+```
+
+## Builder Pattern
+
+### Use bon::builder for Structs
+- Prefer `bon::builder` for structs with many fields
+- Use attributes to customize behavior
+- Define distinct builder types for related structs
+
+```rust
+use bon::builder;
+
+#[builder]
+struct ServerConfig {
+    address: String,
+    port: u16,
+    #[builder(default = "default_timeout()")]
+    timeout_seconds: u64,
+    #[builder(default)]
+    max_connections: Option<usize>,
+}
+
+fn default_timeout() -> u64 {
+    30
+}
+
+// Usage
+let config = ServerConfigBuilder::new()
+    .address("127.0.0.1".to_string())
+    .port(8080)
+    .build()
+    .expect("Failed to build config");
+```
+
+### Default Values and Implementations
+- Always provide functions for default field values
+- Use `builder(default = func_name())` to set default values
+- Always implement `Default` trait when possible
+
+```rust
+#[builder]
+struct AppConfig {
+    #[builder(default = "default_log_level()")]
+    log_level: LogLevel,
+    #[builder(default = "default_threads()")]
+    thread_count: usize,
+}
+
+fn default_log_level() -> LogLevel {
+    LogLevel::Info
+}
+
+fn default_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        AppConfigBuilder::new()
+            .build()
+            .expect("Default configuration shouldn't fail")
+    }
+}
+```
+
+## Functional Programming
+
+### Embrace Immutability
+- Prefer immutable bindings (`let` instead of `let mut`)
+- Use functional transformations over in-place mutations
+- Return new instances rather than modifying existing ones
+
+```rust
+// Prefer
+fn with_added_item(mut self, item: Item) -> Self {
+    self.items.push(item);
+    self
+}
+
+// Over
+fn add_item(&mut self, item: Item) {
+    self.items.push(item);
+}
+```
+
+### Utilize Higher-Order Functions
+- Use closures as function arguments
+- Return closures for specialized behavior
+- Leverage iterator adaptors like map, filter, fold
+
+```rust
+// Using closures and iterators
+let sum_of_even_squares: i32 = numbers
+    .iter()
+    .filter(|&n| n % 2 == 0)
+    .map(|&n| n * n)
+    .sum();
+```
+
+### Chaining with Option and Result
+- Use combinators like `map`, `and_then`, `unwrap_or_else`
+- Chain operations with the `?` operator
+- Build functional pipelines for complex transformations
+
+```rust
+let result = user.find_by_id(id)
+    .and_then(|user| user.address())
+    .map(|address| address.city())
+    .unwrap_or_else(|| "Unknown".to_string());
+```
+
+## Performance
+
+### Avoid Unnecessary Allocations
+- Reuse buffers when possible
+- Use string slices (`&str`) instead of `String` when appropriate
+- Consider using `SmallVec` or stack arrays for small collections
+
+### Use Iterators
+- Prefer iterator chains over explicit loops
+- Use iterator adapters like `map`, `filter`, `fold`
+- Utilize `Iterator::collect` with type annotations
+
+```rust
+// Good
+let sum: u32 = numbers.iter()
+    .filter(|&n| n % 2 == 0)
+    .map(|&n| n * n)
+    .sum();
+
+// Instead of
+let mut sum = 0;
+for &n in &numbers {
+    if n % 2 == 0 {
+        sum += n * n;
+    }
+}
+```
+
+### Utilize Rust's Zero-Cost Abstractions
+- Use higher-level abstractions; the compiler will optimize them
+- Prefer safe abstractions over unsafe code
+- Only reach for unsafe when necessary and document why
+
+## Testing
+
+### Unit Tests
+- Place unit tests in the same file as the code they test
+- Use the `#[test]` attribute
+- Focus on testing public interfaces
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add() {
+        assert_eq!(add(2, 2), 4);
+    }
+}
+```
+
+### Integration Tests
+- Place integration tests in the `tests/` directory
+- Test how multiple components work together
+- Test from a user's perspective
+
+### Property-Based Testing
+- Consider using proptest or quickcheck for property testing
+- Test invariants and properties rather than specific examples
+
+## Documentation
+
+### Document Public APIs
+- Use documentation comments (`///`) for public items
+- Include examples in documentation
+- Document panics, errors, and edge cases
+
+```rust
+/// Adds two numbers together.
+///
+/// # Examples
+///
+/// ```
+/// let result = my_crate::add(2, 2);
+/// assert_eq!(result, 4);
+/// ```
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
+
+## Tooling
+
+### Use Cargo Features
+- Organize optional functionality using features
+- Use workspace for multi-crate projects
+- Utilize cargo tools:
+  - `cargo fmt` for formatting
+  - `cargo clippy` for linting
+  - `cargo doc` for documentation
+  - `cargo audit` for security vulnerabilities
+
+### Format and Lint Your Code
+- Follow the Rust style guide
+- Use rustfmt and clippy in your CI pipeline
+- Address clippy warnings
+
+## Concurrency
+
+### Thread Safety
+- Use `Send` and `Sync` traits to ensure thread safety
+- Prefer message passing over shared mutable state
+- Use `Arc<Mutex<T>>` for shared mutable state
+
+### Async Programming
+- Use async/await for IO-bound tasks
+- Consider thread pools for CPU-bound tasks
+- Be mindful of runtime selection (tokio, async-std)
+
+```rust
+async fn fetch_and_process(url: &str) -> Result<ProcessedData, Error> {
+    let response = reqwest::get(url).await?;
+    let data = response.json::<RawData>().await?;
+    Ok(process_data(data))
+}
+```
+
+## Dependencies
+
+### Choosing Dependencies
+- Evaluate crates based on:
+  - Maintenance activity
+  - Documentation quality
+  - Test coverage
+  - Adoption and popularity
+- Prefer established crates from the ecosystem
+
+### Specify Version Requirements
+- Use semantic versioning in Cargo.toml
+- Be explicit about compatibility requirements
+
+```toml
+[dependencies]
+serde = "1.0"              # Compatible with 1.x
+tokio = { version = "1.0", features = ["full"] }
+```
+
+## Idiomatic Rust
+
+### Prefer Match Over If-Let When Handling Multiple Cases
+```rust
+// Good
+match result {
+    Ok(value) => process(value),
+    Err(Error::NotFound) => create_default(),
+    Err(e) => return Err(e.into()),
+}
+
+// Instead of nested if-let
+if let Ok(value) = result {
+    process(value)
+} else if let Err(Error::NotFound) = result {
+    create_default()
+} else {
+    return Err(result.unwrap_err().into());
+}
+```
+
+### Use Methods for Chainable APIs
+```rust
+// Good
+Config::new()
+    .with_timeout(Duration::from_secs(30))
+    .with_retries(5)
+    .build()
+```
+
+## Resources
+
+- [The Rust Book](https://doc.rust-lang.org/book/)
+- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
+- [Effective Rust](https://www.lurklurk.org/effective-rust/)
+- [Rust Design Patterns](https://rust-unofficial.github.io/patterns/)
+- [rust-clippy](https://github.com/rust-lang/rust-clippy)
