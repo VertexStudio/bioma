@@ -29,11 +29,7 @@ use tracing::{debug, error, info};
 
 /// Errors that can occur during WebSocket transport operations.
 #[derive(Debug, Error)]
-enum WsError {
-    /// Error during WebSocket connection establishment or communication.
-    #[error("WebSocket connection error: {0}")]
-    ConnectionError(#[from] tokio_tungstenite::tungstenite::Error),
-
+pub enum WsError {
     /// Error during JSON serialization or deserialization.
     #[error("JSON serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
@@ -46,9 +42,37 @@ enum WsError {
     #[error("Message sending failed: {0}")]
     SendError(String),
 
-    /// I/O error during WebSocket operations.
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
+    /// WebSocket connection error.
+    #[error("WebSocket connection error: {0}")]
+    ConnectionError(String),
+
+    /// Error binding to network address.
+    #[error("Network binding error: {0}")]
+    BindError(String),
+
+    /// Error in WebSocket protocol.
+    #[error("WebSocket protocol error: {0}")]
+    ProtocolError(String),
+
+    /// WebSocket transport not in correct state.
+    #[error("Transport state error: {0}")]
+    StateError(String),
+
+    /// Invalid message format or content.
+    #[error("Message parsing error: {0}")]
+    MessageError(String),
+
+    /// Operation timed out.
+    #[error("Timeout error: {0}")]
+    TimeoutError(String),
+
+    /// WebSocket handshake failed.
+    #[error("WebSocket handshake failed: {0}")]
+    HandshakeError(String),
+
+    /// Metadata parsing or validation error.
+    #[error("Invalid metadata: {0}")]
+    MetadataError(String),
 }
 
 /// Metadata for WebSocket transport containing client identification.
@@ -239,13 +263,18 @@ impl WsTransport {
                             }
                         }
                         Err(err) => {
-                            error!("Failed to parse JSON-RPC message: {}", err);
+                            let error = WsError::MessageError(format!("Failed to parse JSON-RPC message: {}", err));
+                            error!("{}", error);
                             // Continue processing other messages despite this error
                         }
                     }
                 }
                 Ok(Message::Close(_)) => break, // Client initiated close
-                _ => {}                         // Ignore other message types
+                Err(err) => {
+                    error!("WebSocket connection error: {}", err);
+                    break;
+                }
+                _ => {} // Ignore other message types
             }
         }
 
@@ -323,7 +352,7 @@ impl Transport for WsTransport {
                         // Bind to the endpoint and start listening for connections
                         let listener = TcpListener::bind(&endpoint_clone)
                             .await
-                            .context(format!("Failed to bind to {}", endpoint_clone))?;
+                            .map_err(|e| WsError::BindError(format!("Failed to bind to {}: {}", endpoint_clone, e)))?;
 
                         info!("WebSocket server listening on {}", endpoint_clone);
 
@@ -333,8 +362,9 @@ impl Transport for WsTransport {
                             debug!("Accepting connection from {} with ID {}", addr, client_id);
 
                             // Upgrade the TCP stream to a WebSocket stream
-                            let ws_stream =
-                                accept_async(stream).await.context("Failed to accept WebSocket connection")?;
+                            let ws_stream = accept_async(stream).await.map_err(|e| {
+                                WsError::HandshakeError(format!("Failed to accept WebSocket connection: {}", e))
+                            })?;
 
                             let clients = clients_clone.clone();
                             let on_message = on_message_clone.clone();
@@ -369,9 +399,9 @@ impl Transport for WsTransport {
                     info!("Connecting to WebSocket server at {}", endpoint_clone);
 
                     // Connect to the server
-                    let (ws_stream, _) = connect_async(&endpoint_clone)
-                        .await
-                        .context(format!("Failed to connect to {}", endpoint_clone))?;
+                    let (ws_stream, _) = connect_async(&endpoint_clone).await.map_err(|e| {
+                        WsError::ConnectionError(format!("Failed to connect to {}: {}", endpoint_clone, e))
+                    })?;
 
                     // Split the WebSocket stream into sender and receiver parts
                     let (ws_sender, mut ws_receiver) = ws_stream.split();
@@ -401,13 +431,21 @@ impl Transport for WsTransport {
                                             }
                                         }
                                         Err(err) => {
-                                            error!("Failed to parse JSON-RPC message: {}", err);
+                                            let error = WsError::MessageError(format!(
+                                                "Failed to parse JSON-RPC message: {}",
+                                                err
+                                            ));
+                                            error!("{}", error);
                                             // Continue processing other messages despite this error
                                         }
                                     }
                                 }
                                 Ok(Message::Close(_)) => break, // Server initiated close
-                                _ => {}                         // Ignore other message types
+                                Err(err) => {
+                                    error!("WebSocket connection error: {}", err);
+                                    break;
+                                }
+                                _ => {} // Ignore other message types
                             }
                         }
 
@@ -427,10 +465,12 @@ impl Transport for WsTransport {
                     debug!("WebSocket client sender is ready");
                 }
                 Ok(Err(_)) => {
-                    return Err(anyhow::anyhow!("Failed to initialize client sender"));
+                    return Err(WsError::StateError("Failed to initialize client sender".to_string()).into());
                 }
                 Err(_) => {
-                    return Err(anyhow::anyhow!("Timeout waiting for client sender to be ready"));
+                    return Err(
+                        WsError::TimeoutError("Timeout waiting for client sender to be ready".to_string()).into()
+                    );
                 }
             }
         }
@@ -461,7 +501,7 @@ impl Transport for WsTransport {
             WsMode::Server(server) => {
                 // In server mode, extract the client ID from metadata
                 let metadata = serde_json::from_value::<WsMetadata>(metadata)
-                    .context("Invalid metadata for WebSocket transport")?;
+                    .map_err(|e| WsError::MetadataError(format!("Invalid metadata for WebSocket transport: {}", e)))?;
 
                 Self::send_to_client(&server.clients, &metadata.client_id, message)
                     .await
@@ -472,11 +512,17 @@ impl Transport for WsTransport {
                 let mut sender_guard = client.sender.lock().await;
                 match &mut *sender_guard {
                     Some(sender) => {
-                        let json = serde_json::to_string(&message).context("Failed to serialize JSON-RPC message")?;
-                        sender.send(Message::Text(json.into())).await.context("Failed to send WebSocket message")?;
+                        let json = serde_json::to_string(&message).map_err(|e| WsError::SerializationError(e))?;
+                        sender
+                            .send(Message::Text(json.into()))
+                            .await
+                            .map_err(|e| WsError::ProtocolError(format!("Failed to send WebSocket message: {}", e)))?;
                         Ok(())
                     }
-                    None => Err(anyhow::anyhow!("WebSocket connection not established. Call start() first.")),
+                    None => Err(WsError::StateError(
+                        "WebSocket connection not established. Call start() first.".to_string(),
+                    )
+                    .into()),
                 }
             }
         }
