@@ -25,7 +25,6 @@ pub struct StdioConfig {
     pub args: Vec<String>,
 }
 
-/// Client configuration with builder pattern
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
     #[serde(default = "default_server_url")]
@@ -41,6 +40,11 @@ impl Default for SseConfig {
     fn default() -> Self {
         Self::builder().build()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsConfig {
+    pub endpoint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

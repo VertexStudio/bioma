@@ -63,12 +63,18 @@ impl Default for SseConfig {
     }
 }
 
-pub struct WebsocketConfig {}
+#[derive(Debug, Clone)]
+pub struct WsConfig {
+    /// The endpoint to listen on
+    pub endpoint: String,
+    /// The capacity of the channel
+    pub capacity: usize,
+}
 
 pub enum TransportConfig {
     Stdio(StdioConfig),
     Sse(SseConfig),
-    Websocket(WebsocketConfig),
+    Ws(WsConfig),
 }
 
 pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
@@ -388,7 +394,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                 }
             }
         }
-        TransportConfig::Websocket(_config) => {
+        TransportConfig::Ws(_config) => {
             unimplemented!("Websocket transport not implemented");
         }
     }
