@@ -5,6 +5,7 @@ use crate::schema::{
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
+use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::Error;
@@ -54,6 +55,8 @@ pub enum TransportConfig {
     Stdio(StdioConfig),
     #[serde(rename = "sse")]
     Sse(SseConfig),
+    #[serde(rename = "ws")]
+    Ws(WsConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
@@ -127,6 +130,16 @@ impl ModelContextProtocolClient {
                     }
                 };
                 TransportType::Sse(transport)
+            }
+            TransportConfig::Ws(config) => {
+                let transport = WsTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into()))
+                    }
+                };
+                TransportType::Ws(transport)
             }
         };
 
