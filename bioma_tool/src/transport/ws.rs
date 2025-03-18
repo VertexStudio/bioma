@@ -93,8 +93,6 @@ struct ServerMode {
 struct ClientMode {
     /// WebSocket server endpoint to connect to (e.g., "ws://127.0.0.1:8080").
     endpoint: String,
-    /// Unique identifier for this client.
-    client_id: ClientId,
     /// Channel for forwarding received messages to the application.
     on_message: mpsc::Sender<JsonRpcMessage>,
     /// Sender half of the WebSocket connection, used to send messages.
@@ -170,10 +168,8 @@ impl WsTransport {
         on_error: mpsc::Sender<anyhow::Error>,
         on_close: mpsc::Sender<()>,
     ) -> Result<Self> {
-        let client_id = ClientId::new();
-
         let client_mode =
-            ClientMode { endpoint: config.endpoint.clone(), client_id, on_message, sender: Arc::new(Mutex::new(None)) };
+            ClientMode { endpoint: config.endpoint.clone(), on_message, sender: Arc::new(Mutex::new(None)) };
 
         Ok(Self { mode: Arc::new(WsMode::Client(client_mode)), on_error, on_close })
     }
@@ -312,6 +308,10 @@ impl Transport for WsTransport {
     async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
         let mode = self.mode.clone();
 
+        // For client mode, we'll create a notification channel to wait until sender is set
+        let (sender_ready_tx, sender_ready_rx) = tokio::sync::oneshot::channel();
+        let sender_ready_tx = Arc::new(Mutex::new(Some(sender_ready_tx)));
+
         let handle = tokio::spawn(async move {
             match &*mode {
                 WsMode::Server(server) => {
@@ -362,8 +362,9 @@ impl Transport for WsTransport {
                 }
                 WsMode::Client(client) => {
                     let endpoint_clone = client.endpoint.clone();
-                    let client_id_clone = client.client_id.clone();
                     let on_message_clone = client.on_message.clone();
+                    let sender_clone = client.sender.clone();
+                    let sender_ready = sender_ready_tx.clone();
 
                     info!("Connecting to WebSocket server at {}", endpoint_clone);
 
@@ -377,22 +378,12 @@ impl Transport for WsTransport {
 
                     // Store the sender in the client mode for later use
                     {
-                        let mut client_sender = client.sender.lock().await;
+                        let mut client_sender = sender_clone.lock().await;
                         *client_sender = Some(ws_sender);
-                    }
 
-                    // Send client ID to the server for identification
-                    {
-                        let mut sender_guard = client.sender.lock().await;
-                        if let Some(ref mut sender) = *sender_guard {
-                            let client_id_message = serde_json::json!({
-                                "clientId": client_id_clone
-                            });
-
-                            sender
-                                .send(Message::Text(client_id_message.to_string().into()))
-                                .await
-                                .context("Failed to send client ID")?;
+                        // Signal that the sender is ready
+                        if let Some(tx) = sender_ready.lock().await.take() {
+                            let _ = tx.send(());
                         }
                     }
 
@@ -427,6 +418,22 @@ impl Transport for WsTransport {
                 }
             }
         });
+
+        // For client mode, wait for sender to be ready before returning the handle
+        if let WsMode::Client(_) = &*self.mode {
+            // Wait with a reasonable timeout
+            match tokio::time::timeout(std::time::Duration::from_secs(10), sender_ready_rx).await {
+                Ok(Ok(())) => {
+                    debug!("WebSocket client sender is ready");
+                }
+                Ok(Err(_)) => {
+                    return Err(anyhow::anyhow!("Failed to initialize client sender"));
+                }
+                Err(_) => {
+                    return Err(anyhow::anyhow!("Timeout waiting for client sender to be ready"));
+                }
+            }
+        }
 
         Ok(handle)
     }
