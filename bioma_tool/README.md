@@ -46,10 +46,9 @@ Add the following to the file:
         "bioma-tool": {
             "command": "/Users/rozgo/BiomaAI/bioma/target/release/examples/mcp_server",
             "args": [
+                "stdio",
                 "--log-file",
-                "/Users/rozgo/BiomaAI/bioma/.output/mcp_server-claude.log",
-                "--transport",
-                "stdio"
+                "/Users/rozgo/BiomaAI/bioma/.output/mcp_server-claude.log"
             ]
         }
     }
