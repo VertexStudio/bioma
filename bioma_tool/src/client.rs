@@ -43,9 +43,20 @@ impl Default for SseConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct WsConfig {
+    #[builder(default = default_ws_server_url())]
     pub endpoint: String,
+}
+
+fn default_ws_server_url() -> String {
+    "ws://127.0.0.1:9090".to_string()
+}
+
+impl Default for WsConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

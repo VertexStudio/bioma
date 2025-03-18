@@ -32,8 +32,8 @@ enum Transport {
     },
     /// Use WebSocket transport
     Ws {
-        /// WebSocket server URL (e.g. ws://127.0.0.1:8091)
-        #[arg(long, short, default_value = "ws://127.0.0.1:8091")]
+        /// WebSocket server URL (e.g. ws://127.0.0.1:9090)
+        #[arg(long, short, default_value = "ws://127.0.0.1:9090")]
         endpoint: String,
     },
 }
@@ -70,11 +70,6 @@ async fn main() -> Result<()> {
 
     // Create client
     let mut client = ModelContextProtocolClient::new(server).await?;
-
-    // Wait to open connection if using network transport
-    if matches!(&args.transport, Transport::Sse { .. } | Transport::Ws { .. }) {
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    }
 
     // Initialize the client
     info!("Initializing client...");
