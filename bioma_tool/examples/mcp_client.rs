@@ -3,6 +3,8 @@ use bioma_tool::{
     client::{
         ClientHandlers, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig,
     },
+    roots::readme::Readme,
+    sampling::chat::ChatSampling,
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
 };
 use clap::{Parser, Subcommand};
@@ -11,6 +13,12 @@ use tracing::{error, info};
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    #[arg(long, short)]
+    sampling: bool,
+
+    #[arg(long, short)]
+    roots: bool,
+
     #[command(subcommand)]
     transport: Transport,
 }
@@ -70,8 +78,13 @@ async fn main() -> Result<()> {
             .build(),
     };
 
+    let handlers = ClientHandlers {
+        sampling_handler: if args.sampling { Some(std::sync::Arc::new(ChatSampling::new().await?)) } else { None },
+        roots_handler: if args.roots { Some(std::sync::Arc::new(Readme)) } else { None },
+    };
+
     // Create client
-    let mut client = ModelContextProtocolClient::new(server, ClientHandlers::default()).await?;
+    let mut client = ModelContextProtocolClient::new(server, handlers).await?;
 
     // Initialize the client
     info!("Initializing client...");
