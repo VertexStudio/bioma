@@ -7,6 +7,7 @@ use crate::schema::{
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
+use crate::transport::ws::{WsMessage, WsMetadata, WsTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Result};
@@ -41,8 +42,6 @@ pub struct SseConfig {
     pub endpoint: String,
     #[builder(default = default_channel_capacity())]
     pub channel_capacity: usize,
-    #[builder(default = default_keep_alive())]
-    pub keep_alive: bool,
 }
 
 fn default_server_url() -> String {
@@ -53,22 +52,32 @@ fn default_channel_capacity() -> usize {
     32
 }
 
-fn default_keep_alive() -> bool {
-    true
-}
-
 impl Default for SseConfig {
     fn default() -> Self {
         Self::builder().build()
     }
 }
 
-pub struct WebsocketConfig {}
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct WsConfig {
+    #[builder(default = default_ws_server_url())]
+    pub endpoint: String,
+}
+
+fn default_ws_server_url() -> String {
+    "127.0.0.1:9090".to_string()
+}
+
+impl Default for WsConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
 
 pub enum TransportConfig {
     Stdio(StdioConfig),
     Sse(SseConfig),
-    Websocket(WebsocketConfig),
+    Ws(WsConfig),
 }
 
 pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
@@ -388,8 +397,44 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                 }
             }
         }
-        TransportConfig::Websocket(_config) => {
-            unimplemented!("Websocket transport not implemented");
+        TransportConfig::Ws(config) => {
+            let (on_message_tx, mut on_message_rx) = mpsc::channel::<WsMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+            let transport = WsTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
+            let mut transport_type = TransportType::Ws(transport);
+
+            if let Err(e) = transport_type.start().await {
+                error!("Transport error: {}", e);
+                return Err(e).context("Failed to start transport");
+            }
+
+            while let Some(ws_message) = on_message_rx.recv().await {
+                match &ws_message.message {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                            let metadata = ServerMetadata { client_id: ws_message.client_id.clone() };
+
+                            let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await else {
+                                continue;
+                            };
+
+                            let ws_metadata = WsMetadata { client_id: ws_message.client_id.clone() };
+
+                            if let Err(e) = transport_type
+                                .send(response.into(), serde_json::to_value(&ws_metadata).unwrap_or_default())
+                                .await
+                            {
+                                error!("Failed to send WebSocket response: {}", e);
+                                return Err(e).context("Failed to send WebSocket response");
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
         }
     }
 
