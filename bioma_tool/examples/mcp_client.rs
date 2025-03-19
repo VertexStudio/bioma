@@ -1,6 +1,8 @@
 use anyhow::Result;
 use bioma_tool::{
-    client::{ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    client::{
+        ClientHandlers, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig,
+    },
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
 };
 use clap::{Parser, Subcommand};
@@ -69,7 +71,7 @@ async fn main() -> Result<()> {
     };
 
     // Create client
-    let mut client = ModelContextProtocolClient::new(server).await?;
+    let mut client = ModelContextProtocolClient::new(server, ClientHandlers::new()).await?;
 
     // Initialize the client
     info!("Initializing client...");

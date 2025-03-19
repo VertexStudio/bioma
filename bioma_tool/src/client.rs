@@ -101,6 +101,36 @@ fn default_request_timeout() -> u64 {
     5
 }
 
+// New ClientHandlers struct to hold client handlers
+#[derive(Clone, Default)]
+pub struct ClientHandlers {
+    pub sampling_handler: Option<Arc<dyn SamplingHandler + Send + Sync>>,
+    // TODO: Roots handler
+}
+
+impl ClientHandlers {
+    pub fn new() -> Self {
+        Self { sampling_handler: None }
+    }
+
+    pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
+        self.sampling_handler = Some(handler);
+        self
+    }
+
+    // Generate capabilities based on available handlers
+    pub fn to_capabilities(&self) -> ClientCapabilities {
+        let mut capabilities = ClientCapabilities::default();
+
+        // Set sampling capability if handler is present
+        if self.sampling_handler.is_some() {
+            capabilities.sampling = Some(BTreeMap::new());
+        }
+
+        capabilities
+    }
+}
+
 #[derive(Clone)]
 pub struct ClientMetadata {}
 
@@ -127,19 +157,12 @@ pub struct ModelContextProtocolClient {
 }
 
 impl ModelContextProtocolClient {
-    pub async fn new(
-        server: ServerConfig,
-        mut capabilities: ClientCapabilities,
-        sampling_handler: Option<Arc<dyn SamplingHandler + Send + Sync>>,
-    ) -> Result<Self, ModelContextProtocolClientError> {
-        // Synchronize capabilities with handlers
-        if sampling_handler.is_some() && capabilities.sampling.is_none() {
-            capabilities.sampling = Some(BTreeMap::new());
-        } else if sampling_handler.is_none() && capabilities.sampling.is_some() {
-            return Err(ModelContextProtocolClientError::Configuration(
-                "Sampling capability enabled but no handler provided".into(),
-            ));
-        }
+    pub async fn new(server: ServerConfig, handlers: ClientHandlers) -> Result<Self, ModelContextProtocolClientError> {
+        // Generate capabilities from handlers
+        let capabilities = handlers.to_capabilities();
+
+        // Extract sampling handler
+        let sampling_handler = handlers.sampling_handler;
 
         let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
         let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
@@ -463,16 +486,14 @@ pub enum ModelContextProtocolClientError {
 
 impl ActorError for ModelContextProtocolClientError {}
 
-// Remove Debug derive and implement it manually
 #[derive(Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
     tools: Option<ListToolsResult>,
-    client_capabilities: ClientCapabilities,
+    #[serde(skip)]
+    handlers: ClientHandlers,
     #[serde(skip)]
     client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
-    #[serde(skip)]
-    sampling_handler: Option<Arc<dyn SamplingHandler + Send + Sync>>,
     server_capabilities: Option<ServerCapabilities>,
 }
 
@@ -482,31 +503,25 @@ impl std::fmt::Debug for ModelContextProtocolClientActor {
         f.debug_struct("ModelContextProtocolClientActor")
             .field("server", &self.server)
             .field("tools", &self.tools)
-            .field("client_capabilities", &self.client_capabilities)
             .field("server_capabilities", &self.server_capabilities)
-            // Skip client and sampling_handler fields as they don't implement Debug
+            // Skip client and handlers fields as they don't implement Debug
             .finish_non_exhaustive()
     }
 }
 
 impl ModelContextProtocolClientActor {
-    pub fn new(server: ServerConfig, client_capabilities: ClientCapabilities) -> Self {
+    pub fn new(server: ServerConfig) -> Self {
         ModelContextProtocolClientActor {
             server,
             tools: None,
+            handlers: ClientHandlers::new(),
             client: None,
-            client_capabilities,
-            sampling_handler: None,
             server_capabilities: None,
         }
     }
 
     pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
-        // Automatically enable sampling capability if setting a handler
-        if self.client_capabilities.sampling.is_none() {
-            self.client_capabilities.sampling = Some(BTreeMap::new());
-        }
-        self.sampling_handler = Some(handler);
+        self.handlers = self.handlers.with_sampling_handler(handler);
         self
     }
 }
@@ -517,12 +532,7 @@ impl Actor for ModelContextProtocolClientActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
         info!("{} Started (server: {})", ctx.id(), self.server.name);
 
-        let mut client = ModelContextProtocolClient::new(
-            self.server.clone(),
-            self.client_capabilities.clone(),
-            self.sampling_handler.clone(),
-        )
-        .await?;
+        let mut client = ModelContextProtocolClient::new(self.server.clone(), self.handlers.clone()).await?;
 
         // Initialize the client
         let init_result =
