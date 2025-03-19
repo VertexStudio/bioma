@@ -7,6 +7,7 @@ edition = "2021"
 bioma_actor = { path = "../../bioma_actor" }
 bioma_behavior = { path = "../../bioma_behavior" }
 bioma_llm = { path = "../../bioma_llm" }
+bioma_rag = { path = "../../bioma_rag" }
 bioma_tool = { path = "../../bioma_tool" }
 clap = { workspace = true }
 goose = { workspace = true }
