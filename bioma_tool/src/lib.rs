@@ -5,6 +5,7 @@ use uuid::Uuid;
 pub mod client;
 pub mod prompts;
 pub mod resources;
+pub mod roots;
 pub mod sampling;
 pub mod schema;
 pub mod server;
