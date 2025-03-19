@@ -1031,6 +1031,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bioma_actor",
+ "bioma_llm",
  "bon",
  "bytes",
  "clap",
@@ -1044,6 +1045,7 @@ dependencies = [
  "jsonrpc-core",
  "lazy_static",
  "mockito",
+ "ollama-rs",
  "rand 0.8.5",
  "readability-rs",
  "reqwest 0.12.12",

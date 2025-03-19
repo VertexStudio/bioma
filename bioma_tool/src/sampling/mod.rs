@@ -3,6 +3,9 @@ use serde::Serialize;
 use std::future::Future;
 use std::pin::Pin;
 
+/// Modules containing sampling implementations
+pub mod chat;
+
 /// Errors that can occur during sampling operations
 #[derive(Debug, thiserror::Error)]
 pub enum SamplingError {
