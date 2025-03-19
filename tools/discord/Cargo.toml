@@ -22,4 +22,5 @@ text-splitter = { workspace = true, features = ["markdown"] }
 
 bioma_actor = { path = "../../bioma_actor" }
 bioma_llm = { path = "../../bioma_llm" }
+bioma_rag = { path = "../../bioma_rag" }
 bioma_tool = { path = "../../bioma_tool" }

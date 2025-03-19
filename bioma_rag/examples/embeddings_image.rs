@@ -1,5 +1,5 @@
 use bioma_actor::prelude::*;
-use bioma_llm::prelude::*;
+use bioma_rag::prelude::*;
 use tracing::{error, info};
 
 #[tokio::main]

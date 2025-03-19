@@ -1,9 +1,10 @@
 use bioma_actor::prelude::*;
-use ollama_rs::generation::{chat::ChatMessage, images::Image};
+use bioma_llm::{
+    chat::{Chat, ChatError, ChatMessages},
+    prelude::{ChatMessage, Image},
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
-
-use crate::chat::{Chat, ChatError, ChatMessages};
 
 /// Errors that can occur during summarization
 #[derive(thiserror::Error, Debug)]

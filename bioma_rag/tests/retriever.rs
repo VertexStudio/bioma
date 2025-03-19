@@ -1,10 +1,10 @@
 use bioma_actor::prelude::*;
-use bioma_llm::embeddings::EmbeddingsError;
-use bioma_llm::indexer::{
-    CodeLanguage, ContentSource, ImageDimensions, ImageMetadata, Metadata, TextMetadata, TextType,
+use bioma_rag::prelude::*;
+use bioma_rag::{
+    embeddings::EmbeddingsError,
+    indexer::{CodeLanguage, ContentSource, ImageDimensions, ImageMetadata, Metadata, TextMetadata, TextType},
+    retriever::{Context, RetrievedContext},
 };
-use bioma_llm::prelude::*;
-use bioma_llm::retriever::{Context, RetrievedContext};
 use test_log::test;
 use tracing::error;
 

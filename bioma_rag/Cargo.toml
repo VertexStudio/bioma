@@ -1,0 +1,62 @@
+[package]
+name = "bioma_rag"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+surrealdb = { workspace = true, features = ["kv-mem"] }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+derive_more = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+glob = { workspace = true }
+bon = { workspace = true }
+lazy_static = { workspace = true }
+walkdir = { workspace = true }
+zip = { workspace = true }
+tempfile = { workspace = true }
+utoipa = { workspace = true }
+
+pathdiff = "0.2"
+fastembed = "4.3"
+
+text-splitter = { workspace = true, features = ["code", "markdown"] }
+tree-sitter-rust = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-cpp = { workspace = true }
+tree-sitter-cue = { workspace = true }
+tree-sitter-csv = { workspace = true }
+
+mdka = "1.2"
+image = "0.25"
+base64 = "0.22"
+
+bioma_actor = { path = "../bioma_actor" }
+bioma_llm = { path = "../bioma_llm" }
+
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
+    "ndarray",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
+    "ndarray",
+    "coreml",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ort = { version = "=2.0.0-rc.9", default-features = false, features = [
+    "ndarray",
+    "cuda",
+] }
+
+[dev-dependencies]
+test-log = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
