@@ -6,10 +6,10 @@ use bioma_tool::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{ModelContextProtocolServer, SseConfig, StdioConfig, TransportConfig},
+    server::{ModelContextProtocolServer, SseConfig, StdioConfig, TransportConfig, WsConfig},
     tools::{self, ToolCallHandler},
 };
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::{info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -22,13 +22,28 @@ struct Args {
     #[arg(long, short, default_value = "mcp_server.log")]
     log_file: PathBuf,
 
-    /// Transport type (stdio or websocket)
-    #[arg(long, short, default_value = "stdio")]
-    transport: String,
+    #[command(subcommand)]
+    transport: Transport,
+}
 
-    /// Server address for SSE transport
-    #[arg(long, short, default_value = "127.0.0.1:8090")]
-    endpoint: String,
+#[derive(Subcommand)]
+enum Transport {
+    /// Use stdio transport
+    Stdio,
+
+    /// Use SSE transport
+    Sse {
+        /// Server address for SSE transport (e.g. 127.0.0.1:8090)
+        #[arg(long, short, default_value = "127.0.0.1:8090")]
+        endpoint: String,
+    },
+
+    /// Use WebSocket transport
+    Ws {
+        /// Server address for WebSocket transport (e.g. 127.0.0.1:9090)
+        #[arg(long, short, default_value = "127.0.0.1:9090")]
+        endpoint: String,
+    },
 }
 
 struct McpServer {
@@ -66,6 +81,7 @@ impl ModelContextProtocolServer for McpServer {
             Box::new(tools::memory::Memory),
             Box::new(tools::fetch::Fetch::default()),
             Box::new(tools::random::RandomNumber),
+            Box::new(tools::workflow::Workflow::new(true, None)),
         ]
     }
 }
@@ -106,10 +122,10 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     setup_logging(args.log_file)?;
 
-    let transport = match args.transport.as_str() {
-        "stdio" => TransportConfig::Stdio(StdioConfig {}),
-        "sse" => TransportConfig::Sse(SseConfig::builder().endpoint(args.endpoint).build()),
-        _ => return Err(anyhow::anyhow!("Invalid transport type")),
+    let transport = match &args.transport {
+        Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
+        Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
+        Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
     };
 
     bioma_tool::server::start::<McpServer>("mcp_server", transport).await

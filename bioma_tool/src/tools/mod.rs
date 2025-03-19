@@ -11,6 +11,7 @@ pub mod echo;
 pub mod fetch;
 pub mod memory;
 pub mod random;
+pub mod workflow;
 
 /// Errors that can occur during tool operations
 #[derive(Debug, thiserror::Error)]

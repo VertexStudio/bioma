@@ -117,16 +117,13 @@ async fn test_server_config() {
     let default_config = SseServerConfig::default();
     assert_eq!(default_config.endpoint, "127.0.0.1:8090");
     assert_eq!(default_config.channel_capacity, 32);
-    assert!(default_config.keep_alive);
 
     // Test builder pattern
     let custom_addr: SocketAddr = "127.0.0.1:9090".parse().unwrap();
-    let custom_config =
-        SseServerConfig::builder().endpoint(custom_addr.to_string()).channel_capacity(64).keep_alive(false).build();
+    let custom_config = SseServerConfig::builder().endpoint(custom_addr.to_string()).channel_capacity(64).build();
 
     assert_eq!(custom_config.endpoint, "127.0.0.1:9090");
     assert_eq!(custom_config.channel_capacity, 64);
-    assert!(!custom_config.keep_alive);
 }
 
 #[tokio::test]

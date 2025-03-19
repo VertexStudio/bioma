@@ -1,5 +1,6 @@
 pub mod sse;
 pub mod stdio;
+pub mod ws;
 
 use crate::JsonRpcMessage;
 use anyhow::Result;
@@ -21,6 +22,7 @@ pub trait Transport {
 pub enum TransportType {
     Stdio(stdio::StdioTransport),
     Sse(sse::SseTransport),
+    Ws(ws::WsTransport),
 }
 
 impl Transport for TransportType {
@@ -28,6 +30,7 @@ impl Transport for TransportType {
         match self {
             TransportType::Stdio(t) => t.start().await,
             TransportType::Sse(t) => t.start().await,
+            TransportType::Ws(t) => t.start().await,
         }
     }
 
@@ -35,6 +38,7 @@ impl Transport for TransportType {
         match self {
             TransportType::Stdio(t) => t.send(message, metadata).await,
             TransportType::Sse(t) => t.send(message, metadata).await,
+            TransportType::Ws(t) => t.send(message, metadata).await,
         }
     }
 
@@ -42,6 +46,7 @@ impl Transport for TransportType {
         match self {
             TransportType::Stdio(t) => t.close().await,
             TransportType::Sse(t) => t.close().await,
+            TransportType::Ws(t) => t.close().await,
         }
     }
 }

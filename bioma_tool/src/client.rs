@@ -5,6 +5,7 @@ use crate::schema::{
     ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
+use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::Error;
@@ -25,7 +26,6 @@ pub struct StdioConfig {
     pub args: Vec<String>,
 }
 
-/// Client configuration with builder pattern
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
     #[serde(default = "default_server_url")]
@@ -43,6 +43,22 @@ impl Default for SseConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct WsConfig {
+    #[builder(default = default_ws_server_url())]
+    pub endpoint: String,
+}
+
+fn default_ws_server_url() -> String {
+    "ws://127.0.0.1:9090".to_string()
+}
+
+impl Default for WsConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "transport")]
 pub enum TransportConfig {
@@ -50,6 +66,8 @@ pub enum TransportConfig {
     Stdio(StdioConfig),
     #[serde(rename = "sse")]
     Sse(SseConfig),
+    #[serde(rename = "ws")]
+    Ws(WsConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
@@ -123,6 +141,16 @@ impl ModelContextProtocolClient {
                     }
                 };
                 TransportType::Sse(transport)
+            }
+            TransportConfig::Ws(config) => {
+                let transport = WsTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        return Err(ModelContextProtocolClientError::Transport(format!("Client new: {}", e).into()))
+                    }
+                };
+                TransportType::Ws(transport)
             }
         };
 

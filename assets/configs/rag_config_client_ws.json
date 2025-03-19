@@ -13,9 +13,8 @@
     {
       "server": {
         "name": "bioma-tool",
-        "transport": "stdio",
-        "command": "target/release/examples/mcp_server",
-        "args": ["--log-file", ".output/mcp_server-bioma.log", "stdio"]
+        "transport": "ws",
+        "endpoint": "ws://127.0.0.1:9090"
       }
     }
   ]

@@ -46,10 +46,9 @@ Add the following to the file:
         "bioma-tool": {
             "command": "/Users/rozgo/BiomaAI/bioma/target/release/examples/mcp_server",
             "args": [
+                "stdio",
                 "--log-file",
-                "/Users/rozgo/BiomaAI/bioma/.output/mcp_server-claude.log",
-                "--transport",
-                "stdio"
+                "/Users/rozgo/BiomaAI/bioma/.output/mcp_server-claude.log"
             ]
         }
     }
@@ -70,29 +69,53 @@ schemafy-cli src | rustfmt | tee src/schema.rs
 
 Examples:
 
-MCP client with stdio transport:
+#### MCP Client
+
+With stdio transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client -- stdio target/release/examples/mcp_server
+cargo run --release -p bioma_tool --example mcp_client stdio target/release/examples/mcp_server
 ```
 
-MCP client with SSE transport:
+With SSE transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client -- sse --endpoint http://127.0.0.1:8090
+cargo run --release -p bioma_tool --example mcp_client sse --endpoint http://127.0.0.1:8090
 ```
 
-MCP server:
+With WebSocket transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_client ws --endpoint ws://127.0.0.1:9090
+```
+
+#### MCP Server
+
+Building the server:
 
 ```
 cargo build --release -p bioma_tool --example mcp_server
 ```
 
-MCP server with SSE transport:
+With stdio transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_server -- --transport sse --url 127.0.0.1:8090
+cargo run --release -p bioma_tool --example mcp_server stdio
 ```
+
+With SSE transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_server sse --endpoint 127.0.0.1:8090
+```
+
+With WebSocket transport:
+
+```
+cargo run --release -p bioma_tool --example mcp_server ws --endpoint 127.0.0.1:9090
+```
+
+#### Other Examples
 
 Inspect example server:
 
@@ -103,5 +126,5 @@ npx github:VertexStudio/inspector#feature/ui-ux ./target/release/examples/mcp_se
 Connecting to docker server:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client -- stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
+cargo run --release -p bioma_tool --example mcp_client stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
 ```
