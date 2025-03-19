@@ -15,12 +15,7 @@
         "name": "bioma-tool",
         "transport": "stdio",
         "command": "target/release/examples/mcp_server",
-        "args": [
-          "--transport",
-          "stdio",
-          "--log-file",
-          ".output/mcp_server-bioma.log"
-        ]
+        "args": ["--log-file", ".output/mcp_server-bioma.log", "stdio"]
       }
     }
   ]
