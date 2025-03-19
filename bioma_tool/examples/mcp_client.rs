@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
     };
 
     // Create client
-    let mut client = ModelContextProtocolClient::new(server, ClientHandlers::new()).await?;
+    let mut client = ModelContextProtocolClient::new(server, ClientHandlers::default()).await?;
 
     // Initialize the client
     info!("Initializing client...");

@@ -110,20 +110,6 @@ pub struct ClientHandlers {
 }
 
 impl ClientHandlers {
-    pub fn new() -> Self {
-        Self { sampling_handler: None, roots_handler: None }
-    }
-
-    pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
-        self.sampling_handler = Some(handler);
-        self
-    }
-
-    pub fn with_roots_handler(mut self, handler: Arc<dyn RootsHandler + Send + Sync>) -> Self {
-        self.roots_handler = Some(handler);
-        self
-    }
-
     // Generate capabilities based on available handlers
     pub fn to_capabilities(&self) -> ClientCapabilities {
         let mut capabilities = ClientCapabilities::default();
@@ -171,9 +157,6 @@ impl ModelContextProtocolClient {
     pub async fn new(server: ServerConfig, handlers: ClientHandlers) -> Result<Self, ModelContextProtocolClientError> {
         // Generate capabilities from handlers
         let capabilities = handlers.to_capabilities();
-
-        // Extract sampling handler
-        let sampling_handler = handlers.sampling_handler;
 
         let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
         let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
@@ -225,7 +208,7 @@ impl ModelContextProtocolClient {
         let mut request_handler = MetaIoHandler::default();
 
         // Register sampling handler if available
-        if let Some(handler) = &sampling_handler {
+        if let Some(handler) = &handlers.sampling_handler {
             request_handler.add_method_with_meta("sampling/createMessage", {
                 let handler = handler.clone();
                 move |params: Params, _meta: ClientMetadata| {
@@ -553,20 +536,10 @@ impl ModelContextProtocolClientActor {
         ModelContextProtocolClientActor {
             server,
             tools: None,
-            handlers: ClientHandlers::new(),
+            handlers: ClientHandlers::default(),
             client: None,
             server_capabilities: None,
         }
-    }
-
-    pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
-        self.handlers = self.handlers.with_sampling_handler(handler);
-        self
-    }
-
-    pub fn with_roots_handler(mut self, handler: Arc<dyn RootsHandler + Send + Sync>) -> Self {
-        self.handlers = self.handlers.with_roots_handler(handler);
-        self
     }
 }
 
