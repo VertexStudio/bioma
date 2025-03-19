@@ -4,59 +4,51 @@ use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use ollama_rs::models::ModelOptions;
 use serde::Serialize;
+use tracing;
 
 /// A sampling implementation using the Chat actor
 #[derive(Clone, Debug, Serialize)]
 pub struct ChatSampling {
     #[serde(skip)]
     engine: Engine,
+    #[serde(skip)]
+    chat_id: ActorId,
 }
 
 impl ChatSampling {
     /// Creates a new ChatSampling instance
-    pub fn new(engine: Engine) -> Self {
-        Self { engine }
+    pub async fn new() -> Result<Self, SamplingError> {
+        let engine = Engine::test().await.map_err(|e| SamplingError::Execution(e.to_string()))?;
+
+        // Create a single Chat actor for all requests
+        let chat_id = ActorId::of::<Chat>("/llm/sampling");
+        let chat = Chat::default();
+
+        // Spawn the Chat actor
+        let (mut chat_ctx, mut chat_actor) =
+            Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default())
+                .await
+                .map_err(|e| SamplingError::Execution(e.to_string()))?;
+
+        // Start the Chat actor in a separate task
+        let _chat_handle = tokio::spawn(async move {
+            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
+                tracing::error!("Chat actor error: {}", e);
+            }
+        });
+
+        Ok(Self { engine, chat_id })
     }
 }
 
 impl SamplingDef for ChatSampling {
     async fn create_message(&self, request: CreateMessageRequest) -> Result<CreateMessageResult, SamplingError> {
-        // Create a new Chat actor for this request
-        let chat_id = ActorId::of::<Chat>("/llm/sampling");
-
-        // Extract model preference or use default
-        let model = request
-            .params
-            .model_preferences
-            .and_then(|prefs| prefs.hints.and_then(|hints| hints.first().and_then(|hint| hint.name.clone())))
-            .unwrap_or_else(|| "llama3.2".into());
-
-        // Create the Chat actor
-        let chat = Chat::builder().model(model.clone().into()).build();
-
-        let (mut chat_ctx, mut chat_actor) =
-            Actor::spawn(self.engine.clone(), chat_id.clone(), chat, SpawnOptions::default())
+        // Create a relay actor to send messages
+        let relay_id = ActorId::of::<Relay>("/relay");
+        let (relay_ctx, _relay_actor) =
+            Actor::spawn(self.engine.clone(), relay_id.clone(), Relay, SpawnOptions::default())
                 .await
                 .map_err(|e| SamplingError::Execution(e.to_string()))?;
-
-        // Convert SamplingMessage to ChatMessages
-        let messages = request
-            .params
-            .messages
-            .iter()
-            .map(|msg| {
-                let role = match msg.role {
-                    Role::User => MessageRole::User,
-                    Role::Assistant => MessageRole::Assistant,
-                };
-                ChatMessage {
-                    role,
-                    content: serde_json::to_string(&msg.content).unwrap_or_default(),
-                    images: None,
-                    tool_calls: Vec::new(),
-                }
-            })
-            .collect::<Vec<_>>();
 
         // Set sampling parameters using ModelOptions
         let mut model_options = ModelOptions::default();
@@ -66,28 +58,70 @@ impl SamplingDef for ChatSampling {
         // Convert max_tokens i64 to i32 for num_predict
         model_options = model_options.num_predict(request.params.max_tokens as i32);
 
+        // Add stop sequences if provided
+        if let Some(stop_seqs) = request.params.stop_sequences {
+            model_options = model_options.stop(stop_seqs);
+        }
+
+        // Create messages list, potentially with system prompt
+        let mut messages = Vec::new();
+
+        // Add system prompt as first message if provided
+        if let Some(system_prompt) = request.params.system_prompt {
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: system_prompt,
+                images: None,
+                tool_calls: Vec::new(),
+            });
+        }
+
+        // Add user and assistant messages
+        messages.extend(request.params.messages.iter().map(|msg| {
+            let role = match msg.role {
+                Role::User => MessageRole::User,
+                Role::Assistant => MessageRole::Assistant,
+            };
+            ChatMessage {
+                role,
+                content: serde_json::to_string(&msg.content).unwrap_or_default(),
+                images: None,
+                tool_calls: Vec::new(),
+            }
+        }));
+
+        // TODO: Handle model_preferences to select appropriate model
+        // This would typically influence model selection, but we're using a
+        // fixed model via the Chat actor currently
+
         // Create ChatMessages request
         let chat_messages = ChatMessages::builder().messages(messages).restart(true).options(model_options).build();
 
-        // Use a simpler approach by just running the actor in the current task
-        chat_actor
-            .start(&mut chat_ctx)
-            .await
-            .map_err(|e| SamplingError::Execution(format!("Failed to start chat actor: {}", e)))?;
-
-        // Send the message directly and wait for response
-        let response = chat_ctx
-            .send_and_wait_reply::<Chat, _>(chat_messages, &chat_id, SendOptions::default())
+        // Send the message via the relay actor and wait for response
+        let response = relay_ctx
+            .send_and_wait_reply::<Chat, ChatMessages>(
+                chat_messages,
+                &self.chat_id,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(60)).build(),
+            )
             .await
             .map_err(|e| SamplingError::Execution(format!("Failed to get response: {}", e)))?;
+
+        let role = match response.message.role {
+            MessageRole::Assistant => Role::Assistant,
+            MessageRole::User => Role::User,
+            _ => {
+                return Err(SamplingError::Execution(format!("Unsupported message role: {:?}", response.message.role)));
+            }
+        };
 
         // Convert ChatMessageResponse to CreateMessageResult
         let result = CreateMessageResult {
             meta: None,
             content: serde_json::from_str(&response.message.content)
                 .unwrap_or(serde_json::Value::String(response.message.content)),
-            model,
-            role: Role::Assistant,
+            model: response.model,
+            role,
             stop_reason: Some("stop".to_string()),
         };
 
@@ -102,11 +136,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_sampling() {
-        // Initialize actor engine
-        let engine = Engine::test().await.unwrap();
-
         // Create a ChatSampling instance
-        let sampling = ChatSampling::new(engine);
+        let sampling = ChatSampling::new().await.unwrap();
 
         // Create a test request
         let request = CreateMessageRequest {
