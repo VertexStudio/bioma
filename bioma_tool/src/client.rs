@@ -1,10 +1,11 @@
+use crate::roots::RootsHandler;
 use crate::sampling::SamplingHandler;
 use crate::schema::{
-    CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequest, CreateMessageResult,
-    GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
-    InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourcesRequestParams,
-    ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult,
-    ServerCapabilities,
+    CallToolRequestParams, CallToolResult, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequest,
+    CreateMessageResult, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams,
+    InitializeResult, InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult,
+    ListResourcesRequestParams, ListResourcesResult, ListRootsRequest, ListRootsResult, ListToolsRequestParams,
+    ListToolsResult, ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -105,16 +106,21 @@ fn default_request_timeout() -> u64 {
 #[derive(Clone, Default)]
 pub struct ClientHandlers {
     pub sampling_handler: Option<Arc<dyn SamplingHandler + Send + Sync>>,
-    // TODO: Roots handler
+    pub roots_handler: Option<Arc<dyn RootsHandler + Send + Sync>>,
 }
 
 impl ClientHandlers {
     pub fn new() -> Self {
-        Self { sampling_handler: None }
+        Self { sampling_handler: None, roots_handler: None }
     }
 
     pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
         self.sampling_handler = Some(handler);
+        self
+    }
+
+    pub fn with_roots_handler(mut self, handler: Arc<dyn RootsHandler + Send + Sync>) -> Self {
+        self.roots_handler = Some(handler);
         self
     }
 
@@ -125,6 +131,11 @@ impl ClientHandlers {
         // Set sampling capability if handler is present
         if self.sampling_handler.is_some() {
             capabilities.sampling = Some(BTreeMap::new());
+        }
+
+        // Set roots capability if handler is present
+        if self.roots_handler.is_some() {
+            capabilities.roots = Some(ClientCapabilitiesRoots { list_changed: Some(true) });
         }
 
         capabilities
@@ -249,7 +260,35 @@ impl ModelContextProtocolClient {
             });
         }
 
-        // TODO: Register roots handler when implemented
+        // Register roots handler if available
+        if let Some(handler) = &handlers.roots_handler {
+            request_handler.add_method_with_meta("roots/list", {
+                let handler = handler.clone();
+                move |params: Params, _meta: ClientMetadata| {
+                    let handler = handler.clone();
+                    async move {
+                        let request: ListRootsRequest = params.parse().map_err(|e| {
+                            error!("Failed to parse roots/list parameters: {}", e);
+                            jsonrpc_core::Error::invalid_params(e.to_string())
+                        })?;
+
+                        match handler.list_roots_boxed(request).await {
+                            Ok(result) => {
+                                let response = ListRootsResult { roots: result.roots, meta: result.meta };
+                                Ok(serde_json::to_value(response).map_err(|e| {
+                                    error!("Failed to serialize roots/list result: {}", e);
+                                    jsonrpc_core::Error::internal_error()
+                                })?)
+                            }
+                            Err(e) => {
+                                error!("Roots/list operation failed: {}", e);
+                                Err(jsonrpc_core::Error::internal_error())
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         // Create message handler task
         let message_handler = tokio::spawn({
@@ -522,6 +561,11 @@ impl ModelContextProtocolClientActor {
 
     pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
         self.handlers = self.handlers.with_sampling_handler(handler);
+        self
+    }
+
+    pub fn with_roots_handler(mut self, handler: Arc<dyn RootsHandler + Send + Sync>) -> Self {
+        self.handlers = self.handlers.with_roots_handler(handler);
         self
     }
 }
