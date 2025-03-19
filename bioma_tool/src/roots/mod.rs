@@ -3,8 +3,6 @@ use serde::Serialize;
 use std::future::Future;
 use std::pin::Pin;
 
-/// Module containing roots implementations
-pub mod filesystem;
 /// Module for readme root implementation
 pub mod readme;
 
