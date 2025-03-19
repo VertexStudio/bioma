@@ -1,6 +1,5 @@
 use bioma_actor::prelude::*;
-use bioma_llm::indexer::{GlobsContent, Index, IndexContent};
-use bioma_llm::prelude::*;
+use bioma_rag::prelude::*;
 use clap::Parser;
 use tracing::{error, info};
 
@@ -14,6 +13,10 @@ struct Args {
     /// Globs to index (can be specified multiple times)
     #[arg(short, long)]
     globs: Vec<String>,
+
+    /// Query to search for
+    #[arg(short, long, default_value = "list ffmpeg dependencies")]
+    query: String,
 }
 
 #[tokio::main]
@@ -28,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize the actor system
     let engine = Engine::test().await?;
+    let output_dir = engine.output_dir();
 
     // Create indexer actor ID
     let indexer_id = ActorId::of::<Indexer>("/indexer");
@@ -42,14 +46,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Create retriever actor ID
+    let retriever_id = ActorId::of::<Retriever>("/retriever");
+
+    // Spawn and start the retriever actor
+    let (mut retriever_ctx, mut retriever_actor) =
+        Actor::spawn(engine.clone(), retriever_id.clone(), Retriever::default(), SpawnOptions::default()).await?;
+
+    let _retriever_handle = tokio::spawn(async move {
+        if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+            error!("Retriever actor error: {}", e);
+        }
+    });
+
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    // Spawn a relay actor to send messages to other actors
+    // Spawn a relay actor to connect to embeddings actor
     let relay_id = ActorId::of::<Relay>("/relay");
     let (relay_ctx, _relay_actor) =
         Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await?;
 
-    // Get root for indexer or default to workspace root
+    // Get the workspace root
     let workspace_root = args.root.unwrap_or_else(|| {
         std::env::var("CARGO_MANIFEST_DIR")
             .map(std::path::PathBuf::from)
@@ -62,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Prepare globs
     let globs = if args.globs.is_empty() {
-        vec![format!("{}/bioma_actor/**/*.rs", workspace_root)]
+        vec![format!("{}/bioma_actor/**/*.toml", workspace_root)]
     } else {
         args.globs.into_iter().map(|glob| format!("{}/{}", workspace_root, glob)).collect()
     };
@@ -71,7 +88,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Indexing");
     let index_globs =
         Index::builder().content(IndexContent::Globs(GlobsContent::builder().globs(globs).build())).build();
-
     let _indexer = relay_ctx
         .send_and_wait_reply::<Indexer, Index>(
             index_globs,
@@ -79,6 +95,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SendOptions::builder().timeout(std::time::Duration::from_secs(500)).build(),
         )
         .await?;
+
+    // Retrieve context
+    info!("Retrieving context");
+    let retrieve_context =
+        RetrieveContext::builder().query(RetrieveQuery::Text(args.query)).limit(10).threshold(0.0).build();
+    let context = relay_ctx
+        .send_and_wait_reply::<Retriever, RetrieveContext>(
+            retrieve_context,
+            &retriever_id,
+            SendOptions::builder().timeout(std::time::Duration::from_secs(100)).build(),
+        )
+        .await?;
+    info!("Number of documents: {}", context.context.len());
+
+    // Save context to file for debugging
+    let context_content = context.to_markdown();
+    tokio::fs::write(output_dir.join("debug").join("retriever_context.md"), context_content).await?;
 
     // Export the database for debugging
     dbg_export_db!(engine);

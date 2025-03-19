@@ -1,7 +1,8 @@
 use base64::Engine as _;
 use bioma_actor::prelude::Engine as ActorEngine;
 use bioma_actor::prelude::*;
-use bioma_llm::{
+use bioma_llm::chat::Chat;
+use bioma_rag::{
     indexer::{GlobsContent, ImagesContent, TextsContent},
     prelude::*,
     retriever::{ListSources, ListUniqueSources},

@@ -1,7 +1,5 @@
-use bioma_llm::indexer::DeleteSource;
 use bioma_llm::prelude::*;
-use bioma_llm::rerank::RankTexts;
-use bioma_llm::retriever::{RetrieveContext, RetrieveQuery};
+use bioma_rag::prelude::*;
 use clap::{Parser, ValueEnum};
 use goose::config::GooseConfiguration;
 use goose::prelude::*;

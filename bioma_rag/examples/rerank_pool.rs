@@ -1,5 +1,5 @@
 use bioma_actor::prelude::*;
-use bioma_llm::rerank::{RankTexts, Rerank};
+use bioma_rag::rerank::{RankTexts, Rerank};
 use futures::future::join_all;
 use tracing::{error, info};
 
