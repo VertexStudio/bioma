@@ -1,7 +1,9 @@
 use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
-use bioma_llm::embeddings::{ImageModel, Model};
-use bioma_llm::prelude::*;
+use bioma_rag::{
+    embeddings::{ImageModel, Model},
+    prelude::*,
+};
 use test_log::test;
 use tracing::error;
 

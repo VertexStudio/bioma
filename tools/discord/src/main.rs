@@ -11,6 +11,7 @@ use tracing::{error, info};
 
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
+use bioma_rag::prelude::*;
 
 use serenity::async_trait;
 use serenity::builder::GetMessages;

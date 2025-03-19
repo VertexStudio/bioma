@@ -974,42 +974,49 @@ dependencies = [
 name = "bioma_llm"
 version = "0.1.0"
 dependencies = [
- "actix-cors",
- "actix-multipart",
- "actix-web",
- "anyhow",
- "base64 0.22.1",
  "bioma_actor",
  "bon",
- "clap",
- "color-backtrace",
- "derive_more",
- "fastembed",
  "futures",
- "futures-util",
- "glob",
- "hf-hub 0.3.2",
- "humantime",
- "humantime-serde",
- "image",
- "lazy_static",
- "mdka",
  "ollama-rs",
- "ort",
- "pathdiff",
- "rand 0.8.5",
  "reqwest 0.12.12",
  "schemars",
  "serde",
  "serde_json",
- "strum",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "utoipa",
+]
+
+[[package]]
+name = "bioma_rag"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bioma_actor",
+ "bioma_llm",
+ "bon",
+ "clap",
+ "derive_more",
+ "fastembed",
+ "futures",
+ "glob",
+ "image",
+ "lazy_static",
+ "mdka",
+ "ort",
+ "pathdiff",
+ "reqwest 0.12.12",
+ "serde",
+ "serde_json",
  "surrealdb",
  "tempfile",
  "test-log",
  "text-splitter",
  "thiserror 2.0.12",
  "tokio",
- "tokio-stream",
  "tracing",
  "tracing-subscriber",
  "tree-sitter-cpp",
@@ -1017,7 +1024,6 @@ dependencies = [
  "tree-sitter-cue",
  "tree-sitter-python",
  "tree-sitter-rust",
- "ulid",
  "url",
  "utoipa",
  "uuid",
@@ -1560,6 +1566,7 @@ dependencies = [
  "base64 0.22.1",
  "bioma_actor",
  "bioma_llm",
+ "bioma_rag",
  "bioma_tool",
  "chrono",
  "clap",
@@ -2071,6 +2078,7 @@ dependencies = [
  "anyhow",
  "bioma_actor",
  "bioma_llm",
+ "bioma_rag",
  "bioma_tool",
  "clap",
  "dotenv",
@@ -2295,7 +2303,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a666ed56ec5372e5a27aed8370c8bac8da8575073917c99791f008d2b15a2e0"
 dependencies = [
  "anyhow",
- "hf-hub 0.4.2",
+ "hf-hub",
  "image",
  "ndarray 0.16.1",
  "ort",
@@ -2699,6 +2707,7 @@ dependencies = [
  "bioma_actor",
  "bioma_behavior",
  "bioma_llm",
+ "bioma_rag",
  "bioma_tool",
  "clap",
  "goose",
@@ -2863,23 +2872,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hf-hub"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b780635574b3d92f036890d8373433d6f9fc7abb320ee42a5c25897fc8ed732"
-dependencies = [
- "dirs",
- "indicatif",
- "log",
- "native-tls",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "ureq",
-]
 
 [[package]]
 name = "hf-hub"

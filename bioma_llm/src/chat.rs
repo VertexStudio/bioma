@@ -11,7 +11,6 @@ use ollama_rs::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-// use serde_json::Value;
 use std::borrow::Cow;
 use tracing::{error, info};
 use url::Url;

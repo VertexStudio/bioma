@@ -5,6 +5,7 @@ members = [
     "bioma_behavior",
     "bioma_llm",
     "bioma_tool",
+    "bioma_rag",
 ]
 resolver = "2"
 

@@ -1,6 +1,7 @@
 use base64::Engine as _;
 use bioma_actor::prelude::*;
-use bioma_llm::{prelude::*, summary::SummarizeContent};
+use bioma_llm::chat::Chat;
+use bioma_rag::{prelude::*, summary::SummarizeContent};
 use std::fs;
 use tempfile;
 use test_log::test;

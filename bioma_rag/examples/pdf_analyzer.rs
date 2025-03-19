@@ -1,5 +1,5 @@
 use bioma_actor::prelude::*;
-use bioma_llm::pdf_analyzer::*;
+use bioma_rag::pdf_analyzer::*;
 use std::path::PathBuf;
 use tracing::{error, info};
 
