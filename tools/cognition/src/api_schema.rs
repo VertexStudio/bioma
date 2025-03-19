@@ -1,8 +1,8 @@
 use actix_multipart::form::{json::Json as MpJson, tempfile::TempFile, MultipartForm};
-use bioma_llm::{
-    chat,
+use bioma_llm::prelude::*;
+use bioma_rag::{
     indexer::{ImagesContent, TextsContent},
-    prelude::{ChatMessage, GlobsContent, Index, IndexContent, RetrieveContext, RetrieveQuery, TextChunkConfig},
+    prelude::{GlobsContent, Index, IndexContent, RetrieveContext, RetrieveQuery, TextChunkConfig},
     retriever::{default_retriever_limit, default_retriever_sources, default_retriever_threshold},
 };
 use ollama_rs::{generation::tools::ToolInfo, models::ModelOptions};
