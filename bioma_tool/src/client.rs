@@ -1,8 +1,10 @@
+use crate::sampling::SamplingHandler;
 use crate::schema::{
-    CallToolRequestParams, CallToolResult, ClientCapabilities, GetPromptRequestParams, GetPromptResult, Implementation,
-    InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
-    ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
-    ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
+    CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequest, CreateMessageResult,
+    GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+    InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourcesRequestParams,
+    ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult,
+    ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -10,10 +12,10 @@ use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::JsonRpcMessage;
 use anyhow::Error;
 use bioma_actor::prelude::*;
-use jsonrpc_core::Params;
+use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -86,6 +88,9 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct ClientConfig {
     pub server: ServerConfig,
+    #[serde(default)]
+    #[builder(default)]
+    pub capabilities: ClientCapabilities,
 }
 
 fn default_version() -> String {
@@ -95,6 +100,11 @@ fn default_version() -> String {
 fn default_request_timeout() -> u64 {
     5
 }
+
+#[derive(Clone)]
+pub struct ClientMetadata {}
+
+impl Metadata for ClientMetadata {}
 
 type RequestId = u64;
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ModelContextProtocolClientError>>;
@@ -113,10 +123,24 @@ pub struct ModelContextProtocolClient {
     on_error_rx: mpsc::Receiver<Error>,
     #[allow(unused)]
     on_close_rx: mpsc::Receiver<()>,
+    client_capabilities: ClientCapabilities,
 }
 
 impl ModelContextProtocolClient {
-    pub async fn new(server: ServerConfig) -> Result<Self, ModelContextProtocolClientError> {
+    pub async fn new(
+        server: ServerConfig,
+        mut capabilities: ClientCapabilities,
+        sampling_handler: Option<Arc<dyn SamplingHandler + Send + Sync>>,
+    ) -> Result<Self, ModelContextProtocolClientError> {
+        // Synchronize capabilities with handlers
+        if sampling_handler.is_some() && capabilities.sampling.is_none() {
+            capabilities.sampling = Some(BTreeMap::new());
+        } else if sampling_handler.is_none() && capabilities.sampling.is_some() {
+            return Err(ModelContextProtocolClientError::Configuration(
+                "Sampling capability enabled but no handler provided".into(),
+            ));
+        }
+
         let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
         let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
         let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
@@ -163,9 +187,53 @@ impl ModelContextProtocolClient {
         let pending_requests = Arc::new(Mutex::new(HashMap::<u64, ResponseSender>::new()));
         let pending_requests_clone = pending_requests.clone();
 
+        // Create a request handler for server-initiated requests
+        let mut request_handler = MetaIoHandler::default();
+
+        // Register sampling handler if available
+        if let Some(handler) = &sampling_handler {
+            request_handler.add_method_with_meta("sampling/createMessage", {
+                let handler = handler.clone();
+                move |params: Params, _meta: ClientMetadata| {
+                    let handler = handler.clone();
+                    async move {
+                        let request: CreateMessageRequest = params.parse().map_err(|e| {
+                            error!("Failed to parse sampling parameters: {}", e);
+                            jsonrpc_core::Error::invalid_params(e.to_string())
+                        })?;
+
+                        match handler.create_message_boxed(request).await {
+                            Ok(result) => {
+                                let response = CreateMessageResult {
+                                    content: result.content,
+                                    model: result.model,
+                                    role: result.role,
+                                    stop_reason: result.stop_reason,
+                                    meta: result.meta,
+                                };
+                                Ok(serde_json::to_value(response).map_err(|e| {
+                                    error!("Failed to serialize sampling result: {}", e);
+                                    jsonrpc_core::Error::internal_error()
+                                })?)
+                            }
+                            Err(e) => {
+                                error!("Sampling failed: {}", e);
+                                Err(jsonrpc_core::Error::internal_error())
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // TODO: Register roots handler when implemented
+
         // Create message handler task
         let message_handler = tokio::spawn({
             let pending_requests = pending_requests_clone;
+            let request_handler = Arc::new(request_handler);
+            let mut transport_clone = transport.clone();
+
             async move {
                 while let Some(message) = on_message_rx.recv().await {
                     match message {
@@ -189,6 +257,15 @@ impl ModelContextProtocolClient {
                                 }
                             }
                         },
+                        JsonRpcMessage::Request(request) => {
+                            if let Some(response) =
+                                request_handler.handle_rpc_request(request.clone(), ClientMetadata {}).await
+                            {
+                                if let Err(e) = transport_clone.send(response.into(), serde_json::Value::Null).await {
+                                    error!("Failed to send response to server-initiated request: {}", e);
+                                }
+                            }
+                        }
                         _ => {} // Handle other message types if needed
                     }
                 }
@@ -205,6 +282,7 @@ impl ModelContextProtocolClient {
             pending_requests,
             on_error_rx,
             on_close_rx,
+            client_capabilities: capabilities,
         })
     }
 
@@ -214,11 +292,17 @@ impl ModelContextProtocolClient {
     ) -> Result<InitializeResult, ModelContextProtocolClientError> {
         let params = InitializeRequestParams {
             protocol_version: "2024-11-05".to_string(),
-            capabilities: ClientCapabilities::default(),
+            capabilities: self.client_capabilities.clone(),
             client_info,
         };
         let response = self.request("initialize".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
+        let result: InitializeResult = serde_json::from_value(response)?;
+
+        // Store server capabilities
+        let mut server_capabilities = self.server_capabilities.write().await;
+        *server_capabilities = Some(result.capabilities.clone());
+
+        Ok(result)
     }
 
     pub async fn initialized(&mut self) -> Result<(), ModelContextProtocolClientError> {
@@ -373,28 +457,57 @@ pub enum ModelContextProtocolClientError {
     ResponseIdMismatch { expected: u64, actual: jsonrpc_core::Id },
     #[error("MCP Client not initialized")]
     ClientNotInitialized,
+    #[error("Configuration error: {0}")]
+    Configuration(Cow<'static, str>),
 }
 
 impl ActorError for ModelContextProtocolClientError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Remove Debug derive and implement it manually
+#[derive(Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
     tools: Option<ListToolsResult>,
+    client_capabilities: ClientCapabilities,
     #[serde(skip)]
     client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
+    #[serde(skip)]
+    sampling_handler: Option<Arc<dyn SamplingHandler + Send + Sync>>,
     server_capabilities: Option<ServerCapabilities>,
 }
 
-impl ModelContextProtocolClientActor {
-    pub fn new(server: ServerConfig) -> Self {
-        ModelContextProtocolClientActor { server, tools: None, client: None, server_capabilities: None }
+// Manual implementation of Debug for ModelContextProtocolClientActor
+impl std::fmt::Debug for ModelContextProtocolClientActor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelContextProtocolClientActor")
+            .field("server", &self.server)
+            .field("tools", &self.tools)
+            .field("client_capabilities", &self.client_capabilities)
+            .field("server_capabilities", &self.server_capabilities)
+            // Skip client and sampling_handler fields as they don't implement Debug
+            .finish_non_exhaustive()
     }
 }
 
-impl std::fmt::Debug for ModelContextProtocolClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ModelContextProtocolClient")
+impl ModelContextProtocolClientActor {
+    pub fn new(server: ServerConfig, client_capabilities: ClientCapabilities) -> Self {
+        ModelContextProtocolClientActor {
+            server,
+            tools: None,
+            client: None,
+            client_capabilities,
+            sampling_handler: None,
+            server_capabilities: None,
+        }
+    }
+
+    pub fn with_sampling_handler(mut self, handler: Arc<dyn SamplingHandler + Send + Sync>) -> Self {
+        // Automatically enable sampling capability if setting a handler
+        if self.client_capabilities.sampling.is_none() {
+            self.client_capabilities.sampling = Some(BTreeMap::new());
+        }
+        self.sampling_handler = Some(handler);
+        self
     }
 }
 
@@ -404,7 +517,12 @@ impl Actor for ModelContextProtocolClientActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
         info!("{} Started (server: {})", ctx.id(), self.server.name);
 
-        let mut client = ModelContextProtocolClient::new(self.server.clone()).await?;
+        let mut client = ModelContextProtocolClient::new(
+            self.server.clone(),
+            self.client_capabilities.clone(),
+            self.sampling_handler.clone(),
+        )
+        .await?;
 
         // Initialize the client
         let init_result =
