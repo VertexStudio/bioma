@@ -19,7 +19,8 @@ use bioma_tool::client::ListTools;
 use clap::Parser;
 use cognition::{
     health_check::{
-        check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses, Service,
+        check_embeddings, check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses,
+        Service,
     },
     ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
@@ -153,6 +154,9 @@ async fn health(data: web::Data<AppState>) -> impl Responder {
     // Minio health check
     let minio_url = Url::parse("http://127.0.0.1:9000").unwrap();
     services.insert(Service::Minio, check_minio(minio_url).await);
+
+    // Embeddings health check
+    services.insert(Service::Embeddings, check_embeddings(data.engine.clone(), data.embeddings.clone()).await);
 
     HttpResponse::Ok().json(services)
 }
