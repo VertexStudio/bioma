@@ -186,15 +186,18 @@ pub struct GeneratedEmbeddings {
     pub embeddings: Vec<Vec<f32>>,
 }
 
+/// Check if the embedding task is alive
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Health;
 
+/// The status of the embedding task
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Status {
     Alive,
     Dead(String),
 }
 
+/// The stored embeddings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredEmbeddings {
     pub ids: Vec<RecordId>,
@@ -297,15 +300,12 @@ impl Message<TopK> for Embeddings {
         let query_embedding = match &message.query {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
-                // Try to generate the embedding, reinitializing if needed
                 match self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await {
                     Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
                     Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
-                        // Channel errors indicate the task died - try to reinitialize
                         warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                         self.reinitialize(ctx).await?;
 
-                        // Retry the request with the new task
                         let embeddings =
                             self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await?;
                         embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
@@ -314,15 +314,12 @@ impl Message<TopK> for Embeddings {
                 }
             }
             Query::Image(image_data) => {
-                // Try to generate the embedding, reinitializing if needed
                 match self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await {
                     Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
                     Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
-                        // Channel errors indicate the task died - try to reinitialize
                         warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                         self.reinitialize(ctx).await?;
 
-                        // Retry the request with the new task
                         let embeddings =
                             self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await?;
                         embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
@@ -357,15 +354,12 @@ impl Message<StoreEmbeddings> for Embeddings {
     type Response = StoredEmbeddings;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &StoreEmbeddings) -> Result<(), EmbeddingsError> {
-        // Try to generate embeddings, reinitializing if needed
         let embeddings = match self.send_embedding_request(&message.content).await {
             Ok(embeddings) => embeddings,
             Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
-                // Channel errors indicate the task died - try to reinitialize
                 warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                 self.reinitialize(ctx).await?;
 
-                // Retry the request with the new task
                 self.send_embedding_request(&message.content).await?
             }
             Err(e) => return Err(e),
@@ -423,15 +417,12 @@ impl Message<GenerateEmbeddings> for Embeddings {
         ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
     ) -> Result<(), EmbeddingsError> {
-        // Try to generate embeddings, reinitializing if needed
         let embeddings = match self.send_embedding_request(&message.content).await {
             Ok(embeddings) => embeddings,
             Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
-                // Channel errors indicate the task died - try to reinitialize
                 warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                 self.reinitialize(ctx).await?;
 
-                // Retry the request with the new task
                 self.send_embedding_request(&message.content).await?
             }
             Err(e) => return Err(e),
@@ -446,7 +437,6 @@ impl Message<Health> for Embeddings {
     type Response = Status;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &Health) -> Result<(), EmbeddingsError> {
-        // Check if embedding task is still alive by sending a heartbeat
         let is_alive = match self.send_heartbeat().await {
             Ok(_) => Status::Alive,
             Err(e) => Status::Dead(e.to_string()),
@@ -793,9 +783,6 @@ impl Embeddings {
         self.embedding_tx = None;
         self.shared_embedding = None;
 
-        // Small delay to give time for any in-flight operations to complete
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
         // Reinitialize
         self.init(ctx).await?;
 
@@ -803,7 +790,7 @@ impl Embeddings {
         Ok(())
     }
 
-    /// Helper method to send embedding requests and handle common errors
+    /// Helper method to send embedding requests
     async fn send_embedding_request(&self, content: &EmbeddingContent) -> Result<Vec<Vec<f32>>, EmbeddingsError> {
         let Some(embedding_tx) = self.embedding_tx.as_ref() else {
             return Err(EmbeddingsError::TextEmbeddingNotInitialized);
@@ -814,7 +801,6 @@ impl Embeddings {
             .send(EmbeddingRequest { response_tx: tx, content: EmbeddingRequestContent::Content(content.clone()) })
             .await?;
 
-        // Properly handle nested Result<Result<...>> structure with explicit error conversion
         match rx.await {
             Ok(result) => match result {
                 Ok(embeddings) => Ok(embeddings),
