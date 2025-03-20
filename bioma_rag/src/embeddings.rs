@@ -153,9 +153,15 @@ impl EmbeddingContent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum EmbeddingRequestContent {
+    Content(EmbeddingContent),
+    Heartbeat,
+}
+
 pub struct EmbeddingRequest {
     response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
-    content: EmbeddingContent,
+    content: EmbeddingRequestContent,
 }
 
 /// Store embeddings for texts or images
@@ -178,6 +184,15 @@ pub struct GenerateEmbeddings {
 #[derive(utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub struct GeneratedEmbeddings {
     pub embeddings: Vec<Vec<f32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Health;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Status {
+    Alive,
+    Dead(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -427,6 +442,21 @@ impl Message<GenerateEmbeddings> for Embeddings {
     }
 }
 
+impl Message<Health> for Embeddings {
+    type Response = Status;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &Health) -> Result<(), EmbeddingsError> {
+        // Check if embedding task is still alive by sending a heartbeat
+        let is_alive = match self.send_heartbeat().await {
+            Ok(_) => Status::Alive,
+            Err(e) => Status::Dead(e.to_string()),
+        };
+
+        ctx.reply(is_alive).await?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Display, Eq, Hash, PartialEq)]
 pub enum Model {
     NomicEmbedTextV15,
@@ -494,6 +524,11 @@ impl Actor for Embeddings {
                     error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<TopK>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
+            } else if let Some(input) = frame.is::<Health>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
@@ -640,81 +675,91 @@ impl Embeddings {
                         let image_embedding = fastembed::ImageEmbedding::try_new(image_options)?;
 
                         while let Some(request) = embedding_rx.blocking_recv() {
-                            let start = std::time::Instant::now();
-
                             match request.content {
-                                EmbeddingContent::Text(texts) => {
-                                    // Truncate each text to a maximum of 8192 characters
-                                    let truncated_texts: Vec<String> = texts
-                                        .into_iter()
-                                        .map(|text| {
-                                            if text.len() > Self::MAX_TEXT_LENGTH {
-                                                text.chars().take(Self::MAX_TEXT_LENGTH).collect()
-                                            } else {
-                                                text
-                                            }
-                                        })
-                                        .collect();
-
-                                    let total_length: usize = truncated_texts.iter().map(|text| text.len()).sum();
-
-                                    // Prevent GPU memory overload by limiting the total size of text that can be processed at once
-                                    if total_length > max_total_input_length {
-                                        error!(
-                                            "Total text input size too large: {} characters (max: {})",
-                                            total_length, max_total_input_length
-                                        );
-
-                                        let error =
-                                            EmbeddingsError::InputSizeTooLarge(total_length, max_total_input_length);
-
-                                        let fastembed_error = fastembed::Error::msg(error.to_string());
-
-                                        // Send error response
-                                        let _ = request.response_tx.send(Err(fastembed_error));
-
-                                        continue;
-                                    }
-
-                                    let text_count = truncated_texts.len();
-                                    let avg_text_len = total_length as f32 / text_count as f32;
-
-                                    match text_embedding.embed(truncated_texts, None) {
-                                        Ok(embeddings) => {
-                                            info!(
-                                                "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
-                                                text_count,
-                                                avg_text_len,
-                                                start.elapsed()
-                                            );
-                                            let _ = request.response_tx.send(Ok(embeddings));
-                                        }
-                                        Err(err) => {
-                                            error!("Failed to generate text embeddings: {}", err);
-                                            let _ = request.response_tx.send(Err(err));
-                                        }
-                                    }
+                                EmbeddingRequestContent::Heartbeat => {
+                                    let _ = request.response_tx.send(Ok(vec![]));
                                 }
-                                EmbeddingContent::Image(images) => {
-                                    let image_count = images.len();
-                                    match EmbeddingContent::process_image_data(&images) {
-                                        Ok(paths) => match image_embedding.embed(paths, None) {
-                                            Ok(embeddings) => {
-                                                info!(
-                                                    "Generated {} image embeddings in {:?}",
-                                                    image_count,
-                                                    start.elapsed()
+                                EmbeddingRequestContent::Content(content) => {
+                                    let start = std::time::Instant::now();
+
+                                    match content {
+                                        EmbeddingContent::Text(texts) => {
+                                            // Truncate each text to a maximum of 8192 characters
+                                            let truncated_texts: Vec<String> = texts
+                                                .into_iter()
+                                                .map(|text| {
+                                                    if text.len() > Self::MAX_TEXT_LENGTH {
+                                                        text.chars().take(Self::MAX_TEXT_LENGTH).collect()
+                                                    } else {
+                                                        text
+                                                    }
+                                                })
+                                                .collect();
+
+                                            let total_length: usize =
+                                                truncated_texts.iter().map(|text| text.len()).sum();
+
+                                            // Prevent GPU memory overload by limiting the total size of text that can be processed at once
+                                            if total_length > max_total_input_length {
+                                                error!(
+                                                    "Total text input size too large: {} characters (max: {})",
+                                                    total_length, max_total_input_length
                                                 );
-                                                let _ = request.response_tx.send(Ok(embeddings));
+
+                                                let error = EmbeddingsError::InputSizeTooLarge(
+                                                    total_length,
+                                                    max_total_input_length,
+                                                );
+
+                                                let fastembed_error = fastembed::Error::msg(error.to_string());
+
+                                                // Send error response
+                                                let _ = request.response_tx.send(Err(fastembed_error));
+
+                                                continue;
                                             }
-                                            Err(err) => {
-                                                error!("Failed to generate image embeddings: {}", err);
-                                                let _ = request.response_tx.send(Err(err));
+
+                                            let text_count = truncated_texts.len();
+                                            let avg_text_len = total_length as f32 / text_count as f32;
+
+                                            match text_embedding.embed(truncated_texts, None) {
+                                                Ok(embeddings) => {
+                                                    info!(
+                                                        "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
+                                                        text_count,
+                                                        avg_text_len,
+                                                        start.elapsed()
+                                                    );
+                                                    let _ = request.response_tx.send(Ok(embeddings));
+                                                }
+                                                Err(err) => {
+                                                    error!("Failed to generate text embeddings: {}", err);
+                                                    let _ = request.response_tx.send(Err(err));
+                                                }
                                             }
-                                        },
-                                        Err(err) => {
-                                            error!("Failed to process image data: {}", err);
-                                            let _ = request.response_tx.send(Err(err.into()));
+                                        }
+                                        EmbeddingContent::Image(images) => {
+                                            let image_count = images.len();
+                                            match EmbeddingContent::process_image_data(&images) {
+                                                Ok(paths) => match image_embedding.embed(paths, None) {
+                                                    Ok(embeddings) => {
+                                                        info!(
+                                                            "Generated {} image embeddings in {:?}",
+                                                            image_count,
+                                                            start.elapsed()
+                                                        );
+                                                        let _ = request.response_tx.send(Ok(embeddings));
+                                                    }
+                                                    Err(err) => {
+                                                        error!("Failed to generate image embeddings: {}", err);
+                                                        let _ = request.response_tx.send(Err(err));
+                                                    }
+                                                },
+                                                Err(err) => {
+                                                    error!("Failed to process image data: {}", err);
+                                                    let _ = request.response_tx.send(Err(err.into()));
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -765,13 +810,32 @@ impl Embeddings {
         };
 
         let (tx, rx) = oneshot::channel();
-        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: content.clone() }).await?;
+        embedding_tx
+            .send(EmbeddingRequest { response_tx: tx, content: EmbeddingRequestContent::Content(content.clone()) })
+            .await?;
 
+        // Properly handle nested Result<Result<...>> structure with explicit error conversion
         match rx.await {
             Ok(result) => match result {
                 Ok(embeddings) => Ok(embeddings),
                 Err(err) => Err(EmbeddingsError::Fastembed(err)),
             },
+            Err(err) => Err(EmbeddingsError::RecvEmbeddings(err)),
+        }
+    }
+
+    /// Send a heartbeat to check if the embedding task is still alive
+    async fn send_heartbeat(&self) -> Result<(), EmbeddingsError> {
+        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: EmbeddingRequestContent::Heartbeat }).await?;
+
+        // If we get any response, the channel is working
+        match rx.await {
+            Ok(_) => Ok(()),
             Err(err) => Err(EmbeddingsError::RecvEmbeddings(err)),
         }
     }

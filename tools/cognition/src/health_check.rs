@@ -1,3 +1,5 @@
+use bioma_actor::prelude::*;
+use bioma_rag::embeddings::{self, Health};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -13,6 +15,10 @@ pub enum HealthCheckError {
     ParseError(String),
     #[error("OllamaError: {0}")]
     OllamaError(String),
+    #[error("EmbeddingsError: {0}")]
+    EmbeddingsError(String),
+    #[error("SpawnError: {0}")]
+    SpawnError(String),
 }
 
 #[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -29,6 +35,8 @@ pub enum Service {
     Markitdown,
     #[serde(rename = "minio")]
     Minio,
+    #[serde(rename = "embeddings")]
+    Embeddings,
 }
 
 #[derive(utoipa::ToSchema, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -100,6 +108,12 @@ pub enum Responses {
     },
     #[schema(title = "Minio Response")]
     Minio {
+        #[serde(flatten)]
+        #[schema(inline)]
+        status: Status,
+    },
+    #[schema(title = "Embeddings Response")]
+    Embeddings {
         #[serde(flatten)]
         #[schema(inline)]
         status: Status,
@@ -275,5 +289,41 @@ pub async fn check_surrealdb(endpoint: String) -> Responses {
     match response {
         Ok(_) => Responses::SurrealDb { status: Status::healthy() },
         Err(e) => Responses::SurrealDb { status: Status::unhealthy(e) },
+    }
+}
+
+pub async fn check_embeddings(engine: Engine, embeddings_id: ActorId) -> Responses {
+    // Spawn a temporary relay actor to communicate with the embeddings actor
+    let relay_id = ActorId::of::<Relay>("/health/embeddings/relay");
+
+    // Create the relay actor
+    let spawn_result = Actor::spawn(
+        engine.clone(),
+        relay_id.clone(),
+        Relay,
+        SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+    )
+    .await;
+
+    let relay_ctx = match spawn_result {
+        Ok((ctx, _)) => ctx,
+        Err(e) => {
+            return Responses::Embeddings {
+                status: Status::unhealthy(HealthCheckError::SpawnError(format!("Failed to spawn relay actor: {}", e))),
+            };
+        }
+    };
+
+    // Send the Health message to the embeddings actor and wait for a reply
+    let health_result = relay_ctx
+        .send_and_wait_reply::<embeddings::Embeddings, Health>(Health, &embeddings_id, SendOptions::default())
+        .await;
+
+    match health_result {
+        Ok(embeddings::Status::Alive) => Responses::Embeddings { status: Status::healthy() },
+        Ok(embeddings::Status::Dead(reason)) => {
+            Responses::Embeddings { status: Status::unhealthy(HealthCheckError::EmbeddingsError(reason)) }
+        }
+        Err(e) => Responses::Embeddings { status: Status::unhealthy(HealthCheckError::ReqwestError(e.to_string())) },
     }
 }
