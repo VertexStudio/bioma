@@ -1,6 +1,6 @@
 FROM nvcr.io/nvidia/cuda:12.6.1-cudnn-devel-ubuntu22.04
 
-ARG ONNXRUNTIME_VERSION=1.19.0
+ARG ONNXRUNTIME_VERSION=1.20.0
 ENV DEBIAN_FRONTEND=noninteractive
 ENV APP_NAME=bioma-service
 
@@ -100,4 +100,4 @@ EXPOSE 7123
 VOLUME ["/data"]
 
 # Set the startup command to run your application
-CMD ["cargo", "run", "--release", "-p", "cognition", "--bin", "cognition-server", "assets/configs/rag_config_server.json"]
+CMD ["cargo", "run", "--release", "-p", "cognition", "--bin", "cognition-server", "assets/configs/rag_config_server_runpod.json"]
