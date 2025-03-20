@@ -15,7 +15,7 @@ use tempfile::Builder as TempBuilder;
 use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 lazy_static! {
     static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =
@@ -153,9 +153,15 @@ impl EmbeddingContent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum EmbeddingRequestContent {
+    Content(EmbeddingContent),
+    Heartbeat,
+}
+
 pub struct EmbeddingRequest {
     response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, fastembed::Error>>,
-    content: EmbeddingContent,
+    content: EmbeddingRequestContent,
 }
 
 /// Store embeddings for texts or images
@@ -180,6 +186,18 @@ pub struct GeneratedEmbeddings {
     pub embeddings: Vec<Vec<f32>>,
 }
 
+/// Check if the embedding task is alive
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Health;
+
+/// The status of the embedding task
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Status {
+    Alive,
+    Dead(String),
+}
+
+/// The stored embeddings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredEmbeddings {
     pub ids: Vec<RecordId>,
@@ -233,6 +251,8 @@ pub struct Embeddings {
     embedding_tx: Option<mpsc::Sender<EmbeddingRequest>>,
     #[serde(skip)]
     shared_embedding: Option<StrongSharedEmbedding>,
+    #[serde(skip)]
+    embedding_task: Option<JoinHandle<Result<(), fastembed::Error>>>,
 }
 
 fn default_model() -> Model {
@@ -265,6 +285,7 @@ impl Clone for Embeddings {
             max_total_input_length: self.max_total_input_length,
             embedding_tx: None,
             shared_embedding: None,
+            embedding_task: None,
         }
     }
 }
@@ -282,27 +303,32 @@ impl Message<TopK> for Embeddings {
         let query_embedding = match &message.query {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
-                let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                embedding_tx
-                    .send(EmbeddingRequest { response_tx: tx, content: EmbeddingContent::Text(vec![text.to_string()]) })
-                    .await?;
-                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                match self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await {
+                    Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
+                    Err(EmbeddingsError::SendTextEmbeddings(_)) => {
+                        warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                        self.reinitialize(ctx).await?;
+
+                        let embeddings =
+                            self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await?;
+                        embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             Query::Image(image_data) => {
-                let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                embedding_tx
-                    .send(EmbeddingRequest {
-                        response_tx: tx,
-                        content: EmbeddingContent::Image(vec![image_data.clone()]),
-                    })
-                    .await?;
-                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                match self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await {
+                    Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
+                    Err(EmbeddingsError::SendTextEmbeddings(_)) => {
+                        warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                        self.reinitialize(ctx).await?;
+
+                        let embeddings =
+                            self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await?;
+                        embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         };
 
@@ -331,14 +357,16 @@ impl Message<StoreEmbeddings> for Embeddings {
     type Response = StoredEmbeddings;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &StoreEmbeddings) -> Result<(), EmbeddingsError> {
-        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        let embeddings = match self.send_embedding_request(&message.content).await {
+            Ok(embeddings) => embeddings,
+            Err(EmbeddingsError::SendTextEmbeddings(_)) => {
+                warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                self.reinitialize(ctx).await?;
+
+                self.send_embedding_request(&message.content).await?
+            }
+            Err(e) => return Err(e),
         };
-
-        let (tx, rx) = oneshot::channel();
-        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
-
-        let embeddings = rx.await??;
 
         let db = ctx.engine().db();
         let emb_query = include_str!("../sql/embeddings.surql");
@@ -392,15 +420,32 @@ impl Message<GenerateEmbeddings> for Embeddings {
         ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
     ) -> Result<(), EmbeddingsError> {
-        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        let embeddings = match self.send_embedding_request(&message.content).await {
+            Ok(embeddings) => embeddings,
+            Err(EmbeddingsError::SendTextEmbeddings(_)) => {
+                warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                self.reinitialize(ctx).await?;
+
+                self.send_embedding_request(&message.content).await?
+            }
+            Err(e) => return Err(e),
         };
 
-        let (tx, rx) = oneshot::channel();
-        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
-
-        let embeddings = rx.await??;
         ctx.reply(GeneratedEmbeddings { embeddings }).await?;
+        Ok(())
+    }
+}
+
+impl Message<Health> for Embeddings {
+    type Response = Status;
+
+    async fn handle(&mut self, ctx: &mut ActorContext<Self>, _message: &Health) -> Result<(), EmbeddingsError> {
+        let is_alive = match self.send_heartbeat().await {
+            Ok(_) => Status::Alive,
+            Err(e) => Status::Dead(e.to_string()),
+        };
+
+        ctx.reply(is_alive).await?;
         Ok(())
     }
 }
@@ -476,6 +521,11 @@ impl Actor for Embeddings {
                 if let Err(err) = response {
                     error!("{} {:?}", ctx.id(), err);
                 }
+            } else if let Some(input) = frame.is::<Health>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {:?}", ctx.id(), err);
+                }
             }
         }
         info!("{} Finished", ctx.id());
@@ -487,8 +537,6 @@ impl Embeddings {
     const MAX_TEXT_LENGTH: usize = 8192;
 
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
-        info!("{} Started", ctx.id());
-
         // Manage a shared embedding task
         let shared_embedding = {
             let mut embeddings_map = SHARED_EMBEDDINGS.lock().await;
@@ -585,125 +633,134 @@ impl Embeddings {
                 let cache_dir = ctx.engine().huggingface_cache_dir().clone();
                 let max_total_input_length = self.max_total_input_length;
 
-                let _embedding_task: JoinHandle<Result<(), fastembed::Error>> =
-                    tokio::task::spawn_blocking(move || {
-                        // Initialize both text and image embeddings
-                        let mut text_options = fastembed::InitOptions::new(get_fastembed_model(&text_model))
-                            .with_cache_dir(cache_dir.clone());
-                        let mut image_options =
-                            fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
-                                .with_cache_dir(cache_dir);
+                let embedding_task: JoinHandle<Result<(), fastembed::Error>> = tokio::task::spawn_blocking(move || {
+                    // Initialize both text and image embeddings
+                    let mut text_options =
+                        fastembed::InitOptions::new(get_fastembed_model(&text_model)).with_cache_dir(cache_dir.clone());
+                    let mut image_options = fastembed::ImageInitOptions::new(get_fastembed_image_model(&image_model))
+                        .with_cache_dir(cache_dir);
 
-                        #[cfg(target_os = "macos")]
-                        {
-                            text_options = text_options.with_execution_providers(vec![
-                                ort::execution_providers::CoreMLExecutionProvider::default().build(),
-                            ]);
+                    #[cfg(target_os = "macos")]
+                    {
+                        text_options = text_options.with_execution_providers(vec![
+                            ort::execution_providers::CoreMLExecutionProvider::default().build(),
+                        ]);
 
-                            image_options = image_options.with_execution_providers(vec![
-                                ort::execution_providers::CoreMLExecutionProvider::default().build(),
-                            ]);
-                        }
+                        image_options = image_options.with_execution_providers(vec![
+                            ort::execution_providers::CoreMLExecutionProvider::default().build(),
+                        ]);
+                    }
 
-                        #[cfg(target_os = "linux")]
-                        {
-                            text_options = text_options.with_execution_providers(vec![
-                                ort::execution_providers::CUDAExecutionProvider::default().build(),
-                            ]);
+                    #[cfg(target_os = "linux")]
+                    {
+                        text_options = text_options.with_execution_providers(vec![
+                            ort::execution_providers::CUDAExecutionProvider::default().build(),
+                        ]);
 
-                            image_options = image_options.with_execution_providers(vec![
-                                ort::execution_providers::CUDAExecutionProvider::default().build(),
-                            ]);
-                        }
+                        image_options = image_options.with_execution_providers(vec![
+                            ort::execution_providers::CUDAExecutionProvider::default().build(),
+                        ]);
+                    }
 
-                        let text_embedding = fastembed::TextEmbedding::try_new(text_options)?;
-                        let image_embedding = fastembed::ImageEmbedding::try_new(image_options)?;
+                    let text_embedding = fastembed::TextEmbedding::try_new(text_options)?;
+                    let image_embedding = fastembed::ImageEmbedding::try_new(image_options)?;
 
-                        while let Some(request) = embedding_rx.blocking_recv() {
-                            let start = std::time::Instant::now();
+                    while let Some(request) = embedding_rx.blocking_recv() {
+                        match request.content {
+                            EmbeddingRequestContent::Heartbeat => {
+                                let _ = request.response_tx.send(Ok(vec![]));
+                            }
+                            EmbeddingRequestContent::Content(content) => {
+                                let start = std::time::Instant::now();
 
-                            match request.content {
-                                EmbeddingContent::Text(texts) => {
-                                    // Truncate each text to a maximum of 8192 characters
-                                    let truncated_texts: Vec<String> = texts
-                                        .into_iter()
-                                        .map(|text| {
-                                            if text.len() > Self::MAX_TEXT_LENGTH {
-                                                text.chars().take(Self::MAX_TEXT_LENGTH).collect()
-                                            } else {
-                                                text
-                                            }
-                                        })
-                                        .collect();
+                                match content {
+                                    EmbeddingContent::Text(texts) => {
+                                        // Truncate each text to a maximum of 8192 characters
+                                        let truncated_texts: Vec<String> = texts
+                                            .into_iter()
+                                            .map(|text| {
+                                                if text.len() > Self::MAX_TEXT_LENGTH {
+                                                    text.chars().take(Self::MAX_TEXT_LENGTH).collect()
+                                                } else {
+                                                    text
+                                                }
+                                            })
+                                            .collect();
 
-                                    let total_length: usize = truncated_texts.iter().map(|text| text.len()).sum();
+                                        let total_length: usize = truncated_texts.iter().map(|text| text.len()).sum();
 
-                                    // Prevent GPU memory overload by limiting the total size of text that can be processed at once
-                                    if total_length > max_total_input_length {
-                                        error!(
-                                            "Total text input size too large: {} characters (max: {})",
-                                            total_length, max_total_input_length
-                                        );
-
-                                        let error =
-                                            EmbeddingsError::InputSizeTooLarge(total_length, max_total_input_length);
-
-                                        let fastembed_error = fastembed::Error::msg(error.to_string());
-
-                                        // Send error response
-                                        let _ = request.response_tx.send(Err(fastembed_error));
-
-                                        continue;
-                                    }
-
-                                    let text_count = truncated_texts.len();
-                                    let avg_text_len = total_length as f32 / text_count as f32;
-
-                                    match text_embedding.embed(truncated_texts, None) {
-                                        Ok(embeddings) => {
-                                            info!(
-                                                "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
-                                                text_count,
-                                                avg_text_len,
-                                                start.elapsed()
+                                        // Prevent GPU memory overload by limiting the total size of text that can be processed at once
+                                        if total_length > max_total_input_length {
+                                            error!(
+                                                "Total text input size too large: {} characters (max: {})",
+                                                total_length, max_total_input_length
                                             );
-                                            let _ = request.response_tx.send(Ok(embeddings));
+
+                                            let error = EmbeddingsError::InputSizeTooLarge(
+                                                total_length,
+                                                max_total_input_length,
+                                            );
+
+                                            let fastembed_error = fastembed::Error::msg(error.to_string());
+
+                                            // Send error response
+                                            let _ = request.response_tx.send(Err(fastembed_error));
+
+                                            continue;
                                         }
-                                        Err(err) => {
-                                            error!("Failed to generate text embeddings: {}", err);
-                                            let _ = request.response_tx.send(Err(err));
-                                        }
-                                    }
-                                }
-                                EmbeddingContent::Image(images) => {
-                                    let image_count = images.len();
-                                    match EmbeddingContent::process_image_data(&images) {
-                                        Ok(paths) => match image_embedding.embed(paths, None) {
+
+                                        let text_count = truncated_texts.len();
+                                        let avg_text_len = total_length as f32 / text_count as f32;
+
+                                        match text_embedding.embed(truncated_texts, None) {
                                             Ok(embeddings) => {
                                                 info!(
-                                                    "Generated {} image embeddings in {:?}",
-                                                    image_count,
+                                                    "Generated {} text embeddings (avg. {:.1} chars) in {:?}",
+                                                    text_count,
+                                                    avg_text_len,
                                                     start.elapsed()
                                                 );
                                                 let _ = request.response_tx.send(Ok(embeddings));
                                             }
                                             Err(err) => {
-                                                error!("Failed to generate image embeddings: {}", err);
+                                                error!("Failed to generate text embeddings: {}", err);
                                                 let _ = request.response_tx.send(Err(err));
                                             }
-                                        },
-                                        Err(err) => {
-                                            error!("Failed to process image data: {}", err);
-                                            let _ = request.response_tx.send(Err(err.into()));
+                                        }
+                                    }
+                                    EmbeddingContent::Image(images) => {
+                                        let image_count = images.len();
+                                        match EmbeddingContent::process_image_data(&images) {
+                                            Ok(paths) => match image_embedding.embed(paths, None) {
+                                                Ok(embeddings) => {
+                                                    info!(
+                                                        "Generated {} image embeddings in {:?}",
+                                                        image_count,
+                                                        start.elapsed()
+                                                    );
+                                                    let _ = request.response_tx.send(Ok(embeddings));
+                                                }
+                                                Err(err) => {
+                                                    error!("Failed to generate image embeddings: {}", err);
+                                                    let _ = request.response_tx.send(Err(err));
+                                                }
+                                            },
+                                            Err(err) => {
+                                                error!("Failed to process image data: {}", err);
+                                                let _ = request.response_tx.send(Err(err.into()));
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
 
-                        info!("{} embedding task finished", ctx_id);
-                        Ok(())
-                    });
+                    info!("{} embedding task finished", ctx_id);
+                    Ok(())
+                });
+
+                self.embedding_task = Some(embedding_task);
 
                 // Store the shared embedding
                 let shared_embedding = Arc::new(SharedEmbedding { embedding_tx });
@@ -716,8 +773,63 @@ impl Embeddings {
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
         self.embedding_tx = self.shared_embedding.as_ref().map(|se| se.embedding_tx.clone());
 
-        info!("{} Finished", ctx.id());
+        info!("{} Initialization complete", ctx.id());
         Ok(())
+    }
+
+    /// Reinitialize the embedding infrastructure
+    async fn reinitialize(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
+        info!("{} Reinitializing embedding infrastructure", ctx.id());
+
+        if let Some(handle) = self.embedding_task.take() {
+            handle.abort();
+        }
+
+        // Clear current references to ensure old task can be dropped
+        self.embedding_tx = None;
+        self.shared_embedding = None;
+
+        // Reinitialize
+        self.init(ctx).await?;
+
+        info!("{} Reinitialization complete", ctx.id());
+        Ok(())
+    }
+
+    /// Helper method to send embedding requests
+    async fn send_embedding_request(&self, content: &EmbeddingContent) -> Result<Vec<Vec<f32>>, EmbeddingsError> {
+        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        embedding_tx
+            .send(EmbeddingRequest { response_tx: tx, content: EmbeddingRequestContent::Content(content.clone()) })
+            .await?;
+
+        match rx.await {
+            Ok(result) => match result {
+                Ok(embeddings) => Ok(embeddings),
+                Err(err) => Err(EmbeddingsError::Fastembed(err)),
+            },
+            Err(err) => Err(EmbeddingsError::RecvEmbeddings(err)),
+        }
+    }
+
+    /// Send a heartbeat to check if the embedding task is still alive
+    async fn send_heartbeat(&self) -> Result<(), EmbeddingsError> {
+        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: EmbeddingRequestContent::Heartbeat }).await?;
+
+        // If we get any response, the channel is working
+        match rx.await {
+            Ok(_) => Ok(()),
+            Err(err) => Err(EmbeddingsError::RecvEmbeddings(err)),
+        }
     }
 
     pub fn table_prefix(&self) -> String {
