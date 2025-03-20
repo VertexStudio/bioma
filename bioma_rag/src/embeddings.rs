@@ -302,7 +302,7 @@ impl Message<TopK> for Embeddings {
             Query::Text(text) => {
                 match self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await {
                     Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
-                    Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+                    Err(EmbeddingsError::SendTextEmbeddings(_)) => {
                         warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                         self.reinitialize(ctx).await?;
 
@@ -316,7 +316,7 @@ impl Message<TopK> for Embeddings {
             Query::Image(image_data) => {
                 match self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await {
                     Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
-                    Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+                    Err(EmbeddingsError::SendTextEmbeddings(_)) => {
                         warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                         self.reinitialize(ctx).await?;
 
@@ -356,7 +356,7 @@ impl Message<StoreEmbeddings> for Embeddings {
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &StoreEmbeddings) -> Result<(), EmbeddingsError> {
         let embeddings = match self.send_embedding_request(&message.content).await {
             Ok(embeddings) => embeddings,
-            Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+            Err(EmbeddingsError::SendTextEmbeddings(_)) => {
                 warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                 self.reinitialize(ctx).await?;
 
@@ -419,7 +419,7 @@ impl Message<GenerateEmbeddings> for Embeddings {
     ) -> Result<(), EmbeddingsError> {
         let embeddings = match self.send_embedding_request(&message.content).await {
             Ok(embeddings) => embeddings,
-            Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+            Err(EmbeddingsError::SendTextEmbeddings(_)) => {
                 warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
                 self.reinitialize(ctx).await?;
 
