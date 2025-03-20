@@ -15,7 +15,7 @@ use tempfile::Builder as TempBuilder;
 use tokio::sync::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 lazy_static! {
     static ref SHARED_EMBEDDINGS: Arc<Mutex<HashMap<Model, Weak<SharedEmbedding>>>> =
@@ -282,27 +282,38 @@ impl Message<TopK> for Embeddings {
         let query_embedding = match &message.query {
             Query::Embedding(embedding) => embedding.clone(),
             Query::Text(text) => {
-                let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                embedding_tx
-                    .send(EmbeddingRequest { response_tx: tx, content: EmbeddingContent::Text(vec![text.to_string()]) })
-                    .await?;
-                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                // Try to generate the embedding, reinitializing if needed
+                match self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await {
+                    Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
+                    Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+                        // Channel errors indicate the task died - try to reinitialize
+                        warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                        self.reinitialize(ctx).await?;
+
+                        // Retry the request with the new task
+                        let embeddings =
+                            self.send_embedding_request(&EmbeddingContent::Text(vec![text.to_string()])).await?;
+                        embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             Query::Image(image_data) => {
-                let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-                    return Err(EmbeddingsError::TextEmbeddingNotInitialized);
-                };
-                let (tx, rx) = oneshot::channel();
-                embedding_tx
-                    .send(EmbeddingRequest {
-                        response_tx: tx,
-                        content: EmbeddingContent::Image(vec![image_data.clone()]),
-                    })
-                    .await?;
-                rx.await??.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                // Try to generate the embedding, reinitializing if needed
+                match self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await {
+                    Ok(embeddings) => embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?,
+                    Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+                        // Channel errors indicate the task died - try to reinitialize
+                        warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                        self.reinitialize(ctx).await?;
+
+                        // Retry the request with the new task
+                        let embeddings =
+                            self.send_embedding_request(&EmbeddingContent::Image(vec![image_data.clone()])).await?;
+                        embeddings.first().cloned().ok_or(EmbeddingsError::NoEmbeddingsGenerated)?
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         };
 
@@ -331,14 +342,19 @@ impl Message<StoreEmbeddings> for Embeddings {
     type Response = StoredEmbeddings;
 
     async fn handle(&mut self, ctx: &mut ActorContext<Self>, message: &StoreEmbeddings) -> Result<(), EmbeddingsError> {
-        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        // Try to generate embeddings, reinitializing if needed
+        let embeddings = match self.send_embedding_request(&message.content).await {
+            Ok(embeddings) => embeddings,
+            Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+                // Channel errors indicate the task died - try to reinitialize
+                warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                self.reinitialize(ctx).await?;
+
+                // Retry the request with the new task
+                self.send_embedding_request(&message.content).await?
+            }
+            Err(e) => return Err(e),
         };
-
-        let (tx, rx) = oneshot::channel();
-        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
-
-        let embeddings = rx.await??;
 
         let db = ctx.engine().db();
         let emb_query = include_str!("../sql/embeddings.surql");
@@ -392,14 +408,20 @@ impl Message<GenerateEmbeddings> for Embeddings {
         ctx: &mut ActorContext<Self>,
         message: &GenerateEmbeddings,
     ) -> Result<(), EmbeddingsError> {
-        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
-            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        // Try to generate embeddings, reinitializing if needed
+        let embeddings = match self.send_embedding_request(&message.content).await {
+            Ok(embeddings) => embeddings,
+            Err(EmbeddingsError::SendTextEmbeddings(_)) | Err(EmbeddingsError::RecvEmbeddings(_)) => {
+                // Channel errors indicate the task died - try to reinitialize
+                warn!("{} Embedding task appears to have died, reinitializing...", ctx.id());
+                self.reinitialize(ctx).await?;
+
+                // Retry the request with the new task
+                self.send_embedding_request(&message.content).await?
+            }
+            Err(e) => return Err(e),
         };
 
-        let (tx, rx) = oneshot::channel();
-        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: message.content.clone() }).await?;
-
-        let embeddings = rx.await??;
         ctx.reply(GeneratedEmbeddings { embeddings }).await?;
         Ok(())
     }
@@ -487,8 +509,6 @@ impl Embeddings {
     const MAX_TEXT_LENGTH: usize = 8192;
 
     pub async fn init(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
-        info!("{} Started", ctx.id());
-
         // Manage a shared embedding task
         let shared_embedding = {
             let mut embeddings_map = SHARED_EMBEDDINGS.lock().await;
@@ -716,8 +736,44 @@ impl Embeddings {
         self.shared_embedding = shared_embedding.map(StrongSharedEmbedding);
         self.embedding_tx = self.shared_embedding.as_ref().map(|se| se.embedding_tx.clone());
 
-        info!("{} Finished", ctx.id());
+        info!("{} Initialization complete", ctx.id());
         Ok(())
+    }
+
+    /// Reinitialize the embedding infrastructure
+    async fn reinitialize(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
+        info!("{} Reinitializing embedding infrastructure", ctx.id());
+
+        // Clear current references to ensure old task can be dropped
+        self.embedding_tx = None;
+        self.shared_embedding = None;
+
+        // Small delay to give time for any in-flight operations to complete
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Reinitialize
+        self.init(ctx).await?;
+
+        info!("{} Reinitialization complete", ctx.id());
+        Ok(())
+    }
+
+    /// Helper method to send embedding requests and handle common errors
+    async fn send_embedding_request(&self, content: &EmbeddingContent) -> Result<Vec<Vec<f32>>, EmbeddingsError> {
+        let Some(embedding_tx) = self.embedding_tx.as_ref() else {
+            return Err(EmbeddingsError::TextEmbeddingNotInitialized);
+        };
+
+        let (tx, rx) = oneshot::channel();
+        embedding_tx.send(EmbeddingRequest { response_tx: tx, content: content.clone() }).await?;
+
+        match rx.await {
+            Ok(result) => match result {
+                Ok(embeddings) => Ok(embeddings),
+                Err(err) => Err(EmbeddingsError::Fastembed(err)),
+            },
+            Err(err) => Err(EmbeddingsError::RecvEmbeddings(err)),
+        }
     }
 
     pub fn table_prefix(&self) -> String {
