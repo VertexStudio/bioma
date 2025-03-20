@@ -760,7 +760,6 @@ impl Embeddings {
                     Ok(())
                 });
 
-                // Store the task handle in self
                 self.embedding_task = Some(embedding_task);
 
                 // Store the shared embedding
@@ -782,7 +781,6 @@ impl Embeddings {
     async fn reinitialize(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), EmbeddingsError> {
         info!("{} Reinitializing embedding infrastructure", ctx.id());
 
-        // Explicitly abort the task if it exists
         if let Some(handle) = self.embedding_task.take() {
             handle.abort();
         }
