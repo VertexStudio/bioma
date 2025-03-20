@@ -14,6 +14,9 @@ pub trait Transport {
     // Send a JSON-RPC message with optional metadata
     fn send(&mut self, message: JsonRpcMessage, metadata: serde_json::Value) -> impl Future<Output = Result<()>>;
 
+    // Cancel a request
+    fn cancel(&mut self, request_id: String) -> impl Future<Output = Result<()>>;
+
     // Close the connection
     fn close(&mut self) -> impl Future<Output = Result<()>>;
 }

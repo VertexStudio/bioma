@@ -17,7 +17,21 @@ impl ToolDef for Echo {
     const DESCRIPTION: &'static str = "Echoes back the input message";
     type Args = EchoArgs;
 
-    async fn call(&self, properties: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(
+        &self,
+        properties: Self::Args,
+        client_id: String,
+        client_supports_roots: bool,
+    ) -> Result<CallToolResult, ToolError> {
+        // TODO: We'd need:
+        // 1. A way to access server's method to send requests to client.
+        // 2. Who to send the request to?
+
+        // custom logic + if client supports roots
+        if smth_hpns && client_supports_roots {
+            let roots = self.list_roots(client_id).await;
+        }
+        info!("Got roots and will do something with them: {:?}", roots);
         Ok(CallToolResult {
             content: vec![serde_json::to_value(TextContent {
                 type_: "text".to_string(),

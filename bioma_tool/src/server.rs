@@ -1,9 +1,9 @@
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
-    CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult,
-    ReadResourceRequestParams, ServerCapabilities,
+    CallToolRequestParams, CancelledNotification, CancelledNotificationParams, ClientCapabilities,
+    GetPromptRequestParams, Implementation, InitializeRequestParams, InitializeResult, ListPromptsResult,
+    ListResourcesResult, ListToolsResult, ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
@@ -80,7 +80,10 @@ pub enum TransportConfig {
     Ws(WsConfig),
 }
 
+type Clients = HashMap<ClientId, ClientCapabilities>;
+
 pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
+    let clients: Arc<RwLock<Clients>> = Arc::new(RwLock::new(HashMap::new()));
     debug!("Starting ModelContextProtocol server: {}", name);
 
     let server = std::sync::Arc::new(T::new());
@@ -115,6 +118,8 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                     meta: None,
                 };
 
+                clients.write().await.insert(meta.client_id, init_params.capabilities);
+
                 info!("Successfully handled initialize request");
                 Ok(serde_json::to_value(result).map_err(|e| {
                     error!("Failed to serialize initialize result: {}", e);
@@ -128,7 +133,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         info!("Received initialized notification");
     });
 
-    io_handler.add_notification_with_meta("cancelled", move |params: Params, _meta: ServerMetadata| {
+    io_handler.add_notification_with_meta("cancelled", move |params: Params, meta: ServerMetadata| {
         match params.parse::<CancelledNotificationParams>() {
             Ok(cancel_params) => {
                 info!(
@@ -136,6 +141,8 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                     cancel_params.request_id,
                     cancel_params.reason.unwrap_or_default()
                 );
+
+                meta.tx.send("Cancell this thing", "maybe_an_id");
             }
             Err(e) => {
                 error!("Failed to parse cancellation params: {}", e);
@@ -298,7 +305,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
 
                 match tool {
                     Some(tool) => {
-                        let result = tool.call_boxed(params.arguments).await.map_err(|e| {
+                        let result = tool.call_boxed(params.arguments, meta.client_id).await.map_err(|e| {
                             error!("Tool execution failed: {}", e);
                             jsonrpc_core::Error::internal_error()
                         })?;
@@ -380,6 +387,10 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
                             let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await else {
                                 continue;
                             };
+
+                            if response == CancelledNotification::default() {
+                                transport_type.cancel(sse_message.client_id.clone()).await;
+                            }
 
                             let sse_metadata = SseMetadata { client_id: sse_message.client_id.clone() };
 
