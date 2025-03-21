@@ -157,12 +157,13 @@ async fn main() -> Result<()> {
 
                         info!("Trying to subscribe to filesystem changes...");
                         // Use the root URI for subscription
-                        let subscription_uri = "file:///";
+                        // TODO: Do this later, rn since mcp log is inclued it sends notifications too often and makes IDE crash.
+                        // let subscription_uri = "file:///";
 
-                        match client.subscribe_resource(subscription_uri.to_string()).await {
-                            Ok(_) => info!("Successfully subscribed to filesystem changes"),
-                            Err(e) => info!("Subscription not supported or failed: {:?}", e),
-                        }
+                        // match client.subscribe_resource(subscription_uri.to_string()).await {
+                        //     Ok(_) => info!("Successfully subscribed to filesystem changes"),
+                        //     Err(e) => info!("Subscription not supported or failed: {:?}", e),
+                        // }
 
                         // Later, you could unsubscribe like this:
                         // match client.unsubscribe_resource(subscription_uri.to_string()).await {

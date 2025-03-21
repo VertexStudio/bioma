@@ -194,7 +194,13 @@ impl ModelContextProtocolClient {
                                 }
                             }
                         },
-                        _ => {} // Handle other message types if needed
+                        JsonRpcMessage::Request(request) => match request {
+                            jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
+                                info!("Got notification: {:?}", notification);
+                            }
+                            _ => {}
+                        },
+                        _ => {}
                     }
                 }
             }
