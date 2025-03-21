@@ -1,8 +1,9 @@
 use crate::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, GetPromptRequestParams, GetPromptResult, Implementation,
     InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
-    ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult,
-    ReadResourceRequestParams, ReadResourceResult, ServerCapabilities,
+    ListPromptsResult, ListResourcesRequestParams, ListResourcesResult, ListResourceTemplatesRequestParams, 
+    ListResourceTemplatesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult,
+    ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -245,6 +246,35 @@ impl ModelContextProtocolClient {
         Ok(serde_json::from_value(response)?)
     }
 
+    pub async fn list_resource_templates(
+        &mut self,
+        params: Option<ListResourceTemplatesRequestParams>,
+    ) -> Result<ListResourceTemplatesResult, ModelContextProtocolClientError> {
+        debug!("Server {} - Sending resources/templates/list request", self.server.name);
+        let response = self.request("resources/templates/list".to_string(), serde_json::to_value(params)?).await?;
+        Ok(serde_json::from_value(response)?)
+    }
+
+    pub async fn subscribe_resource(
+        &mut self,
+        uri: String,
+    ) -> Result<(), ModelContextProtocolClientError> {
+        debug!("Server {} - Sending resources/subscribe request for {}", self.server.name, uri);
+        let params = serde_json::json!({ "uri": uri });
+        let _response = self.request("resources/subscribe".to_string(), params).await?;
+        Ok(())
+    }
+
+    pub async fn unsubscribe_resource(
+        &mut self,
+        uri: String,
+    ) -> Result<(), ModelContextProtocolClientError> {
+        debug!("Server {} - Sending resources/unsubscribe request for {}", self.server.name, uri);
+        let params = serde_json::json!({ "uri": uri });
+        let _response = self.request("resources/unsubscribe".to_string(), params).await?;
+        Ok(())
+    }
+
     pub async fn list_prompts(
         &mut self,
         params: Option<ListPromptsRequestParams>,
@@ -281,7 +311,7 @@ impl ModelContextProtocolClient {
         Ok(serde_json::from_value(response)?)
     }
 
-    pub async fn request(
+    async fn request(
         &mut self,
         method: String,
         params: serde_json::Value,

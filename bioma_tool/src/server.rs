@@ -2,7 +2,8 @@ use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
     CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult,
+    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesRequestParams,
+    ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsResult,
     ReadResourceRequestParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
@@ -164,13 +165,24 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
 
     io_handler.add_method_with_meta("resources/list", {
         let server = server.clone();
-        move |_params, _meta: ServerMetadata| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling resources/list request");
 
-            let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
-
             async move {
+                let params: ListResourcesRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Resources list request with cursor: {:?}", params.cursor);
+
+                let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
+
                 let response = ListResourcesResult { next_cursor: None, resources, meta: None };
 
                 info!("Successfully handled resources/list request");
@@ -218,6 +230,41 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                         Err(jsonrpc_core::Error::invalid_params(format!("Resource not found: {}", params.uri)))
                     }
                 }
+            }
+        }
+    });
+
+    io_handler.add_method_with_meta("resources/templates/list", {
+        let server = server.clone();
+        move |params: Params, _meta: ServerMetadata| {
+            let server = server.clone();
+            async move {
+                debug!("Handling resources/templates/list request");
+
+                let params: ListResourceTemplatesRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/templates/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Resource templates list request with cursor: {:?}", params.cursor);
+
+                let resources = server.get_resources();
+
+                // Collect all resource templates
+                let resource_templates =
+                    resources.iter().filter_map(|resource| resource.template()).collect::<Vec<_>>();
+
+                let response = ListResourceTemplatesResult { next_cursor: None, resource_templates, meta: None };
+
+                info!(
+                    "Successfully handled resources/templates/list request, found {} templates",
+                    response.resource_templates.len()
+                );
+                Ok(serde_json::to_value(response).unwrap_or_default())
             }
         }
     });
@@ -436,31 +483,6 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                         Err(jsonrpc_core::Error::method_not_found())
                     }
                 }
-            }
-        }
-    });
-
-    // Add support for resource templates
-    io_handler.add_method_with_meta("resources/templates/list", {
-        let server = server.clone();
-        move |_params: Params, _meta: ServerMetadata| {
-            let server = server.clone();
-            async move {
-                debug!("Handling resources/templates/list request");
-
-                let resources = server.get_resources();
-
-                // Collect all resource templates
-                let templates = resources.iter().filter_map(|resource| resource.template()).collect::<Vec<_>>();
-
-                // Create the response
-                let response = serde_json::json!({
-                    "nextCursor": null,
-                    "resourceTemplates": templates
-                });
-
-                info!("Successfully handled resources/templates/list request, found {} templates", templates.len());
-                Ok(response)
             }
         }
     });

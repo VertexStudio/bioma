@@ -147,21 +147,28 @@ async fn main() -> Result<()> {
 
                 // Try to subscribe to the directory if subscription is supported
                 info!("Checking for resource templates...");
-                let templates_result =
-                    client.request("resources/templates/list".to_string(), serde_json::json!({})).await;
+                let templates_result = client.list_resource_templates(None).await;
                 match templates_result {
-                    Ok(_) => {
+                    Ok(templates) => {
+                        info!("Found {} resource templates", templates.resource_templates.len());
+                        for template in templates.resource_templates {
+                            info!("- Template: {} URI: {}", template.name, template.uri_template);
+                        }
+
                         info!("Trying to subscribe to filesystem changes...");
                         // Use the root URI for subscription
                         let subscription_uri = "file:///";
-                        let subscribe_result = client
-                            .request("resources/subscribe".to_string(), serde_json::json!({ "uri": subscription_uri }))
-                            .await;
 
-                        match subscribe_result {
+                        match client.subscribe_resource(subscription_uri.to_string()).await {
                             Ok(_) => info!("Successfully subscribed to filesystem changes"),
                             Err(e) => info!("Subscription not supported or failed: {:?}", e),
                         }
+
+                        // Later, you could unsubscribe like this:
+                        // match client.unsubscribe_resource(subscription_uri.to_string()).await {
+                        //     Ok(_) => info!("Successfully unsubscribed from filesystem changes"),
+                        //     Err(e) => info!("Unsubscription failed: {:?}", e),
+                        // }
                     }
                     Err(e) => info!("Resource templates not supported: {:?}", e),
                 }
