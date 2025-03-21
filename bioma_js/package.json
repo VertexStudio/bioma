@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "surrealdb": "^1.0.0-beta.21",
-    "ulid": "^2.3.0"
-  }
-}

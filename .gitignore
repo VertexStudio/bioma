@@ -1,7 +1,6 @@
 /target
 .DS_Store
 bioma_behavior_v0
-bioma_js/node_modules
 /.bioma
 /.output
 history.txt
