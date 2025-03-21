@@ -1,30 +1,38 @@
 use crate::resources::{ResourceDef, ResourceError, ResourceManager};
 use crate::schema::{ReadResourceResult, ResourceTemplate};
 use crate::ClientId;
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tokio::time::{interval, Duration};
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 use url::Url;
 
 /// A file system resource that can serve both text and binary files
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct FileSystem {
     /// Base directory for file accesses
     base_dir: Arc<PathBuf>,
     /// Cached file metadata
-    cache: Arc<Mutex<HashMap<String, FileMetadata>>>,
+    cache: Arc<StdMutex<HashMap<String, FileMetadata>>>,
     /// Resource manager for subscriptions
     #[serde(skip)]
     resource_manager: Arc<ResourceManager>,
-    /// Flag to indicate if file watching is enabled
+    /// Active watchers per resource URI
     #[serde(skip)]
-    file_watching_enabled: Arc<Mutex<bool>>,
+    watchers: Arc<Mutex<HashMap<String, WatcherHandle>>>,
+}
+
+// Structure to manage an active watcher
+struct WatcherHandle {
+    _watcher: RecommendedWatcher, // Kept alive while in the map
+    subscriber_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -38,20 +46,12 @@ struct FileMetadata {
 impl FileSystem {
     /// Create a new FileSystem resource with the given base directory
     pub fn new<P: AsRef<Path>>(base_dir: P) -> Self {
-        let fs = Self {
+        Self {
             base_dir: Arc::new(base_dir.as_ref().to_path_buf()),
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(StdMutex::new(HashMap::new())),
             resource_manager: Arc::new(ResourceManager::new()),
-            file_watching_enabled: Arc::new(Mutex::new(false)),
-        };
-
-        // Start the file watching task
-        let fs_clone = fs.clone();
-        tokio::spawn(async move {
-            fs_clone.file_watcher_task().await;
-        });
-
-        fs
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// Get the resource manager
@@ -64,116 +64,129 @@ impl FileSystem {
         self
     }
 
-    /// Enable or disable file watching
-    pub fn set_file_watching(&self, enabled: bool) {
-        let mut watching = self.file_watching_enabled.lock().unwrap();
-        *watching = enabled;
+    // Create a watcher for a specific resource
+    async fn create_watcher(&self, uri: String, path: PathBuf) -> Result<(), ResourceError> {
+        let mut watchers = self.watchers.lock().await;
+
+        // If watcher already exists, just increment the counter
+        if let Some(handle) = watchers.get_mut(&uri) {
+            handle.subscriber_count += 1;
+            return Ok(());
+        }
+
+        // Create a channel to receive events
+        let (tx, rx) = mpsc::channel(32);
+
+        // Set up the file system watcher
+        let watcher = self
+            .setup_fs_watcher(tx, path.clone())
+            .map_err(|e| ResourceError::Custom(format!("Failed to create file watcher: {}", e)))?;
+
+        // Store the watcher
+        watchers.insert(uri.clone(), WatcherHandle { _watcher: watcher, subscriber_count: 1 });
+
+        // Spawn a task to process events for this resource
+        let resource_manager = self.resource_manager.clone();
+        let uri_clone = uri.clone();
+        tokio::spawn(async move {
+            Self::process_events(rx, resource_manager, uri_clone).await;
+        });
+
+        Ok(())
     }
 
-    /// Task that periodically checks for file changes
-    async fn file_watcher_task(&self) {
-        // Check every 5 seconds for changes
-        let mut interval = interval(Duration::from_secs(5));
+    // Set up the filesystem watcher
+    fn setup_fs_watcher(&self, tx: Sender<Event>, path: PathBuf) -> Result<RecommendedWatcher, notify::Error> {
+        let config = Config::default()
+            .with_poll_interval(std::time::Duration::from_secs(1)) // Fallback for unsupported filesystems
+            .with_compare_contents(true);
+
+        let mut watcher = RecommendedWatcher::new(
+            move |res: Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    // Only forward relevant events
+                    match event.kind {
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+                            let _ = tx.blocking_send(event);
+                        }
+                        _ => {}
+                    }
+                }
+            },
+            config,
+        )?;
+
+        // Start watching the path
+        if path.is_dir() {
+            watcher.watch(&path, RecursiveMode::Recursive)?;
+        } else {
+            // For files, watch the file itself and its parent directory
+            watcher.watch(&path, RecursiveMode::NonRecursive)?;
+            if let Some(parent) = path.parent() {
+                watcher.watch(parent, RecursiveMode::NonRecursive)?;
+            }
+        }
+
+        Ok(watcher)
+    }
+
+    // Process file system events
+    async fn process_events(mut rx: Receiver<Event>, resource_manager: Arc<ResourceManager>, uri: String) {
+        use tokio::time::{interval, Duration};
+
+        // Use debouncing to avoid rapid-fire notifications
+        let mut debounce_timer = interval(Duration::from_millis(300));
+        let mut has_changes = false;
 
         loop {
-            interval.tick().await;
+            tokio::select! {
+                Some(event) = rx.recv() => {
+                    debug!("File event detected: {:?} for {}", event.kind, uri);
+                    has_changes = true;
 
-            // Skip if file watching is disabled
-            if !*self.file_watching_enabled.lock().unwrap() {
-                continue;
-            }
-
-            // Get a list of all currently subscribed URIs
-            let subscribed_uris = match self.get_all_subscribed_uris() {
-                Ok(uris) => uris,
-                Err(e) => {
-                    error!("Failed to get subscribed URIs: {}", e);
-                    continue;
-                }
-            };
-
-            // Check each URI for changes
-            for uri in subscribed_uris {
-                match self.check_for_changes(&uri).await {
-                    Ok(changed) => {
-                        if changed {
-                            debug!("Detected change for URI: {}", uri);
-
-                            // Notify subscribers
-                            if let Err(e) = self.resource_manager.notify_resource_updated(&uri).await {
-                                error!("Failed to notify resource updated for {}: {}", uri, e);
-                            }
+                    // Skip waiting if it's a deletion event
+                    if matches!(event.kind, EventKind::Remove(_)) {
+                        // Notify immediately for removals
+                        if let Err(e) = resource_manager.notify_resource_updated(&uri).await {
+                            error!("Failed to notify resource removed: {}", e);
                         }
+                        has_changes = false;
+                        continue;
                     }
-                    Err(e) => {
-                        error!("Failed to check for changes in {}: {}", uri, e);
+
+                    // For other events, reset the debounce timer
+                    debounce_timer = interval(Duration::from_millis(300));
+                }
+
+                _ = debounce_timer.tick() => {
+                    if has_changes {
+                        if let Err(e) = resource_manager.notify_resource_updated(&uri).await {
+                            error!("Failed to notify resource updated: {}", e);
+                        }
+                        has_changes = false;
                     }
                 }
+
+                else => break,
             }
         }
     }
 
-    /// Get all URIs that have subscribers
-    fn get_all_subscribed_uris(&self) -> Result<Vec<String>, ResourceError> {
-        // This is a simplification - in a real implementation we might want to store
-        // this information more efficiently rather than checking all entries
-        let subscribers = self
-            .resource_manager
-            .subscribers
-            .read()
-            .map_err(|e| ResourceError::Custom(format!("Failed to acquire read lock for subscribers: {}", e)))?;
+    // Clean up watcher when unsubscribing
+    async fn remove_watcher(&self, uri: &str) -> Result<(), ResourceError> {
+        let mut watchers = self.watchers.lock().await;
 
-        let mut uris = Vec::new();
-        for (uri, subs) in subscribers.iter() {
-            if !subs.is_empty() {
-                uris.push(uri.clone());
+        if let Some(handle) = watchers.get_mut(uri) {
+            handle.subscriber_count -= 1;
+
+            // Remove the watcher if no subscribers left
+            if handle.subscriber_count == 0 {
+                watchers.remove(uri);
+                debug!("Removed watcher for {}, no more subscribers", uri);
             }
         }
 
-        Ok(uris)
-    }
-
-    /// Check if a file or directory has changed since last check
-    async fn check_for_changes(&self, uri: &str) -> Result<bool, ResourceError> {
-        // Convert URI to path
-        let path = self.uri_to_path(uri)?;
-
-        // Get current metadata
-        let metadata = fs::metadata(&path).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                ResourceError::NotFound(format!("File not found: {}", path.display()))
-            } else {
-                ResourceError::Reading(format!("Failed to read file metadata: {}", e))
-            }
-        })?;
-
-        let last_modified = metadata
-            .modified()
-            .map_err(|e| ResourceError::Reading(format!("Failed to get last modified time: {}", e)))?;
-
-        // Check cache for previous metadata
-        let mut cache = self.cache.lock().unwrap();
-        let has_changed = if let Some(cached_meta) = cache.get(uri) {
-            last_modified > cached_meta.last_modified
-        } else {
-            // First time seeing this file, consider it unchanged
-            false
-        };
-
-        // Update cache
-        if metadata.is_file() {
-            cache.insert(
-                uri.to_string(),
-                FileMetadata {
-                    path: path.clone(),
-                    mime_type: Self::guess_mime_type(&path),
-                    is_binary: Self::guess_mime_type(&path).map_or(false, |mt| Self::is_binary(&mt)),
-                    last_modified,
-                },
-            );
-        }
-
-        Ok(has_changed)
+        Ok(())
     }
 
     /// Get a file's MIME type based on its extension
@@ -397,40 +410,24 @@ impl ResourceDef for FileSystem {
             return Err(ResourceError::NotFound(format!("Cannot subscribe to non-existent resource: {}", uri)));
         }
 
-        // Enable file watching when we have subscribers
-        {
-            let mut watching = self.file_watching_enabled.lock().unwrap();
-            *watching = true;
-        }
+        // Add the subscriber
+        self.resource_manager.add_subscriber(&uri, client_id.clone())?;
 
-        // Add a placeholder subscriber ID - in a real implementation, you'd use a unique client ID
-        self.resource_manager.add_subscriber(&uri, client_id)?;
+        // Set up watcher for this resource
+        self.create_watcher(uri.clone(), path).await?;
 
-        info!("Subscribed to resource: {}", uri);
+        info!("Subscribed to resource: {} for client: {}", uri, client_id);
         Ok(())
     }
 
     async fn unsubscribe(&self, uri: String, client_id: ClientId) -> Result<(), ResourceError> {
-        // Remove the placeholder subscriber
-        self.resource_manager.remove_subscriber(&uri, client_id)?;
+        // Remove the subscriber
+        self.resource_manager.remove_subscriber(&uri, client_id.clone())?;
 
-        // Check if we still have any subscribers
-        let has_any_subscribers = {
-            let subscribers =
-                self.resource_manager.subscribers.read().map_err(|e| {
-                    ResourceError::Custom(format!("Failed to acquire read lock for subscribers: {}", e))
-                })?;
+        // Clean up the watcher if needed
+        self.remove_watcher(&uri).await?;
 
-            !subscribers.is_empty()
-        };
-
-        // Disable file watching if we don't have any subscribers left
-        if !has_any_subscribers {
-            let mut watching = self.file_watching_enabled.lock().unwrap();
-            *watching = false;
-        }
-
-        info!("Unsubscribed from resource: {}", uri);
+        info!("Unsubscribed from resource: {} for client: {}", uri, client_id);
         Ok(())
     }
 
@@ -611,6 +608,7 @@ mod tests {
             _ => panic!("Expected NotFound error"),
         }
     }
+
     #[tokio::test]
     async fn test_subscription_and_notification() {
         // Create a temporary directory
@@ -627,7 +625,7 @@ mod tests {
         let fs_resource = FileSystem::new(temp_dir.path());
 
         // Set up a notification callback
-        let notification_received = Arc::new(Mutex::new(false));
+        let notification_received = Arc::new(StdMutex::new(false));
         let notification_received_clone = notification_received.clone();
 
         let callback: NotificationCallback = Box::new(move |client_id, params| {
@@ -642,29 +640,24 @@ mod tests {
 
         fs_resource.resource_manager.set_notification_callback(callback).unwrap();
 
-        // Subscribe to the file - disambiguate the trait method
+        let client_id = ClientId::new();
+
+        // Subscribe to the file
         let uri = format!("file://{}", file_path.display());
-        ResourceDef::subscribe(&fs_resource, uri.clone(), ClientId::new()).await.unwrap();
+        ResourceDef::subscribe(&fs_resource, uri.clone(), client_id.clone()).await.unwrap();
 
         // Check that we're subscribed
         assert!(fs_resource.resource_manager.has_subscribers(&uri).unwrap());
 
-        // Modify the file to trigger a notification
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        {
-            let mut file = File::create(&file_path).unwrap();
-            write!(file, "Hello, updated world!").unwrap();
-        }
-
-        // Manually trigger the change detection (in a real scenario this would be done by the watcher task)
-        assert!(fs_resource.check_for_changes(&uri).await.unwrap());
+        // Simulate a file change notification
+        // In a real scenario, this would be triggered by the file system watcher
         fs_resource.resource_manager.notify_resource_updated(&uri).await.unwrap();
 
         // Check that the notification was received
         assert!(*notification_received.lock().unwrap());
 
-        // Unsubscribe - also disambiguate
-        ResourceDef::unsubscribe(&fs_resource, uri.clone(), ClientId::new()).await.unwrap();
+        // Unsubscribe
+        ResourceDef::unsubscribe(&fs_resource, uri.clone(), client_id.clone()).await.unwrap();
 
         // Check that we're no longer subscribed
         assert!(!fs_resource.resource_manager.has_subscribers(&uri).unwrap());

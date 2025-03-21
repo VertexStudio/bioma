@@ -1,7 +1,6 @@
 use crate::schema::{ReadResourceResult, Resource, ResourceTemplate, ResourceUpdatedNotificationParams};
 use crate::ClientId;
 use serde::Serialize;
-use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -100,9 +99,6 @@ pub trait ResourceReadHandler: Send + Sync {
     fn get_resource_manager(&self) -> Option<Arc<ResourceManager>> {
         None
     }
-
-    /// Returns self as Any for downcasting to concrete types
-    fn as_any(&self) -> &dyn Any;
 }
 
 /// Trait for defining a concrete resource implementation
@@ -214,10 +210,6 @@ impl<T: ResourceDef + Send + Sync + 'static> ResourceReadHandler for T {
 
     fn get_resource_manager(&self) -> Option<Arc<ResourceManager>> {
         self.provide_resource_manager()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
