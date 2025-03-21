@@ -49,7 +49,7 @@ ENV PATH="/home/bioma/onnxruntime/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:
 ENV LD_LIBRARY_PATH="/home/bioma/onnxruntime/lib:/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
 
 # Build the application
-RUN cargo build --release
+RUN cargo build --release -p cognition --bin cognition-server
 
 # Ensure the binary is in the correct location
 RUN cp target/release/cognition-server /app/

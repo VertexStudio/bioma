@@ -1,6 +1,6 @@
 {
     "engine": {
-      "endpoint": "wss://4s5tvwnrsqlir8-9123.proxy.runpod.net/",
+      "endpoint": "wss://nx7bp2n8l2ck59-9123.proxy.runpod.net/",
       "namespace": "dev",
       "database": "bioma",
       "username": "root",
