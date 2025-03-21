@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info};
 
 /// Metadata associated with client requests, used for routing responses
@@ -91,18 +91,18 @@ pub enum TransportConfig {
 #[derive(Clone)]
 struct NotificationManager {
     /// The active transport used to deliver notifications
-    transport: Arc<Mutex<Option<TransportType>>>,
+    transport: Arc<RwLock<Option<TransportType>>>,
 }
 
 impl NotificationManager {
     /// Creates a new notification manager with no transport configured
     fn new() -> Self {
-        Self { transport: Arc::new(Mutex::new(None)) }
+        Self { transport: Arc::new(RwLock::new(None)) }
     }
 
     /// Sets the active transport for notification delivery
-    fn set_transport(&self, transport: TransportType) {
-        let mut t = self.transport.blocking_lock();
+    async fn set_transport(&self, transport: TransportType) {
+        let mut t = self.transport.write().await;
         *t = Some(transport);
     }
 
@@ -118,7 +118,7 @@ impl NotificationManager {
     ///
     /// Result indicating success or failure of notification delivery
     async fn send_notification(&self, client_id: ClientId, method: &str, params: impl Serialize) -> Result<()> {
-        let transport_guard = self.transport.lock().await;
+        let transport_guard = self.transport.read().await;
         if let Some(transport) = &*transport_guard {
             // Create the notification
             let params_value = serde_json::to_value(params).map_err(|e| {
@@ -212,7 +212,7 @@ pub async fn start<T: ModelContextProtocolServer>(_name: &str, transport: Transp
     };
 
     // Set up the notification manager with the transport
-    notification_manager.set_transport(transport_type.clone());
+    notification_manager.set_transport(transport_type.clone()).await;
 
     // Setup resources and their notification callbacks
     for resource in server.get_resources() {
