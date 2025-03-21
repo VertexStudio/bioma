@@ -90,7 +90,7 @@ EXPOSE 7123
 VOLUME ["/data"]
 
 # Configurar el nivel de log
-ENV RUST_LOG=debug
+ENV RUST_LOG=info
 
 # Comando para iniciar la aplicación
 ENTRYPOINT ["/app/cognition-server"]
