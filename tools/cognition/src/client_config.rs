@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bioma_actor::EngineOptions;
-use bioma_tool::client::ClientConfig as ToolClientConfig;
+use bioma_mcp::client::ClientConfig as ToolClientConfig;
 use clap::Parser;
 use hostname;
 use serde::{Deserialize, Serialize};

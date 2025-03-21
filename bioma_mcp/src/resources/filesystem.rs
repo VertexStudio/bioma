@@ -18,8 +18,10 @@ use url::Url;
 #[derive(Clone, Serialize)]
 pub struct FileSystem {
     /// Base directory for file accesses
+    #[serde(skip)]
     base_dir: Arc<PathBuf>,
     /// Cached file metadata
+    #[serde(skip)]
     cache: Arc<StdMutex<HashMap<String, FileMetadata>>>,
     /// Resource manager for subscriptions
     #[serde(skip)]

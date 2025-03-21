@@ -74,19 +74,19 @@ Examples:
 With stdio transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client stdio target/release/examples/mcp_server
+cargo run --release -p bioma_mcp --example mcp_client stdio target/release/examples/mcp_server
 ```
 
 With SSE transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client sse --endpoint http://127.0.0.1:8090
+cargo run --release -p bioma_mcp --example mcp_client sse --endpoint http://127.0.0.1:8090
 ```
 
 With WebSocket transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client ws --endpoint ws://127.0.0.1:9090
+cargo run --release -p bioma_mcp --example mcp_client ws --endpoint ws://127.0.0.1:9090
 ```
 
 #### MCP Server
@@ -94,25 +94,25 @@ cargo run --release -p bioma_tool --example mcp_client ws --endpoint ws://127.0.
 Building the server:
 
 ```
-cargo build --release -p bioma_tool --example mcp_server
+cargo build --release -p bioma_mcp --example mcp_server
 ```
 
 With stdio transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_server stdio
+cargo run --release -p bioma_mcp --example mcp_server stdio
 ```
 
 With SSE transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_server sse --endpoint 127.0.0.1:8090
+cargo run --release -p bioma_mcp --example mcp_server sse --endpoint 127.0.0.1:8090
 ```
 
 With WebSocket transport:
 
 ```
-cargo run --release -p bioma_tool --example mcp_server ws --endpoint 127.0.0.1:9090
+cargo run --release -p bioma_mcp --example mcp_server ws --endpoint 127.0.0.1:9090
 ```
 
 #### Other Examples
@@ -126,5 +126,5 @@ npx github:VertexStudio/inspector#feature/ui-ux ./target/release/examples/mcp_se
 Connecting to docker server:
 
 ```
-cargo run --release -p bioma_tool --example mcp_client stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
+cargo run --release -p bioma_mcp --example mcp_client stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
 ```
