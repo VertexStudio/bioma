@@ -2,9 +2,10 @@ use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
     CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesRequestParams,
-    ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsResult,
-    ReadResourceRequestParams, ServerCapabilities,
+    InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
+    ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
+    ListResourcesResult, ListToolsRequestParams, ListToolsResult, PingRequestParams, ReadResourceRequestParams,
+    ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
@@ -135,8 +136,15 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
         }
     });
 
-    io_handler.add_notification_with_meta("notifications/initialized", |_params, _meta: ServerMetadata| {
-        info!("Received initialized notification");
+    io_handler.add_notification_with_meta("notifications/initialized", |params: Params, _meta: ServerMetadata| {
+        match params.parse::<InitializedNotificationParams>() {
+            Ok(_params) => {
+                info!("Received initialized notification");
+            }
+            Err(e) => {
+                error!("Failed to parse initialized notification params: {}", e);
+            }
+        }
     });
 
     io_handler.add_notification_with_meta("cancelled", move |params: Params, _meta: ServerMetadata| {
@@ -154,10 +162,18 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
         }
     });
 
-    io_handler.add_method_with_meta("ping", move |_params, _meta: ServerMetadata| {
+    io_handler.add_method_with_meta("ping", move |params: Params, _meta: ServerMetadata| {
         debug!("Handling ping request");
 
         async move {
+            let _params: PingRequestParams = match params.parse() {
+                Ok(params) => params,
+                Err(e) => {
+                    error!("Failed to parse ping parameters: {}", e);
+                    return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                }
+            };
+
             info!("Successfully handled ping request");
             Ok(serde_json::json!({}))
         }
@@ -374,13 +390,24 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
 
     io_handler.add_method_with_meta("prompts/list", {
         let server = server.clone();
-        move |_params, _meta: ServerMetadata| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling prompts/list request");
 
-            let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
-
             async move {
+                let params: ListPromptsRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse prompts/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Prompts list request with cursor: {:?}", params.cursor);
+
+                let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
+
                 let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
 
                 info!("Successfully handled prompts/list request");
@@ -429,11 +456,22 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
 
     io_handler.add_method_with_meta("tools/list", {
         let client_tools = tools.clone();
-        move |_params, meta: ServerMetadata| {
+        move |params: Params, meta: ServerMetadata| {
             debug!("Handling tools/list request");
             let client_tools = client_tools.clone();
 
             async move {
+                let params: ListToolsRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse tools/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Tools list request with cursor: {:?}", params.cursor);
+
                 let tools = if let Some(tools) = client_tools.read().await.get(&meta.client_id) {
                     tools.iter().map(|tool| tool.def()).collect::<Vec<_>>()
                 } else {
