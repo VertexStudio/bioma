@@ -1,13 +1,16 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_tool::client::{
-    CallTool, ClientConfig, ListTools, ModelContextProtocolClientActor, ModelContextProtocolClientError, ServerConfig,
+use bioma_tool::client::{ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
+use bioma_tool::schema::{
+    CallToolRequestParams, CallToolResult, Implementation, ListToolsRequestParams, ListToolsResult, ServerCapabilities,
 };
-use bioma_tool::schema::{CallToolRequestParams, CallToolResult, ListToolsResult};
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -238,6 +241,118 @@ impl Message<ToolCall> for ToolsHub {
             })
             .await?;
         }
+        Ok(())
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ModelContextProtocolClientError {
+    #[error("System error: {0}")]
+    System(#[from] SystemActorError),
+    #[error("Invalid transport type: {0}")]
+    Transport(Cow<'static, str>),
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
+    #[error("Request: {0}")]
+    Request(Cow<'static, str>),
+    #[error("MCP Client not initialized")]
+    ClientNotInitialized,
+    #[error("Client error: {0}")]
+    Client(#[from] ClientError),
+}
+
+impl ActorError for ModelContextProtocolClientError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelContextProtocolClientActor {
+    server: ServerConfig,
+    tools: Option<ListToolsResult>,
+    #[serde(skip)]
+    client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
+    server_capabilities: Option<ServerCapabilities>,
+}
+
+impl ModelContextProtocolClientActor {
+    pub fn new(server: ServerConfig) -> Self {
+        ModelContextProtocolClientActor { server, tools: None, client: None, server_capabilities: None }
+    }
+}
+
+impl Actor for ModelContextProtocolClientActor {
+    type Error = ModelContextProtocolClientError;
+
+    async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
+        info!("{} Started (server: {})", ctx.id(), self.server.name);
+
+        let mut client = ModelContextProtocolClient::new(self.server.clone()).await?;
+
+        // Initialize the client
+        let init_result =
+            client.initialize(Implementation { name: self.server.name.clone(), version: "0.1.0".to_string() }).await?;
+        info!("Server {} capabilities: {:?}", self.server.name, init_result.capabilities);
+        self.server_capabilities = Some(init_result.capabilities);
+
+        // Notify the server that the client has initialized
+        client.initialized().await?;
+
+        self.client = Some(Arc::new(Mutex::new(client)));
+
+        let mut stream = ctx.recv().await?;
+        while let Some(Ok(frame)) = stream.next().await {
+            if let Some(input) = frame.is::<CallTool>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {} {:?}", ctx.id(), self.server.name, err);
+                }
+            } else if let Some(input) = frame.is::<ListTools>() {
+                let response = self.reply(ctx, &input, &frame).await;
+                if let Err(err) = response {
+                    error!("{} {} {:?}", ctx.id(), self.server.name, err);
+                }
+            }
+        }
+
+        info!("{} Finished (server: {})", ctx.id(), self.server.name);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListTools(pub Option<ListToolsRequestParams>);
+
+impl Message<ListTools> for ModelContextProtocolClientActor {
+    type Response = ListToolsResult;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &ListTools,
+    ) -> Result<(), ModelContextProtocolClientError> {
+        let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
+        let mut client = client.lock().await;
+        let response = client.list_tools(message.0.clone()).await?;
+        self.tools = Some(response.clone());
+        self.save(ctx).await?;
+        ctx.reply(response).await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallTool(pub CallToolRequestParams);
+
+impl Message<CallTool> for ModelContextProtocolClientActor {
+    type Response = CallToolResult;
+
+    async fn handle(
+        &mut self,
+        ctx: &mut ActorContext<Self>,
+        message: &CallTool,
+    ) -> Result<(), ModelContextProtocolClientError> {
+        let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
+        let mut client = client.lock().await;
+        let response = client.call_tool(message.0.clone()).await?;
+        ctx.reply(response).await?;
         Ok(())
     }
 }
