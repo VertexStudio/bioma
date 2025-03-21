@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bioma_tool::{
+use bioma_mcp::{
     client::{ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
     schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
 };

@@ -1,9 +1,9 @@
 use anyhow::Result;
-use bioma_tool::client::SseConfig as SseClientConfig;
-use bioma_tool::server::SseConfig as SseServerConfig;
-use bioma_tool::transport::sse::{SseEvent, SseTransport};
-use bioma_tool::transport::Transport;
-use bioma_tool::{ClientId, JsonRpcMessage};
+use bioma_mcp::client::SseConfig as SseClientConfig;
+use bioma_mcp::server::SseConfig as SseServerConfig;
+use bioma_mcp::transport::sse::{SseEvent, SseTransport};
+use bioma_mcp::transport::Transport;
+use bioma_mcp::{ClientId, JsonRpcMessage};
 use serde_json::json;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -49,7 +49,7 @@ async fn test_sse_event() {
 
     // Test shutdown event
     let shutdown_event =
-        SseEvent::Shutdown(bioma_tool::transport::sse::Shutdown { reason: "test shutdown".to_string() });
+        SseEvent::Shutdown(bioma_mcp::transport::sse::Shutdown { reason: "test shutdown".to_string() });
     let shutdown_str = shutdown_event.to_sse_string().unwrap();
     assert!(shutdown_str.contains("event: shutdown"), "Event type should be 'shutdown'");
     assert!(shutdown_str.contains("test shutdown"), "Event should contain the shutdown reason");

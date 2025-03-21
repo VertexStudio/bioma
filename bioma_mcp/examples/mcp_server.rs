@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use bioma_tool::{
+use bioma_mcp::{
     prompts::{self, PromptGetHandler},
     resources::{self, ResourceReadHandler},
     schema::{
@@ -150,5 +150,5 @@ async fn main() -> Result<()> {
     // Use the specified base directory
     let server = McpServer::with_base_dir(args.base_dir.clone());
 
-    bioma_tool::server::start("mcp_server", transport, server).await
+    bioma_mcp::server::start("mcp_server", transport, server).await
 }

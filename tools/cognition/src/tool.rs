@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_tool::client::{ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
-use bioma_tool::schema::{
+use bioma_mcp::client::{ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
+use bioma_mcp::schema::{
     CallToolRequestParams, CallToolResult, Implementation, ListToolsRequestParams, ListToolsResult, ServerCapabilities,
 };
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};

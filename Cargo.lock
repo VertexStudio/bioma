@@ -991,6 +991,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "bioma_mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.1",
+ "bon",
+ "bytes",
+ "clap",
+ "derive_more 0.99.19",
+ "futures",
+ "futures-util",
+ "html2md",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-util",
+ "jsonrpc-core",
+ "lazy_static",
+ "mockito",
+ "notify",
+ "rand 0.8.5",
+ "readability-rs",
+ "reqwest 0.12.15",
+ "robotstxt",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite 0.26.2",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "bioma_rag"
 version = "0.1.0"
 dependencies = [
@@ -1029,45 +1068,6 @@ dependencies = [
  "uuid",
  "walkdir",
  "zip",
-]
-
-[[package]]
-name = "bioma_tool"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.13.1",
- "bon",
- "bytes",
- "clap",
- "derive_more 0.99.19",
- "futures",
- "futures-util",
- "html2md",
- "http-body-util",
- "hyper 1.6.0",
- "hyper-util",
- "jsonrpc-core",
- "lazy_static",
- "mockito",
- "notify",
- "rand 0.8.5",
- "readability-rs",
- "reqwest 0.12.15",
- "robotstxt",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.12",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite 0.26.2",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -1567,8 +1567,8 @@ dependencies = [
  "base64 0.22.1",
  "bioma_actor",
  "bioma_llm",
+ "bioma_mcp",
  "bioma_rag",
- "bioma_tool",
  "chrono",
  "clap",
  "futures-util",
@@ -2099,8 +2099,8 @@ dependencies = [
  "anyhow",
  "bioma_actor",
  "bioma_llm",
+ "bioma_mcp",
  "bioma_rag",
- "bioma_tool",
  "clap",
  "dotenv",
  "ollama-rs",
@@ -2739,8 +2739,8 @@ dependencies = [
  "bioma_actor",
  "bioma_behavior",
  "bioma_llm",
+ "bioma_mcp",
  "bioma_rag",
- "bioma_tool",
  "clap",
  "goose",
  "once_cell",
