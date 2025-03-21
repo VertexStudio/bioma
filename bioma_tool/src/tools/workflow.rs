@@ -179,56 +179,30 @@ impl Default for Workflow {
 impl ToolDef for Workflow {
     const NAME: &'static str = "workflow";
 
-    const DESCRIPTION: &'static str = r#"# Advanced Workflow Tool
+    const DESCRIPTION: &'static str = r#"# Workflow Tool
 
-This tool helps you manage dynamic problem-solving through a flexible, adaptable process that evolves as your understanding deepens. Use it to structure complex multi-step workflows while allowing for reflection, course correction, and exploratory thinking paths.
+    Manages multi-step problem-solving processes with support for sequential progression, branching paths, and step revisions.
 
-## When You Should Use This Tool
+    Args:
+        step_description: Detailed description of the current step
+        step_number: Current position in sequence
+        total_steps: Estimated total steps needed
+        next_step_needed: Whether another step is required
+        is_step_revision: Whether this revises a previous step
+        revises_step: If revising, which step number
+        branch_from_step: If branching, from which step
+        branch_id: Branch identifier if creating a branch
+        needs_more_steps: Whether additional steps are required
 
-- When breaking down complex problems requiring multiple steps
-- For planning processes that may need revision as they develop
-- During analysis requiring course correction or branching exploration
-- When tackling problems where the full scope isn't initially clear
-- For tasks needing persistent context across steps
-- To filter irrelevant information while maintaining focus
+    Returns:
+        JSON response with workflow status and visualization
 
-## Core Concepts
-
-### Steps
-Structure your workflow with adaptable steps, each containing:
-- **step_number**: Your current position in the sequence
-- **total_steps**: Your estimated total steps (adjust as you progress)
-- **step_description**: Detailed description of your current thinking
-- **next_step_needed**: Set to true if you need more steps
-- **needs_more_steps**: Set to true to continue even after reaching what seemed like the "final" step
-
-### Branching
-Create alternative paths when you want to explore different approaches:
-- **branch_id**: Give your thought branch a unique identifier
-- **branch_from_step**: Specify which step number serves as your branching point
-
-### Revisions
-Question or modify previous steps as your understanding evolves:
-- **is_step_revision**: Set to true when revising previous thinking
-- **revises_step**: Indicate which step number you're reconsidering
-
-### Visualization
-The tool provides a visual representation of your thinking process:
-- Completed steps: [✓ 1]
-- Revised steps: [🔄 2]
-- Upcoming steps: [ 3 ]
-- Branch indicators: → [Branch: alternative_approach]
-
-## How You Should Use This Tool
-
-- Start with an initial estimate of needed steps, but be ready to adjust
-- Feel free to question or revise your previous thinking
-- Don't hesitate to add more steps even after reaching what seemed like the end
-- Express uncertainty when present
-- Mark steps that revise previous thinking or branch into new paths
-- Ignore information that is irrelevant to your current step
-- Only set next_step_needed to false when truly done
-"#;
+    Use this tool to:
+    - Break down complex problems into sequential steps
+    - Create alternative solution paths through branching
+    - Revise previous steps as your understanding evolves
+    - Maintain context across multi-step reasoning processes
+    "#;
     type Args = WorkflowStep;
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
@@ -299,27 +273,41 @@ impl Workflow {
         Self { state: Arc::new(Mutex::new(WorkflowState::default())), allow_branches, max_steps }
     }
 
-    /// Generate a simple text visualization of workflow progress
+    /// Generate a text visualization of workflow progress with markdown formatting
     fn format_workflow_progress(&self, steps: &[WorkflowStep], total_steps: i32) -> String {
         let mut result = String::new();
 
+        // Add a header
+        result.push_str("## Workflow Progress\n\n");
+
+        // Format each step with clear prefixes similar to the Python version
         for i in 1..=total_steps {
             let step = steps.iter().find(|s| s.step_number == i);
 
             if let Some(s) = step {
+                // Format based on step type (regular, revision, or branch)
                 if s.is_step_revision == Some(true) {
-                    result.push_str(&format!("[🔄 {}] → ", i));
+                    result.push_str(&format!(
+                        "🔄 **Step {}/{}** (revising step {})\n",
+                        i,
+                        total_steps,
+                        s.revises_step.unwrap_or(0)
+                    ));
+                } else if s.branch_id.is_some() {
+                    result.push_str(&format!(
+                        "🌿 **Step {}/{}** (branch from step {}, ID: {})\n",
+                        i,
+                        total_steps,
+                        s.branch_from_step.unwrap_or(0),
+                        s.branch_id.as_ref().unwrap_or(&String::from("unknown"))
+                    ));
                 } else {
-                    result.push_str(&format!("[✓ {}] → ", i));
+                    result.push_str(&format!("✓ **Step {}/{}**\n", i, total_steps));
                 }
             } else {
-                result.push_str(&format!("[ {} ] → ", i));
+                // Future step
+                result.push_str(&format!("💭 **Step {}/{}** (planned)\n", i, total_steps));
             }
-        }
-
-        // Remove trailing arrow
-        if result.ends_with(" → ") {
-            result.truncate(result.len() - 4);
         }
 
         result
