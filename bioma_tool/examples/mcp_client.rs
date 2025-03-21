@@ -102,15 +102,83 @@ async fn main() -> Result<()> {
         Ok(resources_result) => {
             info!("Available resources: {:?}", resources_result.resources);
 
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            // Look for the filesystem resource and read files from it
+            if let Some(filesystem) = resources_result.resources.iter().find(|r| r.name == "filesystem") {
+                info!("Found filesystem resource: {}", filesystem.uri);
 
-            // Read resource
-            if resources_result.resources.len() > 0 {
-                info!("Reading resource...");
-                let resource_result = client
-                    .read_resource(ReadResourceRequestParams { uri: resources_result.resources[0].uri.clone() })
-                    .await?;
-                info!("Resource content: {:?}", resource_result.contents);
+                // Read README.md file
+                let readme_uri = "file:///bioma/README.md";
+                info!("Reading file: {}", readme_uri);
+
+                let readme_result =
+                    client.read_resource(ReadResourceRequestParams { uri: readme_uri.to_string() }).await;
+                match readme_result {
+                    Ok(result) => {
+                        if let Some(content) = result.contents.first() {
+                            if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
+                                info!(
+                                    "README.md content preview (first 100 chars): {}",
+                                    text.chars().take(100).collect::<String>()
+                                );
+                            } else if let Some(blob) = content.get("blob").and_then(|b| b.as_str()) {
+                                info!("README.md is a binary file with {} bytes", blob.len());
+                            }
+                        }
+                    }
+                    Err(e) => error!("Error reading README.md: {:?}", e),
+                }
+
+                // Then read the root directory
+                let dir_uri = "file:///";
+                info!("Reading directory: {}", dir_uri);
+
+                let dir_result = client.read_resource(ReadResourceRequestParams { uri: dir_uri.to_string() }).await;
+                match dir_result {
+                    Ok(result) => {
+                        info!("Directory contents:");
+                        for content in result.contents {
+                            if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
+                                info!("- {}", text);
+                            }
+                        }
+                    }
+                    Err(e) => error!("Error reading root directory: {:?}", e),
+                }
+
+                // Try to subscribe to the directory if subscription is supported
+                info!("Checking for resource templates...");
+                let templates_result =
+                    client.request("resources/templates/list".to_string(), serde_json::json!({})).await;
+                match templates_result {
+                    Ok(_) => {
+                        info!("Trying to subscribe to filesystem changes...");
+                        // Use the root URI for subscription
+                        let subscription_uri = "file:///";
+                        let subscribe_result = client
+                            .request("resources/subscribe".to_string(), serde_json::json!({ "uri": subscription_uri }))
+                            .await;
+
+                        match subscribe_result {
+                            Ok(_) => info!("Successfully subscribed to filesystem changes"),
+                            Err(e) => info!("Subscription not supported or failed: {:?}", e),
+                        }
+                    }
+                    Err(e) => info!("Resource templates not supported: {:?}", e),
+                }
+            } else {
+                info!("Filesystem resource not found, falling back to readme resource");
+
+                // Use the first available resource (likely the readme from before)
+                if !resources_result.resources.is_empty() {
+                    let read_result = client
+                        .read_resource(ReadResourceRequestParams { uri: resources_result.resources[0].uri.clone() })
+                        .await;
+
+                    match read_result {
+                        Ok(result) => info!("Resource content: {:?}", result),
+                        Err(e) => error!("Error reading resource: {:?}", e),
+                    }
+                }
             }
         }
         Err(e) => error!("Error listing resources: {:?}", e),
@@ -122,7 +190,12 @@ async fn main() -> Result<()> {
     info!("Listing tools...");
     let tools_result = client.list_tools(None).await;
     match tools_result {
-        Ok(tools_result) => info!("Available tools: {:#?}", tools_result.tools),
+        Ok(tools_result) => {
+            info!("Available tools:");
+            for tool in tools_result.tools {
+                info!("- {}", tool.name);
+            }
+        }
         Err(e) => error!("Error listing tools: {:?}", e),
     }
 
