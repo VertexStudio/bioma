@@ -177,7 +177,7 @@ impl Default for Workflow {
 }
 
 impl ToolDef for Workflow {
-    const NAME: &'static str = "mcp_bioma_workflow";
+    const NAME: &'static str = "workflow";
 
     const DESCRIPTION: &'static str = r#"# Advanced Workflow Tool
 
