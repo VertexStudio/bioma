@@ -146,7 +146,7 @@ pub trait ResourceDef: Serialize {
         None
     }
 
-    /// Reads the resource with strongly-typed arguments
+    /// Reads the resource
     fn read<'a>(&'a self, uri: String) -> impl Future<Output = Result<ReadResourceResult, ResourceError>> + Send + 'a;
 
     /// Checks if this resource supports subscription

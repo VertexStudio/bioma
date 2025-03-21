@@ -5,7 +5,7 @@ use crate::schema::{
     InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
     ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
     ListResourcesResult, ListToolsRequestParams, ListToolsResult, PingRequestParams, ReadResourceRequestParams,
-    ResourceUpdatedNotificationParams, ServerCapabilities,
+    ResourceUpdatedNotificationParams, ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
@@ -171,16 +171,7 @@ impl NotificationManager {
     }
 }
 
-pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
-    let server = T::new();
-    start_with_impl(name, transport, server).await
-}
-
-pub async fn start_with_impl<T: ModelContextProtocolServer>(
-    _name: &str,
-    transport: TransportConfig,
-    server: T,
-) -> Result<()> {
+pub async fn start<T: ModelContextProtocolServer>(_name: &str, transport: TransportConfig, server: T) -> Result<()> {
     let server = Arc::new(server);
 
     // Create a message handler for the server
@@ -440,12 +431,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
             async move {
                 debug!("Handling resources/subscribe request");
 
-                #[derive(Deserialize)]
-                struct SubscribeParams {
-                    uri: String,
-                }
-
-                let params: SubscribeParams = match params.parse() {
+                let params: SubscribeRequestParams = match params.parse() {
                     Ok(params) => params,
                     Err(e) => {
                         error!("Failed to parse resources/subscribe parameters: {}", e);
@@ -491,12 +477,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
             async move {
                 debug!("Handling resources/unsubscribe request");
 
-                #[derive(Deserialize)]
-                struct UnsubscribeParams {
-                    uri: String,
-                }
-
-                let params: UnsubscribeParams = match params.parse() {
+                let params: UnsubscribeRequestParams = match params.parse() {
                     Ok(params) => params,
                     Err(e) => {
                         error!("Failed to parse resources/unsubscribe parameters: {}", e);
