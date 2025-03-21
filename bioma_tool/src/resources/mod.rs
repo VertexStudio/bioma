@@ -1,5 +1,7 @@
-use crate::schema::{ReadResourceResult, Resource, ResourceTemplate};
+use crate::schema::{ReadResourceResult, Resource, ResourceTemplate, ResourceUpdatedNotificationParams};
+use crate::ClientId;
 use serde::Serialize;
+use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -36,6 +38,16 @@ pub enum ResourceError {
     SubscriptionNotSupported(String),
 }
 
+/// Type for notification callback functions
+pub type NotificationCallback = Box<
+    dyn Fn(
+            ClientId,
+            ResourceUpdatedNotificationParams,
+        ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Trait for handling resource read with dynamic dispatch
 pub trait ResourceReadHandler: Send + Sync {
     /// Reads the resource with the given arguments
@@ -63,18 +75,29 @@ pub trait ResourceReadHandler: Send + Sync {
     }
 
     /// Subscribe to changes for a resource
-    fn subscribe<'a>(&'a self, _uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+    fn subscribe<'a>(
+        &'a self,
+        _uri: String,
+        _client_id: ClientId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
         Box::pin(async move {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         })
     }
 
     /// Unsubscribe from changes for a resource
-    fn unsubscribe<'a>(&'a self, _uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+    fn unsubscribe<'a>(
+        &'a self,
+        _uri: String,
+        _client_id: ClientId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
         Box::pin(async move {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         })
     }
+
+    /// Returns self as Any for downcasting to concrete types
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Trait for defining a concrete resource implementation
@@ -116,14 +139,22 @@ pub trait ResourceDef: Serialize {
     }
 
     /// Subscribe to changes for a resource
-    fn subscribe<'a>(&'a self, _uri: String) -> impl Future<Output = Result<(), ResourceError>> + Send + 'a {
+    fn subscribe<'a>(
+        &'a self,
+        _uri: String,
+        _client_id: ClientId,
+    ) -> impl Future<Output = Result<(), ResourceError>> + Send + 'a {
         async move {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         }
     }
 
     /// Unsubscribe from changes for a resource
-    fn unsubscribe<'a>(&'a self, _uri: String) -> impl Future<Output = Result<(), ResourceError>> + Send + 'a {
+    fn unsubscribe<'a>(
+        &'a self,
+        _uri: String,
+        _client_id: ClientId,
+    ) -> impl Future<Output = Result<(), ResourceError>> + Send + 'a {
         async move {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         }
@@ -131,7 +162,7 @@ pub trait ResourceDef: Serialize {
 }
 
 /// Implementation of `ResourceReadHandler` for any type implementing `ResourceDef`
-impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
+impl<T: ResourceDef + Send + Sync + 'static> ResourceReadHandler for T {
     fn read_boxed<'a>(
         &'a self,
         uri: String,
@@ -155,19 +186,32 @@ impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
         T::supports_subscription()
     }
 
-    fn subscribe<'a>(&'a self, uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
-        Box::pin(async move { self.subscribe(uri).await })
+    fn subscribe<'a>(
+        &'a self,
+        uri: String,
+        client_id: ClientId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+        Box::pin(async move { self.subscribe(uri, client_id).await })
     }
 
-    fn unsubscribe<'a>(&'a self, uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
-        Box::pin(async move { self.unsubscribe(uri).await })
+    fn unsubscribe<'a>(
+        &'a self,
+        uri: String,
+        client_id: ClientId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+        Box::pin(async move { self.unsubscribe(uri, client_id).await })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
 /// Resource manager for handling subscribers and notifications
 #[derive(Default, Clone)]
 pub struct ResourceManager {
-    subscribers: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    pub subscribers: Arc<RwLock<HashMap<String, Vec<ClientId>>>>,
+    notification_callback: Arc<RwLock<Option<NotificationCallback>>>,
 }
 
 impl std::fmt::Debug for ResourceManager {
@@ -179,33 +223,43 @@ impl std::fmt::Debug for ResourceManager {
 impl ResourceManager {
     /// Create a new resource manager
     pub fn new() -> Self {
-        Self { subscribers: Arc::new(RwLock::new(HashMap::new())) }
+        Self { subscribers: Arc::new(RwLock::new(HashMap::new())), notification_callback: Arc::new(RwLock::new(None)) }
+    }
+
+    /// Set the notification callback to be invoked when resources change
+    pub fn set_notification_callback(&self, callback: NotificationCallback) -> Result<(), ResourceError> {
+        let mut notify_callback = self.notification_callback.write().map_err(|e| {
+            ResourceError::Custom(format!("Failed to acquire write lock for notification callback: {}", e))
+        })?;
+
+        *notify_callback = Some(callback);
+        Ok(())
     }
 
     /// Add a subscriber to a resource
-    pub fn add_subscriber(&self, resource_uri: &str, subscriber_id: &str) -> Result<(), ResourceError> {
+    pub fn add_subscriber(&self, resource_uri: &str, subscriber_id: ClientId) -> Result<(), ResourceError> {
         let mut subscribers = self
             .subscribers
             .write()
             .map_err(|e| ResourceError::Custom(format!("Failed to acquire write lock for subscribers: {}", e)))?;
 
         let subs = subscribers.entry(resource_uri.to_string()).or_insert_with(Vec::new);
-        if !subs.contains(&subscriber_id.to_string()) {
-            subs.push(subscriber_id.to_string());
+        if !subs.contains(&subscriber_id) {
+            subs.push(subscriber_id);
         }
 
         Ok(())
     }
 
     /// Remove a subscriber from a resource
-    pub fn remove_subscriber(&self, resource_uri: &str, subscriber_id: &str) -> Result<(), ResourceError> {
+    pub fn remove_subscriber(&self, resource_uri: &str, subscriber_id: ClientId) -> Result<(), ResourceError> {
         let mut subscribers = self
             .subscribers
             .write()
             .map_err(|e| ResourceError::Custom(format!("Failed to acquire write lock for subscribers: {}", e)))?;
 
         if let Some(subs) = subscribers.get_mut(resource_uri) {
-            subs.retain(|id| id != subscriber_id);
+            subs.retain(|id| id != &subscriber_id);
             if subs.is_empty() {
                 subscribers.remove(resource_uri);
             }
@@ -215,7 +269,7 @@ impl ResourceManager {
     }
 
     /// Get subscribers for a resource
-    pub fn get_subscribers(&self, resource_uri: &str) -> Result<Vec<String>, ResourceError> {
+    pub fn get_subscribers(&self, resource_uri: &str) -> Result<Vec<ClientId>, ResourceError> {
         let subscribers = self
             .subscribers
             .read()
@@ -232,5 +286,54 @@ impl ResourceManager {
             .map_err(|e| ResourceError::Custom(format!("Failed to acquire read lock for subscribers: {}", e)))?;
 
         Ok(subscribers.contains_key(resource_uri) && !subscribers.get(resource_uri).unwrap().is_empty())
+    }
+
+    /// Notify subscribers of a resource change
+    pub fn notify_resource_updated<'a>(
+        &'a self,
+        resource_uri: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+        let resource_uri = resource_uri.to_string();
+
+        Box::pin(async move {
+            // Check if the resource has subscribers
+            if !self.has_subscribers(&resource_uri)? {
+                return Ok(());
+            }
+
+            // Get all subscribers for this resource
+            let subscribers = self.get_subscribers(&resource_uri)?;
+
+            // Create notification params once
+            let params = ResourceUpdatedNotificationParams { uri: resource_uri.clone() };
+
+            // For each subscriber, get the callback and create a future
+            let mut futures = Vec::new();
+
+            // Synchronously access the callback and create futures for each subscriber
+            {
+                let notify_callback = self.notification_callback.read().map_err(|e| {
+                    ResourceError::Custom(format!("Failed to acquire read lock for notification callback: {}", e))
+                })?;
+
+                let callback = match &*notify_callback {
+                    Some(cb) => cb,
+                    None => return Err(ResourceError::Custom("No notification callback registered".to_string())),
+                };
+
+                // Create futures for each subscriber (without awaiting yet)
+                for subscriber_id in subscribers {
+                    let future = callback(subscriber_id, params.clone());
+                    futures.push(future);
+                }
+            } // Lock is dropped here
+
+            // Now await all futures outside the lock scope
+            for future in futures {
+                future.await?;
+            }
+
+            Ok(())
+        })
     }
 }

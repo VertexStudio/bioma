@@ -1,11 +1,11 @@
 use crate::prompts::PromptGetHandler;
-use crate::resources::ResourceReadHandler;
+use crate::resources::{NotificationCallback, ResourceError, ResourceManager, ResourceReadHandler};
 use crate::schema::{
     CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
     InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
     ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
     ListResourcesResult, ListToolsRequestParams, ListToolsResult, PingRequestParams, ReadResourceRequestParams,
-    ServerCapabilities,
+    ResourceUpdatedNotificationParams, ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
@@ -15,9 +15,10 @@ use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info};
 
 #[derive(Clone)]
@@ -82,6 +83,87 @@ pub enum TransportConfig {
     Ws(WsConfig),
 }
 
+/// Helper struct for notification management
+#[derive(Clone)]
+struct NotificationManager {
+    transport: Arc<Mutex<Option<TransportType>>>,
+}
+
+impl NotificationManager {
+    fn new() -> Self {
+        Self { transport: Arc::new(Mutex::new(None)) }
+    }
+
+    fn set_transport(&self, transport: TransportType) {
+        let mut t = self.transport.blocking_lock();
+        *t = Some(transport);
+    }
+
+    async fn send_notification(&self, client_id: ClientId, method: &str, params: impl Serialize) -> Result<()> {
+        let transport_guard = self.transport.lock().await;
+        if let Some(transport) = &*transport_guard {
+            // Create the notification
+            let params_value = serde_json::to_value(params).map_err(|e| {
+                error!("Failed to serialize notification params: {}", e);
+                anyhow::anyhow!("Failed to serialize notification params: {}", e)
+            })?;
+
+            let notification = jsonrpc_core::Notification {
+                jsonrpc: Some(jsonrpc_core::Version::V2),
+                method: method.to_string(),
+                params: jsonrpc_core::Params::Map(serde_json::from_value(params_value).map_err(|e| {
+                    error!("Failed to convert params to Map: {}", e);
+                    anyhow::anyhow!("Failed to convert params to Map: {}", e)
+                })?),
+            };
+
+            // Create metadata based on the client_id
+            let meta = match transport {
+                TransportType::Stdio(_) => serde_json::Value::Null,
+                TransportType::Sse(_) => {
+                    let sse_metadata = SseMetadata { client_id: client_id.clone() };
+                    serde_json::to_value(&sse_metadata).unwrap_or_default()
+                }
+                TransportType::Ws(_) => {
+                    let ws_metadata = WsMetadata { client_id: client_id.clone() };
+                    serde_json::to_value(&ws_metadata).unwrap_or_default()
+                }
+            };
+
+            // Clone the transport since we can't mutably borrow it
+            let mut transport_clone = transport.clone();
+
+            // Send the notification
+            transport_clone
+                .send(
+                    JsonRpcMessage::Request(jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(
+                        notification,
+                    ))),
+                    meta,
+                )
+                .await
+                .map_err(|e| {
+                    error!("Failed to send notification: {}", e);
+                    anyhow::anyhow!("Failed to send notification: {}", e)
+                })
+        } else {
+            error!("Cannot send notification: transport not set");
+            Err(anyhow::anyhow!("Transport not set"))
+        }
+    }
+}
+
+/// Helper function to get the ResourceManager from a resource
+fn get_resource_manager(resource: &dyn ResourceReadHandler) -> Option<Arc<ResourceManager>> {
+    // Try to get the resource manager from the FileSystem resource
+    if let Some(fs) = resource.as_any().downcast_ref::<crate::resources::filesystem::FileSystem>() {
+        return Some(fs.get_resource_manager());
+    }
+
+    // Add other resource types as needed
+    None
+}
+
 pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
     let server = T::new();
     start_with_impl(name, transport, server).await
@@ -89,7 +171,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
 
 pub async fn start_with_impl<T: ModelContextProtocolServer>(
     _name: &str,
-    transport: TransportConfig,
+    transport_config: TransportConfig,
     server: T,
 ) -> Result<()> {
     let server = Arc::new(server);
@@ -99,6 +181,64 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
 
     // Store active tool call handlers per client
     let tools = Arc::new(RwLock::new(HashMap::new()));
+
+    // Create notification manager
+    let notification_manager = Arc::new(NotificationManager::new());
+
+    // Create and configure the transport based on the config
+    let (transport_type, message_rx) = match transport_config {
+        TransportConfig::Stdio(_config) => {
+            let (on_message_tx, on_message_rx) = mpsc::channel::<JsonRpcMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+            let transport = StdioTransport::new_server(on_message_tx, on_error_tx, on_close_tx);
+            (TransportType::Stdio(transport), Box::new(on_message_rx) as Box<dyn Any>)
+        }
+        TransportConfig::Sse(config) => {
+            let (on_message_tx, on_message_rx) = mpsc::channel::<SseMessage>(config.channel_capacity);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+            let transport = SseTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
+            (TransportType::Sse(transport), Box::new(on_message_rx) as Box<dyn Any>)
+        }
+        TransportConfig::Ws(config) => {
+            let (on_message_tx, on_message_rx) = mpsc::channel::<WsMessage>(32);
+            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
+            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+
+            let transport = WsTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
+            (TransportType::Ws(transport), Box::new(on_message_rx) as Box<dyn Any>)
+        }
+    };
+
+    // Set up the notification manager with the transport
+    notification_manager.set_transport(transport_type.clone());
+
+    // Setup resources and their notification callbacks
+    for resource in server.get_resources() {
+        // Get the resource manager if available
+        if let Some(resource_manager) = get_resource_manager(resource.as_ref()) {
+            // Create a notification callback
+            let notification_mgr = notification_manager.clone();
+            let callback: NotificationCallback =
+                Box::new(move |client_id, params: ResourceUpdatedNotificationParams| {
+                    let nm = notification_mgr.clone();
+                    Box::pin(async move {
+                        match nm.send_notification(client_id, "notifications/resources/updated", params).await {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(ResourceError::Custom(format!("Failed to send notification: {}", e))),
+                        }
+                    })
+                });
+
+            // Set the callback
+            if let Err(e) = resource_manager.set_notification_callback(callback) {
+                error!("Failed to set notification callback: {}", e);
+            }
+        }
+    }
 
     // Create tools per client
     io_handler.add_method_with_meta("initialize", {
@@ -315,7 +455,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                     .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
 
                 match resource {
-                    Some(resource) => match resource.subscribe(params.uri.clone()).await {
+                    Some(resource) => match resource.subscribe(params.uri.clone(), client_id.clone()).await {
                         Ok(_) => {
                             info!("Successfully subscribed to resource: {} for client: {}", params.uri, client_id);
                             Ok(serde_json::json!({}))
@@ -366,7 +506,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                     .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
 
                 match resource {
-                    Some(resource) => match resource.unsubscribe(params.uri.clone()).await {
+                    Some(resource) => match resource.unsubscribe(params.uri.clone(), client_id.clone()).await {
                         Ok(_) => {
                             info!("Successfully unsubscribed from resource: {} for client: {}", params.uri, client_id);
                             Ok(serde_json::json!({}))
@@ -525,24 +665,24 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
         }
     });
 
-    match transport {
-        TransportConfig::Stdio(_config) => {
-            let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(32);
-            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
-            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+    // Start the transport
+    let mut transport = transport_type.clone();
+    if let Err(e) = transport.start().await {
+        error!("Transport error: {}", e);
+        return Err(e).context("Failed to start transport");
+    }
 
-            let transport = StdioTransport::new_server(on_message_tx, on_error_tx, on_close_tx);
-            let mut transport_type = TransportType::Stdio(transport);
-
-            if let Err(e) = transport_type.start().await {
-                error!("Transport error: {}", e);
-                return Err(e).context("Failed to start transport");
-            }
+    // Handle messages based on transport type
+    match transport_type {
+        TransportType::Stdio(_) => {
+            let mut rx = message_rx
+                .downcast::<mpsc::Receiver<JsonRpcMessage>>()
+                .expect("Failed to downcast to JsonRpcMessage receiver");
 
             // Generate a fixed client ID for stdio transport
             let client_id = ClientId::new();
 
-            while let Some(request) = on_message_rx.recv().await {
+            while let Some(request) = rx.recv().await {
                 match &request {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
@@ -553,7 +693,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                                 continue;
                             };
 
-                            if let Err(e) = transport_type.send(response.into(), serde_json::Value::Null).await {
+                            if let Err(e) = transport.send(response.into(), serde_json::Value::Null).await {
                                 error!("Failed to send response: {}", e);
                                 return Err(e).context("Failed to send response");
                             }
@@ -565,20 +705,11 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                 }
             }
         }
-        TransportConfig::Sse(config) => {
-            let (on_message_tx, mut on_message_rx) = mpsc::channel::<SseMessage>(32);
-            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
-            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+        TransportType::Sse(_) => {
+            let mut rx =
+                message_rx.downcast::<mpsc::Receiver<SseMessage>>().expect("Failed to downcast to SseMessage receiver");
 
-            let transport = SseTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
-            let mut transport_type = TransportType::Sse(transport);
-
-            if let Err(e) = transport_type.start().await {
-                error!("Transport error: {}", e);
-                return Err(e).context("Failed to start transport");
-            }
-
-            while let Some(sse_message) = on_message_rx.recv().await {
+            while let Some(sse_message) = rx.recv().await {
                 match &sse_message.message {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
@@ -590,7 +721,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
 
                             let sse_metadata = SseMetadata { client_id: sse_message.client_id.clone() };
 
-                            if let Err(e) = transport_type
+                            if let Err(e) = transport
                                 .send(response.into(), serde_json::to_value(&sse_metadata).unwrap_or_default())
                                 .await
                             {
@@ -604,20 +735,11 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                 }
             }
         }
-        TransportConfig::Ws(config) => {
-            let (on_message_tx, mut on_message_rx) = mpsc::channel::<WsMessage>(32);
-            let (on_error_tx, _on_error_rx) = mpsc::channel(32);
-            let (on_close_tx, _on_close_rx) = mpsc::channel(32);
+        TransportType::Ws(_) => {
+            let mut rx =
+                message_rx.downcast::<mpsc::Receiver<WsMessage>>().expect("Failed to downcast to WsMessage receiver");
 
-            let transport = WsTransport::new_server(config, on_message_tx, on_error_tx, on_close_tx);
-            let mut transport_type = TransportType::Ws(transport);
-
-            if let Err(e) = transport_type.start().await {
-                error!("Transport error: {}", e);
-                return Err(e).context("Failed to start transport");
-            }
-
-            while let Some(ws_message) = on_message_rx.recv().await {
+            while let Some(ws_message) = rx.recv().await {
                 match &ws_message.message {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
@@ -629,7 +751,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
 
                             let ws_metadata = WsMetadata { client_id: ws_message.client_id.clone() };
 
-                            if let Err(e) = transport_type
+                            if let Err(e) = transport
                                 .send(response.into(), serde_json::to_value(&ws_metadata).unwrap_or_default())
                                 .await
                             {
