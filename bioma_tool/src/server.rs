@@ -2,8 +2,10 @@ use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
     CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
-    InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult,
-    ReadResourceRequestParams, ServerCapabilities,
+    InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
+    ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
+    ListResourcesResult, ListToolsRequestParams, ListToolsResult, PingRequestParams, ReadResourceRequestParams,
+    ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
@@ -81,17 +83,27 @@ pub enum TransportConfig {
 }
 
 pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
-    debug!("Starting ModelContextProtocol server: {}", name);
+    let server = T::new();
+    start_with_impl(name, transport, server).await
+}
 
-    let server = std::sync::Arc::new(T::new());
-    let client_tools: Arc<RwLock<HashMap<ClientId, Vec<Box<dyn ToolCallHandler>>>>> =
-        Arc::new(RwLock::new(HashMap::new()));
+pub async fn start_with_impl<T: ModelContextProtocolServer>(
+    _name: &str,
+    transport: TransportConfig,
+    server: T,
+) -> Result<()> {
+    let server = Arc::new(server);
 
+    // Create a message handler for the server
     let mut io_handler = MetaIoHandler::default();
 
+    // Store active tool call handlers per client
+    let tools = Arc::new(RwLock::new(HashMap::new()));
+
+    // Create tools per client
     io_handler.add_method_with_meta("initialize", {
         let server = server.clone();
-        let client_tools = client_tools.clone();
+        let client_tools = tools.clone();
 
         move |params: Params, meta: ServerMetadata| {
             let client_tools = client_tools.clone();
@@ -124,8 +136,15 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_notification_with_meta("notifications/initialized", |_params, _meta: ServerMetadata| {
-        info!("Received initialized notification");
+    io_handler.add_notification_with_meta("notifications/initialized", |params: Params, _meta: ServerMetadata| {
+        match params.parse::<InitializedNotificationParams>() {
+            Ok(_params) => {
+                info!("Received initialized notification");
+            }
+            Err(e) => {
+                error!("Failed to parse initialized notification params: {}", e);
+            }
+        }
     });
 
     io_handler.add_notification_with_meta("cancelled", move |params: Params, _meta: ServerMetadata| {
@@ -143,10 +162,18 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         }
     });
 
-    io_handler.add_method_with_meta("ping", move |_params, _meta: ServerMetadata| {
+    io_handler.add_method_with_meta("ping", move |params: Params, _meta: ServerMetadata| {
         debug!("Handling ping request");
 
         async move {
+            let _params: PingRequestParams = match params.parse() {
+                Ok(params) => params,
+                Err(e) => {
+                    error!("Failed to parse ping parameters: {}", e);
+                    return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                }
+            };
+
             info!("Successfully handled ping request");
             Ok(serde_json::json!({}))
         }
@@ -154,13 +181,24 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
 
     io_handler.add_method_with_meta("resources/list", {
         let server = server.clone();
-        move |_params, _meta: ServerMetadata| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling resources/list request");
 
-            let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
-
             async move {
+                let params: ListResourcesRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Resources list request with cursor: {:?}", params.cursor);
+
+                let resources = server.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
+
                 let response = ListResourcesResult { next_cursor: None, resources, meta: None };
 
                 info!("Successfully handled resources/list request");
@@ -173,30 +211,177 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
         let server = server.clone();
         move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
-            debug!("Handling resources/read request");
-
             async move {
-                let params: ReadResourceRequestParams = params.parse().map_err(|e| {
-                    error!("Failed to parse resource read parameters: {}", e);
-                    jsonrpc_core::Error::invalid_params(e.to_string())
-                })?;
+                debug!("Handling resources/read request");
+
+                let params: ReadResourceRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/read parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                debug!("Requested resource URI: {}", params.uri);
 
                 let resources = server.get_resources();
-                let resource = resources.iter().find(|resource| resource.def().uri == params.uri);
+                let resource = resources.iter().find(|resource| resource.supports(&params.uri));
 
                 match resource {
-                    Some(resource) => {
-                        let result = resource.read_boxed(params.uri.clone()).await.map_err(|e| {
-                            error!("Resource read failed: {}", e);
-                            jsonrpc_core::Error::internal_error()
-                        })?;
-
-                        info!("Successfully handled resources/read request for: {}", params.uri);
-                        Ok(serde_json::to_value(result).unwrap_or_default())
-                    }
+                    Some(resource) => match resource.read_boxed(params.uri.clone()).await {
+                        Ok(result) => {
+                            info!("Successfully handled resources/read request for: {}", params.uri);
+                            Ok(serde_json::to_value(result).map_err(|e| {
+                                error!("Failed to serialize resources/read result: {}", e);
+                                jsonrpc_core::Error::internal_error()
+                            })?)
+                        }
+                        Err(e) => {
+                            error!("Failed to read resource: {}", e);
+                            Err(jsonrpc_core::Error::internal_error())
+                        }
+                    },
                     None => {
-                        error!("Unknown resource requested: {}", params.uri);
-                        Err(jsonrpc_core::Error::method_not_found())
+                        error!("Resource not found: {}", params.uri);
+                        Err(jsonrpc_core::Error::invalid_params(format!("Resource not found: {}", params.uri)))
+                    }
+                }
+            }
+        }
+    });
+
+    io_handler.add_method_with_meta("resources/templates/list", {
+        let server = server.clone();
+        move |params: Params, _meta: ServerMetadata| {
+            let server = server.clone();
+            async move {
+                debug!("Handling resources/templates/list request");
+
+                let params: ListResourceTemplatesRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/templates/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Resource templates list request with cursor: {:?}", params.cursor);
+
+                let resources = server.get_resources();
+
+                // Collect all resource templates
+                let resource_templates =
+                    resources.iter().filter_map(|resource| resource.template()).collect::<Vec<_>>();
+
+                let response = ListResourceTemplatesResult { next_cursor: None, resource_templates, meta: None };
+
+                info!(
+                    "Successfully handled resources/templates/list request, found {} templates",
+                    response.resource_templates.len()
+                );
+                Ok(serde_json::to_value(response).unwrap_or_default())
+            }
+        }
+    });
+
+    // Add support for resource subscriptions
+    io_handler.add_method_with_meta("resources/subscribe", {
+        let server = server.clone();
+        move |params: Params, meta: ServerMetadata| {
+            let server = server.clone();
+            let client_id = meta.client_id.clone();
+            async move {
+                debug!("Handling resources/subscribe request");
+
+                #[derive(Deserialize)]
+                struct SubscribeParams {
+                    uri: String,
+                }
+
+                let params: SubscribeParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/subscribe parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                debug!("Subscribe resource URI: {}", params.uri);
+
+                let resources = server.get_resources();
+                let resource = resources
+                    .iter()
+                    .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
+
+                match resource {
+                    Some(resource) => match resource.subscribe(params.uri.clone()).await {
+                        Ok(_) => {
+                            info!("Successfully subscribed to resource: {} for client: {}", params.uri, client_id);
+                            Ok(serde_json::json!({}))
+                        }
+                        Err(e) => {
+                            error!("Failed to subscribe to resource: {}", e);
+                            Err(jsonrpc_core::Error::internal_error())
+                        }
+                    },
+                    None => {
+                        error!("Resource not found or doesn't support subscription: {}", params.uri);
+                        Err(jsonrpc_core::Error::invalid_params(format!(
+                            "Resource not found or doesn't support subscription: {}",
+                            params.uri
+                        )))
+                    }
+                }
+            }
+        }
+    });
+
+    io_handler.add_method_with_meta("resources/unsubscribe", {
+        let server = server.clone();
+        move |params: Params, meta: ServerMetadata| {
+            let server = server.clone();
+            let client_id = meta.client_id.clone();
+            async move {
+                debug!("Handling resources/unsubscribe request");
+
+                #[derive(Deserialize)]
+                struct UnsubscribeParams {
+                    uri: String,
+                }
+
+                let params: UnsubscribeParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse resources/unsubscribe parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                debug!("Unsubscribe resource URI: {}", params.uri);
+
+                let resources = server.get_resources();
+                let resource = resources
+                    .iter()
+                    .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
+
+                match resource {
+                    Some(resource) => match resource.unsubscribe(params.uri.clone()).await {
+                        Ok(_) => {
+                            info!("Successfully unsubscribed from resource: {} for client: {}", params.uri, client_id);
+                            Ok(serde_json::json!({}))
+                        }
+                        Err(e) => {
+                            error!("Failed to unsubscribe from resource: {}", e);
+                            Err(jsonrpc_core::Error::internal_error())
+                        }
+                    },
+                    None => {
+                        error!("Resource not found or doesn't support subscription: {}", params.uri);
+                        Err(jsonrpc_core::Error::invalid_params(format!(
+                            "Resource not found or doesn't support subscription: {}",
+                            params.uri
+                        )))
                     }
                 }
             }
@@ -205,13 +390,24 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
 
     io_handler.add_method_with_meta("prompts/list", {
         let server = server.clone();
-        move |_params, _meta: ServerMetadata| {
+        move |params: Params, _meta: ServerMetadata| {
             let server = server.clone();
             debug!("Handling prompts/list request");
 
-            let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
-
             async move {
+                let params: ListPromptsRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse prompts/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Prompts list request with cursor: {:?}", params.cursor);
+
+                let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
+
                 let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
 
                 info!("Successfully handled prompts/list request");
@@ -259,12 +455,23 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     });
 
     io_handler.add_method_with_meta("tools/list", {
-        let client_tools = client_tools.clone();
-        move |_params, meta: ServerMetadata| {
+        let client_tools = tools.clone();
+        move |params: Params, meta: ServerMetadata| {
             debug!("Handling tools/list request");
             let client_tools = client_tools.clone();
 
             async move {
+                let params: ListToolsRequestParams = match params.parse() {
+                    Ok(params) => params,
+                    Err(e) => {
+                        error!("Failed to parse tools/list parameters: {}", e);
+                        return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                    }
+                };
+
+                // Here you could use params.cursor for pagination if needed
+                debug!("Tools list request with cursor: {:?}", params.cursor);
+
                 let tools = if let Some(tools) = client_tools.read().await.get(&meta.client_id) {
                     tools.iter().map(|tool| tool.def()).collect::<Vec<_>>()
                 } else {
@@ -278,7 +485,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
     });
 
     io_handler.add_method_with_meta("tools/call", {
-        let client_tools = client_tools.clone();
+        let client_tools = tools.clone();
         move |params: Params, meta: ServerMetadata| {
             debug!("Handling tools/call request");
             let client_tools = client_tools.clone();
