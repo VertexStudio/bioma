@@ -8,8 +8,8 @@ use crate::schema::{
     ResourceUpdatedNotificationParams, ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
 };
 use crate::tools::ToolCallHandler;
-use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
-use crate::transport::ws::{WsMessage, WsMetadata, WsTransport};
+use crate::transport::sse::{SseMessage, SseTransport};
+use crate::transport::ws::{WsMessage, WsTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Result};
@@ -135,19 +135,6 @@ impl NotificationManager {
                 })?),
             };
 
-            // Create metadata based on the client_id
-            let meta = match transport {
-                TransportType::Stdio(_) => serde_json::Value::Null,
-                TransportType::Sse(_) => {
-                    let sse_metadata = SseMetadata { client_id: client_id.clone() };
-                    serde_json::to_value(&sse_metadata).unwrap_or_default()
-                }
-                TransportType::Ws(_) => {
-                    let ws_metadata = WsMetadata { client_id: client_id.clone() };
-                    serde_json::to_value(&ws_metadata).unwrap_or_default()
-                }
-            };
-
             // Clone the transport since we can't mutably borrow it
             let mut transport_clone = transport.clone();
 
@@ -157,7 +144,7 @@ impl NotificationManager {
                     JsonRpcMessage::Request(jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(
                         notification,
                     ))),
-                    meta,
+                    client_id,
                 )
                 .await
                 .map_err(|e| {
@@ -184,7 +171,7 @@ pub async fn start<T: ModelContextProtocolServer>(_name: &str, transport: Transp
     let notification_manager = Arc::new(NotificationManager::new());
 
     // Create and configure the transport based on the config
-    let (transport_type, message_rx) = match transport {
+    let (mut transport_type, message_rx) = match transport {
         TransportConfig::Stdio(_config) => {
             let (on_message_tx, on_message_rx) = mpsc::channel::<JsonRpcMessage>(32);
             let (on_error_tx, _on_error_rx) = mpsc::channel(32);
@@ -680,7 +667,7 @@ pub async fn start<T: ModelContextProtocolServer>(_name: &str, transport: Transp
                                 continue;
                             };
 
-                            if let Err(e) = transport.send(response.into(), serde_json::Value::Null).await {
+                            if let Err(e) = transport_type.send(response.into(), client_id.clone()).await {
                                 error!("Failed to send response: {}", e);
                                 return Err(e).context("Failed to send response");
                             }
@@ -706,12 +693,7 @@ pub async fn start<T: ModelContextProtocolServer>(_name: &str, transport: Transp
                                 continue;
                             };
 
-                            let sse_metadata = SseMetadata { client_id: sse_message.client_id.clone() };
-
-                            if let Err(e) = transport
-                                .send(response.into(), serde_json::to_value(&sse_metadata).unwrap_or_default())
-                                .await
-                            {
+                            if let Err(e) = transport_type.send(response.into(), sse_message.client_id.clone()).await {
                                 error!("Failed to send SSE response: {}", e);
                                 return Err(e).context("Failed to send SSE response");
                             }
@@ -736,12 +718,7 @@ pub async fn start<T: ModelContextProtocolServer>(_name: &str, transport: Transp
                                 continue;
                             };
 
-                            let ws_metadata = WsMetadata { client_id: ws_message.client_id.clone() };
-
-                            if let Err(e) = transport
-                                .send(response.into(), serde_json::to_value(&ws_metadata).unwrap_or_default())
-                                .await
-                            {
+                            if let Err(e) = transport_type.send(response.into(), ws_message.client_id.clone()).await {
                                 error!("Failed to send WebSocket response: {}", e);
                                 return Err(e).context("Failed to send WebSocket response");
                             }

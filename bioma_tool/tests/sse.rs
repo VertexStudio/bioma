@@ -168,7 +168,7 @@ async fn test_error_handling() -> Result<()> {
     let test_message = json!({"jsonrpc":"2.0","method":"test","params":{},"id":"test"});
     let json_rpc_message: JsonRpcMessage = serde_json::from_value(test_message)?;
 
-    let result = client.send(json_rpc_message, serde_json::Value::Null).await;
+    let result = client.send(json_rpc_message, ClientId::new()).await;
     assert!(result.is_err(), "Sending without connection should fail");
 
     Ok(())

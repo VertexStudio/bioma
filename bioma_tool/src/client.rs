@@ -8,7 +8,7 @@ use crate::schema::{
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
-use crate::JsonRpcMessage;
+use crate::{ClientId, JsonRpcMessage};
 use anyhow::Error;
 use bioma_actor::prelude::*;
 use jsonrpc_core::Params;
@@ -114,6 +114,7 @@ pub struct ModelContextProtocolClient {
     on_error_rx: mpsc::Receiver<Error>,
     #[allow(unused)]
     on_close_rx: mpsc::Receiver<()>,
+    client_id: ClientId,
 }
 
 impl ModelContextProtocolClient {
@@ -154,6 +155,9 @@ impl ModelContextProtocolClient {
                 TransportType::Ws(transport)
             }
         };
+
+        // Create a unique client ID
+        let client_id = ClientId::new();
 
         // Start transport once during initialization
         let start_handle = transport
@@ -212,6 +216,7 @@ impl ModelContextProtocolClient {
             pending_requests,
             on_error_rx,
             on_close_rx,
+            client_id,
         })
     }
 
@@ -337,8 +342,11 @@ impl ModelContextProtocolClient {
             pending.insert(id, response_tx);
         }
 
+        // Use the client's stored ID instead of creating a new one
+        let client_id = self.client_id.clone();
+
         // Send request
-        if let Err(e) = self.transport.send(request.into(), serde_json::Value::Null).await {
+        if let Err(e) = self.transport.send(request.into(), client_id).await {
             // Clean up pending request on send error
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&id);
@@ -372,9 +380,12 @@ impl ModelContextProtocolClient {
             params: Params::Map(params.as_object().cloned().unwrap_or_default()),
         };
 
+        // Use the stored client_id instead of creating a new one
+        let client_id = self.client_id.clone();
+
         // Send notification without waiting for response
         self.transport
-            .send(notification.into(), serde_json::Value::Null)
+            .send(notification.into(), client_id)
             .await
             .map_err(|e| ModelContextProtocolClientError::Transport(format!("Send: {}", e).into()))
     }

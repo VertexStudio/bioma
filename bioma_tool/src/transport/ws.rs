@@ -9,22 +9,26 @@
 //! Both modes implement the `Transport` trait, providing a consistent interface for
 //! sending and receiving messages.
 
+use super::Transport;
+
 use crate::client::WsConfig as WsClientConfig;
 use crate::server::WsConfig as WsServerConfig;
 use crate::{ClientId, JsonRpcMessage};
 
-use super::Transport;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::{accept_async, connect_async, tungstenite::protocol::Message, WebSocketStream};
+use tokio_tungstenite::{
+    accept_async, connect_async,
+    tungstenite::protocol::{frame::coding::CloseCode, CloseFrame, Message},
+    WebSocketStream,
+};
 use tracing::{debug, error, info};
 
 /// Errors that can occur during WebSocket transport operations.
@@ -75,13 +79,6 @@ pub enum WsError {
     MetadataError(String),
 }
 
-/// Metadata for WebSocket transport containing client identification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WsMetadata {
-    /// Unique identifier for the client.
-    pub client_id: ClientId,
-}
-
 /// WebSocket message with client identification for server-side processing.
 #[derive(Debug, Clone)]
 pub struct WsMessage {
@@ -98,7 +95,7 @@ type WsStreamServer = WebSocketStream<TcpStream>;
 type WsStreamClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Registry of connected clients and their message senders.
-type ClientRegistry = Arc<Mutex<HashMap<ClientId, mpsc::Sender<JsonRpcMessage>>>>;
+type ClientRegistry = Arc<RwLock<HashMap<ClientId, mpsc::Sender<JsonRpcMessage>>>>;
 
 /// Sender half of the WebSocket stream for client mode.
 type WsSenderClient = Arc<Mutex<Option<futures_util::stream::SplitSink<WsStreamClient, Message>>>>;
@@ -123,7 +120,7 @@ struct ClientMode {
     sender: WsSenderClient,
 }
 
-/// WebSocket transport operation mode.
+/// WebSocket transport operating mode.
 enum WsMode {
     /// Server mode with connected clients registry.
     Server(ServerMode),
@@ -169,7 +166,7 @@ impl WsTransport {
         on_close: mpsc::Sender<()>,
     ) -> Self {
         let server_mode =
-            ServerMode { clients: Arc::new(Mutex::new(HashMap::new())), endpoint: config.endpoint, on_message };
+            ServerMode { clients: Arc::new(RwLock::new(HashMap::new())), endpoint: config.endpoint, on_message };
 
         Self { mode: Arc::new(WsMode::Server(server_mode)), on_error, on_close }
     }
@@ -231,7 +228,7 @@ impl WsTransport {
 
         // Register the client in the client registry
         {
-            let mut clients = clients.lock().await;
+            let mut clients = clients.write().await;
             clients.insert(client_id.clone(), client_sender);
         }
 
@@ -280,7 +277,7 @@ impl WsTransport {
 
         // Clean up client registration when connection closes
         {
-            let mut clients = clients.lock().await;
+            let mut clients = clients.write().await;
             clients.remove(&client_id);
         }
 
@@ -311,7 +308,7 @@ impl WsTransport {
         client_id: &ClientId,
         message: JsonRpcMessage,
     ) -> Result<(), WsError> {
-        let clients = clients.lock().await;
+        let clients = clients.read().await;
         if let Some(sender) = clients.get(client_id) {
             sender
                 .send(message)
@@ -486,7 +483,7 @@ impl Transport for WsTransport {
     /// # Arguments
     ///
     /// * `message` - The JSON-RPC message to send.
-    /// * `metadata` - In server mode, this must contain a client ID. In client mode, this is ignored.
+    /// * `client_id` - In server mode, this must contain a client ID. In client mode, this is ignored.
     ///
     /// # Returns
     ///
@@ -496,33 +493,22 @@ impl Transport for WsTransport {
     ///
     /// Returns an error if the transport is not started, the client is not found, or the message
     /// could not be serialized or sent.
-    async fn send(&mut self, message: JsonRpcMessage, metadata: serde_json::Value) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
         match &*self.mode {
             WsMode::Server(server) => {
-                // In server mode, extract the client ID from metadata
-                let metadata = serde_json::from_value::<WsMetadata>(metadata)
-                    .map_err(|e| WsError::MetadataError(format!("Invalid metadata for WebSocket transport: {}", e)))?;
-
-                Self::send_to_client(&server.clients, &metadata.client_id, message)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{}", e))
+                debug!("Server sending WebSocket message");
+                Self::send_to_client(&server.clients, &client_id, message).await.map_err(|e| anyhow::anyhow!("{}", e))
             }
             WsMode::Client(client) => {
-                // In client mode, send the message to the server
+                debug!("Client sending WebSocket message");
                 let mut sender_guard = client.sender.lock().await;
                 match &mut *sender_guard {
                     Some(sender) => {
-                        let json = serde_json::to_string(&message).map_err(|e| WsError::SerializationError(e))?;
-                        sender
-                            .send(Message::Text(json.into()))
-                            .await
-                            .map_err(|e| WsError::ProtocolError(format!("Failed to send WebSocket message: {}", e)))?;
+                        let message_json = serde_json::to_string(&message)?;
+                        sender.send(Message::Text(message_json.into())).await?;
                         Ok(())
                     }
-                    None => Err(WsError::StateError(
-                        "WebSocket connection not established. Call start() first.".to_string(),
-                    )
-                    .into()),
+                    None => Err(anyhow::anyhow!("WebSocket connection not established")),
                 }
             }
         }
@@ -543,7 +529,7 @@ impl Transport for WsTransport {
         match &*self.mode {
             WsMode::Server(server) => {
                 // Get all client senders
-                let mut clients = server.clients.lock().await;
+                let mut clients = server.clients.write().await;
                 let client_count = clients.len();
 
                 if client_count > 0 {
@@ -578,8 +564,8 @@ impl Transport for WsTransport {
                     info!("Initiating graceful shutdown of WebSocket connection");
 
                     // Create a close frame with normal close code (1000)
-                    let close_frame = Message::Close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                        code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+                    let close_frame = Message::Close(Some(CloseFrame {
+                        code: CloseCode::Normal,
                         reason: "Client initiated shutdown".into(),
                     }));
 
