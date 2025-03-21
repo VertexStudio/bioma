@@ -8,8 +8,8 @@ use crate::schema::{
     ServerCapabilities,
 };
 use crate::tools::ToolCallHandler;
-use crate::transport::sse::{SseMessage, SseMetadata, SseTransport};
-use crate::transport::ws::{WsMessage, WsMetadata, WsTransport};
+use crate::transport::sse::{SseMessage, SseTransport};
+use crate::transport::ws::{WsMessage, WsTransport};
 use crate::transport::{stdio::StdioTransport, Transport, TransportType};
 use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Result};
@@ -553,7 +553,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                                 continue;
                             };
 
-                            if let Err(e) = transport_type.send(response.into(), serde_json::Value::Null).await {
+                            if let Err(e) = transport_type.send(response.into(), client_id.clone()).await {
                                 error!("Failed to send response: {}", e);
                                 return Err(e).context("Failed to send response");
                             }
@@ -588,12 +588,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                                 continue;
                             };
 
-                            let sse_metadata = SseMetadata { client_id: sse_message.client_id.clone() };
-
-                            if let Err(e) = transport_type
-                                .send(response.into(), serde_json::to_value(&sse_metadata).unwrap_or_default())
-                                .await
-                            {
+                            if let Err(e) = transport_type.send(response.into(), sse_message.client_id.clone()).await {
                                 error!("Failed to send SSE response: {}", e);
                                 return Err(e).context("Failed to send SSE response");
                             }
@@ -627,12 +622,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
                                 continue;
                             };
 
-                            let ws_metadata = WsMetadata { client_id: ws_message.client_id.clone() };
-
-                            if let Err(e) = transport_type
-                                .send(response.into(), serde_json::to_value(&ws_metadata).unwrap_or_default())
-                                .await
-                            {
+                            if let Err(e) = transport_type.send(response.into(), ws_message.client_id.clone()).await {
                                 error!("Failed to send WebSocket response: {}", e);
                                 return Err(e).context("Failed to send WebSocket response");
                             }

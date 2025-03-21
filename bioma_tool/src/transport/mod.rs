@@ -2,6 +2,7 @@ pub mod sse;
 pub mod stdio;
 pub mod ws;
 
+use crate::ClientId;
 use crate::JsonRpcMessage;
 use anyhow::Result;
 use std::future::Future;
@@ -11,8 +12,8 @@ pub trait Transport {
     // Start processing messages
     fn start(&mut self) -> impl Future<Output = Result<JoinHandle<Result<()>>>>;
 
-    // Send a JSON-RPC message with optional metadata
-    fn send(&mut self, message: JsonRpcMessage, metadata: serde_json::Value) -> impl Future<Output = Result<()>>;
+    // Send a JSON-RPC message with client_id
+    fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> impl Future<Output = Result<()>>;
 
     // Close the connection
     fn close(&mut self) -> impl Future<Output = Result<()>>;
@@ -34,11 +35,11 @@ impl Transport for TransportType {
         }
     }
 
-    async fn send(&mut self, message: JsonRpcMessage, metadata: serde_json::Value) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
         match self {
-            TransportType::Stdio(t) => t.send(message, metadata).await,
-            TransportType::Sse(t) => t.send(message, metadata).await,
-            TransportType::Ws(t) => t.send(message, metadata).await,
+            TransportType::Stdio(t) => t.send(message, client_id).await,
+            TransportType::Sse(t) => t.send(message, client_id).await,
+            TransportType::Ws(t) => t.send(message, client_id).await,
         }
     }
 

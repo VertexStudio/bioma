@@ -21,12 +21,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
-/// Metadata for SSE transport
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SseMetadata {
-    pub client_id: ClientId,
-}
-
 /// Shutdown event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Shutdown {
@@ -599,11 +593,7 @@ impl Transport for SseTransport {
         }
     }
 
-    fn send(
-        &mut self,
-        message: JsonRpcMessage,
-        metadata: serde_json::Value,
-    ) -> impl std::future::Future<Output = Result<()>> {
+    fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> impl std::future::Future<Output = Result<()>> {
         let mode = self.mode.clone();
 
         async move {
@@ -611,19 +601,11 @@ impl Transport for SseTransport {
                 SseMode::Server { clients, .. } => {
                     debug!("Server sending [sse] JsonRpcMessage");
 
-                    // Get client_id from metadata
-                    // Using SseMetadata instead of direct ClientId deserialization
-                    if let Some(sse_metadata) = serde_json::from_value::<SseMetadata>(metadata).ok() {
-                        let client_id = sse_metadata.client_id;
+                    // Create SseEvent::Message
+                    let sse_event = SseEvent::Message(message);
 
-                        // Create SseEvent::Message
-                        let sse_event = SseEvent::Message(message);
-
-                        // Send event to the specific client
-                        Self::send_to_client(clients, &client_id, sse_event).await?;
-                    } else {
-                        return Err(SseError::Other("Invalid metadata type provided".to_string()).into());
-                    }
+                    // Send event to the specific client
+                    Self::send_to_client(clients, &client_id, sse_event).await?;
 
                     Ok(())
                 }

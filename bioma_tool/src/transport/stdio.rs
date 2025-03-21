@@ -1,6 +1,6 @@
 use super::Transport;
 use crate::client::StdioConfig;
-use crate::JsonRpcMessage;
+use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Error, Result};
 use std::sync::Arc;
 use tokio::{
@@ -110,7 +110,7 @@ impl Transport for StdioTransport {
         Ok(handle)
     }
 
-    async fn send(&mut self, message: JsonRpcMessage, _metadata: serde_json::Value) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, _client_id: ClientId) -> Result<()> {
         let message_str = serde_json::to_string(&message)?;
         match &*self.mode {
             StdioMode::Server(stdout) => {
