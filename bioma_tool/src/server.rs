@@ -21,8 +21,11 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info};
 
+/// Metadata associated with client requests, used for routing responses
+/// and tracking per-client state.
 #[derive(Clone)]
 pub struct ServerMetadata {
+    /// Unique identifier for the client connection
     pub client_id: ClientId,
 }
 
@@ -38,7 +41,6 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
 
 pub struct StdioConfig {}
 
-/// Server configuration with builder pattern
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
     #[builder(default = default_server_url())]
@@ -83,22 +85,38 @@ pub enum TransportConfig {
     Ws(WsConfig),
 }
 
-/// Helper struct for notification management
+/// Manages notification delivery to clients by abstracting transport details
+/// and providing a consistent API for sending notifications across different
+/// transport types (Stdio, SSE, WebSocket).
 #[derive(Clone)]
 struct NotificationManager {
+    /// The active transport used to deliver notifications
     transport: Arc<Mutex<Option<TransportType>>>,
 }
 
 impl NotificationManager {
+    /// Creates a new notification manager with no transport configured
     fn new() -> Self {
         Self { transport: Arc::new(Mutex::new(None)) }
     }
 
+    /// Sets the active transport for notification delivery
     fn set_transport(&self, transport: TransportType) {
         let mut t = self.transport.blocking_lock();
         *t = Some(transport);
     }
 
+    /// Sends a notification to a specific client
+    ///
+    /// # Arguments
+    ///
+    /// * `client_id` - Target client identifier
+    /// * `method` - Notification method name
+    /// * `params` - Notification parameters
+    ///
+    /// # Returns
+    ///
+    /// Result indicating success or failure of notification delivery
     async fn send_notification(&self, client_id: ClientId, method: &str, params: impl Serialize) -> Result<()> {
         let transport_guard = self.transport.lock().await;
         if let Some(transport) = &*transport_guard {
@@ -160,7 +178,7 @@ pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: Transpo
 
 pub async fn start_with_impl<T: ModelContextProtocolServer>(
     _name: &str,
-    transport_config: TransportConfig,
+    transport: TransportConfig,
     server: T,
 ) -> Result<()> {
     let server = Arc::new(server);
@@ -175,7 +193,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
     let notification_manager = Arc::new(NotificationManager::new());
 
     // Create and configure the transport based on the config
-    let (transport_type, message_rx) = match transport_config {
+    let (transport_type, message_rx) = match transport {
         TransportConfig::Stdio(_config) => {
             let (on_message_tx, on_message_rx) = mpsc::channel::<JsonRpcMessage>(32);
             let (on_error_tx, _on_error_rx) = mpsc::channel(32);
@@ -414,7 +432,6 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
         }
     });
 
-    // Add support for resource subscriptions
     io_handler.add_method_with_meta("resources/subscribe", {
         let server = server.clone();
         move |params: Params, meta: ServerMetadata| {

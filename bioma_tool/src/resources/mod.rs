@@ -1,3 +1,14 @@
+//! Resource management system for accessing and monitoring data sources.
+//!
+//! This module provides a framework for:
+//! - Defining different types of resources (filesystem, APIs, etc.)
+//! - Reading resources with a common interface
+//! - Subscribing to resource changes
+//! - Notifying clients when resources are updated
+//!
+//! Resources are identified by URI strings and can provide either text or binary data.
+//! The system supports both one-time reads and ongoing subscriptions when resources change.
+
 use crate::schema::{ReadResourceResult, Resource, ResourceTemplate, ResourceUpdatedNotificationParams};
 use crate::ClientId;
 use serde::Serialize;
@@ -37,7 +48,11 @@ pub enum ResourceError {
     SubscriptionNotSupported(String),
 }
 
-/// Type for notification callback functions
+/// Callback function type for delivering resource change notifications
+///
+/// This callback is invoked when a resource changes and needs to notify
+/// subscribed clients. It receives the client ID and notification parameters
+/// and returns a future that resolves when the notification is delivered.
 pub type NotificationCallback = Box<
     dyn Fn(
             ClientId,
@@ -168,7 +183,7 @@ pub trait ResourceDef: Serialize {
 }
 
 /// Implementation of `ResourceReadHandler` for any type implementing `ResourceDef`
-impl<T: ResourceDef + Send + Sync + 'static> ResourceReadHandler for T {
+impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
     fn read_boxed<'a>(
         &'a self,
         uri: String,
@@ -216,7 +231,9 @@ impl<T: ResourceDef + Send + Sync + 'static> ResourceReadHandler for T {
 /// Resource manager for handling subscribers and notifications
 #[derive(Default, Clone)]
 pub struct ResourceManager {
+    /// Maps resource URIs to their subscribers
     pub subscribers: Arc<RwLock<HashMap<String, Vec<ClientId>>>>,
+    /// Callback that will be invoked when resources change
     notification_callback: Arc<RwLock<Option<NotificationCallback>>>,
 }
 
@@ -294,7 +311,13 @@ impl ResourceManager {
         Ok(subscribers.contains_key(resource_uri) && !subscribers.get(resource_uri).unwrap().is_empty())
     }
 
-    /// Notify subscribers of a resource change
+    /// Notifies all subscribers of a resource change
+    ///
+    /// This method:
+    /// 1. Checks if the resource has subscribers
+    /// 2. Creates notification parameters once
+    /// 3. Calls the notification callback for each subscriber
+    /// 4. Returns once all notifications have been delivered
     pub fn notify_resource_updated<'a>(
         &'a self,
         resource_uri: &str,
@@ -302,21 +325,16 @@ impl ResourceManager {
         let resource_uri = resource_uri.to_string();
 
         Box::pin(async move {
-            // Check if the resource has subscribers
             if !self.has_subscribers(&resource_uri)? {
                 return Ok(());
             }
 
-            // Get all subscribers for this resource
             let subscribers = self.get_subscribers(&resource_uri)?;
 
-            // Create notification params once
             let params = ResourceUpdatedNotificationParams { uri: resource_uri.clone() };
 
-            // For each subscriber, get the callback and create a future
             let mut futures = Vec::new();
 
-            // Synchronously access the callback and create futures for each subscriber
             {
                 let notify_callback = self.notification_callback.read().map_err(|e| {
                     ResourceError::Custom(format!("Failed to acquire read lock for notification callback: {}", e))
@@ -332,9 +350,8 @@ impl ResourceManager {
                     let future = callback(subscriber_id, params.clone());
                     futures.push(future);
                 }
-            } // Lock is dropped here
+            }
 
-            // Now await all futures outside the lock scope
             for future in futures {
                 future.await?;
             }

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info};
 use url::Url;
 
@@ -26,15 +26,16 @@ pub struct FileSystem {
     resource_manager: Arc<ResourceManager>,
     /// Active watchers per resource URI
     #[serde(skip)]
-    watchers: Arc<Mutex<HashMap<String, WatcherHandle>>>,
+    watchers: Arc<TokioMutex<HashMap<String, WatcherHandle>>>,
 }
 
-// Structure to manage an active watcher
+/// Manages an active filesystem watcher instance and its subscriber count
 struct WatcherHandle {
-    _watcher: RecommendedWatcher, // Kept alive while in the map
+    _watcher: RecommendedWatcher, // Retained for lifetime management
     subscriber_count: usize,
 }
 
+/// Cached metadata about a file to avoid redundant filesystem operations
 #[derive(Clone, Debug, Serialize)]
 struct FileMetadata {
     pub path: PathBuf,
@@ -50,7 +51,7 @@ impl FileSystem {
             base_dir: Arc::new(base_dir.as_ref().to_path_buf()),
             cache: Arc::new(StdMutex::new(HashMap::new())),
             resource_manager: Arc::new(ResourceManager::new()),
-            watchers: Arc::new(Mutex::new(HashMap::new())),
+            watchers: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }
 
@@ -59,12 +60,12 @@ impl FileSystem {
         self.resource_manager.clone()
     }
 
-    /// Return self as Any for downcasting
-    pub fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    // Create a watcher for a specific resource
+    /// Creates a filesystem watcher for a specific resource URI
+    ///
+    /// Each URI can have a single watcher with multiple subscribers. When the
+    /// first subscriber requests a resource, a watcher is created. Subsequent
+    /// subscribers increment the counter, and the watcher is removed when the
+    /// last subscriber unsubscribes.
     async fn create_watcher(&self, uri: String, path: PathBuf) -> Result<(), ResourceError> {
         let mut watchers = self.watchers.lock().await;
 
@@ -95,7 +96,11 @@ impl FileSystem {
         Ok(())
     }
 
-    // Set up the filesystem watcher
+    /// Configures and initializes a filesystem watcher for detecting changes
+    ///
+    /// Sets up the appropriate watch mode depending on whether the path is
+    /// a file or directory. For files, we also watch the parent directory
+    /// to detect if the file is deleted and recreated.
     fn setup_fs_watcher(&self, tx: Sender<Event>, path: PathBuf) -> Result<RecommendedWatcher, notify::Error> {
         let config = Config::default()
             .with_poll_interval(std::time::Duration::from_secs(1)) // Fallback for unsupported filesystems
@@ -130,7 +135,10 @@ impl FileSystem {
         Ok(watcher)
     }
 
-    // Process file system events
+    /// Processes filesystem events and notifies subscribers of changes
+    ///
+    /// Uses debouncing to prevent rapid-fire notifications when many changes
+    /// occur at once, except for removal events which are sent immediately.
     async fn process_events(mut rx: Receiver<Event>, resource_manager: Arc<ResourceManager>, uri: String) {
         use tokio::time::{interval, Duration};
 
@@ -172,7 +180,7 @@ impl FileSystem {
         }
     }
 
-    // Clean up watcher when unsubscribing
+    /// Decrements the subscriber count for a watcher and removes it if no subscribers remain
     async fn remove_watcher(&self, uri: &str) -> Result<(), ResourceError> {
         let mut watchers = self.watchers.lock().await;
 
