@@ -96,6 +96,11 @@ pub trait ResourceReadHandler: Send + Sync {
         })
     }
 
+    /// Returns the resource manager if this resource supports subscriptions
+    fn get_resource_manager(&self) -> Option<Arc<ResourceManager>> {
+        None
+    }
+
     /// Returns self as Any for downcasting to concrete types
     fn as_any(&self) -> &dyn Any;
 }
@@ -159,6 +164,11 @@ pub trait ResourceDef: Serialize {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         }
     }
+
+    /// Provides a reference to the resource manager if this resource supports subscriptions
+    fn provide_resource_manager(&self) -> Option<Arc<ResourceManager>> {
+        None
+    }
 }
 
 /// Implementation of `ResourceReadHandler` for any type implementing `ResourceDef`
@@ -200,6 +210,10 @@ impl<T: ResourceDef + Send + Sync + 'static> ResourceReadHandler for T {
         client_id: ClientId,
     ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
         Box::pin(async move { self.unsubscribe(uri, client_id).await })
+    }
+
+    fn get_resource_manager(&self) -> Option<Arc<ResourceManager>> {
+        self.provide_resource_manager()
     }
 
     fn as_any(&self) -> &dyn Any {

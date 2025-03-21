@@ -433,6 +433,10 @@ impl ResourceDef for FileSystem {
         info!("Unsubscribed from resource: {}", uri);
         Ok(())
     }
+
+    fn provide_resource_manager(&self) -> Option<Arc<ResourceManager>> {
+        Some(self.get_resource_manager())
+    }
 }
 
 // Add as_any method implementation for the trait

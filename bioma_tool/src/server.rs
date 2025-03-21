@@ -1,5 +1,5 @@
 use crate::prompts::PromptGetHandler;
-use crate::resources::{NotificationCallback, ResourceError, ResourceManager, ResourceReadHandler};
+use crate::resources::{NotificationCallback, ResourceError, ResourceReadHandler};
 use crate::schema::{
     CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
     InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
@@ -153,17 +153,6 @@ impl NotificationManager {
     }
 }
 
-/// Helper function to get the ResourceManager from a resource
-fn get_resource_manager(resource: &dyn ResourceReadHandler) -> Option<Arc<ResourceManager>> {
-    // Try to get the resource manager from the FileSystem resource
-    if let Some(fs) = resource.as_any().downcast_ref::<crate::resources::filesystem::FileSystem>() {
-        return Some(fs.get_resource_manager());
-    }
-
-    // Add other resource types as needed
-    None
-}
-
 pub async fn start<T: ModelContextProtocolServer>(name: &str, transport: TransportConfig) -> Result<()> {
     let server = T::new();
     start_with_impl(name, transport, server).await
@@ -219,7 +208,7 @@ pub async fn start_with_impl<T: ModelContextProtocolServer>(
     // Setup resources and their notification callbacks
     for resource in server.get_resources() {
         // Get the resource manager if available
-        if let Some(resource_manager) = get_resource_manager(resource.as_ref()) {
+        if let Some(resource_manager) = resource.get_resource_manager() {
             // Create a notification callback
             let notification_mgr = notification_manager.clone();
             let callback: NotificationCallback =
