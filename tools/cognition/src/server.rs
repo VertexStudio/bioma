@@ -15,13 +15,13 @@ use base64::Engine as Base64Engine;
 use bioma_actor::prelude::*;
 use bioma_llm::prelude::*;
 use bioma_rag::prelude::*;
-use bioma_tool::client::ListTools;
 use clap::Parser;
 use cognition::{
     health_check::{
         check_embeddings, check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses,
         Service,
     },
+    tool::ListTools,
     ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
 use embeddings::EmbeddingContent;
