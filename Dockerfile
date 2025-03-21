@@ -93,4 +93,5 @@ VOLUME ["/data"]
 ENV RUST_LOG=debug
 
 # Comando para iniciar la aplicación
-CMD ["/app/cognition-server", "/app/assets/configs/rag_config_server_runpod.json"]
+ENTRYPOINT ["/app/cognition-server"]
+CMD ["/app/assets/configs/rag_config_server_runpod.json"]
