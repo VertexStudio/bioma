@@ -148,7 +148,7 @@ async fn main() -> Result<()> {
     };
 
     // Use the specified base directory
-    let server_impl = McpServer::with_base_dir(args.base_dir.clone());
+    let server = McpServer::with_base_dir(args.base_dir.clone());
 
-    bioma_tool::server::start_with_impl("mcp_server", transport, server_impl).await
+    bioma_tool::server::start("mcp_server", transport, server).await
 }
