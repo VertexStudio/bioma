@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["full", "tracing"] }
 tokio-tungstenite = "0.26"
 futures = "0.3"
 futures-util = "0.3"
-reqwest = { version = "0.12", features = ["multipart"] }
+reqwest = { version = "0.12", features = ["multipart", "stream"] }
 jsonrpc-core = "18.0"
 
 # Database and Storage
@@ -37,7 +37,7 @@ schemars = "0.8"
 bon = "3.1"
 
 # Error Handling and Utilities
-thiserror = "2.0.12"
+thiserror = "2.0"
 anyhow = "1.0"
 derive_more = "0.99"
 
@@ -57,7 +57,7 @@ console-subscriber = "0.4"
 color-backtrace = "0.6"
 
 # ID Generation
-uuid = "1.10"
+uuid = { version = "1.10", features = ["serde", "v4"] }
 ulid = "1.1"
 hostname = "0.4"
 
