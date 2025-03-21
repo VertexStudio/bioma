@@ -22,6 +22,10 @@ struct Args {
     #[arg(long, short, default_value = "mcp_server.log")]
     log_file: PathBuf,
 
+    /// Base directory for file access
+    #[arg(long, short, default_value = ".")]
+    base_dir: PathBuf,
+
     #[command(subcommand)]
     transport: Transport,
 }
@@ -53,13 +57,16 @@ struct McpServer {
 
 impl ModelContextProtocolServer for McpServer {
     fn new() -> Self {
-        Self { resources: vec![Box::new(resources::readme::Readme)], prompts: vec![Box::new(prompts::greet::Greet)] }
+        Self::with_base_dir(PathBuf::from("."))
     }
 
     fn get_capabilities(&self) -> ServerCapabilities {
         let caps = ServerCapabilities {
             tools: Some(ServerCapabilitiesPromptsResourcesTools { list_changed: Some(false) }),
-            resources: Some(ServerCapabilitiesPromptsResources { list_changed: Some(false), subscribe: Some(false) }),
+            resources: Some(ServerCapabilitiesPromptsResources {
+                list_changed: Some(true), // Enable resource list change notifications
+                subscribe: Some(true),    // Enable resource subscriptions
+            }),
             prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
             ..Default::default()
         };
@@ -83,6 +90,18 @@ impl ModelContextProtocolServer for McpServer {
             Box::new(tools::random::RandomNumber),
             Box::new(tools::workflow::Workflow::new(true, None)),
         ]
+    }
+}
+
+impl McpServer {
+    fn with_base_dir(base_dir: PathBuf) -> Self {
+        Self {
+            resources: vec![
+                Box::new(resources::readme::Readme),
+                Box::new(resources::filesystem::FileSystem::new(base_dir)),
+            ],
+            prompts: vec![Box::new(prompts::greet::Greet)],
+        }
     }
 }
 
@@ -128,5 +147,8 @@ async fn main() -> Result<()> {
         Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
     };
 
-    bioma_tool::server::start::<McpServer>("mcp_server", transport).await
+    // Use the specified base directory
+    let server_impl = McpServer::with_base_dir(args.base_dir.clone());
+
+    bioma_tool::server::start_with_impl("mcp_server", transport, server_impl).await
 }
