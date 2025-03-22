@@ -7,6 +7,13 @@ use crate::JsonRpcMessage;
 use anyhow::Result;
 use std::future::Future;
 use tokio::task::JoinHandle;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub client_id: ClientId,
+    pub message: JsonRpcMessage,
+}
 
 pub trait Transport {
     // Start processing messages

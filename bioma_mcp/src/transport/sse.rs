@@ -1,5 +1,6 @@
 use crate::client::SseConfig as SseClientConfig;
 use crate::server::SseConfig as SseServerConfig;
+use crate::transport::Message;
 use crate::{ClientId, JsonRpcMessage};
 
 use super::Transport;
@@ -121,12 +122,6 @@ impl SseEvent {
     }
 }
 
-/// Message received from a client with associated client ID
-pub struct SseMessage {
-    pub message: JsonRpcMessage,
-    pub client_id: ClientId,
-}
-
 /// SSE-specific error types
 #[derive(Debug, thiserror::Error)]
 enum SseError {
@@ -158,7 +153,7 @@ type ClientRegistry = Arc<Mutex<HashMap<ClientId, mpsc::Sender<SseEvent>>>>;
 /// SSE transport operating mode
 enum SseMode {
     /// Server mode with connected clients, binding address, and channel capacity
-    Server { clients: ClientRegistry, endpoint: String, channel_capacity: usize, on_message: mpsc::Sender<SseMessage> },
+    Server { clients: ClientRegistry, endpoint: String, channel_capacity: usize, on_message: mpsc::Sender<Message> },
 
     /// Client mode connecting to a server
     Client {
@@ -183,7 +178,7 @@ impl SseTransport {
     /// Create a new SSE transport in server mode
     pub fn new_server(
         config: SseServerConfig,
-        on_message: mpsc::Sender<SseMessage>,
+        on_message: mpsc::Sender<Message>,
         on_error: mpsc::Sender<Error>,
         on_close: mpsc::Sender<()>,
     ) -> Self {
@@ -490,7 +485,7 @@ impl Transport for SseTransport {
                                                     Ok(json_rpc_message) => {
                                                         // Forward the parsed message
                                                         if on_message
-                                                            .send(SseMessage { message: json_rpc_message, client_id })
+                                                            .send(Message { message: json_rpc_message, client_id })
                                                             .await
                                                             .is_err()
                                                         {

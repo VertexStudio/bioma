@@ -13,6 +13,7 @@ use super::Transport;
 
 use crate::client::WsConfig as WsClientConfig;
 use crate::server::WsConfig as WsServerConfig;
+use crate::transport::Message;
 use crate::{ClientId, JsonRpcMessage};
 
 use anyhow::Result;
@@ -26,7 +27,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{
     accept_async, connect_async,
-    tungstenite::protocol::{frame::coding::CloseCode, CloseFrame, Message},
+    tungstenite::protocol::{frame::coding::CloseCode, CloseFrame, Message as WsMessage},
     WebSocketStream,
 };
 use tracing::{debug, error, info};
@@ -79,15 +80,6 @@ pub enum WsError {
     MetadataError(String),
 }
 
-/// WebSocket message with client identification for server-side processing.
-#[derive(Debug, Clone)]
-pub struct WsMessage {
-    /// The JSON-RPC message payload.
-    pub message: JsonRpcMessage,
-    /// The unique identifier of the client that sent or should receive this message.
-    pub client_id: ClientId,
-}
-
 /// WebSocket stream type used for server connections.
 type WsStreamServer = WebSocketStream<TcpStream>;
 
@@ -98,7 +90,7 @@ type WsStreamClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type ClientRegistry = Arc<RwLock<HashMap<ClientId, mpsc::Sender<JsonRpcMessage>>>>;
 
 /// Sender half of the WebSocket stream for client mode.
-type WsSenderClient = Arc<Mutex<Option<futures_util::stream::SplitSink<WsStreamClient, Message>>>>;
+type WsSenderClient = Arc<Mutex<Option<futures_util::stream::SplitSink<WsStreamClient, WsMessage>>>>;
 
 /// Server mode configuration and state.
 struct ServerMode {
@@ -107,7 +99,7 @@ struct ServerMode {
     /// WebSocket server endpoint address (e.g., "127.0.0.1:8080").
     endpoint: String,
     /// Channel for forwarding received messages to the application.
-    on_message: mpsc::Sender<WsMessage>,
+    on_message: mpsc::Sender<Message>,
 }
 
 /// Client mode configuration and state.
@@ -142,7 +134,6 @@ pub struct WsTransport {
     #[allow(unused)]
     on_error: mpsc::Sender<anyhow::Error>,
     /// Channel for notifying the application when the transport is closed.
-    #[allow(unused)]
     on_close: mpsc::Sender<()>,
 }
 
@@ -161,7 +152,7 @@ impl WsTransport {
     /// A new WebSocket transport configured for server mode.
     pub fn new_server(
         config: WsServerConfig,
-        on_message: mpsc::Sender<WsMessage>,
+        on_message: mpsc::Sender<Message>,
         on_error: mpsc::Sender<anyhow::Error>,
         on_close: mpsc::Sender<()>,
     ) -> Self {
@@ -218,7 +209,7 @@ impl WsTransport {
         ws_stream: WsStreamServer,
         client_id: ClientId,
         clients: ClientRegistry,
-        on_message: mpsc::Sender<WsMessage>,
+        on_message: mpsc::Sender<Message>,
     ) -> Result<(), WsError> {
         // Split the WebSocket stream into sender and receiver parts
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -238,7 +229,7 @@ impl WsTransport {
         let client_task = tokio::spawn(async move {
             while let Some(message) = client_receiver.recv().await {
                 let json = serde_json::to_string(&message)?;
-                if ws_sender.send(Message::Text(json.into())).await.is_err() {
+                if ws_sender.send(WsMessage::Text(json.into())).await.is_err() {
                     // Connection was closed, exit the loop
                     break;
                 }
@@ -249,11 +240,11 @@ impl WsTransport {
         // Process incoming messages from the WebSocket
         while let Some(result) = ws_receiver.next().await {
             match result {
-                Ok(Message::Text(text)) => {
+                Ok(WsMessage::Text(text)) => {
                     debug!("Received WebSocket message: {}", text);
                     match serde_json::from_str::<JsonRpcMessage>(&text) {
                         Ok(message) => {
-                            let ws_message = WsMessage { message, client_id: client_id.clone() };
+                            let ws_message = Message { client_id: client_id.clone(), message };
                             if on_message.send(ws_message).await.is_err() {
                                 // Channel was closed, exit the loop
                                 break;
@@ -266,7 +257,7 @@ impl WsTransport {
                         }
                     }
                 }
-                Ok(Message::Close(_)) => break, // Client initiated close
+                Ok(WsMessage::Close(_)) => break, // Client initiated close
                 Err(err) => {
                     error!("WebSocket connection error: {}", err);
                     break;
@@ -418,7 +409,7 @@ impl Transport for WsTransport {
                     let receive_task = tokio::spawn(async move {
                         while let Some(result) = ws_receiver.next().await {
                             match result {
-                                Ok(Message::Text(text)) => {
+                                Ok(WsMessage::Text(text)) => {
                                     debug!("Client received [ws]: {}", text);
                                     match serde_json::from_str::<JsonRpcMessage>(&text) {
                                         Ok(message) => {
@@ -437,7 +428,7 @@ impl Transport for WsTransport {
                                         }
                                     }
                                 }
-                                Ok(Message::Close(_)) => break, // Server initiated close
+                                Ok(WsMessage::Close(_)) => break, // Server initiated close
                                 Err(err) => {
                                     error!("WebSocket connection error: {}", err);
                                     break;
@@ -505,7 +496,7 @@ impl Transport for WsTransport {
                 match &mut *sender_guard {
                     Some(sender) => {
                         let message_json = serde_json::to_string(&message)?;
-                        sender.send(Message::Text(message_json.into())).await?;
+                        sender.send(WsMessage::Text(message_json.into())).await?;
                         Ok(())
                     }
                     None => Err(anyhow::anyhow!("WebSocket connection not established")),
@@ -564,7 +555,7 @@ impl Transport for WsTransport {
                     info!("Initiating graceful shutdown of WebSocket connection");
 
                     // Create a close frame with normal close code (1000)
-                    let close_frame = Message::Close(Some(CloseFrame {
+                    let close_frame = WsMessage::Close(Some(CloseFrame {
                         code: CloseCode::Normal,
                         reason: "Client initiated shutdown".into(),
                     }));

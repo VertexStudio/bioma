@@ -1,5 +1,6 @@
 use super::Transport;
 use crate::client::StdioConfig;
+use crate::transport::Message;
 use crate::{ClientId, JsonRpcMessage};
 use anyhow::{Context, Error, Result};
 use std::sync::Arc;
@@ -12,8 +13,12 @@ use tokio::{
 use tracing::{debug, error};
 
 enum StdioMode {
-    Server(Mutex<tokio::io::Stdout>),
+    Server {
+        on_message: mpsc::Sender<Message>,
+        stdout: Arc<Mutex<tokio::io::Stdout>>,
+    },
     Client {
+        on_message: mpsc::Sender<JsonRpcMessage>,
         // Holds the child process to keep it alive
         #[allow(unused)]
         process: Arc<Mutex<Child>>,
@@ -26,7 +31,6 @@ enum StdioMode {
 #[derive(Clone)]
 pub struct StdioTransport {
     mode: Arc<StdioMode>,
-    on_message: mpsc::Sender<JsonRpcMessage>,
     #[allow(unused)]
     on_error: mpsc::Sender<Error>,
     #[allow(unused)]
@@ -35,11 +39,15 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     pub fn new_server(
-        on_message: mpsc::Sender<JsonRpcMessage>,
+        on_message: mpsc::Sender<Message>,
         on_error: mpsc::Sender<Error>,
         on_close: mpsc::Sender<()>,
     ) -> Self {
-        Self { mode: Arc::new(StdioMode::Server(Mutex::new(tokio::io::stdout()))), on_message, on_error, on_close }
+        Self {
+            mode: Arc::new(StdioMode::Server { stdout: Arc::new(Mutex::new(tokio::io::stdout())), on_message }),
+            on_error,
+            on_close,
+        }
     }
 
     pub async fn new_client(
@@ -60,11 +68,11 @@ impl StdioTransport {
 
         Ok(Self {
             mode: Arc::new(StdioMode::Client {
+                on_message,
                 process: Arc::new(Mutex::new(child)),
                 stdin: Arc::new(Mutex::new(stdin)),
                 stdout: Arc::new(Mutex::new(stdout)),
             }),
-            on_message,
             on_error,
             on_close,
         })
@@ -75,24 +83,24 @@ impl Transport for StdioTransport {
     async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
         // Clone the necessary parts to avoid moving self
         let mode = self.mode.clone();
-        let on_message = self.on_message.clone();
-
         let handle = tokio::spawn(async move {
             match &*mode {
-                StdioMode::Server(_stdout) => {
+                StdioMode::Server { on_message, stdout: _stdout } => {
+                    let client_id = ClientId::new();
                     let stdin = tokio::io::stdin();
                     let mut lines = BufReader::new(stdin).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
                         debug!("Server received [stdio]: {}", line);
                         let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
-                        if on_message.send(request).await.is_err() {
+                        let message = Message { message: request, client_id: client_id.clone() };
+                        if on_message.send(message).await.is_err() {
                             error!("Failed to send request through channel");
                             break;
                         }
                     }
                     Ok(())
                 }
-                StdioMode::Client { stdout, .. } => {
+                StdioMode::Client { on_message, stdout, .. } => {
                     let mut stdout = stdout.lock().await;
                     let mut lines = BufReader::new(&mut *stdout).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
@@ -113,7 +121,7 @@ impl Transport for StdioTransport {
     async fn send(&mut self, message: JsonRpcMessage, _client_id: ClientId) -> Result<()> {
         let message_str = serde_json::to_string(&message)?;
         match &*self.mode {
-            StdioMode::Server(stdout) => {
+            StdioMode::Server { stdout, .. } => {
                 debug!("Server sending [stdio]: {}", message_str);
                 let mut stdout = stdout.lock().await;
                 stdout.write_all(message_str.as_bytes()).await.context("Failed to write message")?;
@@ -134,7 +142,7 @@ impl Transport for StdioTransport {
     fn close(&mut self) -> impl std::future::Future<Output = Result<()>> {
         async move {
             match &*self.mode {
-                StdioMode::Server(stdout) => {
+                StdioMode::Server { stdout, .. } => {
                     debug!("Closing server stdio transport");
                     let mut stdout = stdout.lock().await;
                     stdout.flush().await.context("Failed to flush stdout on close")?;

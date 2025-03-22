@@ -6,7 +6,7 @@ use bioma_mcp::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{ModelContextProtocolServer, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    server::{ModelContextProtocolServer, Server, SseConfig, StdioConfig, TransportConfig, WsConfig},
     tools::{self, ToolCallHandler},
 };
 use clap::{Parser, Subcommand};
@@ -50,28 +50,20 @@ enum Transport {
     },
 }
 
-struct McpServer {
+struct ExampleMcpServer {
+    transport_config: TransportConfig,
+    capabilities: ServerCapabilities,
     resources: Vec<Box<dyn ResourceReadHandler>>,
     prompts: Vec<Box<dyn PromptGetHandler>>,
 }
 
-impl ModelContextProtocolServer for McpServer {
-    fn new() -> Self {
-        Self::with_base_dir(PathBuf::from("."))
+impl ModelContextProtocolServer for ExampleMcpServer {
+    fn get_transport_config(&self) -> &TransportConfig {
+        &self.transport_config
     }
 
-    fn get_capabilities(&self) -> ServerCapabilities {
-        let caps = ServerCapabilities {
-            tools: Some(ServerCapabilitiesPromptsResourcesTools { list_changed: Some(false) }),
-            resources: Some(ServerCapabilitiesPromptsResources {
-                list_changed: Some(true), // Enable resource list change notifications
-                subscribe: Some(true),    // Enable resource subscriptions
-            }),
-            prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
-            ..Default::default()
-        };
-
-        caps
+    fn get_capabilities(&self) -> &ServerCapabilities {
+        &self.capabilities
     }
 
     fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>> {
@@ -90,18 +82,6 @@ impl ModelContextProtocolServer for McpServer {
             Box::new(tools::random::RandomNumber),
             Box::new(tools::workflow::Workflow::new(true, None)),
         ]
-    }
-}
-
-impl McpServer {
-    fn with_base_dir(base_dir: PathBuf) -> Self {
-        Self {
-            resources: vec![
-                Box::new(resources::readme::Readme),
-                Box::new(resources::filesystem::FileSystem::new(base_dir)),
-            ],
-            prompts: vec![Box::new(prompts::greet::Greet)],
-        }
     }
 }
 
@@ -133,6 +113,7 @@ fn setup_logging(log_path: PathBuf) -> Result<()> {
         .init();
 
     info!("Logging system initialized");
+
     Ok(())
 }
 
@@ -141,14 +122,29 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     setup_logging(args.log_file)?;
 
-    let transport = match &args.transport {
+    let transport_config = match &args.transport {
         Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
         Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
         Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
     };
 
-    // Use the specified base directory
-    let server = McpServer::with_base_dir(args.base_dir.clone());
+    let capabilities = ServerCapabilities {
+        tools: Some(ServerCapabilitiesPromptsResourcesTools { list_changed: Some(false) }),
+        resources: Some(ServerCapabilitiesPromptsResources { list_changed: Some(true), subscribe: Some(true) }),
+        prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
+        ..Default::default()
+    };
 
-    bioma_mcp::server::start("mcp_server", transport, server).await
+    let resources: Vec<Box<dyn ResourceReadHandler>> = vec![
+        Box::new(resources::readme::Readme),
+        Box::new(resources::filesystem::FileSystem::new(args.base_dir.clone())),
+    ];
+
+    let prompts: Vec<Box<dyn PromptGetHandler>> = vec![Box::new(prompts::greet::Greet)];
+
+    let server = ExampleMcpServer { transport_config, capabilities, resources, prompts };
+
+    let mcp_server = Server::new(server);
+
+    mcp_server.start().await
 }
