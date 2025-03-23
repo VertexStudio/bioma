@@ -3,7 +3,7 @@ use bioma_mcp::client::SseConfig as SseClientConfig;
 use bioma_mcp::server::SseConfig as SseServerConfig;
 use bioma_mcp::transport::sse::{SseEvent, SseTransport};
 use bioma_mcp::transport::Transport;
-use bioma_mcp::{ClientId, JsonRpcMessage};
+use bioma_mcp::{ConnectionId, JsonRpcMessage};
 use serde_json::json;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -13,8 +13,8 @@ use tokio::sync::mpsc;
 #[tokio::test]
 async fn test_client_id() {
     // Test ID generation uniqueness
-    let id1 = ClientId::new();
-    let id2 = ClientId::new();
+    let id1 = ConnectionId::new();
+    let id2 = ConnectionId::new();
     assert_ne!(id1, id2, "Generated IDs should be unique");
 
     // Test string conversion
@@ -168,7 +168,7 @@ async fn test_error_handling() -> Result<()> {
     let test_message = json!({"jsonrpc":"2.0","method":"test","params":{},"id":"test"});
     let json_rpc_message: JsonRpcMessage = serde_json::from_value(test_message)?;
 
-    let result = client.send(json_rpc_message, ClientId::new()).await;
+    let result = client.send(json_rpc_message, ConnectionId::new()).await;
     assert!(result.is_err(), "Sending without connection should fail");
 
     Ok(())

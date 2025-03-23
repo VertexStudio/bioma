@@ -1,7 +1,7 @@
 use crate::client::SseConfig as SseClientConfig;
 use crate::server::SseConfig as SseServerConfig;
 use crate::transport::Message;
-use crate::{ClientId, JsonRpcMessage};
+use crate::{ConnectionId, JsonRpcMessage};
 
 use super::{SendMessage, Transport, TransportSender};
 use anyhow::{Context, Error, Result};
@@ -147,8 +147,8 @@ enum SseError {
     Other(String),
 }
 
-/// Client registry type for SSE server - maps ClientId to message sender
-type ClientRegistry = Arc<Mutex<HashMap<ClientId, mpsc::Sender<SseEvent>>>>;
+/// Client registry type for SSE server - maps ConnectionId to message sender
+type ClientRegistry = Arc<Mutex<HashMap<ConnectionId, mpsc::Sender<SseEvent>>>>;
 
 /// SSE transport operating mode
 enum SseMode {
@@ -225,16 +225,16 @@ impl SseTransport {
     }
 
     /// Helper method to send a message to a specific client
-    async fn send_to_client(clients: &ClientRegistry, client_id: &ClientId, event: SseEvent) -> Result<()> {
+    async fn send_to_client(clients: &ClientRegistry, conn_id: &ConnectionId, event: SseEvent) -> Result<()> {
         let clients_map = clients.lock().await;
 
-        if let Some(tx) = clients_map.get(client_id) {
+        if let Some(tx) = clients_map.get(conn_id) {
             if tx.send(event).await.is_err() {
-                debug!("Client {} disconnected", client_id.to_string());
+                debug!("Client {} disconnected", conn_id.to_string());
                 // We'll handle client removal outside this function
             }
         } else {
-            debug!("Client {} not found", client_id.to_string());
+            debug!("Client {} not found", conn_id.to_string());
             return Err(SseError::ClientNotFound.into());
         }
 
@@ -372,12 +372,12 @@ impl Transport for SseTransport {
 
                                                 // Create a channel for sending messages to this client
                                                 let (client_tx, mut client_rx) = mpsc::channel::<SseEvent>(capacity);
-                                                let client_id = ClientId::new();
+                                                let conn_id = ConnectionId::new();
 
                                                 // Register client
                                                 {
                                                     let mut clients_map = clients.lock().await;
-                                                    clients_map.insert(client_id.clone(), client_tx);
+                                                    clients_map.insert(conn_id.clone(), client_tx);
                                                 }
 
                                                 // Create a new channel for the streaming response
@@ -386,9 +386,9 @@ impl Transport for SseTransport {
 
                                                 // Spawn a task to handle sending SSE events to the client
                                                 tokio::spawn(async move {
-                                                    // Send initial endpoint event with path that includes client_id
+                                                    // Send initial endpoint event with path that includes conn_id
                                                     let endpoint_url =
-                                                        format!("http://{}/sse/{}", endpoint, client_id.to_string());
+                                                        format!("http://{}/sse/{}", endpoint, conn_id.to_string());
                                                     let endpoint_event = SseEvent::Endpoint(endpoint_url);
 
                                                     // Convert to SSE event string
@@ -447,9 +447,9 @@ impl Transport for SseTransport {
                                             // Message endpoint for receiving client messages
                                             (&Method::POST, path) => {
                                                 // Extract client ID from path
-                                                let client_id = if let Some(id_str) = path.strip_prefix("/sse/") {
+                                                let conn_id = if let Some(id_str) = path.strip_prefix("/sse/") {
                                                     if let Ok(uuid) = Uuid::parse_str(id_str) {
-                                                        ClientId(uuid)
+                                                        ConnectionId(uuid)
                                                     } else {
                                                         let response = Response::builder()
                                                             .status(StatusCode::BAD_REQUEST)
@@ -476,7 +476,7 @@ impl Transport for SseTransport {
 
                                                 debug!(
                                                     "Received client message from {}: {}",
-                                                    client_id.to_string(),
+                                                    conn_id.to_string(),
                                                     message_str
                                                 );
 
@@ -485,7 +485,7 @@ impl Transport for SseTransport {
                                                     Ok(json_rpc_message) => {
                                                         // Forward the parsed message
                                                         if on_message
-                                                            .send(Message { message: json_rpc_message, client_id })
+                                                            .send(Message { message: json_rpc_message, conn_id })
                                                             .await
                                                             .is_err()
                                                         {
@@ -588,7 +588,11 @@ impl Transport for SseTransport {
         }
     }
 
-    fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> impl std::future::Future<Output = Result<()>> {
+    fn send(
+        &mut self,
+        message: JsonRpcMessage,
+        conn_id: ConnectionId,
+    ) -> impl std::future::Future<Output = Result<()>> {
         let mode = self.mode.clone();
 
         async move {
@@ -600,7 +604,7 @@ impl Transport for SseTransport {
                     let sse_event = SseEvent::Message(message);
 
                     // Send event to the specific client
-                    Self::send_to_client(clients, &client_id, sse_event).await?;
+                    Self::send_to_client(clients, &conn_id, sse_event).await?;
 
                     Ok(())
                 }
@@ -625,7 +629,7 @@ impl Transport for SseTransport {
                     // Serialize the message
                     let message_str = serde_json::to_string(&message).context("Failed to serialize JsonRpcMessage")?;
 
-                    // Send HTTP POST request (client_id is part of the URL path)
+                    // Send HTTP POST request (conn_id is part of the URL path)
                     let response = http_client
                         .post(&url)
                         .header("Content-Type", "application/json")
@@ -657,8 +661,8 @@ impl Transport for SseTransport {
                     let mut clients_map = clients.lock().await;
 
                     // Send a shutdown event to all connected clients
-                    for (client_id, tx) in clients_map.drain() {
-                        debug!("Sending shutdown event to client {}", client_id.to_string());
+                    for (conn_id, tx) in clients_map.drain() {
+                        debug!("Sending shutdown event to client {}", conn_id.to_string());
 
                         // Create shutdown system message
                         let shutdown_event =
@@ -666,7 +670,7 @@ impl Transport for SseTransport {
 
                         // Send the shutdown event to the client
                         if tx.send(shutdown_event).await.is_err() {
-                            debug!("Client {} already disconnected", client_id.to_string());
+                            debug!("Client {} already disconnected", conn_id.to_string());
                         }
 
                         // The client connection will be closed when tx is dropped
@@ -700,11 +704,11 @@ pub struct SseTransportSender {
 }
 
 impl SendMessage for SseTransportSender {
-    async fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+    async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             SseMode::Server { clients, .. } => {
                 let event = SseEvent::Message(message);
-                SseTransport::send_to_client(clients, &client_id, event).await
+                SseTransport::send_to_client(clients, &conn_id, event).await
             }
             SseMode::Client { message_endpoint, http_client, .. } => {
                 let endpoint = message_endpoint.lock().await.clone();

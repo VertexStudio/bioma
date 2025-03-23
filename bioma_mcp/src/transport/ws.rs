@@ -14,7 +14,7 @@ use super::{SendMessage, Transport, TransportSender};
 use crate::client::WsConfig as WsClientConfig;
 use crate::server::WsConfig as WsServerConfig;
 use crate::transport::Message;
-use crate::{ClientId, JsonRpcMessage};
+use crate::{ConnectionId, JsonRpcMessage};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -41,7 +41,7 @@ pub enum WsError {
 
     /// Attempted to send a message to a client that is not registered.
     #[error("Client not found: {0}")]
-    ClientNotFound(ClientId),
+    ClientNotFound(ConnectionId),
 
     /// Failed to send a message through a channel.
     #[error("Message sending failed: {0}")]
@@ -87,7 +87,7 @@ type WsStreamServer = WebSocketStream<TcpStream>;
 type WsStreamClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Registry of connected clients and their message senders.
-type ClientRegistry = Arc<RwLock<HashMap<ClientId, mpsc::Sender<JsonRpcMessage>>>>;
+type ClientRegistry = Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>;
 
 /// Sender half of the WebSocket stream for client mode.
 type WsSenderClient = Arc<Mutex<Option<futures_util::stream::SplitSink<WsStreamClient, WsMessage>>>>;
@@ -144,9 +144,9 @@ pub struct WsTransportSender {
 }
 
 impl SendMessage for WsTransportSender {
-    async fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+    async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
-            WsMode::Server(server) => WsTransport::send_to_client(&server.clients, &client_id, message)
+            WsMode::Server(server) => WsTransport::send_to_client(&server.clients, &conn_id, message)
                 .await
                 .map_err(|e| anyhow::Error::msg(format!("Failed to send to client: {}", e))),
             WsMode::Client(client) => {
@@ -232,7 +232,7 @@ impl WsTransport {
     /// # Arguments
     ///
     /// * `ws_stream` - The WebSocket stream for this client connection.
-    /// * `client_id` - Unique identifier for this client.
+    /// * `conn_id` - Unique identifier for this client.
     /// * `clients` - Registry of connected clients to register this client in.
     /// * `on_message` - Channel for forwarding received messages to the application.
     ///
@@ -241,7 +241,7 @@ impl WsTransport {
     /// `Ok(())` if the connection was handled successfully, or an error if something went wrong.
     async fn handle_client_connection(
         ws_stream: WsStreamServer,
-        client_id: ClientId,
+        conn_id: ConnectionId,
         clients: ClientRegistry,
         on_message: mpsc::Sender<Message>,
     ) -> Result<(), WsError> {
@@ -254,10 +254,10 @@ impl WsTransport {
         // Register the client in the client registry
         {
             let mut clients = clients.write().await;
-            clients.insert(client_id.clone(), client_sender);
+            clients.insert(conn_id.clone(), client_sender);
         }
 
-        info!("WebSocket client connected: {}", client_id);
+        info!("WebSocket client connected: {}", conn_id);
 
         // Task for forwarding messages from the client channel to the WebSocket
         let client_task = tokio::spawn(async move {
@@ -278,7 +278,7 @@ impl WsTransport {
                     debug!("Received WebSocket message: {}", text);
                     match serde_json::from_str::<JsonRpcMessage>(&text) {
                         Ok(message) => {
-                            let ws_message = Message { client_id: client_id.clone(), message };
+                            let ws_message = Message { conn_id: conn_id.clone(), message };
                             if on_message.send(ws_message).await.is_err() {
                                 // Channel was closed, exit the loop
                                 break;
@@ -303,10 +303,10 @@ impl WsTransport {
         // Clean up client registration when connection closes
         {
             let mut clients = clients.write().await;
-            clients.remove(&client_id);
+            clients.remove(&conn_id);
         }
 
-        info!("WebSocket client disconnected: {}", client_id);
+        info!("WebSocket client disconnected: {}", conn_id);
         client_task.abort(); // Cancel the client forwarding task
         Ok(())
     }
@@ -316,7 +316,7 @@ impl WsTransport {
     /// # Arguments
     ///
     /// * `clients` - Registry of connected clients.
-    /// * `client_id` - The client to send the message to.
+    /// * `conn_id` - The client to send the message to.
     /// * `message` - The JSON-RPC message to send.
     ///
     /// # Returns
@@ -330,18 +330,18 @@ impl WsTransport {
     /// Returns `WsError::SendError` if the message channel is closed.
     async fn send_to_client(
         clients: &ClientRegistry,
-        client_id: &ClientId,
+        conn_id: &ConnectionId,
         message: JsonRpcMessage,
     ) -> Result<(), WsError> {
         let clients = clients.read().await;
-        if let Some(sender) = clients.get(client_id) {
+        if let Some(sender) = clients.get(conn_id) {
             sender
                 .send(message)
                 .await
-                .map_err(|_| WsError::SendError(format!("Failed to send message to client {}", client_id)))?;
+                .map_err(|_| WsError::SendError(format!("Failed to send message to client {}", conn_id)))?;
             Ok(())
         } else {
-            Err(WsError::ClientNotFound(client_id.clone()))
+            Err(WsError::ClientNotFound(conn_id.clone()))
         }
     }
 }
@@ -380,8 +380,8 @@ impl Transport for WsTransport {
 
                         // Accept and handle incoming connections
                         while let Ok((stream, addr)) = listener.accept().await {
-                            let client_id = ClientId::new();
-                            debug!("Accepting connection from {} with ID {}", addr, client_id);
+                            let conn_id = ConnectionId::new();
+                            debug!("Accepting connection from {} with ID {}", addr, conn_id);
 
                             // Upgrade the TCP stream to a WebSocket stream
                             let ws_stream = accept_async(stream).await.map_err(|e| {
@@ -390,7 +390,7 @@ impl Transport for WsTransport {
 
                             let clients = clients_clone.clone();
                             let on_message = on_message_clone.clone();
-                            let client_id_clone = client_id.clone();
+                            let client_id_clone = conn_id.clone();
 
                             // Spawn a task to handle this client connection
                             tokio::spawn(async move {
@@ -508,7 +508,7 @@ impl Transport for WsTransport {
     /// # Arguments
     ///
     /// * `message` - The JSON-RPC message to send.
-    /// * `client_id` - In server mode, this must contain a client ID. In client mode, this is ignored.
+    /// * `conn_id` - In server mode, this must contain a client ID. In client mode, this is ignored.
     ///
     /// # Returns
     ///
@@ -518,11 +518,11 @@ impl Transport for WsTransport {
     ///
     /// Returns an error if the transport is not started, the client is not found, or the message
     /// could not be serialized or sent.
-    async fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             WsMode::Server(server) => {
                 debug!("Server sending WebSocket message");
-                Self::send_to_client(&server.clients, &client_id, message).await.map_err(|e| anyhow::anyhow!("{}", e))
+                Self::send_to_client(&server.clients, &conn_id, message).await.map_err(|e| anyhow::anyhow!("{}", e))
             }
             WsMode::Client(client) => {
                 debug!("Client sending WebSocket message");

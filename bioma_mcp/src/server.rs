@@ -11,7 +11,7 @@ use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportType};
-use crate::{ClientId, JsonRpcMessage};
+use crate::{ConnectionId, JsonRpcMessage};
 use anyhow::{Context, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 #[derive(Clone)]
 pub struct ServerMetadata {
     /// Unique identifier for the client connection
-    pub client_id: ClientId,
+    pub conn_id: ConnectionId,
 }
 
 impl Metadata for ServerMetadata {}
@@ -87,14 +87,14 @@ pub enum TransportConfig {
 }
 
 pub struct Session {
-    pub client_id: ClientId,
+    pub conn_id: ConnectionId,
     pub tools: HashMap<String, Arc<dyn ToolCallHandler>>,
 }
 
 impl Session {
-    fn new(client_id: ClientId, tools: Vec<Arc<dyn ToolCallHandler>>) -> Self {
+    fn new(conn_id: ConnectionId, tools: Vec<Arc<dyn ToolCallHandler>>) -> Self {
         let tools = tools.into_iter().map(|tool| (tool.def().name.clone(), tool)).collect();
-        Self { client_id, tools }
+        Self { conn_id, tools }
     }
 
     fn get_tool(&self, name: &str) -> Option<Arc<dyn ToolCallHandler>> {
@@ -108,7 +108,7 @@ impl Session {
 
 pub struct Server<T: ModelContextProtocolServer> {
     server: Arc<RwLock<T>>,
-    sessions: Arc<RwLock<HashMap<ClientId, Session>>>,
+    sessions: Arc<RwLock<HashMap<ConnectionId, Session>>>,
 }
 
 impl<T: ModelContextProtocolServer> Server<T> {
@@ -194,13 +194,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         meta: None,
                     };
 
-                    let client_id = meta.client_id;
+                    let conn_id = meta.conn_id;
 
                     let server = server.read().await;
                     let tools = server.create_tools();
 
-                    let session = Session::new(client_id.clone(), tools);
-                    sessions.write().await.insert(client_id, session);
+                    let session = Session::new(conn_id.clone(), tools);
+                    sessions.write().await.insert(conn_id, session);
 
                     info!("Successfully handled initialize request");
                     Ok(serde_json::to_value(result).map_err(|e| {
@@ -371,7 +371,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
             move |params: Params, meta: ServerMetadata| {
                 let server = server.clone();
-                let client_id = meta.client_id.clone();
+                let conn_id = meta.conn_id.clone();
                 let transport_sender = transport_sender.clone();
 
                 async move {
@@ -392,7 +392,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let resource = resources
                         .iter()
                         .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
-                    let on_resource_updated_client_id = client_id.clone();
+                    let on_resource_updated_client_id = conn_id.clone();
                     let on_resource_updated_uri = params.uri.clone();
 
                     let (on_resource_updated_tx, mut on_resource_updated_rx) = mpsc::channel::<()>(1);
@@ -426,7 +426,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     match resource {
                         Some(resource) => match resource.subscribe(params.uri.clone(), on_resource_updated_tx).await {
                             Ok(_) => {
-                                info!("Successfully subscribed to resource: {} for client: {}", params.uri, client_id);
+                                info!("Successfully subscribed to resource: {} for client: {}", params.uri, conn_id);
                                 Ok(serde_json::json!({}))
                             }
                             Err(e) => {
@@ -580,11 +580,10 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     // Here you could use params.cursor for pagination if needed
                     debug!("Tools list request with cursor: {:?}", params.cursor);
 
-                    let client_id = meta.client_id.clone();
+                    let conn_id = meta.conn_id.clone();
                     let sessions = sessions.read().await;
 
-                    let tools =
-                        if let Some(session) = sessions.get(&client_id) { session.list_tools() } else { vec![] };
+                    let tools = if let Some(session) = sessions.get(&conn_id) { session.list_tools() } else { vec![] };
                     let response = ListToolsResult { next_cursor: None, tools, meta: None };
                     info!("Successfully handled tools/list request");
                     Ok(serde_json::to_value(response).unwrap_or_default())
@@ -609,7 +608,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     // Find the tool reference using Arc - no cloning of the actual tool
                     let tool_reference = {
                         let sessions = sessions.read().await;
-                        if let Some(session) = sessions.get(&meta.client_id) {
+                        if let Some(session) = sessions.get(&meta.conn_id) {
                             session.get_tool(&params.name)
                         } else {
                             None
@@ -658,15 +657,14 @@ impl<T: ModelContextProtocolServer> Server<T> {
                 match &message.message {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                            let metadata = ServerMetadata { client_id: message.client_id.clone() };
+                            let metadata = ServerMetadata { conn_id: message.conn_id.clone() };
 
                             let Some(response) = io_handler_clone.handle_rpc_request(request.clone(), metadata).await
                             else {
                                 return;
                             };
 
-                            if let Err(e) =
-                                transport_sender_clone.send(response.into(), message.client_id.clone()).await
+                            if let Err(e) = transport_sender_clone.send(response.into(), message.conn_id.clone()).await
                             {
                                 error!("Failed to send response: {}", e);
                             }

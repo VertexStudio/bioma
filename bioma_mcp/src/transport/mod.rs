@@ -2,7 +2,7 @@ pub mod sse;
 pub mod stdio;
 pub mod ws;
 
-use crate::ClientId;
+use crate::ConnectionId;
 use crate::JsonRpcMessage;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    pub client_id: ClientId,
+    pub conn_id: ConnectionId,
     pub message: JsonRpcMessage,
 }
 
@@ -19,8 +19,8 @@ pub trait Transport {
     // Start processing messages
     fn start(&mut self) -> impl Future<Output = Result<JoinHandle<Result<()>>>>;
 
-    // Send a JSON-RPC message with client_id
-    fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> impl Future<Output = Result<()>>;
+    // Send a JSON-RPC message with conn_id
+    fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> impl Future<Output = Result<()>>;
 
     // Close the connection
     fn close(&mut self) -> impl Future<Output = Result<()>>;
@@ -31,7 +31,7 @@ pub trait Transport {
 
 // A trait for sending messages without locking the transport
 pub trait SendMessage {
-    fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> impl Future<Output = Result<()>>;
+    fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> impl Future<Output = Result<()>>;
 }
 
 #[derive(Clone)]
@@ -42,11 +42,11 @@ pub enum TransportSenderType {
 }
 
 impl TransportSenderType {
-    pub async fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+    pub async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match self {
-            Self::Stdio(sender) => sender.send(message, client_id).await,
-            Self::Sse(sender) => sender.send(message, client_id).await,
-            Self::Ws(sender) => sender.send(message, client_id).await,
+            Self::Stdio(sender) => sender.send(message, conn_id).await,
+            Self::Sse(sender) => sender.send(message, conn_id).await,
+            Self::Ws(sender) => sender.send(message, conn_id).await,
         }
     }
 }
@@ -70,8 +70,8 @@ impl TransportSender {
         Self { inner: TransportSenderType::Ws(sender) }
     }
 
-    pub async fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
-        self.inner.send(message, client_id).await
+    pub async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
+        self.inner.send(message, conn_id).await
     }
 }
 
@@ -91,11 +91,11 @@ impl Transport for TransportType {
         }
     }
 
-    async fn send(&mut self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match self {
-            TransportType::Stdio(t) => t.send(message, client_id).await,
-            TransportType::Sse(t) => t.send(message, client_id).await,
-            TransportType::Ws(t) => t.send(message, client_id).await,
+            TransportType::Stdio(t) => t.send(message, conn_id).await,
+            TransportType::Sse(t) => t.send(message, conn_id).await,
+            TransportType::Ws(t) => t.send(message, conn_id).await,
         }
     }
 

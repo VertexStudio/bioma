@@ -1,7 +1,7 @@
 use super::{SendMessage, Transport, TransportSender};
 use crate::client::StdioConfig;
 use crate::transport::Message;
-use crate::{ClientId, JsonRpcMessage};
+use crate::{ConnectionId, JsonRpcMessage};
 use anyhow::{Context, Error, Result};
 use std::sync::Arc;
 use tokio::{
@@ -44,7 +44,7 @@ pub struct StdioTransportSender {
 }
 
 impl SendMessage for StdioTransportSender {
-    async fn send(&self, message: JsonRpcMessage, _client_id: ClientId) -> Result<()> {
+    async fn send(&self, message: JsonRpcMessage, _client_id: ConnectionId) -> Result<()> {
         let json = serde_json::to_string(&message).context("Failed to serialize message")?;
         let message_with_newline = format!("{}\n", json);
 
@@ -114,13 +114,13 @@ impl Transport for StdioTransport {
         let handle = tokio::spawn(async move {
             match &*mode {
                 StdioMode::Server { on_message, stdout: _stdout } => {
-                    let client_id = ClientId::new();
+                    let conn_id = ConnectionId::new();
                     let stdin = tokio::io::stdin();
                     let mut lines = BufReader::new(stdin).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
                         debug!("Server received [stdio]: {}", line);
                         let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
-                        let message = Message { message: request, client_id: client_id.clone() };
+                        let message = Message { message: request, conn_id: conn_id.clone() };
                         if on_message.send(message).await.is_err() {
                             error!("Failed to send request through channel");
                             break;
@@ -146,7 +146,7 @@ impl Transport for StdioTransport {
         Ok(handle)
     }
 
-    async fn send(&mut self, message: JsonRpcMessage, _client_id: ClientId) -> Result<()> {
+    async fn send(&mut self, message: JsonRpcMessage, _client_id: ConnectionId) -> Result<()> {
         let message_str = serde_json::to_string(&message)?;
         match &*self.mode {
             StdioMode::Server { stdout, .. } => {

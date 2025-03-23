@@ -2,13 +2,13 @@ use crate::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, GetPromptRequestParams, GetPromptResult, Implementation,
     InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
     ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
-    ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult,
-    ServerCapabilities,
+    ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult, Root,
+    RootsListChangedNotification, RootsListChangedNotificationParams, ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
-use crate::transport::{stdio::StdioTransport, Transport, TransportType, TransportSender};
-use crate::{ClientId, JsonRpcMessage};
+use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
+use crate::{ConnectionId, JsonRpcMessage};
 use anyhow::Error;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
@@ -114,7 +114,7 @@ pub struct ModelContextProtocolClient {
     on_error_rx: mpsc::Receiver<Error>,
     #[allow(unused)]
     on_close_rx: mpsc::Receiver<()>,
-    client_id: ClientId,
+    conn_id: ConnectionId,
 }
 
 impl ModelContextProtocolClient {
@@ -154,7 +154,7 @@ impl ModelContextProtocolClient {
         let transport_sender = transport.sender();
 
         // Create a unique client ID
-        let client_id = ClientId::new();
+        let conn_id = ConnectionId::new();
 
         // Start transport once during initialization
         let start_handle =
@@ -212,7 +212,7 @@ impl ModelContextProtocolClient {
             pending_requests,
             on_error_rx,
             on_close_rx,
-            client_id,
+            conn_id,
         })
     }
 
@@ -323,10 +323,10 @@ impl ModelContextProtocolClient {
         }
 
         // Use the client's stored ID instead of creating a new one
-        let client_id = self.client_id.clone();
+        let conn_id = self.conn_id.clone();
 
         // Send request using the transport sender instead of locking the transport
-        if let Err(e) = self.transport_sender.send(request.into(), client_id).await {
+        if let Err(e) = self.transport_sender.send(request.into(), conn_id).await {
             // Clean up pending request on send error
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&id);
@@ -356,12 +356,12 @@ impl ModelContextProtocolClient {
             params: Params::Map(params.as_object().cloned().unwrap_or_default()),
         };
 
-        // Use the stored client_id instead of creating a new one
-        let client_id = self.client_id.clone();
+        // Use the stored conn_id instead of creating a new one
+        let conn_id = self.conn_id.clone();
 
         // Send notification using the transport sender instead of locking the transport
         self.transport_sender
-            .send(notification.into(), client_id)
+            .send(notification.into(), conn_id)
             .await
             .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
     }
