@@ -7,7 +7,7 @@ use crate::schema::{
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
-use crate::transport::{stdio::StdioTransport, Transport, TransportType};
+use crate::transport::{stdio::StdioTransport, Transport, TransportType, TransportSender};
 use crate::{ClientId, JsonRpcMessage};
 use anyhow::Error;
 use jsonrpc_core::Params;
@@ -103,6 +103,7 @@ type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 pub struct ModelContextProtocolClient {
     server: ServerConfig,
     transport: TransportType,
+    transport_sender: TransportSender,
     pub server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
@@ -148,6 +149,9 @@ impl ModelContextProtocolClient {
                 TransportType::Ws(transport)
             }
         };
+
+        // Create a separate transport sender for message sending operations
+        let transport_sender = transport.sender();
 
         // Create a unique client ID
         let client_id = ClientId::new();
@@ -200,6 +204,7 @@ impl ModelContextProtocolClient {
         Ok(Self {
             server,
             transport,
+            transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
             start_handle,
@@ -320,8 +325,8 @@ impl ModelContextProtocolClient {
         // Use the client's stored ID instead of creating a new one
         let client_id = self.client_id.clone();
 
-        // Send request
-        if let Err(e) = self.transport.send(request.into(), client_id).await {
+        // Send request using the transport sender instead of locking the transport
+        if let Err(e) = self.transport_sender.send(request.into(), client_id).await {
             // Clean up pending request on send error
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&id);
@@ -354,8 +359,8 @@ impl ModelContextProtocolClient {
         // Use the stored client_id instead of creating a new one
         let client_id = self.client_id.clone();
 
-        // Send notification without waiting for response
-        self.transport
+        // Send notification using the transport sender instead of locking the transport
+        self.transport_sender
             .send(notification.into(), client_id)
             .await
             .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
