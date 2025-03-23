@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::info;
 use url::Url;
 
 /// A file system resource that can serve both text and binary files
@@ -25,22 +25,10 @@ pub struct FileSystem {
     watchers: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
 }
 
-/// Cached metadata about a file to avoid redundant filesystem operations
-#[derive(Clone, Debug, Serialize)]
-struct FileMetadata {
-    pub path: PathBuf,
-    pub mime_type: Option<String>,
-    pub is_binary: bool,
-    pub last_modified: std::time::SystemTime,
-}
-
 impl FileSystem {
     /// Create a new FileSystem resource with the given base directory
     pub fn new<P: AsRef<Path>>(base_dir: P) -> Self {
-        Self {
-            base_dir: Arc::new(base_dir.as_ref().to_path_buf()),
-            watchers: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { base_dir: Arc::new(base_dir.as_ref().to_path_buf()), watchers: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     async fn watch_path(path: impl AsRef<Path>, tx: mpsc::Sender<()>) -> Result<JoinHandle<()>, ResourceError> {
@@ -464,7 +452,5 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscription_and_notification() {
-
-    }
+    async fn test_subscription_and_notification() {}
 }

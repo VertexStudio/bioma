@@ -9,7 +9,7 @@
 //! Both modes implement the `Transport` trait, providing a consistent interface for
 //! sending and receiving messages.
 
-use super::Transport;
+use super::{SendMessage, Transport, TransportSender};
 
 use crate::client::WsConfig as WsClientConfig;
 use crate::server::WsConfig as WsServerConfig;
@@ -135,6 +135,40 @@ pub struct WsTransport {
     on_error: mpsc::Sender<anyhow::Error>,
     /// Channel for notifying the application when the transport is closed.
     on_close: mpsc::Sender<()>,
+}
+
+// A separate sender for WsTransport
+#[derive(Clone)]
+pub struct WsTransportSender {
+    mode: Arc<WsMode>,
+}
+
+impl SendMessage for WsTransportSender {
+    async fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+        match &*self.mode {
+            WsMode::Server(server) => WsTransport::send_to_client(&server.clients, &client_id, message)
+                .await
+                .map_err(|e| anyhow::Error::msg(format!("Failed to send to client: {}", e))),
+            WsMode::Client(client) => {
+                // Serialize message to JSON
+                let json = serde_json::to_string(&message)
+                    .map_err(|e| anyhow::Error::msg(format!("Serialization error: {}", e)))?;
+
+                // Send via WebSocket
+                let mut sender_guard = client.sender.lock().await;
+                if let Some(sender) = sender_guard.as_mut() {
+                    sender
+                        .send(WsMessage::Text(json.into()))
+                        .await
+                        .map_err(|e| anyhow::Error::msg(format!("WebSocket send error: {}", e)))?;
+                } else {
+                    return Err(anyhow::Error::msg("WebSocket sender not initialized"));
+                }
+
+                Ok(())
+            }
+        }
+    }
 }
 
 impl WsTransport {
@@ -588,5 +622,9 @@ impl Transport for WsTransport {
                 Ok(())
             }
         }
+    }
+
+    fn sender(&self) -> TransportSender {
+        TransportSender::new_ws(WsTransportSender { mode: self.mode.clone() })
     }
 }

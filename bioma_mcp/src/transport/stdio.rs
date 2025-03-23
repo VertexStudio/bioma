@@ -1,4 +1,4 @@
-use super::Transport;
+use super::{SendMessage, Transport, TransportSender};
 use crate::client::StdioConfig;
 use crate::transport::Message;
 use crate::{ClientId, JsonRpcMessage};
@@ -35,6 +35,34 @@ pub struct StdioTransport {
     on_error: mpsc::Sender<Error>,
     #[allow(unused)]
     on_close: mpsc::Sender<()>,
+}
+
+// A separate sender for StdioTransport
+#[derive(Clone)]
+pub struct StdioTransportSender {
+    mode: Arc<StdioMode>,
+}
+
+impl SendMessage for StdioTransportSender {
+    async fn send(&self, message: JsonRpcMessage, _client_id: ClientId) -> Result<()> {
+        let json = serde_json::to_string(&message).context("Failed to serialize message")?;
+        let message_with_newline = format!("{}\n", json);
+
+        match &*self.mode {
+            StdioMode::Server { stdout, .. } => {
+                let mut stdout = stdout.lock().await;
+                stdout.write_all(message_with_newline.as_bytes()).await.context("Failed to write to stdout")?;
+                stdout.flush().await.context("Failed to flush stdout")?;
+            }
+            StdioMode::Client { stdin, .. } => {
+                let mut stdin = stdin.lock().await;
+                stdin.write_all(message_with_newline.as_bytes()).await.context("Failed to write to stdin")?;
+                stdin.flush().await.context("Failed to flush stdin")?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl StdioTransport {
@@ -161,5 +189,9 @@ impl Transport for StdioTransport {
             }
             Ok(())
         }
+    }
+
+    fn sender(&self) -> TransportSender {
+        TransportSender::new_stdio(StdioTransportSender { mode: self.mode.clone() })
     }
 }

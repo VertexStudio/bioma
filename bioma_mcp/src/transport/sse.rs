@@ -3,7 +3,7 @@ use crate::server::SseConfig as SseServerConfig;
 use crate::transport::Message;
 use crate::{ClientId, JsonRpcMessage};
 
-use super::Transport;
+use super::{SendMessage, Transport, TransportSender};
 use anyhow::{Context, Error, Result};
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -684,6 +684,53 @@ impl Transport for SseTransport {
 
                     Ok(())
                 }
+            }
+        }
+    }
+
+    fn sender(&self) -> TransportSender {
+        TransportSender::new_sse(SseTransportSender { mode: self.mode.clone() })
+    }
+}
+
+// A separate sender for SseTransport
+#[derive(Clone)]
+pub struct SseTransportSender {
+    mode: Arc<SseMode>,
+}
+
+impl SendMessage for SseTransportSender {
+    async fn send(&self, message: JsonRpcMessage, client_id: ClientId) -> Result<()> {
+        match &*self.mode {
+            SseMode::Server { clients, .. } => {
+                let event = SseEvent::Message(message);
+                SseTransport::send_to_client(clients, &client_id, event).await
+            }
+            SseMode::Client { message_endpoint, http_client, .. } => {
+                let endpoint = message_endpoint.lock().await.clone();
+
+                if let Some(endpoint) = endpoint {
+                    // Serialize the message to JSON
+                    let json = serde_json::to_string(&message).context("Failed to serialize message")?;
+
+                    // Send the message to the endpoint
+                    let res = http_client
+                        .post(&endpoint)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(json)
+                        .send()
+                        .await
+                        .context("Failed to send message")?;
+
+                    // Check if the request was successful
+                    if !res.status().is_success() {
+                        return Err(Error::msg(format!("HTTP error: {}", res.status())));
+                    }
+                } else {
+                    return Err(Error::msg("No message endpoint available"));
+                }
+
+                Ok(())
             }
         }
     }
