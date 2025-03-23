@@ -12,10 +12,11 @@ use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -28,11 +29,14 @@ pub struct ServerMetadata {
 impl Metadata for ServerMetadata {}
 
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
-    fn get_transport_config(&self) -> &TransportConfig;
-    fn get_capabilities(&self) -> &ServerCapabilities;
-    fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>>;
-    fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>>;
-    fn create_tools(&self) -> Vec<Arc<dyn ToolCallHandler>>;
+    fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
+    fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
+    fn get_resources(&self) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
+    fn get_prompts(&self) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
+
+    fn create_tools(&self) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
+
+    fn on_error(&self, error: Error) -> impl Future<Output = ()> + Send;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +118,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
     }
 
     pub async fn start(&self) -> Result<()> {
-        let transport_config = self.server.read().await.get_transport_config().clone();
+        let transport_config = self.server.read().await.get_transport_config().await.clone();
 
         let (transport_type, mut on_message_rx, _on_error_rx, _on_close_rx) = match &transport_config {
             TransportConfig::Stdio(_config) => {
@@ -171,7 +175,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                 debug!("Handling initialize request");
 
                 async move {
-                    let capabilities = server.read().await.get_capabilities().clone();
+                    let capabilities = server.read().await.get_capabilities().await.clone();
 
                     let init_params: InitializeRequestParams = params.parse().map_err(|e| {
                         error!("Failed to parse initialize parameters: {}", e);
@@ -192,7 +196,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let conn_id = meta.conn_id;
 
                     let server = server.read().await;
-                    let tools = server.create_tools();
+                    let tools = server.create_tools().await;
 
                     let session = Session::new(conn_id.clone(), tools);
                     sessions.write().await.insert(conn_id, session);
@@ -268,8 +272,9 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Resources list request with cursor: {:?}", params.cursor);
 
-                    let resources =
-                        server.read().await.get_resources().iter().map(|resource| resource.def()).collect::<Vec<_>>();
+                    let server = server.read().await;
+                    let resources = server.get_resources().await.clone();
+                    let resources = resources.iter().map(|resource| resource.def()).collect::<Vec<_>>();
 
                     let response = ListResourcesResult { next_cursor: None, resources, meta: None };
 
@@ -297,7 +302,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     debug!("Requested resource URI: {}", params.uri);
 
                     let server = server.read().await;
-                    let resources = server.get_resources();
+                    let resources = server.get_resources().await;
                     let resource = resources.iter().find(|resource| resource.supports(&params.uri));
 
                     match resource {
@@ -341,7 +346,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     debug!("Resource templates list request with cursor: {:?}", params.cursor);
 
                     let server = server.read().await;
-                    let resources = server.get_resources();
+                    let resources = server.get_resources().await;
 
                     let resource_templates =
                         resources.iter().filter_map(|resource| resource.template()).collect::<Vec<_>>();
@@ -380,7 +385,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     debug!("Subscribe resource URI: {}", params.uri);
 
                     let server = server.read().await;
-                    let resources = server.get_resources();
+                    let resources = server.get_resources().await;
                     let resource = resources
                         .iter()
                         .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
@@ -456,7 +461,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     debug!("Unsubscribe resource URI: {}", params.uri);
 
                     let server = server.read().await;
-                    let resources = server.get_resources();
+                    let resources = server.get_resources().await;
                     let resource = resources
                         .iter()
                         .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
@@ -502,7 +507,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     debug!("Prompts list request with cursor: {:?}", params.cursor);
 
                     let server = server.read().await;
-                    let prompts = server.get_prompts().iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
+                    let prompts = server.get_prompts().await.iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
 
                     let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
 
@@ -525,7 +530,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     })?;
 
                     let server = server.read().await;
-                    let prompts = server.get_prompts();
+                    let prompts = server.get_prompts().await;
                     let prompt = prompts.iter().find(|p| p.def().name == params.name);
 
                     match prompt {

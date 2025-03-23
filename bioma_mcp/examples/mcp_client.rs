@@ -1,7 +1,10 @@
 use anyhow::Result;
 use bioma_mcp::{
-    client::{ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
-    schema::{CallToolRequestParams, Implementation, ReadResourceRequestParams},
+    client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    schema::{
+        CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, Implementation, ReadResourceRequestParams,
+        Root,
+    },
 };
 use clap::{Parser, Subcommand};
 use tracing::{error, info};
@@ -33,6 +36,26 @@ enum Transport {
     },
 }
 
+struct ExampleMcpClient {
+    server_config: ServerConfig,
+    capabilities: ClientCapabilities,
+    roots: Vec<Root>,
+}
+
+impl ModelContextProtocolClient for ExampleMcpClient {
+    async fn get_server_config(&self) -> ServerConfig {
+        self.server_config.clone()
+    }
+
+    async fn get_capabilities(&self) -> ClientCapabilities {
+        self.capabilities.clone()
+    }
+
+    async fn get_roots(&self) -> Vec<Root> {
+        self.roots.clone()
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -53,16 +76,25 @@ async fn main() -> Result<()> {
             }))
             .build(),
         Transport::Sse { endpoint } => ServerConfig::builder()
-            .name(endpoint.clone())
+            .name("bioma-tool".to_string())
             .transport(TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()))
             .build(),
         Transport::Ws { endpoint } => ServerConfig::builder()
-            .name(endpoint.clone())
+            .name("bioma-tool".to_string())
             .transport(TransportConfig::Ws(WsConfig { endpoint: endpoint.clone() }))
             .build(),
     };
 
-    let mut client = ModelContextProtocolClient::new(server).await?;
+    let capabilities =
+        ClientCapabilities { roots: Some(ClientCapabilitiesRoots { list_changed: Some(true) }), ..Default::default() };
+
+    let client = ExampleMcpClient {
+        server_config: server,
+        capabilities,
+        roots: vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }],
+    };
+
+    let mut client = Client::new(client).await?;
 
     info!("Initializing client...");
     let init_result = client

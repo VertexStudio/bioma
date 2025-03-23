@@ -27,13 +27,7 @@ pub enum ToolError {
     Custom(String),
 }
 
-///
-
 pub trait ToolCallHandler: Send + Sync {
-    ///
-
-    ///
-
     fn call_boxed<'a>(
         &'a self,
         args: Option<BTreeMap<String, Value>>,
@@ -42,16 +36,12 @@ pub trait ToolCallHandler: Send + Sync {
     fn def(&self) -> schema::Tool;
 }
 
-///
-
 pub trait ToolDef: Serialize {
     const NAME: &'static str;
 
     const DESCRIPTION: &'static str;
 
     type Args: Serialize + JsonSchema + serde::de::DeserializeOwned;
-
-    ///
 
     fn def() -> schema::Tool {
         let mut settings = schemars::gen::SchemaSettings::draft07();
@@ -66,14 +56,8 @@ pub trait ToolDef: Serialize {
         }
     }
 
-    ///
-
-    ///
-
     fn call<'a>(&'a self, args: Self::Args) -> impl Future<Output = Result<CallToolResult, ToolError>> + Send + 'a;
 }
-
-///
 
 impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
     fn call_boxed<'a>(

@@ -1,14 +1,3 @@
-
-//!
-
-
-
-
-
-//!
-
-
-
 use crate::schema::{ReadResourceResult, Resource, ResourceTemplate};
 use serde::Serialize;
 use std::future::Future;

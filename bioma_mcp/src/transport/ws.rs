@@ -1,14 +1,3 @@
-
-//!
-
-
-//!
-
-
-//!
-
-
-
 use super::{SendMessage, Transport, TransportSender};
 
 use crate::client::WsConfig as WsClientConfig;
@@ -98,8 +87,6 @@ enum WsMode {
     Client(ClientMode),
 }
 
-///
-
 #[derive(Clone)]
 pub struct WsTransport {
     mode: Arc<WsMode>,
@@ -142,14 +129,6 @@ impl SendMessage for WsTransportSender {
 }
 
 impl WsTransport {
-    ///
-
-    ///
-
-    ///
-
-    ///
-
     pub fn new_server(
         config: WsServerConfig,
         on_message: mpsc::Sender<Message>,
@@ -162,14 +141,6 @@ impl WsTransport {
         Self { mode: Arc::new(WsMode::Server(server_mode)), on_error, on_close }
     }
 
-    ///
-
-    ///
-
-    ///
-
-    ///
-
     pub fn new_client(
         config: &WsClientConfig,
         on_message: mpsc::Sender<JsonRpcMessage>,
@@ -181,16 +152,6 @@ impl WsTransport {
 
         Ok(Self { mode: Arc::new(WsMode::Client(client_mode)), on_error, on_close })
     }
-
-    ///
-
-    ///
-
-    ///
-
-    ///
-
-    ///
 
     async fn handle_client_connection(
         ws_stream: WsStreamServer,
@@ -255,18 +216,6 @@ impl WsTransport {
         Ok(())
     }
 
-    ///
-
-    ///
-
-    ///
-
-    ///
-
-    ///
-
-    ///
-
     async fn send_to_client(
         clients: &ClientRegistry,
         conn_id: &ConnectionId,
@@ -286,12 +235,6 @@ impl WsTransport {
 }
 
 impl Transport for WsTransport {
-    ///
-
-    ///
-
-    ///
-
     async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
         let mode = self.mode.clone();
 
@@ -422,20 +365,6 @@ impl Transport for WsTransport {
         Ok(handle)
     }
 
-    ///
-
-    ///
-
-    ///
-
-    ///
-
-    ///
-
-    ///
-
-    ///
-
     async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             WsMode::Server(server) => {
@@ -456,12 +385,6 @@ impl Transport for WsTransport {
             }
         }
     }
-
-    ///
-
-    ///
-
-    ///
 
     async fn close(&mut self) -> Result<()> {
         match &*self.mode {

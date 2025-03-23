@@ -1,8 +1,9 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_mcp::client::{ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
+use bioma_mcp::client::{Client, ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
 use bioma_mcp::schema::{
-    CallToolRequestParams, CallToolResult, Implementation, ListToolsRequestParams, ListToolsResult, ServerCapabilities,
+    CallToolRequestParams, CallToolResult, ClientCapabilities, Implementation, ListToolsRequestParams, ListToolsResult,
+    Root,
 };
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use serde::{Deserialize, Serialize};
@@ -266,15 +267,32 @@ impl ActorError for ModelContextProtocolClientError {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
-    tools: Option<ListToolsResult>,
     #[serde(skip)]
-    client: Option<Arc<Mutex<ModelContextProtocolClient>>>,
-    server_capabilities: Option<ServerCapabilities>,
+    client: Option<Arc<Mutex<Client<McpBasicClient>>>>,
+    tools: Option<ListToolsResult>,
 }
 
 impl ModelContextProtocolClientActor {
     pub fn new(server: ServerConfig) -> Self {
-        ModelContextProtocolClientActor { server, tools: None, client: None, server_capabilities: None }
+        ModelContextProtocolClientActor { server, client: None, tools: None }
+    }
+}
+
+pub struct McpBasicClient {
+    server: ServerConfig,
+}
+
+impl ModelContextProtocolClient for McpBasicClient {
+    async fn get_server_config(&self) -> ServerConfig {
+        self.server.clone()
+    }
+
+    async fn get_capabilities(&self) -> ClientCapabilities {
+        ClientCapabilities::default()
+    }
+
+    async fn get_roots(&self) -> Vec<Root> {
+        vec![]
     }
 }
 
@@ -284,13 +302,12 @@ impl Actor for ModelContextProtocolClientActor {
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
         info!("{} Started (server: {})", ctx.id(), self.server.name);
 
-        let mut client = ModelContextProtocolClient::new(self.server.clone()).await?;
+        let mut client = Client::new(McpBasicClient { server: self.server.clone() }).await?;
 
         // Initialize the client
         let init_result =
             client.initialize(Implementation { name: self.server.name.clone(), version: "0.1.0".to_string() }).await?;
         info!("Server {} capabilities: {:?}", self.server.name, init_result.capabilities);
-        self.server_capabilities = Some(init_result.capabilities);
 
         // Notify the server that the client has initialized
         client.initialized().await?;

@@ -27,13 +27,6 @@ pub struct Shutdown {
     pub reason: String,
 }
 
-///
-
-///
-
-///
-
-///
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SseEvent {

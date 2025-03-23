@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use bioma_mcp::{
     prompts::{self, PromptGetHandler},
     resources::{self, ResourceReadHandler},
@@ -12,7 +12,7 @@ use bioma_mcp::{
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{error, info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -44,41 +44,6 @@ enum Transport {
     },
 }
 
-struct ExampleMcpServer {
-    transport_config: TransportConfig,
-    capabilities: ServerCapabilities,
-    resources: Vec<Box<dyn ResourceReadHandler>>,
-    prompts: Vec<Box<dyn PromptGetHandler>>,
-}
-
-impl ModelContextProtocolServer for ExampleMcpServer {
-    fn get_transport_config(&self) -> &TransportConfig {
-        &self.transport_config
-    }
-
-    fn get_capabilities(&self) -> &ServerCapabilities {
-        &self.capabilities
-    }
-
-    fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>> {
-        &self.resources
-    }
-
-    fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>> {
-        &self.prompts
-    }
-
-    fn create_tools(&self) -> Vec<Arc<dyn ToolCallHandler>> {
-        vec![
-            Arc::new(tools::echo::Echo),
-            Arc::new(tools::memory::Memory),
-            Arc::new(tools::fetch::Fetch::default()),
-            Arc::new(tools::random::RandomNumber),
-            Arc::new(tools::workflow::Workflow::new(true, None)),
-        ]
-    }
-}
-
 fn setup_logging(log_path: PathBuf) -> Result<()> {
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent).context("Failed to create log directory")?;
@@ -108,6 +73,45 @@ fn setup_logging(log_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
+struct ExampleMcpServer {
+    transport_config: TransportConfig,
+    capabilities: ServerCapabilities,
+    resources: Vec<Arc<dyn ResourceReadHandler>>,
+    prompts: Vec<Arc<dyn PromptGetHandler>>,
+}
+
+impl ModelContextProtocolServer for ExampleMcpServer {
+    async fn get_transport_config(&self) -> TransportConfig {
+        self.transport_config.clone()
+    }
+
+    async fn get_capabilities(&self) -> ServerCapabilities {
+        self.capabilities.clone()
+    }
+
+    async fn get_resources(&self) -> Vec<Arc<dyn ResourceReadHandler>> {
+        self.resources.clone()
+    }
+
+    async fn get_prompts(&self) -> Vec<Arc<dyn PromptGetHandler>> {
+        self.prompts.clone()
+    }
+
+    async fn create_tools(&self) -> Vec<Arc<dyn ToolCallHandler>> {
+        vec![
+            Arc::new(tools::echo::Echo),
+            Arc::new(tools::memory::Memory),
+            Arc::new(tools::fetch::Fetch::default()),
+            Arc::new(tools::random::RandomNumber),
+            Arc::new(tools::workflow::Workflow::new(true, None)),
+        ]
+    }
+
+    async fn on_error(&self, error: Error) {
+        error!("Error: {}", error);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -126,12 +130,12 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let resources: Vec<Box<dyn ResourceReadHandler>> = vec![
-        Box::new(resources::readme::Readme),
-        Box::new(resources::filesystem::FileSystem::new(args.base_dir.clone())),
+    let resources: Vec<Arc<dyn ResourceReadHandler>> = vec![
+        Arc::new(resources::readme::Readme),
+        Arc::new(resources::filesystem::FileSystem::new(args.base_dir.clone())),
     ];
 
-    let prompts: Vec<Box<dyn PromptGetHandler>> = vec![Box::new(prompts::greet::Greet)];
+    let prompts: Vec<Arc<dyn PromptGetHandler>> = vec![Arc::new(prompts::greet::Greet)];
 
     let server = ExampleMcpServer { transport_config, capabilities, resources, prompts };
 
