@@ -87,15 +87,14 @@ pub enum TransportConfig {
     Ws(WsConfig),
 }
 
-pub struct Session {
-    pub conn_id: ConnectionId,
-    pub tools: HashMap<String, Arc<dyn ToolCallHandler>>,
+struct Session {
+    tools: HashMap<String, Arc<dyn ToolCallHandler>>,
 }
 
 impl Session {
-    fn new(conn_id: ConnectionId, tools: Vec<Arc<dyn ToolCallHandler>>) -> Self {
+    fn new(tools: Vec<Arc<dyn ToolCallHandler>>) -> Self {
         let tools = tools.into_iter().map(|tool| (tool.def().name.clone(), tool)).collect();
-        Self { conn_id, tools }
+        Self { tools }
     }
 
     fn get_tool(&self, name: &str) -> Option<Arc<dyn ToolCallHandler>> {
@@ -198,7 +197,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let server = server.read().await;
                     let tools = server.create_tools().await;
 
-                    let session = Session::new(conn_id.clone(), tools);
+                    let session = Session::new(tools);
                     sessions.write().await.insert(conn_id, session);
 
                     info!("Successfully handled initialize request");

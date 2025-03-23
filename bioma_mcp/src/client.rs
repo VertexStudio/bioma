@@ -1,16 +1,18 @@
 use crate::schema::{
-    CallToolRequestParams, CallToolResult, ClientCapabilities, GetPromptRequestParams, GetPromptResult, Implementation,
-    InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
-    ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
-    ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult, Root,
-    RootsListChangedNotificationParams, ServerCapabilities,
+    CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequestParams, CreateMessageResult,
+    GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
+    InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
+    ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
+    ListToolsResult, ReadResourceRequestParams, ReadResourceResult, Root, RootsListChangedNotificationParams,
+    ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
 use anyhow::Error;
-use jsonrpc_core::Params;
+pub use jsonrpc_core::Metadata;
+use jsonrpc_core::{MetaIoHandler, Params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
@@ -91,22 +93,29 @@ pub struct ClientConfig {
     pub server: ServerConfig,
 }
 
-pub trait ModelContextProtocolClient: Send + Sync + 'static {
+pub trait ModelContextProtocolClient<M: Metadata>: Send + Sync + 'static {
     fn get_server_config(&self) -> impl Future<Output = ServerConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ClientCapabilities> + Send;
     fn get_roots(&self) -> impl Future<Output = Vec<Root>> + Send;
+    fn on_create_message(
+        &self,
+        params: CreateMessageRequestParams,
+        meta: M,
+    ) -> impl Future<Output = CreateMessageResult> + Send;
 }
 
 type RequestId = u64;
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
 type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 
-pub struct Client<T: ModelContextProtocolClient> {
-    client: T,
+pub struct Client<T: ModelContextProtocolClient<M>, M: Metadata> {
+    client: Arc<RwLock<T>>,
     transport: TransportType,
     transport_sender: TransportSender,
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     roots: Arc<RwLock<HashMap<String, Root>>>,
+    #[allow(unused)]
+    io_handler: MetaIoHandler<M>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
     #[allow(unused)]
@@ -117,15 +126,18 @@ pub struct Client<T: ModelContextProtocolClient> {
     #[allow(unused)]
     on_close_rx: mpsc::Receiver<()>,
     conn_id: ConnectionId,
+    _marker: std::marker::PhantomData<M>,
 }
 
-impl<T: ModelContextProtocolClient> Client<T> {
+impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
+        let client = Arc::new(RwLock::new(client));
+
         let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
         let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
         let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
 
-        let server_config = client.get_server_config().await;
+        let server_config = client.read().await.get_server_config().await;
 
         let mut transport = match &server_config.transport {
             TransportConfig::Stdio(config) => {
@@ -154,9 +166,33 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         };
 
-        let transport_sender = transport.sender();
-
         let conn_id = ConnectionId::new();
+
+        let mut io_handler = MetaIoHandler::default();
+
+        io_handler.add_method_with_meta("sampling/createMessage", {
+            let client = client.clone();
+            move |params: Params, meta: M| {
+                let client = client.clone();
+                async move {
+                    let params: CreateMessageRequestParams = match params.parse() {
+                        Ok(params) => params,
+                        Err(e) => {
+                            error!("Failed to parse createMessage parameters: {}", e);
+                            return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                        }
+                    };
+                    let result = client.read().await.on_create_message(params, meta).await;
+                    info!("Successfully handled createMessage request");
+                    Ok(serde_json::to_value(result).map_err(|e| {
+                        error!("Failed to serialize createMessage result: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?)
+                }
+            }
+        });
+
+        let transport_sender = transport.sender();
 
         let start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
@@ -207,6 +243,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
             roots: Arc::new(RwLock::new(HashMap::new())),
+            io_handler,
             request_counter: Arc::new(RwLock::new(0)),
             start_handle,
             message_handler,
@@ -214,13 +251,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
             on_error_rx,
             on_close_rx,
             conn_id,
+            _marker: std::marker::PhantomData,
         })
     }
 
     pub async fn initialize(&mut self, client_info: Implementation) -> Result<InitializeResult, ClientError> {
         let params = InitializeRequestParams {
             protocol_version: "2024-11-05".to_string(),
-            capabilities: self.client.get_capabilities().await,
+            capabilities: self.client.read().await.get_capabilities().await,
             client_info,
         };
         let response = self.request("initialize".to_string(), serde_json::to_value(params)?).await?;
@@ -240,7 +278,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: Option<ListResourcesRequestParams>,
     ) -> Result<ListResourcesResult, ClientError> {
-        debug!("Server {} - Sending resources/list request", self.client.get_server_config().await.name);
+        debug!("Server {} - Sending resources/list request", self.client.read().await.get_server_config().await.name);
         let response = self.request("resources/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -249,7 +287,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: ReadResourceRequestParams,
     ) -> Result<ReadResourceResult, ClientError> {
-        debug!("Server {} - Sending resources/read request", self.client.get_server_config().await.name);
+        debug!("Server {} - Sending resources/read request", self.client.read().await.get_server_config().await.name);
         let response = self.request("resources/read".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -258,7 +296,10 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: Option<ListResourceTemplatesRequestParams>,
     ) -> Result<ListResourceTemplatesResult, ClientError> {
-        debug!("Server {} - Sending resources/templates/list request", self.client.get_server_config().await.name);
+        debug!(
+            "Server {} - Sending resources/templates/list request",
+            self.client.read().await.get_server_config().await.name
+        );
         let response = self.request("resources/templates/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -266,7 +307,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn subscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
         debug!(
             "Server {} - Sending resources/subscribe request for {}",
-            self.client.get_server_config().await.name,
+            self.client.read().await.get_server_config().await.name,
             uri
         );
         let params = serde_json::json!({ "uri": uri });
@@ -277,7 +318,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
         debug!(
             "Server {} - Sending resources/unsubscribe request for {}",
-            self.client.get_server_config().await.name,
+            self.client.read().await.get_server_config().await.name,
             uri
         );
         let params = serde_json::json!({ "uri": uri });
@@ -289,31 +330,31 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: Option<ListPromptsRequestParams>,
     ) -> Result<ListPromptsResult, ClientError> {
-        debug!("Server {} - Sending prompts/list request", self.client.get_server_config().await.name);
+        debug!("Server {} - Sending prompts/list request", self.client.read().await.get_server_config().await.name);
         let response = self.request("prompts/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
-        debug!("Server {} - Sending prompts/get request", self.client.get_server_config().await.name);
+        debug!("Server {} - Sending prompts/get request", self.client.read().await.get_server_config().await.name);
         let response = self.request("prompts/get".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn list_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<ListToolsResult, ClientError> {
-        debug!("Server {} - Sending tools/list request", self.client.get_server_config().await.name);
+        debug!("Server {} - Sending tools/list request", self.client.read().await.get_server_config().await.name);
         let response = self.request("tools/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
-        debug!("Server {} - Sending tools/call request", self.client.get_server_config().await.name);
+        debug!("Server {} - Sending tools/call request", self.client.read().await.get_server_config().await.name);
         let response = self.request("tools/call".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn add_root(&mut self, root: Root, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
-        let capabilities = self.client.get_capabilities().await;
+        let capabilities = self.client.read().await.get_capabilities().await;
         let supports_root_notifications = capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
         let should_notify = {
             let mut roots = self.roots.write().await;
@@ -328,7 +369,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     }
 
     pub async fn remove_root(&mut self, uri: String, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
-        let capabilities = self.client.get_capabilities().await;
+        let capabilities = self.client.read().await.get_capabilities().await;
         let supports_root_notifications = capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
         let should_notify = {
             let mut roots = self.roots.write().await;
@@ -376,7 +417,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         match tokio::time::timeout(
-            std::time::Duration::from_secs(self.client.get_server_config().await.request_timeout),
+            std::time::Duration::from_secs(self.client.read().await.get_server_config().await.request_timeout),
             response_rx,
         )
         .await
@@ -419,7 +460,7 @@ pub enum ClientError {
     Request(Cow<'static, str>),
 }
 
-impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
+impl<T: ModelContextProtocolClient<M>, M: Metadata> std::fmt::Debug for Client<T, M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ModelContextProtocolClient")
     }

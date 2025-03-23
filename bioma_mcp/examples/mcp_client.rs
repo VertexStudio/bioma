@@ -1,9 +1,11 @@
 use anyhow::Result;
 use bioma_mcp::{
-    client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    client::{
+        Client, Metadata, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig,
+    },
     schema::{
-        CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, Implementation, ReadResourceRequestParams,
-        Root,
+        CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
+        CreateMessageResult, Implementation, ReadResourceRequestParams, Root,
     },
 };
 use clap::{Parser, Subcommand};
@@ -36,13 +38,18 @@ enum Transport {
     },
 }
 
+#[derive(Clone)]
+pub struct ClientMetadata;
+
+impl Metadata for ClientMetadata {}
+
 struct ExampleMcpClient {
     server_config: ServerConfig,
     capabilities: ClientCapabilities,
     roots: Vec<Root>,
 }
 
-impl ModelContextProtocolClient for ExampleMcpClient {
+impl ModelContextProtocolClient<ClientMetadata> for ExampleMcpClient {
     async fn get_server_config(&self) -> ServerConfig {
         self.server_config.clone()
     }
@@ -53,6 +60,14 @@ impl ModelContextProtocolClient for ExampleMcpClient {
 
     async fn get_roots(&self) -> Vec<Root> {
         self.roots.clone()
+    }
+
+    async fn on_create_message(
+        &self,
+        _params: CreateMessageRequestParams,
+        _meta: ClientMetadata,
+    ) -> CreateMessageResult {
+        todo!()
     }
 }
 
@@ -65,24 +80,31 @@ async fn main() -> Result<()> {
     info!("Starting MCP client...");
     let args = Args::parse();
 
-    info!("Starting MCP server process...");
-
     let server = match &args.transport {
-        Transport::Stdio { command, args } => ServerConfig::builder()
-            .name("bioma-tool".to_string())
-            .transport(TransportConfig::Stdio(StdioConfig {
-                command: command.clone(),
-                args: args.clone().unwrap_or_default(),
-            }))
-            .build(),
-        Transport::Sse { endpoint } => ServerConfig::builder()
-            .name("bioma-tool".to_string())
-            .transport(TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()))
-            .build(),
-        Transport::Ws { endpoint } => ServerConfig::builder()
-            .name("bioma-tool".to_string())
-            .transport(TransportConfig::Ws(WsConfig { endpoint: endpoint.clone() }))
-            .build(),
+        Transport::Stdio { command, args } => {
+            info!("Starting to MCP server process with command: {}", command);
+            ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Stdio(StdioConfig {
+                    command: command.clone(),
+                    args: args.clone().unwrap_or_default(),
+                }))
+                .build()
+        }
+        Transport::Sse { endpoint } => {
+            info!("Connecting to MCP server at {}", endpoint);
+            ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()))
+                .build()
+        }
+        Transport::Ws { endpoint } => {
+            info!("Connecting to MCP server at {}", endpoint);
+            ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Ws(WsConfig { endpoint: endpoint.clone() }))
+                .build()
+        }
     };
 
     let capabilities =

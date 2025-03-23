@@ -1,9 +1,9 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_mcp::client::{Client, ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
+use bioma_mcp::client::{Client, ClientConfig, ClientError, Metadata, ModelContextProtocolClient, ServerConfig};
 use bioma_mcp::schema::{
-    CallToolRequestParams, CallToolResult, ClientCapabilities, Implementation, ListToolsRequestParams, ListToolsResult,
-    Root,
+    CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequestParams, CreateMessageResult,
+    Implementation, ListToolsRequestParams, ListToolsResult, Root,
 };
 use ollama_rs::generation::tools::{ToolCall, ToolInfo};
 use serde::{Deserialize, Serialize};
@@ -268,7 +268,7 @@ impl ActorError for ModelContextProtocolClientError {}
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
     #[serde(skip)]
-    client: Option<Arc<Mutex<Client<McpBasicClient>>>>,
+    client: Option<Arc<Mutex<Client<McpBasicClient, ClientMetadata>>>>,
     tools: Option<ListToolsResult>,
 }
 
@@ -278,11 +278,16 @@ impl ModelContextProtocolClientActor {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientMetadata;
+
+impl Metadata for ClientMetadata {}
+
 pub struct McpBasicClient {
     server: ServerConfig,
 }
 
-impl ModelContextProtocolClient for McpBasicClient {
+impl ModelContextProtocolClient<ClientMetadata> for McpBasicClient {
     async fn get_server_config(&self) -> ServerConfig {
         self.server.clone()
     }
@@ -293,6 +298,14 @@ impl ModelContextProtocolClient for McpBasicClient {
 
     async fn get_roots(&self) -> Vec<Root> {
         vec![]
+    }
+
+    async fn on_create_message(
+        &self,
+        _params: CreateMessageRequestParams,
+        _meta: ClientMetadata,
+    ) -> CreateMessageResult {
+        todo!()
     }
 }
 
