@@ -104,7 +104,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
     pub async fn start(&self) -> Result<()> {
         let transport_config = self.server.read().await.get_transport_config().clone();
 
-        let (transport, on_message_tx, mut on_message_rx, on_error_rx, on_close_rx) = match &transport_config {
+        let (transport, mut on_message_rx, _on_error_rx, _on_close_rx) = match &transport_config {
             TransportConfig::Stdio(_config) => {
                 let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(32);
                 let (on_error_tx, on_error_rx) = mpsc::channel(32);
@@ -112,7 +112,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                 let transport =
                     StdioTransport::new_server(on_message_tx.clone(), on_error_tx.clone(), on_close_tx.clone());
-                (TransportType::Stdio(transport), on_message_tx, on_message_rx, on_error_rx, on_close_rx)
+                (TransportType::Stdio(transport), on_message_rx, on_error_rx, on_close_rx)
             }
             TransportConfig::Sse(config) => {
                 let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(config.channel_capacity);
@@ -125,7 +125,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     on_error_tx.clone(),
                     on_close_tx.clone(),
                 );
-                (TransportType::Sse(transport), on_message_tx, on_message_rx, on_error_rx, on_close_rx)
+                (TransportType::Sse(transport), on_message_rx, on_error_rx, on_close_rx)
             }
             TransportConfig::Ws(config) => {
                 let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(32);
@@ -138,7 +138,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     on_error_tx.clone(),
                     on_close_tx.clone(),
                 );
-                (TransportType::Ws(transport), on_message_tx, on_message_rx, on_error_rx, on_close_rx)
+                (TransportType::Ws(transport), on_message_rx, on_error_rx, on_close_rx)
             }
         };
 
@@ -346,12 +346,12 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         io_handler.add_method_with_meta("resources/subscribe", {
             let server = self.server.clone();
-            let on_message_tx = on_message_tx.clone();
+            let transport = transport.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let server = server.clone();
                 let client_id = meta.client_id.clone();
-                let on_message_tx = on_message_tx.clone();
+                let mut transport = transport.clone();
 
                 async move {
                     debug!("Handling resources/subscribe request");
@@ -371,7 +371,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let resource = resources
                         .iter()
                         .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
-                    let on_resource_updatedclient_id = client_id.clone();
+                    let on_resource_updated_client_id = client_id.clone();
                     let on_resource_updated_uri = params.uri.clone();
 
                     let (on_resource_updated_tx, mut on_resource_updated_rx) = mpsc::channel::<()>(1);
@@ -389,9 +389,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                         .unwrap_or_default(),
                                 ),
                             };
-                            let message = Message { client_id: on_resource_updatedclient_id, message: request.into() };
+                            let message: JsonRpcMessage = request.into();
                             while let Some(_) = on_resource_updated_rx.recv().await {
-                                if let Err(e) = on_message_tx.send(message.clone()).await {
+                                if let Err(e) =
+                                    transport.send(message.clone(), on_resource_updated_client_id.clone()).await
+                                {
                                     error!("Failed to send error notification: {}", e);
                                 }
                             }
