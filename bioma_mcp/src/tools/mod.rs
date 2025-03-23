@@ -51,9 +51,6 @@ pub trait ToolCallHandler: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<CallToolResult, ToolError>> + Send + 'a>>;
 
     /// Returns the tool's schema definition
-    ///
-    /// # Panics
-    /// Currently panics with "Not implemented" as schema generation needs to be implemented
     fn def(&self) -> schema::Tool;
 }
 

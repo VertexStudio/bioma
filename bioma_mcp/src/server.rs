@@ -35,7 +35,7 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_capabilities(&self) -> &ServerCapabilities;
     fn get_resources(&self) -> &Vec<Box<dyn ResourceReadHandler>>;
     fn get_prompts(&self) -> &Vec<Box<dyn PromptGetHandler>>;
-    fn create_tools(&self) -> Vec<Box<dyn ToolCallHandler>>;
+    fn create_tools(&self) -> Vec<Arc<dyn ToolCallHandler>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +88,22 @@ pub enum TransportConfig {
 
 pub struct Session {
     pub client_id: ClientId,
-    pub tools: Vec<Box<dyn ToolCallHandler>>,
+    pub tools: HashMap<String, Arc<dyn ToolCallHandler>>,
+}
+
+impl Session {
+    fn new(client_id: ClientId, tools: Vec<Arc<dyn ToolCallHandler>>) -> Self {
+        let tools = tools.into_iter().map(|tool| (tool.def().name.clone(), tool)).collect();
+        Self { client_id, tools }
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Arc<dyn ToolCallHandler>> {
+        self.tools.get(name).cloned()
+    }
+
+    fn list_tools(&self) -> Vec<crate::schema::Tool> {
+        self.tools.values().map(|tool| tool.def()).collect()
+    }
 }
 
 pub struct Server<T: ModelContextProtocolServer> {
@@ -184,7 +199,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let server = server.read().await;
                     let tools = server.create_tools();
 
-                    let session = Session { client_id: client_id.clone(), tools };
+                    let session = Session::new(client_id.clone(), tools);
                     sessions.write().await.insert(client_id, session);
 
                     info!("Successfully handled initialize request");
@@ -568,11 +583,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let client_id = meta.client_id.clone();
                     let sessions = sessions.read().await;
 
-                    let tools = if let Some(session) = sessions.get(&client_id) {
-                        session.tools.iter().map(|tool| tool.def()).collect::<Vec<_>>()
-                    } else {
-                        vec![]
-                    };
+                    let tools =
+                        if let Some(session) = sessions.get(&client_id) { session.list_tools() } else { vec![] };
                     let response = ListToolsResult { next_cursor: None, tools, meta: None };
                     info!("Successfully handled tools/list request");
                     Ok(serde_json::to_value(response).unwrap_or_default())
@@ -594,16 +606,20 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?;
 
-                    let sessions = sessions.read().await;
+                    // Find the tool reference using Arc - no cloning of the actual tool
+                    let tool_reference = {
+                        let sessions = sessions.read().await;
+                        if let Some(session) = sessions.get(&meta.client_id) {
+                            session.get_tool(&params.name)
+                        } else {
+                            None
+                        }
+                    }; // Sessions lock is released here
 
-                    let tool = if let Some(session) = sessions.get(&meta.client_id) {
-                        session.tools.iter().find(|t| t.def().name == params.name)
-                    } else {
-                        None
-                    };
-
-                    match tool {
+                    match tool_reference {
                         Some(tool) => {
+                            // Multiple calls can be processed concurrently with the same
+                            // shared tool instance, preserving any internal state
                             let result = tool.call_boxed(params.arguments).await.map_err(|e| {
                                 error!("Tool execution failed: {}", e);
                                 jsonrpc_core::Error::internal_error()

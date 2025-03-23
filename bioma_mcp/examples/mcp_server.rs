@@ -11,6 +11,7 @@ use bioma_mcp::{
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{info, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -74,13 +75,13 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         &self.prompts
     }
 
-    fn create_tools(&self) -> Vec<Box<dyn ToolCallHandler>> {
+    fn create_tools(&self) -> Vec<Arc<dyn ToolCallHandler>> {
         vec![
-            Box::new(tools::echo::Echo),
-            Box::new(tools::memory::Memory),
-            Box::new(tools::fetch::Fetch::default()),
-            Box::new(tools::random::RandomNumber),
-            Box::new(tools::workflow::Workflow::new(true, None)),
+            Arc::new(tools::echo::Echo),
+            Arc::new(tools::memory::Memory),
+            Arc::new(tools::fetch::Fetch::default()),
+            Arc::new(tools::random::RandomNumber),
+            Arc::new(tools::workflow::Workflow::new(true, None)),
         ]
     }
 }
