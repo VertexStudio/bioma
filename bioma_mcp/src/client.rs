@@ -3,7 +3,7 @@ use crate::schema::{
     InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
     ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
     ListResourcesResult, ListToolsRequestParams, ListToolsResult, ReadResourceRequestParams, ReadResourceResult, Root,
-    RootsListChangedNotification, RootsListChangedNotificationParams, ServerCapabilities,
+    RootsListChangedNotificationParams, ServerCapabilities,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -12,8 +12,9 @@ use crate::{ConnectionId, JsonRpcMessage};
 use anyhow::Error;
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -105,6 +106,7 @@ pub struct Client<T: ModelContextProtocolClient> {
     transport: TransportType,
     transport_sender: TransportSender,
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
+    roots: Arc<RwLock<HashMap<String, Root>>>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
     #[allow(unused)]
@@ -204,6 +206,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             transport,
             transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
+            roots: Arc::new(RwLock::new(HashMap::new())),
             request_counter: Arc::new(RwLock::new(0)),
             start_handle,
             message_handler,
@@ -221,7 +224,10 @@ impl<T: ModelContextProtocolClient> Client<T> {
             client_info,
         };
         let response = self.request("initialize".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
+        let result: InitializeResult = serde_json::from_value(response)?;
+        let mut server_capabilities = self.server_capabilities.write().await;
+        *server_capabilities = Some(result.capabilities.clone());
+        Ok(result)
     }
 
     pub async fn initialized(&mut self) -> Result<(), ClientError> {
@@ -306,6 +312,42 @@ impl<T: ModelContextProtocolClient> Client<T> {
         Ok(serde_json::from_value(response)?)
     }
 
+    pub async fn add_root(&mut self, root: Root, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
+        let capabilities = self.client.get_capabilities().await;
+        let supports_root_notifications = capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
+        let should_notify = {
+            let mut roots = self.roots.write().await;
+            let root = roots.insert(root.uri.clone(), root.clone());
+            root.is_none() && supports_root_notifications
+        };
+        if should_notify {
+            let params = RootsListChangedNotificationParams { meta };
+            self.notify("notifications/rootsListChanged".to_string(), serde_json::to_value(params)?).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn remove_root(&mut self, uri: String, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
+        let capabilities = self.client.get_capabilities().await;
+        let supports_root_notifications = capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
+        let should_notify = {
+            let mut roots = self.roots.write().await;
+            let root = roots.remove(&uri);
+            root.is_some() && supports_root_notifications
+        };
+        if should_notify {
+            let params = RootsListChangedNotificationParams { meta };
+            self.notify("notifications/rootsListChanged".to_string(), serde_json::to_value(params)?).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn close(&mut self) -> Result<(), ClientError> {
+        self.transport.close().await.map_err(|e| ClientError::Transport(format!("Close: {}", e).into()))?;
+        self.start_handle.abort();
+        Ok(())
+    }
+
     async fn request(&mut self, method: String, params: serde_json::Value) -> Result<serde_json::Value, ClientError> {
         let mut counter = self.request_counter.write().await;
         *counter += 1;
@@ -351,7 +393,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    pub async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
+    async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
@@ -364,12 +406,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             .send(notification.into(), conn_id)
             .await
             .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
-    }
-
-    pub async fn close(&mut self) -> Result<(), ClientError> {
-        self.transport.close().await.map_err(|e| ClientError::Transport(format!("Close: {}", e).into()))?;
-        self.start_handle.abort();
-        Ok(())
     }
 }
 
