@@ -627,91 +627,109 @@ impl<T: ModelContextProtocolServer> Server<T> {
         match transport {
             TransportType::Stdio(_) => {
                 while let Some(stdio_request) = on_message_rx.recv().await {
-                    match &stdio_request.message {
-                        JsonRpcMessage::Request(request) => match request {
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                                let Some(response) = io_handler
-                                    .handle_rpc_request(
-                                        request.clone(),
-                                        ServerMetadata { client_id: stdio_request.client_id.clone() },
-                                    )
-                                    .await
-                                else {
-                                    continue;
-                                };
+                    let io_handler_clone = io_handler.clone();
+                    let mut transport_clone = transport.clone();
 
-                                if let Err(e) = transport.send(response.into(), stdio_request.client_id.clone()).await {
-                                    error!("Failed to send response: {}", e);
-                                    return Err(e).context("Failed to send response");
+                    tokio::spawn(async move {
+                        match &stdio_request.message {
+                            JsonRpcMessage::Request(request) => match request {
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                                    let metadata = ServerMetadata { client_id: stdio_request.client_id.clone() };
+
+                                    let Some(response) =
+                                        io_handler_clone.handle_rpc_request(request.clone(), metadata).await
+                                    else {
+                                        return;
+                                    };
+
+                                    if let Err(e) =
+                                        transport_clone.send(response.into(), stdio_request.client_id.clone()).await
+                                    {
+                                        error!("Failed to send response: {}", e);
+                                    }
                                 }
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
+                                    debug!("Handled notification: {:?}", notification.method);
+                                }
+                                _ => {
+                                    warn!("Unsupported request: {:?}", request);
+                                }
+                            },
+                            JsonRpcMessage::Response(response) => {
+                                error!("Received response: {:?}", response);
                             }
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                                debug!("Handled notification: {:?}", notification.method);
-                            }
-                            _ => {
-                                warn!("Unsupported request: {:?}", request);
-                            }
-                        },
-                        JsonRpcMessage::Response(response) => {
-                            error!("Received response: {:?}", response);
                         }
-                    }
+                    });
                 }
             }
             TransportType::Sse(_) => {
                 while let Some(sse_message) = on_message_rx.recv().await {
-                    match &sse_message.message {
-                        JsonRpcMessage::Request(request) => match request {
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                                let metadata = ServerMetadata { client_id: sse_message.client_id.clone() };
+                    let io_handler_clone = io_handler.clone();
+                    let mut transport_clone = transport.clone();
 
-                                let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await
-                                else {
-                                    continue;
-                                };
+                    tokio::spawn(async move {
+                        match &sse_message.message {
+                            JsonRpcMessage::Request(request) => match request {
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                                    let metadata = ServerMetadata { client_id: sse_message.client_id.clone() };
 
-                                if let Err(e) = transport.send(response.into(), sse_message.client_id.clone()).await {
-                                    error!("Failed to send SSE response: {}", e);
-                                    return Err(e).context("Failed to send SSE response");
+                                    let Some(response) =
+                                        io_handler_clone.handle_rpc_request(request.clone(), metadata).await
+                                    else {
+                                        return;
+                                    };
+
+                                    if let Err(e) =
+                                        transport_clone.send(response.into(), sse_message.client_id.clone()).await
+                                    {
+                                        error!("Failed to send SSE response: {}", e);
+                                    }
                                 }
-                            }
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                                debug!("Handled notification: {:?}", notification.method);
-                            }
-                            _ => {
-                                warn!("Unsupported request: {:?}", request);
-                            }
-                        },
-                        _ => {}
-                    }
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
+                                    debug!("Handled notification: {:?}", notification.method);
+                                }
+                                _ => {
+                                    warn!("Unsupported request: {:?}", request);
+                                }
+                            },
+                            _ => {}
+                        }
+                    });
                 }
             }
             TransportType::Ws(_) => {
                 while let Some(ws_message) = on_message_rx.recv().await {
-                    match &ws_message.message {
-                        JsonRpcMessage::Request(request) => match request {
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                                let metadata = ServerMetadata { client_id: ws_message.client_id.clone() };
+                    let io_handler_clone = io_handler.clone();
+                    let mut transport_clone = transport.clone();
 
-                                let Some(response) = io_handler.handle_rpc_request(request.clone(), metadata).await
-                                else {
-                                    continue;
-                                };
+                    tokio::spawn(async move {
+                        match &ws_message.message {
+                            JsonRpcMessage::Request(request) => match request {
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                                    let metadata = ServerMetadata { client_id: ws_message.client_id.clone() };
 
-                                if let Err(e) = transport.send(response.into(), ws_message.client_id.clone()).await {
-                                    error!("Failed to send WebSocket response: {}", e);
-                                    return Err(e).context("Failed to send WebSocket response");
+                                    let Some(response) =
+                                        io_handler_clone.handle_rpc_request(request.clone(), metadata).await
+                                    else {
+                                        return;
+                                    };
+
+                                    if let Err(e) =
+                                        transport_clone.send(response.into(), ws_message.client_id.clone()).await
+                                    {
+                                        error!("Failed to send WebSocket response: {}", e);
+                                    }
                                 }
-                            }
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                                debug!("Handled notification: {:?}", notification.method);
-                            }
-                            _ => {
-                                warn!("Unsupported request: {:?}", request);
-                            }
-                        },
-                        _ => {}
-                    }
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
+                                    debug!("Handled notification: {:?}", notification.method);
+                                }
+                                _ => {
+                                    warn!("Unsupported request: {:?}", request);
+                                }
+                            },
+                            _ => {}
+                        }
+                    });
                 }
             }
         }
