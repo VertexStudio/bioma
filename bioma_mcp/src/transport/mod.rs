@@ -16,20 +16,15 @@ pub struct Message {
 }
 
 pub trait Transport {
-    // Start processing messages
     fn start(&mut self) -> impl Future<Output = Result<JoinHandle<Result<()>>>>;
 
-    // Send a JSON-RPC message with conn_id
     fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> impl Future<Output = Result<()>>;
 
-    // Close the connection
     fn close(&mut self) -> impl Future<Output = Result<()>>;
 
-    // Create a sender that can be used to send messages without locking the transport
     fn sender(&self) -> TransportSender;
 }
 
-// A trait for sending messages without locking the transport
 pub trait SendMessage {
     fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> impl Future<Output = Result<()>>;
 }
@@ -51,7 +46,6 @@ impl TransportSenderType {
     }
 }
 
-// A sender that can be cloned and used to send messages without locking the transport
 #[derive(Clone)]
 pub struct TransportSender {
     inner: TransportSenderType,

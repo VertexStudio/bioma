@@ -150,20 +150,16 @@ impl ModelContextProtocolClient {
             }
         };
 
-        // Create a separate transport sender for message sending operations
         let transport_sender = transport.sender();
 
-        // Create a unique client ID
         let conn_id = ConnectionId::new();
 
-        // Start transport once during initialization
         let start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
 
         let pending_requests = Arc::new(Mutex::new(HashMap::<u64, ResponseSender>::new()));
         let pending_requests_clone = pending_requests.clone();
 
-        // Create message handler task
         let message_handler = tokio::spawn({
             let pending_requests = pending_requests_clone;
             async move {
@@ -305,7 +301,6 @@ impl ModelContextProtocolClient {
         *counter += 1;
         let id = *counter;
 
-        // Create proper JSON-RPC 2.0 request
         let request = jsonrpc_core::MethodCall {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
@@ -313,34 +308,27 @@ impl ModelContextProtocolClient {
             id: jsonrpc_core::Id::Num(id),
         };
 
-        // Create response channel
         let (response_tx, response_rx) = oneshot::channel();
 
-        // Register pending request
         {
             let mut pending = self.pending_requests.lock().await;
             pending.insert(id, response_tx);
         }
 
-        // Use the client's stored ID instead of creating a new one
         let conn_id = self.conn_id.clone();
 
-        // Send request using the transport sender instead of locking the transport
         if let Err(e) = self.transport_sender.send(request.into(), conn_id).await {
-            // Clean up pending request on send error
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&id);
             return Err(ClientError::Transport(format!("Send: {}", e).into()));
         }
 
-        // Wait for response with timeout
         match tokio::time::timeout(std::time::Duration::from_secs(self.server.request_timeout), response_rx).await {
             Ok(response) => match response {
                 Ok(result) => result,
                 Err(_) => Err(ClientError::Request("Response channel closed".into())),
             },
             Err(_) => {
-                // Clean up pending request on timeout
                 let mut pending = self.pending_requests.lock().await;
                 pending.remove(&id);
                 Err(ClientError::Request("Request timed out".into()))
@@ -349,17 +337,14 @@ impl ModelContextProtocolClient {
     }
 
     pub async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
-        // Create JSON-RPC 2.0 notification
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
             params: Params::Map(params.as_object().cloned().unwrap_or_default()),
         };
 
-        // Use the stored conn_id instead of creating a new one
         let conn_id = self.conn_id.clone();
 
-        // Send notification using the transport sender instead of locking the transport
         self.transport_sender
             .send(notification.into(), conn_id)
             .await

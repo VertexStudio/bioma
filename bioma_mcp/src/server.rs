@@ -20,11 +20,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
-/// Metadata associated with client requests, used for routing responses
-/// and tracking per-client state.
 #[derive(Clone)]
 pub struct ServerMetadata {
-    /// Unique identifier for the client connection
     pub conn_id: ConnectionId,
 }
 
@@ -157,10 +154,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         };
 
-        // Create a separate transport sender for message sending operations
         let transport_sender = transport_type.sender();
 
-        // Keep the transport in a mutex for starting and lifecycle operations
         let transport = Arc::new(Mutex::new(transport_type));
 
         let mut io_handler = MetaIoHandler::default();
@@ -271,7 +266,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         }
                     };
 
-                    // Here you could use params.cursor for pagination if needed
                     debug!("Resources list request with cursor: {:?}", params.cursor);
 
                     let resources =
@@ -344,13 +338,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         }
                     };
 
-                    // Here you could use params.cursor for pagination if needed
                     debug!("Resource templates list request with cursor: {:?}", params.cursor);
 
                     let server = server.read().await;
                     let resources = server.get_resources();
 
-                    // Collect all resource templates
                     let resource_templates =
                         resources.iter().filter_map(|resource| resource.template()).collect::<Vec<_>>();
 
@@ -507,7 +499,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         }
                     };
 
-                    // Here you could use params.cursor for pagination if needed
                     debug!("Prompts list request with cursor: {:?}", params.cursor);
 
                     let server = server.read().await;
@@ -533,7 +524,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?;
 
-                    // Find the requested prompt
                     let server = server.read().await;
                     let prompts = server.get_prompts();
                     let prompt = prompts.iter().find(|p| p.def().name == params.name);
@@ -577,7 +567,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         }
                     };
 
-                    // Here you could use params.cursor for pagination if needed
                     debug!("Tools list request with cursor: {:?}", params.cursor);
 
                     let conn_id = meta.conn_id.clone();
@@ -605,7 +594,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?;
 
-                    // Find the tool reference using Arc - no cloning of the actual tool
                     let tool_reference = {
                         let sessions = sessions.read().await;
                         if let Some(session) = sessions.get(&meta.conn_id) {
@@ -613,12 +601,10 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         } else {
                             None
                         }
-                    }; // Sessions lock is released here
+                    };
 
                     match tool_reference {
                         Some(tool) => {
-                            // Multiple calls can be processed concurrently with the same
-                            // shared tool instance, preserving any internal state
                             let result = tool.call_boxed(params.arguments).await.map_err(|e| {
                                 error!("Tool execution failed: {}", e);
                                 jsonrpc_core::Error::internal_error()
@@ -639,7 +625,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         });
 
-        // Start the transport
         {
             let mut transport_lock = transport.lock().await;
             if let Err(e) = transport_lock.start().await {
@@ -648,7 +633,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         }
 
-        // Handle messages based on transport type
         while let Some(message) = on_message_rx.recv().await {
             let io_handler_clone = io_handler.clone();
             let transport_sender_clone = transport_sender.clone();

@@ -12,7 +12,6 @@ impl ResourceDef for Readme {
     const MIME_TYPE: Option<&'static str> = Some("text/markdown");
 
     async fn read(&self, uri: String) -> Result<ReadResourceResult, ResourceError> {
-        // Check if the URI matches what we expect
         if uri != Self::URI {
             return Err(ResourceError::NotFound(format!("Resource not found: {}", uri)));
         }

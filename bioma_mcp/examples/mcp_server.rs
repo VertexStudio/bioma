@@ -19,11 +19,9 @@ use tracing_subscriber::fmt::format::FmtSpan;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the log file
     #[arg(long, short, default_value = "mcp_server.log")]
     log_file: PathBuf,
 
-    /// Base directory for file access
     #[arg(long, short, default_value = ".")]
     base_dir: PathBuf,
 
@@ -33,19 +31,14 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Transport {
-    /// Use stdio transport
     Stdio,
 
-    /// Use SSE transport
     Sse {
-        /// Server address for SSE transport (e.g. 127.0.0.1:8090)
         #[arg(long, short, default_value = "127.0.0.1:8090")]
         endpoint: String,
     },
 
-    /// Use WebSocket transport
     Ws {
-        /// Server address for WebSocket transport (e.g. 127.0.0.1:9090)
         #[arg(long, short, default_value = "127.0.0.1:9090")]
         endpoint: String,
     },
@@ -87,19 +80,16 @@ impl ModelContextProtocolServer for ExampleMcpServer {
 }
 
 fn setup_logging(log_path: PathBuf) -> Result<()> {
-    // Create parent directory if it doesn't exist
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent).context("Failed to create log directory")?;
     }
 
-    // Create file appender
     let file_appender = RollingFileAppender::new(
         Rotation::NEVER,
         log_path.parent().unwrap_or(&PathBuf::from(".")),
         log_path.file_name().unwrap_or_default(),
     );
 
-    // Initialize tracing subscriber with cleaner formatting
     tracing_subscriber::fmt()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
         .with_level(true)
@@ -107,7 +97,7 @@ fn setup_logging(log_path: PathBuf) -> Result<()> {
         .with_thread_ids(true)
         .with_file(true)
         .with_line_number(true)
-        .with_ansi(false) // Disable ANSI color codes
+        .with_ansi(false)
         .with_span_events(FmtSpan::CLOSE)
         .with_writer(file_appender)
         .with_max_level(Level::DEBUG)

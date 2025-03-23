@@ -15,24 +15,19 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Transport {
-    /// Use stdio transport
     Stdio {
-        /// Path to the MCP server executable
         command: String,
 
-        /// Args to pass to the MCP server
         #[arg(num_args = 0.., value_delimiter = ' ')]
         args: Option<Vec<String>>,
     },
-    /// Use SSE transport
+
     Sse {
-        /// Server URL (e.g. http://127.0.0.1:8090)
         #[arg(long, short, default_value = "http://127.0.0.1:8090")]
         endpoint: String,
     },
-    /// Use WebSocket transport
+
     Ws {
-        /// WebSocket server URL (e.g. ws://127.0.0.1:9090)
         #[arg(long, short, default_value = "ws://127.0.0.1:9090")]
         endpoint: String,
     },
@@ -47,7 +42,6 @@ async fn main() -> Result<()> {
     info!("Starting MCP client...");
     let args = Args::parse();
 
-    // Configure and start the MCP server process
     info!("Starting MCP server process...");
 
     let server = match &args.transport {
@@ -68,10 +62,8 @@ async fn main() -> Result<()> {
             .build(),
     };
 
-    // Create client
     let mut client = ModelContextProtocolClient::new(server).await?;
 
-    // Initialize the client
     info!("Initializing client...");
     let init_result = client
         .initialize(Implementation { name: "mcp_client_example".to_string(), version: "0.1.0".to_string() })
@@ -80,12 +72,10 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // Notify the server that the client has initialized
     client.initialized().await?;
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // List prompts
     info!("Listing prompts...");
     let prompts_result = client.list_prompts(None).await;
     match prompts_result {
@@ -95,18 +85,15 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // List resources
     info!("Listing resources...");
     let resources_result = client.list_resources(None).await;
     match resources_result {
         Ok(resources_result) => {
             info!("Available resources: {:?}", resources_result.resources);
 
-            // Look for the filesystem resource and read files from it
             if let Some(filesystem) = resources_result.resources.iter().find(|r| r.name == "filesystem") {
                 info!("Found filesystem resource: {}", filesystem.uri);
 
-                // Read README.md file
                 let readme_uri = "file:///bioma/README.md";
                 info!("Reading file: {}", readme_uri);
 
@@ -128,7 +115,6 @@ async fn main() -> Result<()> {
                     Err(e) => error!("Error reading README.md: {:?}", e),
                 }
 
-                // Then read the root directory
                 let dir_uri = "file:///";
                 info!("Reading directory: {}", dir_uri);
 
@@ -145,7 +131,6 @@ async fn main() -> Result<()> {
                     Err(e) => error!("Error reading root directory: {:?}", e),
                 }
 
-                // Try to subscribe to the directory if subscription is supported
                 info!("Checking for resource templates...");
                 let templates_result = client.list_resource_templates(None).await;
                 match templates_result {
@@ -156,27 +141,12 @@ async fn main() -> Result<()> {
                         }
 
                         info!("Trying to subscribe to filesystem changes...");
-                        // Use the root URI for subscription
-                        // TODO: Do this later, rn since mcp log is inclued it sends notifications too often and makes IDE crash.
-                        // let subscription_uri = "file:///";
-
-                        // match client.subscribe_resource(subscription_uri.to_string()).await {
-                        //     Ok(_) => info!("Successfully subscribed to filesystem changes"),
-                        //     Err(e) => info!("Subscription not supported or failed: {:?}", e),
-                        // }
-
-                        // Later, you could unsubscribe like this:
-                        // match client.unsubscribe_resource(subscription_uri.to_string()).await {
-                        //     Ok(_) => info!("Successfully unsubscribed from filesystem changes"),
-                        //     Err(e) => info!("Unsubscription failed: {:?}", e),
-                        // }
                     }
                     Err(e) => info!("Resource templates not supported: {:?}", e),
                 }
             } else {
                 info!("Filesystem resource not found, falling back to readme resource");
 
-                // Use the first available resource (likely the readme from before)
                 if !resources_result.resources.is_empty() {
                     let read_result = client
                         .read_resource(ReadResourceRequestParams { uri: resources_result.resources[0].uri.clone() })
@@ -194,7 +164,6 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // List tools
     info!("Listing tools...");
     let tools_result = client.list_tools(None).await;
     match tools_result {
@@ -209,7 +178,6 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // Make an echo tool call
     info!("Making echo tool call...");
     let echo_args = serde_json::json!({
         "message": "Hello from MCP client!"
@@ -221,7 +189,6 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    // Shutdown the client
     info!("Shutting down client...");
     client.close().await?;
 

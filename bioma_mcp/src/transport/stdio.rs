@@ -19,10 +19,10 @@ enum StdioMode {
     },
     Client {
         on_message: mpsc::Sender<JsonRpcMessage>,
-        // Holds the child process to keep it alive
+
         #[allow(unused)]
         process: Arc<Mutex<Child>>,
-        // Mutexes need to be independent as we need to lock them separately
+
         stdin: Arc<Mutex<tokio::process::ChildStdin>>,
         stdout: Arc<Mutex<tokio::process::ChildStdout>>,
     },
@@ -37,7 +37,6 @@ pub struct StdioTransport {
     on_close: mpsc::Sender<()>,
 }
 
-// A separate sender for StdioTransport
 #[derive(Clone)]
 pub struct StdioTransportSender {
     mode: Arc<StdioMode>,
@@ -109,7 +108,6 @@ impl StdioTransport {
 
 impl Transport for StdioTransport {
     async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
-        // Clone the necessary parts to avoid moving self
         let mode = self.mode.clone();
         let handle = tokio::spawn(async move {
             match &*mode {
@@ -180,7 +178,6 @@ impl Transport for StdioTransport {
                     let mut stdin = stdin.lock().await;
                     stdin.flush().await.context("Failed to flush stdin on close")?;
 
-                    // Graceful termination of the child process
                     let mut child = process.lock().await;
                     if let Err(e) = child.start_kill() {
                         debug!("Failed to kill child process: {}", e);
