@@ -1,77 +1,3 @@
-//! # Workflow Tool
-//!
-//! The Workflow Tool helps manage complex multi-step processes, allowing for sequential progression,
-//! branching paths, and step revisions.
-//!
-//! ## Core Concepts
-//!
-//! ### Steps
-//! A workflow consists of steps, each with:
-//! - **step_number**: Position in the sequence
-//! - **total_steps**: Estimated total number of steps
-//! - **step_description**: Description of the current step
-//! - **next_step_needed**: Boolean indicating if more steps are required
-//!
-//! ### Branching
-//! Create alternative paths from any existing step:
-//! - **branch_id**: Unique identifier for the branch
-//! - **branch_from_step**: Step number from which to branch
-//!
-//! ### Revisions
-//! Modify previous steps when needed:
-//! - **is_step_revision**: Flag indicating this is a revision
-//! - **revises_step**: Step number being revised
-//!
-//! ## Example Usage
-//!
-//! ### Basic Sequential Flow
-//! ```json
-//! Step 1: {
-//!   "step_description": "Gather requirements",
-//!   "step_number": 1,
-//!   "total_steps": 3,
-//!   "next_step_needed": true
-//! }
-//!
-//! Step 2: {
-//!   "step_description": "Design solution",
-//!   "step_number": 2,
-//!   "total_steps": 3,
-//!   "next_step_needed": true
-//! }
-//!
-//! Step 3: {
-//!   "step_description": "Implement solution",
-//!   "step_number": 3,
-//!   "total_steps": 3,
-//!   "next_step_needed": false
-//! }
-//! ```
-//!
-//! ### Creating a Branch
-//! ```json
-//! Step 3a: {
-//!   "step_description": "Alternative implementation",
-//!   "step_number": 3,
-//!   "total_steps": 3,
-//!   "next_step_needed": true,
-//!   "branch_id": "alternative",
-//!   "branch_from_step": 2
-//! }
-//! ```
-//!
-//! ### Revising a Step
-//! ```json
-//! Step 2 (revised): {
-//!   "step_description": "Redesign solution based on feedback",
-//!   "step_number": 2,
-//!   "total_steps": 3,
-//!   "next_step_needed": true,
-//!   "is_step_revision": true,
-//!   "revises_step": 2
-//! }
-//! ```
-
 use crate::schema::{CallToolResult, TextContent};
 use crate::tools::{ToolDef, ToolError};
 use schemars::JsonSchema;
@@ -80,7 +6,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Represents a single step in a workflow process
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(description = "A single step in the workflow process")]
 pub struct WorkflowStep {
@@ -115,7 +40,6 @@ pub struct WorkflowStep {
     needs_more_steps: Option<bool>,
 }
 
-/// Query parameters for retrieving workflow steps
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(description = "Query parameters to retrieve specific workflow steps")]
 pub struct StepQuery {
@@ -129,7 +53,6 @@ pub struct StepQuery {
     return_last_n: Option<i32>,
 }
 
-/// Enhanced response providing detailed workflow status
 #[derive(Debug, Serialize, Deserialize)]
 struct WorkflowStatus {
     step_number: i32,
@@ -139,12 +62,11 @@ struct WorkflowStatus {
     current_branch: Option<String>,
     branches: Vec<String>,
     step_history_length: usize,
-    recent_steps: Vec<WorkflowStep>, // Last few steps for context
+    recent_steps: Vec<WorkflowStep>,
     active_branches: HashMap<String, BranchStatus>,
     progress_visualization: String,
 }
 
-/// Status information for a workflow branch
 #[derive(Debug, Serialize, Deserialize)]
 struct BranchStatus {
     branch_name: String,
@@ -153,7 +75,6 @@ struct BranchStatus {
     is_active: bool,
 }
 
-/// Internal state tracking for the workflow
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct WorkflowState {
     step_history: Vec<WorkflowStep>,
@@ -161,7 +82,6 @@ struct WorkflowState {
     current_branch: Option<String>,
 }
 
-/// Workflow tool for managing multi-step processes
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Workflow {
     #[serde(skip)]
@@ -206,7 +126,6 @@ impl ToolDef for Workflow {
     type Args = WorkflowStep;
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
-        // Check if max_steps is reached
         if let Some(max) = self.max_steps {
             if args.step_number > max {
                 return Ok(Self::error(format!(
@@ -218,13 +137,11 @@ impl ToolDef for Workflow {
 
         let mut state = self.state.lock().await;
 
-        // Adjust total_steps if needed
         let mut step_data = args.clone();
         if step_data.step_number > step_data.total_steps {
             step_data.total_steps = step_data.step_number;
         }
 
-        // Validate inputs
         if step_data.revises_step.is_some() && step_data.is_step_revision.is_none() {
             return Ok(Self::error("When specifying revises_step, is_step_revision must be set to true"));
         }
@@ -233,13 +150,11 @@ impl ToolDef for Workflow {
             return Ok(Self::error("When creating a branch (branch_id), you must specify branch_from_step"));
         }
 
-        // Handle branch logic
         if let (Some(branch_id), Some(branch_from_step)) = (&step_data.branch_id, &step_data.branch_from_step) {
             if !self.allow_branches {
                 return Ok(Self::error("Branching is disabled in current configuration"));
             }
 
-            // Validate the branch_from_step exists
             if *branch_from_step <= 0 || *branch_from_step > state.step_history.len() as i32 {
                 return Ok(Self::error(format!(
                     "branch_from_step {} does not exist in step history",
@@ -253,13 +168,10 @@ impl ToolDef for Workflow {
             state.current_branch = None;
         }
 
-        // Add to step history
         state.step_history.push(step_data.clone());
 
-        // Build response data
         let response = self.build_workflow_status(&state, &step_data).await;
 
-        // Convert response to JSON string with pretty formatting
         match serde_json::to_string_pretty(&response) {
             Ok(json_response) => Ok(Self::success(json_response)),
             Err(e) => Ok(Self::error(format!("Failed to serialize response: {}", e))),
@@ -268,24 +180,19 @@ impl ToolDef for Workflow {
 }
 
 impl Workflow {
-    /// Creates a new Workflow with custom configuration
     pub fn new(allow_branches: bool, max_steps: Option<i32>) -> Self {
         Self { state: Arc::new(Mutex::new(WorkflowState::default())), allow_branches, max_steps }
     }
 
-    /// Generate a text visualization of workflow progress with markdown formatting
     fn format_workflow_progress(&self, steps: &[WorkflowStep], total_steps: i32) -> String {
         let mut result = String::new();
 
-        // Add a header
         result.push_str("## Workflow Progress\n\n");
 
-        // Format each step with clear prefixes similar to the Python version
         for i in 1..=total_steps {
             let step = steps.iter().find(|s| s.step_number == i);
 
             if let Some(s) = step {
-                // Format based on step type (regular, revision, or branch)
                 if s.is_step_revision == Some(true) {
                     result.push_str(&format!(
                         "🔄 **Step {}/{}** (revising step {})\n",
@@ -305,7 +212,6 @@ impl Workflow {
                     result.push_str(&format!("✓ **Step {}/{}**\n", i, total_steps));
                 }
             } else {
-                // Future step
                 result.push_str(&format!("💭 **Step {}/{}** (planned)\n", i, total_steps));
             }
         }
@@ -313,23 +219,18 @@ impl Workflow {
         result
     }
 
-    /// Retrieve steps based on query parameters
     pub async fn get_steps(&self, query: StepQuery) -> Result<Vec<WorkflowStep>, ToolError> {
         let state = self.state.lock().await;
 
-        // Handle different query types
         if let Some(step_num) = query.step_number {
-            // Return a specific step
             return Ok(state.step_history.iter().filter(|s| s.step_number == step_num).cloned().collect());
         } else if let Some(branch_id) = query.branch_id {
-            // Return steps from a specific branch
             if let Some(branch_steps) = state.branches.get(&branch_id) {
                 return Ok(branch_steps.clone());
             } else {
                 return Ok(Vec::new());
             }
         } else if let Some(n) = query.return_last_n {
-            // Return the last N steps
             let n = n as usize;
             if n >= state.step_history.len() {
                 return Ok(state.step_history.clone());
@@ -338,11 +239,9 @@ impl Workflow {
             }
         }
 
-        // Default: return all steps
         Ok(state.step_history.clone())
     }
 
-    // Add these helper methods similar to fetch.rs
     fn error(error_message: impl Into<String>) -> CallToolResult {
         CallToolResult {
             content: vec![serde_json::to_value(TextContent {
@@ -369,9 +268,7 @@ impl Workflow {
         }
     }
 
-    // Add this new helper method to build the workflow status
     async fn build_workflow_status(&self, state: &WorkflowState, step_data: &WorkflowStep) -> WorkflowStatus {
-        // Build branch status map
         let mut active_branches = HashMap::new();
         for (branch_name, branch_steps) in &state.branches {
             if let Some(first_step) = branch_steps.first() {
@@ -388,7 +285,6 @@ impl Workflow {
             }
         }
 
-        // Get recent steps (last 3)
         let recent_steps = if state.step_history.len() <= 3 {
             state.step_history.clone()
         } else {
@@ -445,7 +341,6 @@ mod tests {
     async fn test_workflow_branching() {
         let tool = Workflow::default();
 
-        // Add main flow step 1
         let step1 = WorkflowStep {
             step_description: "Initial step".to_string(),
             step_number: 1,
@@ -459,7 +354,6 @@ mod tests {
         };
         let _ = ToolDef::call(&tool, step1).await.unwrap();
 
-        // Add branch
         let branch_step = WorkflowStep {
             step_description: "Branch step".to_string(),
             step_number: 2,
@@ -485,7 +379,6 @@ mod tests {
     async fn test_step_retrieval() {
         let tool = Workflow::default();
 
-        // Add steps
         for i in 1..=5 {
             let step = WorkflowStep {
                 step_description: format!("Step {}", i),
@@ -501,14 +394,12 @@ mod tests {
             let _ = ToolDef::call(&tool, step).await.unwrap();
         }
 
-        // Test getting a specific step
         let query = StepQuery { step_number: Some(3), branch_id: None, return_last_n: None };
 
         let steps = tool.get_steps(query).await.unwrap();
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].step_number, 3);
 
-        // Test getting last steps
         let query = StepQuery { step_number: None, branch_id: None, return_last_n: Some(2) };
 
         let steps = tool.get_steps(query).await.unwrap();

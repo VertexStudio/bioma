@@ -7,7 +7,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-// Global memory store
 lazy_static! {
     static ref MEMORY_STORE: Mutex<HashMap<String, Value>> = Mutex::new(HashMap::new());
 }
@@ -155,7 +154,6 @@ mod tests {
 
         let tool = Memory;
 
-        // Test storing
         let store_props = MemoryArgs {
             action: MemoryAction::Store,
             key: Some("test_key".to_string()),
@@ -164,23 +162,19 @@ mod tests {
         let result = tool.call(store_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully stored"));
 
-        // Test retrieving
         let retrieve_props =
             MemoryArgs { action: MemoryAction::Retrieve, key: Some("test_key".to_string()), value: None };
         let result = tool.call(retrieve_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test"));
 
-        // Test listing
         let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test_key"));
 
-        // Test deleting
         let delete_props = MemoryArgs { action: MemoryAction::Delete, key: Some("test_key".to_string()), value: None };
         let result = tool.call(delete_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully deleted"));
 
-        // Test clearing
         let store_props = MemoryArgs {
             action: MemoryAction::Store,
             key: Some("test_key2".to_string()),
@@ -192,7 +186,6 @@ mod tests {
         let result = tool.call(clear_props).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully cleared"));
 
-        // Verify memory is empty after clear
         let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
         let result = tool.call(list_props).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "[]");
@@ -203,7 +196,6 @@ mod tests {
         clear_memory().await;
         let tool = Memory;
 
-        // Test all JSON value types
         let test_cases = vec![
             ("object_key", json!({"test": "value"})),
             ("array_key", json!([1, 2, 3])),
@@ -213,15 +205,12 @@ mod tests {
             ("null_key", json!(null)),
         ];
 
-        // Store and retrieve each type
         for (key, value) in test_cases {
-            // Store value
             let store_props =
                 MemoryArgs { action: MemoryAction::Store, key: Some(key.to_string()), value: Some(value.clone()) };
             let result = tool.call(store_props).await.unwrap();
             assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully stored"));
 
-            // Retrieve and verify value
             let retrieve_props = MemoryArgs { action: MemoryAction::Retrieve, key: Some(key.to_string()), value: None };
             let result = tool.call(retrieve_props).await.unwrap();
             let retrieved_value: Value = serde_json::from_str(result.content[0]["text"].as_str().unwrap()).unwrap();

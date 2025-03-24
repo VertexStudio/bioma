@@ -41,32 +41,27 @@ impl ToolDef for Fetch {
     type Args = FetchArgs;
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
-        // Validate URL
         let url = Url::parse(&args.url);
         let url = match url {
             Ok(url) => url,
             Err(e) => return Ok(Self::error(format!("Invalid URL: {}", e))),
         };
 
-        // Check robots.txt
         if let Err(e) = self.check_robots_txt(&url).await {
             return Ok(Self::error(format!("Access denied by robots.txt: {}", e)));
         }
 
-        // Fetch the webpage
         let response = match self.fetch_url(&url).await {
             Ok(r) => r,
             Err(e) => return Ok(Self::error(format!("Failed to fetch URL: {}", e))),
         };
 
-        // Process content
         let content = self.process_content(&url, response, &args).await;
         let content = match content {
             Ok(content) => content,
             Err(e) => return Ok(Self::error(format!("Failed to process content: {}", e))),
         };
 
-        // Create result
         let result = Self::success(&content);
 
         Ok(result)
@@ -110,7 +105,7 @@ impl Fetch {
         match response {
             Ok(resp) => {
                 if resp.status().is_client_error() {
-                    return Ok(()); // No robots.txt, assume allowed
+                    return Ok(());
                 }
 
                 let robots_content =
@@ -122,7 +117,7 @@ impl Fetch {
                 }
                 Ok(())
             }
-            Err(_) => Ok(()), // Failed to fetch robots.txt, assume allowed
+            Err(_) => Ok(()),
         }
     }
 
@@ -147,21 +142,17 @@ impl Fetch {
         let content = if args.raw.unwrap_or(false) || !is_html {
             html
         } else {
-            // Convert the HTML string into a cursor that implements Read
             let mut cursor = std::io::Cursor::new(html);
 
-            // Use readability for main content extraction
             let readable = readability::extract(&mut cursor, url, ExtractOptions::default());
             let readable = match readable {
                 Ok(readable) => readable,
                 Err(e) => return Err(ToolError::Custom(format!("Failed to extract content: {}", e))),
             };
 
-            // Convert to markdown
             html2md::parse_html(&readable.content)
         };
 
-        // Apply start_index and max_length
         let start = args.start_index.unwrap_or(0);
         let content = if start < content.len() { content[start..].to_string() } else { String::new() };
 
@@ -189,10 +180,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_with_robots_txt() {
-        // Create async server
         let mut server = mockito::Server::new_async().await;
 
-        // Mock robots.txt
         let robots_mock = server
             .mock("GET", "/robots.txt")
             .with_status(200)
@@ -201,7 +190,6 @@ mod tests {
             .create_async()
             .await;
 
-        // Mock HTML page
         let html_mock = server
             .mock("GET", "/test")
             .with_status(200)
@@ -212,20 +200,17 @@ mod tests {
 
         let tool = Fetch::default();
 
-        // Test allowed URL
         let props = FetchArgs { url: format!("{}/test", server.url()), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(false));
 
-        // Test disallowed URL
         let props =
             FetchArgs { url: format!("{}/private/test", server.url()), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(true));
 
-        // Clean up mocks
         robots_mock.remove_async().await;
         html_mock.remove_async().await;
     }
@@ -267,7 +252,6 @@ mod tests {
 
         let tool = Fetch::default();
 
-        // Test max_length
         let props = FetchArgs {
             url: format!("{}/limited", server.url()),
             max_length: Some(5),
@@ -278,7 +262,6 @@ mod tests {
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.content[0].get("text").unwrap().as_str().unwrap(), "12345");
 
-        // Test start_index
         let props = FetchArgs {
             url: format!("{}/limited", server.url()),
             max_length: None,
@@ -296,7 +279,6 @@ mod tests {
     async fn test_fetch_error_cases() {
         let mut server = mockito::Server::new_async().await;
 
-        // Test 404 response
         let not_found_mock = server.mock("GET", "/not-found").with_status(404).create_async().await;
 
         let tool = Fetch::default();
@@ -306,7 +288,6 @@ mod tests {
         let result = tool.call(props).await.unwrap();
         assert_eq!(result.is_error, Some(true));
 
-        // Test invalid URL
         let props = FetchArgs { url: "not-a-url".to_string(), max_length: None, start_index: None, raw: None };
 
         let result = tool.call(props).await.unwrap();
