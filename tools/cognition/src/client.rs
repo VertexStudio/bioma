@@ -1,12 +1,10 @@
 use bioma_actor::prelude::*;
 use clap::Parser;
 use client_config::Args;
-use tool::ToolsHub;
+use cognition::ToolsHub;
 use tracing::info;
 
 pub mod client_config;
-pub mod tool;
-pub mod user;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
