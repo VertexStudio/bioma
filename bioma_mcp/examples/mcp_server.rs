@@ -1,4 +1,4 @@
-use anyhow::{Context, Error, Result};
+use anyhow::{Context as AnyhowContext, Error, Result};
 use bioma_mcp::{
     prompts::{self, PromptGetHandler},
     resources::{self, ResourceReadHandler},
@@ -6,7 +6,7 @@ use bioma_mcp::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{ModelContextProtocolServer, Server, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    server::{Context, ModelContextProtocolServer, Server, SseConfig, StdioConfig, TransportConfig, WsConfig},
     tools::{self, ToolCallHandler},
 };
 use clap::{Parser, Subcommand};
@@ -76,8 +76,7 @@ fn setup_logging(log_path: PathBuf) -> Result<()> {
 struct ExampleMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
-    resources: Vec<Arc<dyn ResourceReadHandler>>,
-    prompts: Vec<Arc<dyn PromptGetHandler>>,
+    base_dir: PathBuf,
 }
 
 impl ModelContextProtocolServer for ExampleMcpServer {
@@ -89,15 +88,18 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         self.capabilities.clone()
     }
 
-    async fn get_resources(&self) -> Vec<Arc<dyn ResourceReadHandler>> {
-        self.resources.clone()
+    async fn new_resources(&self, context: Context) -> Vec<Arc<dyn ResourceReadHandler>> {
+        vec![
+            Arc::new(resources::readme::Readme),
+            Arc::new(resources::filesystem::FileSystem::new(self.base_dir.clone(), context)),
+        ]
     }
 
-    async fn get_prompts(&self) -> Vec<Arc<dyn PromptGetHandler>> {
-        self.prompts.clone()
+    async fn new_prompts(&self, _context: Context) -> Vec<Arc<dyn PromptGetHandler>> {
+        vec![Arc::new(prompts::greet::Greet)]
     }
 
-    async fn create_tools(&self) -> Vec<Arc<dyn ToolCallHandler>> {
+    async fn new_tools(&self, _context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
         vec![
             Arc::new(tools::echo::Echo),
             Arc::new(tools::memory::Memory),
@@ -130,16 +132,11 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let resources: Vec<Arc<dyn ResourceReadHandler>> = vec![
-        Arc::new(resources::readme::Readme),
-        Arc::new(resources::filesystem::FileSystem::new(args.base_dir.clone())),
-    ];
-
-    let prompts: Vec<Arc<dyn PromptGetHandler>> = vec![Arc::new(prompts::greet::Greet)];
-
-    let server = ExampleMcpServer { transport_config, capabilities, resources, prompts };
+    let server = ExampleMcpServer { transport_config, capabilities, base_dir: args.base_dir };
 
     let mcp_server = Server::new(server);
 
-    mcp_server.start().await
+    let _ = mcp_server.start().await;
+
+    Ok(())
 }

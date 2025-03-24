@@ -2,7 +2,6 @@ use crate::schema::{ReadResourceResult, Resource, ResourceTemplate};
 use serde::Serialize;
 use std::future::Future;
 use std::pin::Pin;
-use tokio::sync::mpsc;
 
 pub mod filesystem;
 pub mod readme;
@@ -40,19 +39,15 @@ pub trait ResourceReadHandler: Send + Sync {
         self.def().uri == uri
     }
 
-    fn template(&self) -> Option<ResourceTemplate> {
-        None
+    fn templates(&self) -> Vec<ResourceTemplate> {
+        vec![]
     }
 
     fn supports_subscription(&self, _uri: &str) -> bool {
         false
     }
 
-    fn subscribe<'a>(
-        &'a self,
-        _uri: String,
-        _on_resource_updated_tx: mpsc::Sender<()>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+    fn subscribe<'a>(&'a self, _uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
         Box::pin(async move {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         })
@@ -84,8 +79,8 @@ pub trait ResourceDef: Serialize {
         }
     }
 
-    fn template() -> Option<ResourceTemplate> {
-        None
+    fn templates() -> Vec<ResourceTemplate> {
+        vec![]
     }
 
     fn read<'a>(&'a self, uri: String) -> impl Future<Output = Result<ReadResourceResult, ResourceError>> + Send + 'a;
@@ -94,11 +89,7 @@ pub trait ResourceDef: Serialize {
         false
     }
 
-    fn subscribe<'a>(
-        &'a self,
-        _uri: String,
-        _on_resource_updated_tx: mpsc::Sender<()>,
-    ) -> impl Future<Output = Result<(), ResourceError>> + Send + 'a {
+    fn subscribe<'a>(&'a self, _uri: String) -> impl Future<Output = Result<(), ResourceError>> + Send + 'a {
         async move {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         }
@@ -127,20 +118,16 @@ impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
         self.def().uri == uri
     }
 
-    fn template(&self) -> Option<ResourceTemplate> {
-        T::template()
+    fn templates(&self) -> Vec<ResourceTemplate> {
+        T::templates()
     }
 
     fn supports_subscription(&self, _uri: &str) -> bool {
         T::supports_subscription()
     }
 
-    fn subscribe<'a>(
-        &'a self,
-        uri: String,
-        on_resource_updated_tx: mpsc::Sender<()>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
-        Box::pin(async move { self.subscribe(uri, on_resource_updated_tx).await })
+    fn subscribe<'a>(&'a self, uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
+        Box::pin(async move { self.subscribe(uri).await })
     }
 
     fn unsubscribe<'a>(&'a self, uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {

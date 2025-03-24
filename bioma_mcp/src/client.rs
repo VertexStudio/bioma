@@ -389,7 +389,7 @@ impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
         Ok(())
     }
 
-    async fn request(&mut self, method: String, params: serde_json::Value) -> Result<serde_json::Value, ClientError> {
+    async fn request(&self, method: String, params: serde_json::Value) -> Result<serde_json::Value, ClientError> {
         let mut counter = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
@@ -434,7 +434,7 @@ impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
         }
     }
 
-    async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
+    async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,

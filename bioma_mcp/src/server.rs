@@ -1,24 +1,25 @@
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
-    CallToolRequestParams, CancelledNotificationParams, GetPromptRequestParams, Implementation,
-    InitializeRequestParams, InitializeResult, InitializedNotificationParams, ListPromptsRequestParams,
-    ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams,
-    ListResourcesResult, ListToolsRequestParams, ListToolsResult, PingRequestParams, ReadResourceRequestParams,
-    ResourceUpdatedNotificationParams, ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
+    CallToolRequestParams, CancelledNotificationParams, ClientCapabilities, CreateMessageRequestParams,
+    CreateMessageResult, GetPromptRequestParams, Implementation, InitializeRequestParams, InitializeResult,
+    InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
+    ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
+    ListToolsResult, PingRequestParams, ReadResourceRequestParams, ResourceUpdatedNotificationParams,
+    ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
-use crate::transport::{stdio::StdioTransport, Message, Transport, TransportType};
+use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
-use anyhow::{Context, Error, Result};
+// use anyhow::{Context, Error, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
@@ -28,15 +29,23 @@ pub struct ServerMetadata {
 
 impl Metadata for ServerMetadata {}
 
+#[derive(Debug, thiserror::Error)]
+pub enum ServerError {
+    #[error("Transport error: {0}")]
+    Transport(String),
+    #[error("Request error: {0}")]
+    Request(String),
+    #[error("Failed to parse response: {0}")]
+    ParseResponse(String),
+}
+
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
-    fn get_resources(&self) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
-    fn get_prompts(&self) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
-
-    fn create_tools(&self) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
-
-    fn on_error(&self, error: Error) -> impl Future<Output = ()> + Send;
+    fn new_resources(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
+    fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
+    fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
+    fn on_error(&self, error: anyhow::Error) -> impl Future<Output = ()> + Send;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,38 +97,161 @@ pub enum TransportConfig {
 }
 
 struct Session {
-    tools: HashMap<String, Arc<dyn ToolCallHandler>>,
+    #[allow(unused)]
+    context: Context,
+    tools: Vec<Arc<dyn ToolCallHandler>>,
+    prompts: Vec<Arc<dyn PromptGetHandler>>,
+    resources: Vec<Arc<dyn ResourceReadHandler>>,
 }
 
 impl Session {
-    fn new(tools: Vec<Arc<dyn ToolCallHandler>>) -> Self {
-        let tools = tools.into_iter().map(|tool| (tool.def().name.clone(), tool)).collect();
-        Self { tools }
-    }
-
-    fn get_tool(&self, name: &str) -> Option<Arc<dyn ToolCallHandler>> {
-        self.tools.get(name).cloned()
+    fn find_tool(&self, name: &str) -> Option<Arc<dyn ToolCallHandler>> {
+        self.tools.iter().find(|tool| tool.def().name == name).cloned()
     }
 
     fn list_tools(&self) -> Vec<crate::schema::Tool> {
-        self.tools.values().map(|tool| tool.def()).collect()
+        self.tools.iter().map(|tool| tool.def()).collect()
+    }
+
+    fn find_resource(&self, uri: &str) -> Option<Arc<dyn ResourceReadHandler>> {
+        self.resources.iter().find(|resource| resource.def().uri == uri).cloned()
+    }
+
+    fn list_resources(&self) -> Vec<crate::schema::Resource> {
+        self.resources.iter().map(|resource| resource.def()).collect()
+    }
+
+    fn find_prompt(&self, name: &str) -> Option<Arc<dyn PromptGetHandler>> {
+        self.prompts.iter().find(|prompt| prompt.def().name == name).cloned()
+    }
+
+    fn list_prompts(&self) -> Vec<crate::schema::Prompt> {
+        self.prompts.iter().map(|prompt| prompt.def()).collect()
+    }
+}
+
+type RequestId = u64;
+type ResponseSender = oneshot::Sender<Result<serde_json::Value, ServerError>>;
+type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+type RequestCounter = Arc<RwLock<u64>>;
+
+#[derive(Clone)]
+pub struct Context {
+    pub client_capabilities: ClientCapabilities,
+    pub server_capabilities: ServerCapabilities,
+    conn_id: ConnectionId,
+    sender: TransportSender,
+    pending_requests: PendingRequests,
+    request_counter: RequestCounter,
+}
+
+impl Context {
+    pub fn test() -> Self {
+        Self {
+            client_capabilities: ClientCapabilities::default(),
+            server_capabilities: ServerCapabilities::default(),
+            conn_id: ConnectionId(uuid::Uuid::new_v4()),
+            sender: TransportSender::new_nop(),
+            pending_requests: PendingRequests::default(),
+            request_counter: RequestCounter::default(),
+        }
+    }
+
+    pub async fn create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ServerError> {
+        let params = serde_json::to_value(params).unwrap_or_default();
+        let result =
+            self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(10)).await?;
+        Ok(serde_json::from_value(result).map_err(|e| ServerError::ParseResponse(e.to_string()))?)
+    }
+
+    pub async fn resource_updated(&self, params: ResourceUpdatedNotificationParams) -> Result<(), ServerError> {
+        let params = serde_json::to_value(params).unwrap_or_default();
+        self.notify("notifications/resources/updated".to_string(), params).await?;
+        Ok(())
+    }
+
+    pub async fn request(
+        &self,
+        method: String,
+        params: serde_json::Value,
+        timeout: std::time::Duration,
+    ) -> Result<serde_json::Value, ServerError> {
+        let mut counter = self.request_counter.write().await;
+        *counter += 1;
+        let id = *counter;
+
+        let request = jsonrpc_core::MethodCall {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method,
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+            id: jsonrpc_core::Id::Num(id),
+        };
+
+        let (response_tx, response_rx) = oneshot::channel();
+
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.insert(id, response_tx);
+        }
+
+        let conn_id = self.conn_id.clone();
+
+        if let Err(e) = self.sender.send(request.into(), conn_id).await {
+            let mut pending = self.pending_requests.lock().await;
+            pending.remove(&id);
+            return Err(ServerError::Transport(format!("Send: {}", e).into()));
+        }
+
+        match tokio::time::timeout(timeout, response_rx).await {
+            Ok(response) => match response {
+                Ok(result) => result,
+                Err(_) => Err(ServerError::Request("Response channel closed".into())),
+            },
+            Err(_) => {
+                let mut pending = self.pending_requests.lock().await;
+                pending.remove(&id);
+                Err(ServerError::Request("Request timed out".into()))
+            }
+        }
+    }
+
+    pub async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ServerError> {
+        let notification = jsonrpc_core::Notification {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method,
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+        };
+
+        let conn_id = self.conn_id.clone();
+
+        self.sender
+            .send(notification.into(), conn_id)
+            .await
+            .map_err(|e| ServerError::Transport(format!("Send: {}", e).into()))
     }
 }
 
 pub struct Server<T: ModelContextProtocolServer> {
     server: Arc<RwLock<T>>,
     sessions: Arc<RwLock<HashMap<ConnectionId, Session>>>,
+    pending_requests: PendingRequests,
+    request_counter: RequestCounter,
 }
 
 impl<T: ModelContextProtocolServer> Server<T> {
     pub fn new(server: T) -> Self {
-        Server { sessions: Arc::new(RwLock::new(HashMap::new())), server: Arc::new(RwLock::new(server)) }
+        Server {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            server: Arc::new(RwLock::new(server)),
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            request_counter: Arc::new(RwLock::new(0)),
+        }
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self) -> Result<(), ServerError> {
         let transport_config = self.server.read().await.get_transport_config().await.clone();
 
-        let (transport_type, mut on_message_rx, _on_error_rx, _on_close_rx) = match &transport_config {
+        let (transport_type, mut on_client_rx, _on_error_rx, _on_close_rx) = match &transport_config {
             TransportConfig::Stdio(_config) => {
                 let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(32);
                 let (on_error_tx, on_error_rx) = mpsc::channel(32);
@@ -166,10 +298,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
         io_handler.add_method_with_meta("initialize", {
             let server = self.server.clone();
             let sessions = self.sessions.clone();
+            let transport_sender = transport_sender.clone();
+            let pending_requests = self.pending_requests.clone();
+            let request_counter = self.request_counter.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let server = server.clone();
                 let sessions = sessions.clone();
+                let transport_sender = transport_sender.clone();
+                let pending_requests = pending_requests.clone();
+                let request_counter = request_counter.clone();
 
                 debug!("Handling initialize request");
 
@@ -182,7 +320,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     })?;
 
                     let result = InitializeResult {
-                        capabilities,
+                        capabilities: capabilities.clone(),
                         protocol_version: init_params.protocol_version,
                         server_info: Implementation {
                             name: "bioma-mcp-server".to_string(),
@@ -194,10 +332,21 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     let conn_id = meta.conn_id;
 
-                    let server = server.read().await;
-                    let tools = server.create_tools().await;
+                    let context = Context {
+                        conn_id: conn_id.clone(),
+                        sender: transport_sender.clone(),
+                        client_capabilities: init_params.capabilities.clone(),
+                        server_capabilities: capabilities.clone(),
+                        pending_requests: pending_requests.clone(),
+                        request_counter: request_counter.clone(),
+                    };
 
-                    let session = Session::new(tools);
+                    let server = server.read().await;
+                    let tools = server.new_tools(context.clone()).await;
+                    let resources = server.new_resources(context.clone()).await;
+                    let prompts = server.new_prompts(context.clone()).await;
+
+                    let session = Session { tools, resources, prompts, context };
                     sessions.write().await.insert(conn_id, session);
 
                     info!("Successfully handled initialize request");
@@ -255,9 +404,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("resources/list", {
-            let server = self.server.clone();
-            move |params: Params, _meta: ServerMetadata| {
-                let server = server.clone();
+            let sessions = self.sessions.clone();
+
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
+
                 debug!("Handling resources/list request");
 
                 async move {
@@ -271,10 +422,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Resources list request with cursor: {:?}", params.cursor);
 
-                    let server = server.read().await;
-                    let resources = server.get_resources().await.clone();
-                    let resources = resources.iter().map(|resource| resource.def()).collect::<Vec<_>>();
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&meta.conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
 
+                    let resources = session.list_resources();
                     let response = ListResourcesResult { next_cursor: None, resources, meta: None };
 
                     info!("Successfully handled resources/list request");
@@ -284,9 +438,9 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("resources/read", {
-            let server = self.server.clone();
-            move |params: Params, _meta: ServerMetadata| {
-                let server = server.clone();
+            let sessions = self.sessions.clone();
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
                 async move {
                     debug!("Handling resources/read request");
 
@@ -300,9 +454,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Requested resource URI: {}", params.uri);
 
-                    let server = server.read().await;
-                    let resources = server.get_resources().await;
-                    let resource = resources.iter().find(|resource| resource.supports(&params.uri));
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&meta.conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    let resource = session.find_resource(&params.uri);
 
                     match resource {
                         Some(resource) => match resource.read_boxed(params.uri.clone()).await {
@@ -328,9 +486,9 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("resources/templates/list", {
-            let server = self.server.clone();
-            move |params: Params, _meta: ServerMetadata| {
-                let server = server.clone();
+            let sessions = self.sessions.clone();
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
                 async move {
                     debug!("Handling resources/templates/list request");
 
@@ -344,11 +502,14 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Resource templates list request with cursor: {:?}", params.cursor);
 
-                    let server = server.read().await;
-                    let resources = server.get_resources().await;
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&meta.conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
 
                     let resource_templates =
-                        resources.iter().filter_map(|resource| resource.template()).collect::<Vec<_>>();
+                        session.resources.iter().map(|resource| resource.templates()).flatten().collect::<Vec<_>>();
 
                     let response = ListResourceTemplatesResult { next_cursor: None, resource_templates, meta: None };
 
@@ -362,13 +523,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("resources/subscribe", {
-            let server = self.server.clone();
-            let transport_sender = transport_sender.clone();
+            let sessions = self.sessions.clone();
 
             move |params: Params, meta: ServerMetadata| {
-                let server = server.clone();
+                let sessions = sessions.clone();
                 let conn_id = meta.conn_id.clone();
-                let transport_sender = transport_sender.clone();
 
                 async move {
                     debug!("Handling resources/subscribe request");
@@ -383,44 +542,19 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Subscribe resource URI: {}", params.uri);
 
-                    let server = server.read().await;
-                    let resources = server.get_resources().await;
-                    let resource = resources
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    let resource = session
+                        .resources
                         .iter()
                         .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
-                    let on_resource_updated_client_id = conn_id.clone();
-                    let on_resource_updated_uri = params.uri.clone();
-
-                    let (on_resource_updated_tx, mut on_resource_updated_rx) = mpsc::channel::<()>(1);
-                    let notification_sender = transport_sender.clone();
-                    tokio::spawn({
-                        async move {
-                            let params = ResourceUpdatedNotificationParams { uri: on_resource_updated_uri.clone() };
-                            let request = jsonrpc_core::Notification {
-                                jsonrpc: Some(jsonrpc_core::Version::V2),
-                                method: "notifications/resources/updated".to_string(),
-                                params: Params::Map(
-                                    serde_json::to_value(params)
-                                        .unwrap_or_default()
-                                        .as_object()
-                                        .cloned()
-                                        .unwrap_or_default(),
-                                ),
-                            };
-                            let message: JsonRpcMessage = request.into();
-                            while let Some(_) = on_resource_updated_rx.recv().await {
-                                if let Err(e) = notification_sender
-                                    .send(message.clone(), on_resource_updated_client_id.clone())
-                                    .await
-                                {
-                                    error!("Failed to send error notification: {}", e);
-                                }
-                            }
-                        }
-                    });
 
                     match resource {
-                        Some(resource) => match resource.subscribe(params.uri.clone(), on_resource_updated_tx).await {
+                        Some(resource) => match resource.subscribe(params.uri.clone()).await {
                             Ok(_) => {
                                 info!("Successfully subscribed to resource: {} for client: {}", params.uri, conn_id);
                                 Ok(serde_json::json!({}))
@@ -443,9 +577,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("resources/unsubscribe", {
-            let server = self.server.clone();
-            move |params: Params, _meta: ServerMetadata| {
-                let server = server.clone();
+            let sessions = self.sessions.clone();
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
+                let conn_id = meta.conn_id.clone();
+
                 async move {
                     debug!("Handling resources/unsubscribe request");
 
@@ -459,9 +595,14 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Unsubscribe resource URI: {}", params.uri);
 
-                    let server = server.read().await;
-                    let resources = server.get_resources().await;
-                    let resource = resources
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    let resource = session
+                        .resources
                         .iter()
                         .find(|resource| resource.supports(&params.uri) && resource.supports_subscription(&params.uri));
 
@@ -489,9 +630,9 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("prompts/list", {
-            let server = self.server.clone();
-            move |params: Params, _meta: ServerMetadata| {
-                let server = server.clone();
+            let sessions = self.sessions.clone();
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
                 debug!("Handling prompts/list request");
 
                 async move {
@@ -505,8 +646,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     debug!("Prompts list request with cursor: {:?}", params.cursor);
 
-                    let server = server.read().await;
-                    let prompts = server.get_prompts().await.iter().map(|prompt| prompt.def()).collect::<Vec<_>>();
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&meta.conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    let prompts = session.list_prompts();
 
                     let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
 
@@ -517,9 +663,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
         });
 
         io_handler.add_method_with_meta("prompts/get", {
-            let server = self.server.clone();
-            move |params: Params, _meta: ServerMetadata| {
-                let server = server.clone();
+            let sessions = self.sessions.clone();
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
+                let conn_id = meta.conn_id.clone();
+
                 debug!("Handling prompts/get request");
 
                 async move {
@@ -528,9 +676,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?;
 
-                    let server = server.read().await;
-                    let prompts = server.get_prompts().await;
-                    let prompt = prompts.iter().find(|p| p.def().name == params.name);
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    let prompt = session.find_prompt(&params.name);
 
                     match prompt {
                         Some(prompt) => {
@@ -601,7 +753,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let tool_reference = {
                         let sessions = sessions.read().await;
                         if let Some(session) = sessions.get(&meta.conn_id) {
-                            session.get_tool(&params.name)
+                            let tool_reference = session.find_tool(&params.name);
+                            tool_reference
                         } else {
                             None
                         }
@@ -633,13 +786,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
             let mut transport_lock = transport.lock().await;
             if let Err(e) = transport_lock.start().await {
                 error!("Transport error: {}", e);
-                return Err(e).context("Failed to start transport");
+                return Err(ServerError::Transport(e.to_string()));
             }
         }
 
-        while let Some(message) = on_message_rx.recv().await {
+        let pending_requests = self.pending_requests.clone();
+
+        while let Some(message) = on_client_rx.recv().await {
             let io_handler_clone = io_handler.clone();
             let transport_sender_clone = transport_sender.clone();
+            let pending_requests = pending_requests.clone();
 
             tokio::spawn(async move {
                 match &message.message {
@@ -661,12 +817,33 @@ impl<T: ModelContextProtocolServer> Server<T> {
                             debug!("Handled notification: {:?}", notification.method);
                         }
                         _ => {
-                            warn!("Unsupported request: {:?}", request);
+                            warn!("Unsupported batch request: {:?}", request);
                         }
                     },
-                    JsonRpcMessage::Response(response) => {
-                        error!("Received response: {:?}", response);
-                    }
+                    JsonRpcMessage::Response(response) => match response {
+                        jsonrpc_core::Response::Single(output) => match output {
+                            jsonrpc_core::Output::Success(success) => {
+                                if let jsonrpc_core::Id::Num(id) = success.id {
+                                    let mut requests = pending_requests.lock().await;
+                                    if let Some(sender) = requests.remove(&id) {
+                                        let _ = sender.send(Ok(success.result.clone()));
+                                    }
+                                }
+                            }
+                            jsonrpc_core::Output::Failure(failure) => {
+                                if let jsonrpc_core::Id::Num(id) = failure.id {
+                                    let mut requests = pending_requests.lock().await;
+                                    if let Some(sender) = requests.remove(&id) {
+                                        let _ = sender
+                                            .send(Err(ServerError::Request(format!("RPC error: {:?}", failure.error))));
+                                    }
+                                }
+                            }
+                        },
+                        jsonrpc_core::Response::Batch(_) => {
+                            warn!("Unsupported batch response");
+                        }
+                    },
                 }
             });
         }

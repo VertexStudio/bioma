@@ -10,8 +10,6 @@ pub mod server;
 pub mod tools;
 pub mod transport;
 
-pub use server::ModelContextProtocolServer;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Deref)]
 pub struct ConnectionId(Uuid);
 

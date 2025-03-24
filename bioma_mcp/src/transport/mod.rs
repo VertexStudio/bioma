@@ -34,6 +34,7 @@ pub enum TransportSenderType {
     Stdio(stdio::StdioTransportSender),
     Sse(sse::SseTransportSender),
     Ws(ws::WsTransportSender),
+    Nop,
 }
 
 impl TransportSenderType {
@@ -42,6 +43,7 @@ impl TransportSenderType {
             Self::Stdio(sender) => sender.send(message, conn_id).await,
             Self::Sse(sender) => sender.send(message, conn_id).await,
             Self::Ws(sender) => sender.send(message, conn_id).await,
+            Self::Nop => Ok(()),
         }
     }
 }
@@ -62,6 +64,10 @@ impl TransportSender {
 
     pub fn new_ws(sender: ws::WsTransportSender) -> Self {
         Self { inner: TransportSenderType::Ws(sender) }
+    }
+
+    pub fn new_nop() -> Self {
+        Self { inner: TransportSenderType::Nop }
     }
 
     pub async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {

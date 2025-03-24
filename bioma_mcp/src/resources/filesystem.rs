@@ -1,5 +1,6 @@
 use crate::resources::{ResourceDef, ResourceError};
-use crate::schema::{ReadResourceResult, ResourceTemplate};
+use crate::schema::{ReadResourceResult, ResourceTemplate, ResourceUpdatedNotificationParams};
+use crate::server::Context;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::any::Any;
@@ -8,14 +9,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::info;
 use url::Url;
 
 #[derive(Clone, Serialize)]
 pub struct FileSystem {
+    #[serde(skip)]
+    context: Context,
+
     #[serde(skip)]
     base_dir: Arc<PathBuf>,
 
@@ -24,8 +27,12 @@ pub struct FileSystem {
 }
 
 impl FileSystem {
-    pub fn new<P: AsRef<Path>>(base_dir: P) -> Self {
-        Self { base_dir: Arc::new(base_dir.as_ref().to_path_buf()), watchers: Arc::new(Mutex::new(HashMap::new())) }
+    pub fn new<P: AsRef<Path>>(base_dir: P, context: Context) -> Self {
+        Self {
+            base_dir: Arc::new(base_dir.as_ref().to_path_buf()),
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+            context,
+        }
     }
 
     async fn watch_path(path: impl AsRef<Path>, tx: mpsc::Sender<()>) -> Result<JoinHandle<()>, ResourceError> {
@@ -43,6 +50,8 @@ impl FileSystem {
                 Config::default(),
             )
             .unwrap();
+
+            // TODO: End this task when tx is dropped
 
             watcher.watch(&path, RecursiveMode::Recursive).unwrap();
 
@@ -136,14 +145,14 @@ impl ResourceDef for FileSystem {
     const URI: &'static str = "file:///";
     const MIME_TYPE: Option<&'static str> = None;
 
-    fn template() -> Option<ResourceTemplate> {
-        Some(ResourceTemplate {
+    fn templates() -> Vec<ResourceTemplate> {
+        vec![ResourceTemplate {
             name: Self::NAME.to_string(),
             description: Some(Self::DESCRIPTION.to_string()),
             uri_template: "file:///{path}".to_string(),
             mime_type: None,
             annotations: None,
-        })
+        }]
     }
 
     async fn read(&self, uri: String) -> Result<ReadResourceResult, ResourceError> {
@@ -234,11 +243,21 @@ impl ResourceDef for FileSystem {
         true
     }
 
-    async fn subscribe(&self, uri: String, on_resource_updated_tx: mpsc::Sender<()>) -> Result<(), ResourceError> {
+    async fn subscribe(&self, uri: String) -> Result<(), ResourceError> {
         let path = self.uri_to_path(&uri)?;
         if !path.exists() {
             return Err(ResourceError::NotFound(format!("Cannot subscribe to non-existent resource: {}", uri)));
         }
+
+        let (on_resource_updated_tx, mut on_resource_updated_rx) = mpsc::channel(1);
+        let context = self.context.clone();
+        let updated_uri = uri.clone();
+        tokio::spawn(async move {
+            while let Some(_) = on_resource_updated_rx.recv().await {
+                let _ = context.resource_updated(ResourceUpdatedNotificationParams { uri: updated_uri.clone() }).await;
+            }
+        });
+
         let handle = FileSystem::watch_path(path, on_resource_updated_tx).await?;
         self.watchers.lock().await.insert(uri.clone(), handle);
         info!("Subscribed to resource: {}", uri);
@@ -276,7 +295,7 @@ mod tests {
             write!(file, "Hello, world!").unwrap();
         }
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let uri = format!("file://{}", file_path.display());
         let result = fs_resource.read(uri).await.unwrap();
@@ -290,7 +309,7 @@ mod tests {
     async fn test_filesystem_not_found() {
         let temp_dir = tempdir().unwrap();
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let uri = format!("file://{}/nonexistent.txt", temp_dir.path().display());
         let result = fs_resource.read(uri).await;
@@ -320,7 +339,7 @@ mod tests {
             std::fs::create_dir(&subdir_path).unwrap();
         }
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let uri = format!("file://{}", temp_dir.path().display());
         let result = fs_resource.read(uri).await.unwrap();
@@ -344,7 +363,7 @@ mod tests {
             write!(file, "Root test").unwrap();
         }
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let result = fs_resource.read("file:///".to_string()).await.unwrap();
 
@@ -356,7 +375,7 @@ mod tests {
     async fn test_uri_to_path_root() {
         let temp_dir = tempdir().unwrap();
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let path = fs_resource.uri_to_path("file:///").unwrap();
         assert_eq!(path, temp_dir.path());
@@ -369,7 +388,7 @@ mod tests {
     async fn test_path_to_uri() {
         let temp_dir = tempdir().unwrap();
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let uri = fs_resource.path_to_uri(temp_dir.path());
         assert!(uri.starts_with("file://"));
@@ -380,7 +399,7 @@ mod tests {
     async fn test_nonexistent_directory() {
         let temp_dir = tempdir().unwrap();
 
-        let fs_resource = FileSystem::new(temp_dir.path());
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         let nonexistent_dir = format!("file://{}/nonexistent_dir/", temp_dir.path().display());
         let result = fs_resource.read(nonexistent_dir).await;
