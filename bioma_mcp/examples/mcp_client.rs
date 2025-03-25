@@ -192,11 +192,7 @@ async fn main() -> Result<()> {
                             Ok(_) => info!("Successfully subscribed to filesystem changes at {}", filesystem_uri),
                             Err(e) => error!("Failed to subscribe to filesystem changes: {:?}", e),
                         }
-
-                        // Wait a moment to receive any potential change notifications
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                        // Unsubscribe from filesystem changes
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         match client.unsubscribe_resource(filesystem_uri.to_string()).await {
                             Ok(_) => info!("Successfully unsubscribed from filesystem changes"),
                             Err(e) => error!("Failed to unsubscribe from filesystem changes: {:?}", e),
