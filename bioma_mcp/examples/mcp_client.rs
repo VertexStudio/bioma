@@ -161,6 +161,19 @@ async fn run_client(client_id: usize, server_config: ServerConfig) -> Result<()>
                         }
 
                         info!("Client {}: Trying to subscribe to filesystem changes...", client_id);
+
+                        // Subscribe to a specific file for changes
+                        let file_uri = "file:///mcp_server.log";
+                        match client.subscribe_resource(file_uri.to_string()).await {
+                            Ok(_) => info!("Client {}: Successfully subscribed to {}", client_id, file_uri),
+                            Err(e) => error!("Client {}: Failed to subscribe to {}: {:?}", client_id, file_uri, e),
+                        }
+
+                        // Unsubscribe from the file
+                        match client.unsubscribe_resource(file_uri.to_string()).await {
+                            Ok(_) => info!("Client {}: Successfully unsubscribed from {}", client_id, file_uri),
+                            Err(e) => error!("Client {}: Failed to unsubscribe from {}: {:?}", client_id, file_uri, e),
+                        }
                     }
                     Err(e) => info!("Client {}: Resource templates not supported: {:?}", client_id, e),
                 }
