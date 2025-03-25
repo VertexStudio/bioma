@@ -1,9 +1,6 @@
 use anyhow::Result;
 use bioma_mcp::{
-    client::{
-        Client, ClientMetadata, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig,
-        WsConfig,
-    },
+    client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
         CreateMessageResult, Implementation, ReadResourceRequestParams, Root,
@@ -39,7 +36,8 @@ enum Transport {
     },
 }
 
-struct ExampleMcpClient {
+#[derive(Clone)]
+pub struct ExampleMcpClient {
     server_config: ServerConfig,
     capabilities: ClientCapabilities,
     roots: Vec<Root>,
@@ -58,11 +56,7 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         self.roots.clone()
     }
 
-    async fn on_create_message(
-        &self,
-        _params: CreateMessageRequestParams,
-        _meta: ClientMetadata,
-    ) -> CreateMessageResult {
+    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> CreateMessageResult {
         todo!()
     }
 }
@@ -238,10 +232,6 @@ async fn main() -> Result<()> {
     info!("Echo response: {:?}", echo_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-    info!("Updating roots...");
-    let new_roots = vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }];
-    client.update_roots(new_roots).await?;
 
     info!("Shutting down client...");
     client.close().await?;
