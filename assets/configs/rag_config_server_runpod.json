@@ -9,7 +9,7 @@
       "hf_cache_dir": ".output/cache/huggingface/hub"
     },
     "rag_endpoint": "http://0.0.0.0:5766",
-    "chat_endpoint": "https://zb6epagdkz1oby-11434.proxy.runpod.net/",
+    "chat_endpoint": "https://leg5g8fyyvjvt7-11434.proxy.runpod.net/",
     "chat_model": "qwq:latest",
     "chat_prompt": "You are, Bioma, a helpful assistant. Your creator is Vertex Studio, a games and simulation company. Format your response in markdown. Use the following context to answer the user's query:\n\n",
     "think_model": "qwq:latest",
