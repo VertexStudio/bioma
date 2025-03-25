@@ -2,10 +2,10 @@ use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
+    App, HttpResponse, HttpServer, Responder,
     http::Method,
     middleware::Logger,
     web::{self, Json},
-    App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
     AskQuery, ChatQuery, EmbeddingsQuery, IndexRequest, ModelEmbed, RetrieveContextRequest, RetrieveOutputFormat,
@@ -17,12 +17,12 @@ use bioma_llm::prelude::*;
 use bioma_rag::prelude::*;
 use clap::Parser;
 use cognition::{
+    ChatResponse, ToolHubMap, ToolsHub, UserActor,
     health_check::{
-        check_embeddings, check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses,
-        Service,
+        Responses, Service, check_embeddings, check_markitdown, check_minio, check_ollama, check_pdf_analyzer,
+        check_surrealdb,
     },
     tool::ListTools,
-    ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -34,7 +34,7 @@ use server_config::{Args, ServerConfig};
 use std::{collections::HashMap, error::Error as StdError, time::Duration};
 use tracing::{debug, error, info};
 use url::Url;
-use utoipa::{openapi::ServerBuilder, OpenApi};
+use utoipa::{OpenApi, openapi::ServerBuilder};
 
 mod api_schema;
 mod server_config;
@@ -110,7 +110,7 @@ impl AppState {
         {
             Ok(result) => result,
             Err(e) => {
-                return Err(HttpResponse::InternalServerError().body(format!("Failed to create chat actor: {}", e)))
+                return Err(HttpResponse::InternalServerError().body(format!("Failed to create chat actor: {}", e)));
             }
         };
 
@@ -2325,11 +2325,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .memory_limit(UPLOAD_MEMORY_LIMIT)
                     .total_limit(UPLOAD_TOTAL_LIMIT),
             )
-            .service(Files::new("/templates", "tools/cognition/templates"))
+            .service(Files::new("/templates", "apps/cognition/templates"))
             // Add the dynamic swagger-initializer.js route before the static files
             .route("/docs/swagger-ui/dist/swagger-initializer.js", web::get().to(swagger_initializer))
             // Then serve the rest of the static files
-            .service(Files::new("/docs", "tools/cognition/docs").prefer_utf8(true).use_last_modified(true))
+            .service(Files::new("/docs", "apps/cognition/docs").prefer_utf8(true).use_last_modified(true))
             // Serve dashboard at root
             .route("/", web::get().to(dashboard))
             .route("/health", web::get().to(health))

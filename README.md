@@ -102,7 +102,7 @@ python assets/scripts/rerank_server.py
 
 ## Cognition server example
 
-[Agentic RAG Server](tools/rag_server/docs/rag_server.md)
+[Agentic RAG Server](apps/cognition/docs/rag_server.md)
 
 ### Launch the server:
 
