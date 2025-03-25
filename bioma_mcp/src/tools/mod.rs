@@ -10,6 +10,7 @@ pub mod echo;
 pub mod fetch;
 pub mod memory;
 pub mod random;
+pub mod sampling;
 pub mod workflow;
 
 #[derive(Debug, thiserror::Error)]

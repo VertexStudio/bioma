@@ -9,6 +9,7 @@ use bioma_mcp::{
     },
 };
 use clap::{Parser, Subcommand};
+use serde_json::json;
 use tracing::{error, info};
 
 #[derive(Parser)]
@@ -67,7 +68,20 @@ impl ModelContextProtocolClient<ClientMetadata> for ExampleMcpClient {
         _params: CreateMessageRequestParams,
         _meta: ClientMetadata,
     ) -> CreateMessageResult {
-        todo!()
+        let result = json!({
+            "meta": null,
+            "content": {
+                "text": "This is a stub response.",
+                "type": "text"
+            },
+            "model": "stub-model",
+            "role": "assistant",
+            "stop_reason": "endTurn"
+        });
+
+        let result: CreateMessageResult = serde_json::from_value(result).unwrap();
+
+        result
     }
 }
 
@@ -229,6 +243,17 @@ async fn main() -> Result<()> {
         }
         Err(e) => error!("Error listing tools: {:?}", e),
     }
+
+    info!("Making sampling tool call...");
+    let sampling_args = serde_json::json!({
+        "query": "Hello from MCP client!"
+    });
+    let sampling_call = CallToolRequestParams {
+        name: "sampling".to_string(),
+        arguments: serde_json::from_value(sampling_args).unwrap(),
+    };
+    let sampling_result = client.call_tool(sampling_call).await;
+    info!("Sampling response: {:?}", sampling_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
