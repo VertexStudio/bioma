@@ -107,7 +107,7 @@ impl ModelContextProtocolServer for ExampleMcpServer {
             Arc::new(tools::fetch::Fetch::default()),
             Arc::new(tools::random::RandomNumber),
             Arc::new(tools::workflow::Workflow::new(true, None)),
-            Arc::new(tools::sampling::Sampling::new(context)), // Now an `Arc<ExampleMcpServer>`
+            Arc::new(tools::sampling::Sampling::new(context)),
         ]
     }
 

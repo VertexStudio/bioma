@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 use bioma_mcp::{
     client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
@@ -10,6 +8,8 @@ use bioma_mcp::{
 };
 use clap::{Parser, Subcommand};
 use serde_json::json;
+use std::io;
+use std::{collections::HashMap, io::Write};
 use tracing::{error, info};
 
 #[derive(Parser)]
@@ -59,8 +59,27 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         self.roots.clone()
     }
 
-    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> CreateMessageResult {
-        todo!()
+    async fn on_create_message(&self, params: CreateMessageRequestParams) -> CreateMessageResult {
+        info!("Params: {:#?}", params);
+
+        print!("Accept request? (y/n): ");
+        io::stdout().flush().expect("Failed to flush stdout");
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Failed to read line");
+
+        let result = json!({
+            "meta": null,
+            "content": {
+                "text": "This is a stub response.",
+                "type": "text"
+            },
+            "model": "stub-model",
+            "role": "assistant",
+            "stop_reason": "endTurn"
+        });
+
+        serde_json::from_value(result).unwrap()
     }
 }
 
