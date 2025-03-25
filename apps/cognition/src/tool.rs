@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
-use bioma_mcp::client::{Client, ClientConfig, ClientError, Metadata, ModelContextProtocolClient, ServerConfig};
+use bioma_mcp::client::{Client, ClientConfig, ClientError, ClientMetadata, ModelContextProtocolClient, ServerConfig};
 use bioma_mcp::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequestParams, CreateMessageResult,
     Implementation, ListToolsRequestParams, ListToolsResult, Root,
@@ -268,7 +268,7 @@ impl ActorError for ModelContextProtocolClientError {}
 pub struct ModelContextProtocolClientActor {
     server: ServerConfig,
     #[serde(skip)]
-    client: Option<Arc<Mutex<Client<McpBasicClient, ClientMetadata>>>>,
+    client: Option<Arc<Mutex<Client<McpBasicClient>>>>,
     tools: Option<ListToolsResult>,
 }
 
@@ -278,16 +278,11 @@ impl ModelContextProtocolClientActor {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientMetadata;
-
-impl Metadata for ClientMetadata {}
-
 pub struct McpBasicClient {
     server: ServerConfig,
 }
 
-impl ModelContextProtocolClient<ClientMetadata> for McpBasicClient {
+impl ModelContextProtocolClient for McpBasicClient {
     async fn get_server_config(&self) -> ServerConfig {
         self.server.clone()
     }

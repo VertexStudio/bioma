@@ -100,14 +100,14 @@ pub struct ClientConfig {
     pub server: ServerConfig,
 }
 
-pub trait ModelContextProtocolClient<M: Metadata>: Send + Sync + 'static {
+pub trait ModelContextProtocolClient: Send + Sync + 'static {
     fn get_server_config(&self) -> impl Future<Output = ServerConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ClientCapabilities> + Send;
     fn get_roots(&self) -> impl Future<Output = Vec<Root>> + Send;
     fn on_create_message(
         &self,
         params: CreateMessageRequestParams,
-        meta: M,
+        meta: ClientMetadata,
     ) -> impl Future<Output = CreateMessageResult> + Send;
 }
 
@@ -115,7 +115,7 @@ type RequestId = u64;
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
 type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 
-pub struct Client<T: ModelContextProtocolClient<ClientMetadata>> {
+pub struct Client<T: ModelContextProtocolClient> {
     client: Arc<RwLock<T>>,
     transport: TransportType,
     transport_sender: TransportSender,
@@ -133,10 +133,9 @@ pub struct Client<T: ModelContextProtocolClient<ClientMetadata>> {
     #[allow(unused)]
     on_close_rx: mpsc::Receiver<()>,
     conn_id: ConnectionId,
-    _marker: std::marker::PhantomData<ClientMetadata>,
 }
 
-impl<T: ModelContextProtocolClient<ClientMetadata>> Client<T> {
+impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
         let client = Arc::new(RwLock::new(client));
 
@@ -292,7 +291,6 @@ impl<T: ModelContextProtocolClient<ClientMetadata>> Client<T> {
             on_error_rx,
             on_close_rx,
             conn_id,
-            _marker: std::marker::PhantomData,
         })
     }
 
@@ -501,7 +499,7 @@ pub enum ClientError {
     Request(Cow<'static, str>),
 }
 
-impl<T: ModelContextProtocolClient<ClientMetadata>> std::fmt::Debug for Client<T> {
+impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ModelContextProtocolClient")
     }

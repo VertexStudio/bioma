@@ -45,7 +45,7 @@ struct ExampleMcpClient {
     roots: Vec<Root>,
 }
 
-impl ModelContextProtocolClient<ClientMetadata> for ExampleMcpClient {
+impl ModelContextProtocolClient for ExampleMcpClient {
     async fn get_server_config(&self) -> ServerConfig {
         self.server_config.clone()
     }
