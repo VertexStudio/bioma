@@ -24,6 +24,13 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
+#[derive(Clone)]
+pub struct ClientMetadata {
+    pub conn_id: ConnectionId,
+}
+
+impl Metadata for ClientMetadata {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StdioConfig {
     pub command: String,
@@ -108,14 +115,14 @@ type RequestId = u64;
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
 type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 
-pub struct Client<T: ModelContextProtocolClient<M>, M: Metadata> {
+pub struct Client<T: ModelContextProtocolClient<ClientMetadata>> {
     client: Arc<RwLock<T>>,
     transport: TransportType,
     transport_sender: TransportSender,
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     roots: Arc<RwLock<HashMap<String, Root>>>,
     #[allow(unused)]
-    io_handler: MetaIoHandler<M>,
+    io_handler: MetaIoHandler<ClientMetadata>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
     #[allow(unused)]
@@ -126,10 +133,10 @@ pub struct Client<T: ModelContextProtocolClient<M>, M: Metadata> {
     #[allow(unused)]
     on_close_rx: mpsc::Receiver<()>,
     conn_id: ConnectionId,
-    _marker: std::marker::PhantomData<M>,
+    _marker: std::marker::PhantomData<ClientMetadata>,
 }
 
-impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
+impl<T: ModelContextProtocolClient<ClientMetadata>> Client<T> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
         let client = Arc::new(RwLock::new(client));
 
@@ -172,7 +179,7 @@ impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
 
         io_handler.add_method_with_meta("sampling/createMessage", {
             let client = client.clone();
-            move |params: Params, meta: M| {
+            move |params: Params, meta: ClientMetadata| {
                 let client = client.clone();
                 async move {
                     let params: CreateMessageRequestParams = match params.parse() {
@@ -193,6 +200,11 @@ impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
         });
 
         let transport_sender = transport.sender();
+        let conn_id = conn_id.clone();
+
+        let transport_sender_clone = transport_sender.clone();
+        let io_handler_clone = io_handler.clone();
+        let conn_id_clone = conn_id.clone();
 
         let start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
@@ -204,13 +216,13 @@ impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
             let pending_requests = pending_requests_clone;
             async move {
                 while let Some(message) = on_message_rx.recv().await {
-                    match message {
+                    match &message {
                         JsonRpcMessage::Response(jsonrpc_core::Response::Single(output)) => match output {
                             jsonrpc_core::Output::Success(success) => {
                                 if let jsonrpc_core::Id::Num(id) = success.id {
                                     let mut requests = pending_requests.lock().await;
                                     if let Some(sender) = requests.remove(&id) {
-                                        let _ = sender.send(Ok(success.result));
+                                        let _ = sender.send(Ok(success.result.clone()));
                                     }
                                 }
                             }
@@ -226,6 +238,20 @@ impl<T: ModelContextProtocolClient<M>, M: Metadata> Client<T, M> {
                             }
                         },
                         JsonRpcMessage::Request(request) => match request {
+                            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
+                                let metadata = ClientMetadata { conn_id: conn_id_clone.clone() };
+                                let Some(response) =
+                                    io_handler_clone.handle_rpc_request(request.clone(), metadata).await
+                                else {
+                                    return;
+                                };
+
+                                if let Err(e) =
+                                    transport_sender_clone.send(response.into(), conn_id_clone.clone()).await
+                                {
+                                    error!("Failed to send response: {}", e);
+                                }
+                            }
                             jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
                                 info!("Got notification: {:?}", notification);
                             }
@@ -460,7 +486,7 @@ pub enum ClientError {
     Request(Cow<'static, str>),
 }
 
-impl<T: ModelContextProtocolClient<M>, M: Metadata> std::fmt::Debug for Client<T, M> {
+impl<T: ModelContextProtocolClient<ClientMetadata>> std::fmt::Debug for Client<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ModelContextProtocolClient")
     }
