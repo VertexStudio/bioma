@@ -74,7 +74,7 @@ Examples:
 With stdio transport:
 
 ```
-cargo run --release -p bioma_mcp --example mcp_client stdio target/release/examples/mcp_server
+cargo run --release -p bioma_mcp --example mcp_client -- stdio target/release/examples/mcp_server stdio
 ```
 
 With SSE transport:
