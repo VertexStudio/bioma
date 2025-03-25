@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "tools/*",
+    "apps/*",
     "bioma_actor",
     "bioma_behavior",
     "bioma_llm",
