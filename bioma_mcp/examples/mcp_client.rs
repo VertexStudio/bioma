@@ -1,7 +1,8 @@
 use anyhow::Result;
 use bioma_mcp::{
     client::{
-        Client, Metadata, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig,
+        Client, ClientMetadata, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig,
+        WsConfig,
     },
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
@@ -37,11 +38,6 @@ enum Transport {
         endpoint: String,
     },
 }
-
-#[derive(Clone)]
-pub struct ClientMetadata;
-
-impl Metadata for ClientMetadata {}
 
 struct ExampleMcpClient {
     server_config: ServerConfig,

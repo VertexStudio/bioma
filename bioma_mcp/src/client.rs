@@ -199,6 +199,21 @@ impl<T: ModelContextProtocolClient<ClientMetadata>> Client<T> {
             }
         });
 
+        io_handler.add_method_with_meta("roots/list", {
+            let client = client.clone();
+            move |_params: Params, _meta: ClientMetadata| {
+                let client = client.clone();
+                async move {
+                    let roots = client.read().await.get_roots().await;
+                    info!("Successfully handled roots/list request");
+                    Ok(serde_json::to_value(roots).map_err(|e| {
+                        error!("Failed to serialize roots/list result: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?)
+                }
+            }
+        });
+
         let transport_sender = transport.sender();
         let conn_id = conn_id.clone();
 
