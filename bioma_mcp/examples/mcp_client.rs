@@ -239,6 +239,10 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
+    info!("Updating roots...");
+    let new_roots = vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }];
+    client.update_roots(new_roots).await?;
+
     info!("Shutting down client...");
     client.close().await?;
 

@@ -294,6 +294,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
         })
     }
 
+    pub async fn update_roots(&mut self, roots: Vec<Root>) -> Result<(), ClientError> {
+        let mut roots_map = self.roots.write().await;
+        *roots_map = roots.into_iter().map(|root| (root.uri.clone(), root)).collect();
+        let params = RootsListChangedNotificationParams { meta: None };
+        self.notify("notifications/roots/list_changed".to_string(), serde_json::to_value(params)?).await?;
+        Ok(())
+    }
+
     pub async fn initialize(&mut self, client_info: Implementation) -> Result<InitializeResult, ClientError> {
         let params = InitializeRequestParams {
             protocol_version: "2024-11-05".to_string(),
