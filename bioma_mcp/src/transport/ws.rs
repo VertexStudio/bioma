@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{
@@ -19,7 +19,7 @@ use tokio_tungstenite::{
     tungstenite::protocol::{frame::coding::CloseCode, CloseFrame, Message as WsMessage},
     WebSocketStream,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Error)]
 pub enum WsError {
@@ -79,6 +79,8 @@ struct ClientMode {
     on_message: mpsc::Sender<JsonRpcMessage>,
 
     sender: WsSenderClient,
+
+    close_handshake: Arc<Mutex<Option<oneshot::Receiver<()>>>>,
 }
 
 enum WsMode {
@@ -147,8 +149,12 @@ impl WsTransport {
         on_error: mpsc::Sender<anyhow::Error>,
         on_close: mpsc::Sender<()>,
     ) -> Result<Self> {
-        let client_mode =
-            ClientMode { endpoint: config.endpoint.clone(), on_message, sender: Arc::new(Mutex::new(None)) };
+        let client_mode = ClientMode {
+            endpoint: config.endpoint.clone(),
+            on_message,
+            sender: Arc::new(Mutex::new(None)),
+            close_handshake: Arc::new(Mutex::new(None)),
+        };
 
         Ok(Self { mode: Arc::new(WsMode::Client(client_mode)), on_error, on_close })
     }
@@ -291,6 +297,7 @@ impl Transport for WsTransport {
                     let on_message_clone = client.on_message.clone();
                     let sender_clone = client.sender.clone();
                     let sender_ready = sender_ready_tx.clone();
+                    let close_handshake_clone = client.close_handshake.clone();
 
                     info!("Connecting to WebSocket server at {}", endpoint_clone);
 
@@ -307,6 +314,15 @@ impl Transport for WsTransport {
                         if let Some(tx) = sender_ready.lock().await.take() {
                             let _ = tx.send(());
                         }
+                    }
+
+                    // Create channel for coordinating the close handshake
+                    let (close_tx, close_rx) = oneshot::channel();
+
+                    // Store the receiver in shared state for close() to access
+                    {
+                        let mut handshake = close_handshake_clone.lock().await;
+                        *handshake = Some(close_rx);
                     }
 
                     let receive_task = tokio::spawn(async move {
@@ -330,11 +346,20 @@ impl Transport for WsTransport {
                                     }
                                 }
                                 Ok(WsMessage::Close(_)) => {
-                                    debug!("Received close frame from server, connection closing normally");
+                                    debug!("Received close frame from server, close handshake complete");
+                                    // Signal that the close handshake is complete
+                                    let _ = close_tx.send(());
                                     break;
                                 }
                                 Err(err) => {
-                                    error!("WebSocket connection error: {}", err);
+                                    let err_str = err.to_string();
+                                    if err_str.contains("Connection reset") {
+                                        debug!("Connection reset during close handshake (expected)");
+                                        // Signal completion even though it wasn't a clean close
+                                        let _ = close_tx.send(());
+                                    } else {
+                                        error!("WebSocket connection error: {}", err);
+                                    }
                                     break;
                                 }
                                 _ => {}
@@ -418,6 +443,13 @@ impl Transport for WsTransport {
                 if let Some(ref mut sender) = *sender_guard {
                     info!("Initiating graceful shutdown of WebSocket connection");
 
+                    // Get the handshake coordination channel
+                    let close_handshake_rx = {
+                        let mut handshake = client.close_handshake.lock().await;
+                        handshake.take()
+                    };
+
+                    // Send close frame
                     let close_frame = WsMessage::Close(Some(CloseFrame {
                         code: CloseCode::Normal,
                         reason: "Client initiated shutdown".into(),
@@ -426,8 +458,22 @@ impl Transport for WsTransport {
                     match sender.send(close_frame).await {
                         Ok(_) => {
                             debug!("WebSocket close frame sent successfully");
-
+                            // Don't set sender to None yet - we need it for the handshake
                             drop(sender_guard);
+
+                            // Wait for the close handshake to complete with a timeout
+                            if let Some(rx) = close_handshake_rx {
+                                match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+                                    Ok(Ok(())) => debug!("WebSocket close handshake completed successfully"),
+                                    Ok(Err(_)) => warn!("Close handshake receiver dropped without sending"),
+                                    Err(_) => warn!("Timeout waiting for WebSocket close handshake"),
+                                }
+                            }
+
+                            // Now we can set the sender to None
+                            if let Ok(mut sender_guard) = client.sender.try_lock() {
+                                *sender_guard = None;
+                            }
                         }
                         Err(e) => {
                             error!("Error sending WebSocket close frame: {}", e);
