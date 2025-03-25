@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use bioma_mcp::{
     client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
@@ -232,6 +234,13 @@ async fn main() -> Result<()> {
     info!("Echo response: {:?}", echo_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    info!("Updating roots...");
+    let roots = HashMap::from([(
+        "workspace".to_string(),
+        Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() },
+    )]);
+    client.update_roots(roots).await?;
 
     info!("Shutting down client...");
     client.close().await?;
