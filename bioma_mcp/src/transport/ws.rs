@@ -329,7 +329,10 @@ impl Transport for WsTransport {
                                         }
                                     }
                                 }
-                                Ok(WsMessage::Close(_)) => break,
+                                Ok(WsMessage::Close(_)) => {
+                                    debug!("Received close frame from server, connection closing normally");
+                                    break;
+                                }
                                 Err(err) => {
                                     error!("WebSocket connection error: {}", err);
                                     break;
@@ -424,15 +427,13 @@ impl Transport for WsTransport {
                         Ok(_) => {
                             debug!("WebSocket close frame sent successfully");
 
-                            debug!("Waiting for connection to close gracefully");
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            drop(sender_guard);
                         }
                         Err(e) => {
                             error!("Error sending WebSocket close frame: {}", e);
+                            *sender_guard = None;
                         }
                     }
-
-                    *sender_guard = None;
                 } else {
                     debug!("WebSocket connection already closed");
                 }
