@@ -11,14 +11,25 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     build-essential \
-    golang \
     nvidia-container-runtime
 
+# Descargar y extraer Go
+RUN wget https://github.com/golang/go/archive/refs/tags/go1.24.0.tar.gz && \
+    tar -xzf go1.24.0.tar.gz && \
+    mv go-go1.24.0 /usr/local/go
+
+# Configurar variables de entorno para Go
+ENV GOROOT=/usr/local/go
+ENV PATH=$GOROOT/bin:$PATH
+
 # Establecer directorio de trabajo
-WORKDIR /app
+WORKDIR /workdir
 
 # Clonar el repositorio de Ollama
 RUN git clone --branch bug/tool-prop-type https://github.com/rozgo/ollama.git .
+
+# Cambiar al directorio del repositorio clonado
+WORKDIR /workdir/ollama
 
 # Construir Ollama
 RUN go mod tidy && \
