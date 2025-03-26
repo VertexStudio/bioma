@@ -11,11 +11,10 @@ use bioma_mcp::{
     },
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root, SamplingMessage,
+        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root,
     },
 };
 use clap::{Parser, Subcommand};
-use serde::{Deserialize, Serialize};
 use std::io;
 use std::{collections::HashMap, io::Write};
 use tracing::{error, info};
@@ -71,13 +70,6 @@ impl SamplingChat {
 
         Ok(Self { engine, chat_handle })
     }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct OllamaRequest {
-    model: String,
-    messages: Vec<SamplingMessage>,
-    stream: bool,
 }
 
 #[derive(Clone)]
