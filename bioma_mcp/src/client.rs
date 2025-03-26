@@ -331,12 +331,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let params = RootsListChangedNotificationParams { meta: None };
-        self.notify_internal(
-            &server_name,
-            "notifications/roots/list_changed".to_string(),
-            serde_json::to_value(params)?,
-        )
-        .await?;
+        self.notify(&server_name, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
+            .await?;
 
         Ok(())
     }
@@ -354,8 +350,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             client_info,
         };
 
-        let response =
-            self.request_internal(&server_name, "initialize".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "initialize".to_string(), serde_json::to_value(params)?).await?;
         let result: InitializeResult = serde_json::from_value(response)?;
 
         {
@@ -370,8 +365,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn initialized(&mut self) -> Result<(), ClientError> {
         let server_name = self.get_current_server_name()?;
         let params = InitializedNotificationParams { meta: None };
-        self.notify_internal(&server_name, "notifications/initialized".to_string(), serde_json::to_value(params)?)
-            .await?;
+        self.notify(&server_name, "notifications/initialized".to_string(), serde_json::to_value(params)?).await?;
         Ok(())
     }
 
@@ -381,8 +375,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     ) -> Result<ListResourcesResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending resources/list request", server_name);
-        let response =
-            self.request_internal(&server_name, "resources/list".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "resources/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -392,8 +385,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     ) -> Result<ReadResourceResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending resources/read request", server_name);
-        let response =
-            self.request_internal(&server_name, "resources/read".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "resources/read".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -403,9 +395,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
     ) -> Result<ListResourceTemplatesResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending resources/templates/list request", server_name);
-        let response = self
-            .request_internal(&server_name, "resources/templates/list".to_string(), serde_json::to_value(params)?)
-            .await?;
+        let response =
+            self.request(&server_name, "resources/templates/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -413,7 +404,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending resources/subscribe request for {}", server_name, uri);
         let params = serde_json::json!({ "uri": uri });
-        let _response = self.request_internal(&server_name, "resources/subscribe".to_string(), params).await?;
+        let _response = self.request(&server_name, "resources/subscribe".to_string(), params).await?;
         Ok(())
     }
 
@@ -421,7 +412,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending resources/unsubscribe request for {}", server_name, uri);
         let params = serde_json::json!({ "uri": uri });
-        let _response = self.request_internal(&server_name, "resources/unsubscribe".to_string(), params).await?;
+        let _response = self.request(&server_name, "resources/unsubscribe".to_string(), params).await?;
         Ok(())
     }
 
@@ -431,32 +422,28 @@ impl<T: ModelContextProtocolClient> Client<T> {
     ) -> Result<ListPromptsResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending prompts/list request", server_name);
-        let response =
-            self.request_internal(&server_name, "prompts/list".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "prompts/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending prompts/get request", server_name);
-        let response =
-            self.request_internal(&server_name, "prompts/get".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "prompts/get".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn list_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<ListToolsResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending tools/list request", server_name);
-        let response =
-            self.request_internal(&server_name, "tools/list".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "tools/list".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
         let server_name = self.get_current_server_name()?;
         debug!("Server {} - Sending tools/call request", server_name);
-        let response =
-            self.request_internal(&server_name, "tools/call".to_string(), serde_json::to_value(params)?).await?;
+        let response = self.request(&server_name, "tools/call".to_string(), serde_json::to_value(params)?).await?;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -479,12 +466,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         if should_notify {
             let params = RootsListChangedNotificationParams { meta };
-            self.notify_internal(
-                &server_name,
-                "notifications/rootsListChanged".to_string(),
-                serde_json::to_value(params)?,
-            )
-            .await?;
+            self.notify(&server_name, "notifications/rootsListChanged".to_string(), serde_json::to_value(params)?)
+                .await?;
         }
 
         Ok(())
@@ -509,12 +492,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         if should_notify {
             let params = RootsListChangedNotificationParams { meta };
-            self.notify_internal(
-                &server_name,
-                "notifications/rootsListChanged".to_string(),
-                serde_json::to_value(params)?,
-            )
-            .await?;
+            self.notify(&server_name, "notifications/rootsListChanged".to_string(), serde_json::to_value(params)?)
+                .await?;
         }
 
         Ok(())
@@ -571,7 +550,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    async fn request_internal(
+    async fn request(
         &mut self,
         server_name: &str,
         method: String,
@@ -623,7 +602,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    async fn notify_internal(
+    async fn notify(
         &mut self,
         server_name: &str,
         method: String,
