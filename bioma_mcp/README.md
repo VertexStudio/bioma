@@ -71,48 +71,70 @@ Examples:
 
 #### MCP Client
 
-With stdio transport:
+MCP client runs with stdio transport by default if no configuration is provided.
+
+With JSON configuration:
 
 ```
-cargo run --release -p bioma_mcp --example mcp_client -- stdio target/release/examples/mcp_server stdio
+cargo run --release -p bioma_mcp --example mcp_client --config assets/configs/mcp_client_config.json
 ```
 
-With SSE transport:
+Example configuration file (`assets/configs/mcp_client_config.json`):
 
-```
-cargo run --release -p bioma_mcp --example mcp_client sse --endpoint http://127.0.0.1:8090
-```
-
-With WebSocket transport:
-
-```
-cargo run --release -p bioma_mcp --example mcp_client ws --endpoint ws://127.0.0.1:9090
-```
+```json
+{
+  "servers": [
+    {
+      "name": "stdio-server",
+      "transport": "stdio",
+      "command": "target/release/examples/mcp_server",
+      "args": ["stdio"]
+    },
+    {
+      "name": "sse-server",
+      "transport": "sse",
+      "endpoint": "http://127.0.0.1:8090"
+    },
+    {
+      "name": "websocket-server",
+      "transport": "ws",
+      "endpoint": "ws://127.0.0.1:9090"
+    }
+  ]
+}
 
 #### MCP Server
 
 Building the server:
 
 ```
+
 cargo build --release -p bioma_mcp --example mcp_server
+
 ```
 
 With stdio transport:
 
 ```
+
 cargo run --release -p bioma_mcp --example mcp_server stdio
+
 ```
 
 With SSE transport:
 
 ```
+
 cargo run --release -p bioma_mcp --example mcp_server sse --endpoint 127.0.0.1:8090
+
 ```
 
 With WebSocket transport:
 
 ```
+
 cargo run --release -p bioma_mcp --example mcp_server ws --endpoint 127.0.0.1:9090
+
 ```
 
 #### Other Examples
@@ -120,11 +142,17 @@ cargo run --release -p bioma_mcp --example mcp_server ws --endpoint 127.0.0.1:90
 Inspect example server:
 
 ```
+
 npx github:VertexStudio/inspector#feature/ui-ux ./target/release/examples/mcp_server --log-file .output/mcp_server-inspector.log
+
 ```
 
 Connecting to docker server:
 
 ```
+
 cargo run --release -p bioma_mcp --example mcp_client stdio docker run -i --rm --mount "type=bind,src=/Users/rozgo/BiomaAI/bioma,dst=/data/BiomaAI,ro" mcp/filesystem /data/BiomaAI
+
+```
+
 ```
