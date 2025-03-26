@@ -27,14 +27,14 @@ struct ClientConfig {
 
 #[derive(Clone)]
 pub struct ExampleMcpClient {
-    servers_configs: Vec<ServerConfig>,
+    server_configs: Vec<ServerConfig>,
     capabilities: ClientCapabilities,
     roots: Vec<Root>,
 }
 
 impl ModelContextProtocolClient for ExampleMcpClient {
-    async fn get_servers_configs(&self) -> Vec<ServerConfig> {
-        self.servers_configs.clone()
+    async fn get_server_configs(&self) -> Vec<ServerConfig> {
+        self.server_configs.clone()
     }
 
     async fn get_capabilities(&self) -> ClientCapabilities {
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     info!("Starting MCP client...");
     let args = Args::parse();
 
-    let servers_configs: Vec<ServerConfig> = if let Some(config_path) = &args.config {
+    let server_configs: Vec<ServerConfig> = if let Some(config_path) = &args.config {
         info!("Loading server configurations from: {}", config_path.display());
         let config_content =
             std::fs::read_to_string(config_path).map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
@@ -79,8 +79,8 @@ async fn main() -> Result<()> {
             .build()]
     };
 
-    info!("Loaded {} server configurations", servers_configs.len());
-    for (i, server) in servers_configs.iter().enumerate() {
+    info!("Loaded {} server configurations", server_configs.len());
+    for (i, server) in server_configs.iter().enumerate() {
         info!("Server {}: {}", i + 1, server.name);
     }
 
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
         ClientCapabilities { roots: Some(ClientCapabilitiesRoots { list_changed: Some(true) }), ..Default::default() };
 
     let client = ExampleMcpClient {
-        servers_configs,
+        server_configs,
         capabilities,
         roots: vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }],
     };

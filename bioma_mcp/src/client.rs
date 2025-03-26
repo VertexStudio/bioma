@@ -93,7 +93,7 @@ pub struct ClientConfig {
 }
 
 pub trait ModelContextProtocolClient: Send + Sync + 'static {
-    fn get_servers_configs(&self) -> impl Future<Output = Vec<ServerConfig>> + Send;
+    fn get_server_configs(&self) -> impl Future<Output = Vec<ServerConfig>> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ClientCapabilities> + Send;
     fn get_roots(&self) -> impl Future<Output = Vec<Root>> + Send;
     fn on_create_message(&self, params: CreateMessageRequestParams)
@@ -108,9 +108,6 @@ struct ServerConnection {
     transport: TransportType,
     transport_sender: TransportSender,
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
-    roots: Arc<RwLock<HashMap<String, Root>>>,
-    #[allow(unused)]
-    io_handler: MetaIoHandler<()>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
     #[allow(unused)]
@@ -126,25 +123,67 @@ struct ServerConnection {
 pub struct Client<T: ModelContextProtocolClient> {
     client: Arc<RwLock<T>>,
     connections: HashMap<String, ServerConnection>,
+    io_handler: MetaIoHandler<()>,
+    roots: Arc<RwLock<HashMap<String, Root>>>,
 }
 
 impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
         let client = Arc::new(RwLock::new(client));
-        let server_configs = client.read().await.get_servers_configs().await;
+        let server_configs = client.read().await.get_server_configs().await;
 
         if server_configs.is_empty() {
             return Err(ClientError::Request("No server configurations available".into()));
         }
 
-        let mut client_instance = Self { client, connections: HashMap::new() };
+        let mut io_handler = MetaIoHandler::default();
+
+        io_handler.add_method_with_meta("sampling/createMessage", {
+            let client = client.clone();
+            move |params: Params, _: ()| {
+                let client = client.clone();
+                async move {
+                    let params: CreateMessageRequestParams = match params.parse() {
+                        Ok(params) => params,
+                        Err(e) => {
+                            error!("Failed to parse createMessage parameters: {}", e);
+                            return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                        }
+                    };
+                    let result = client.read().await.on_create_message(params).await;
+                    info!("Successfully handled createMessage request");
+                    Ok(serde_json::to_value(result).map_err(|e| {
+                        error!("Failed to serialize createMessage result: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?)
+                }
+            }
+        });
+
+        io_handler.add_method_with_meta("roots/list", {
+            let client = client.clone();
+            move |_params: Params, _: ()| {
+                let client = client.clone();
+                async move {
+                    let roots = client.read().await.get_roots().await;
+                    info!("Successfully handled roots/list request");
+                    Ok(serde_json::to_value(roots).map_err(|e| {
+                        error!("Failed to serialize roots/list result: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?)
+                }
+            }
+        });
+
+        let mut client =
+            Self { client, connections: HashMap::new(), io_handler, roots: Arc::new(RwLock::new(HashMap::new())) };
 
         for config in server_configs {
             let name = config.name.clone();
-            client_instance.add_server(name, config).await?;
+            client.add_server(name, config).await?;
         }
 
-        Ok(client_instance)
+        Ok(client)
     }
 
     pub async fn add_server(&mut self, name: String, server_config: ServerConfig) -> Result<(), ClientError> {
@@ -180,51 +219,11 @@ impl<T: ModelContextProtocolClient> Client<T> {
         };
 
         let conn_id = ConnectionId::new();
-
-        let mut io_handler = MetaIoHandler::default();
-
-        io_handler.add_method_with_meta("sampling/createMessage", {
-            let client = self.client.clone();
-            move |params: Params, _: ()| {
-                let client = client.clone();
-                async move {
-                    let params: CreateMessageRequestParams = match params.parse() {
-                        Ok(params) => params,
-                        Err(e) => {
-                            error!("Failed to parse createMessage parameters: {}", e);
-                            return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
-                        }
-                    };
-                    let result = client.read().await.on_create_message(params).await;
-                    info!("Successfully handled createMessage request");
-                    Ok(serde_json::to_value(result).map_err(|e| {
-                        error!("Failed to serialize createMessage result: {}", e);
-                        jsonrpc_core::Error::invalid_params(e.to_string())
-                    })?)
-                }
-            }
-        });
-
-        io_handler.add_method_with_meta("roots/list", {
-            let client = self.client.clone();
-            move |_params: Params, _: ()| {
-                let client = client.clone();
-                async move {
-                    let roots = client.read().await.get_roots().await;
-                    info!("Successfully handled roots/list request");
-                    Ok(serde_json::to_value(roots).map_err(|e| {
-                        error!("Failed to serialize roots/list result: {}", e);
-                        jsonrpc_core::Error::invalid_params(e.to_string())
-                    })?)
-                }
-            }
-        });
-
         let transport_sender = transport.sender();
         let conn_id_clone = conn_id.clone();
 
         let transport_sender_clone = transport_sender.clone();
-        let io_handler_clone = io_handler.clone();
+        let io_handler_clone = self.io_handler.clone();
         let start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
 
@@ -284,8 +283,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             transport,
             transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
-            roots: Arc::new(RwLock::new(HashMap::new())),
-            io_handler,
             request_counter: Arc::new(RwLock::new(0)),
             start_handle,
             message_handler,
@@ -338,7 +335,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let timeout = client
             .read()
             .await
-            .get_servers_configs()
+            .get_server_configs()
             .await
             .iter()
             .find(|cfg| connection.conn_id.to_string().contains(&cfg.name))
@@ -383,13 +380,13 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        {
+            let mut client_roots = self.roots.write().await;
+            *client_roots = roots.clone();
+        }
+
         let mut errors = Vec::new();
         for (server_name, connection) in &mut self.connections {
-            {
-                let mut conn_roots = connection.roots.write().await;
-                *conn_roots = roots.clone();
-            }
-
             let params = RootsListChangedNotificationParams { meta: None };
             if let Err(e) =
                 Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
@@ -816,26 +813,24 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let supports_root_notifications =
             client_capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
 
+        let root_is_new = {
+            let mut client_roots = self.roots.write().await;
+            client_roots.insert(root.uri.clone(), root.clone()).is_none()
+        };
+
+        if !root_is_new || !supports_root_notifications {
+            return Ok(());
+        }
+
         let mut errors = Vec::new();
 
         for (server_name, connection) in &mut self.connections {
-            let should_notify = {
-                let mut conn_roots = connection.roots.write().await;
-                let root_is_new = conn_roots.insert(root.uri.clone(), root.clone()).is_none();
-                root_is_new && supports_root_notifications
-            };
-
-            if should_notify {
-                let params = RootsListChangedNotificationParams { meta: meta.clone() };
-                if let Err(e) = Self::notify(
-                    connection,
-                    "notifications/rootsListChanged".to_string(),
-                    serde_json::to_value(params)?,
-                )
-                .await
-                {
-                    errors.push(format!("Failed to notify root change on '{}': {:?}", server_name, e));
-                }
+            let params = RootsListChangedNotificationParams { meta: meta.clone() };
+            if let Err(e) =
+                Self::notify(connection, "notifications/rootsListChanged".to_string(), serde_json::to_value(params)?)
+                    .await
+            {
+                errors.push(format!("Failed to notify root change on '{}': {:?}", server_name, e));
             }
         }
 
@@ -855,26 +850,24 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let supports_root_notifications =
             client_capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
 
+        let root_existed = {
+            let mut client_roots = self.roots.write().await;
+            client_roots.remove(&uri).is_some()
+        };
+
+        if !root_existed || !supports_root_notifications {
+            return Ok(());
+        }
+
         let mut errors = Vec::new();
 
         for (server_name, connection) in &mut self.connections {
-            let should_notify = {
-                let mut conn_roots = connection.roots.write().await;
-                let root_existed = conn_roots.remove(&uri).is_some();
-                root_existed && supports_root_notifications
-            };
-
-            if should_notify {
-                let params = RootsListChangedNotificationParams { meta: meta.clone() };
-                if let Err(e) = Self::notify(
-                    connection,
-                    "notifications/rootsListChanged".to_string(),
-                    serde_json::to_value(params)?,
-                )
-                .await
-                {
-                    errors.push(format!("Failed to notify root removal on '{}': {:?}", server_name, e));
-                }
+            let params = RootsListChangedNotificationParams { meta: meta.clone() };
+            if let Err(e) =
+                Self::notify(connection, "notifications/rootsListChanged".to_string(), serde_json::to_value(params)?)
+                    .await
+            {
+                errors.push(format!("Failed to notify root removal on '{}': {:?}", server_name, e));
             }
         }
 
