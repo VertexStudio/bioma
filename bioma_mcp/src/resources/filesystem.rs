@@ -103,11 +103,33 @@ impl FileSystem {
             return Ok((*self.base_dir).clone());
         }
 
-        let path = Path::new(path_str.trim_start_matches('/'));
-        let absolute_path = self.base_dir.join(path);
+        let absolute_path = PathBuf::from(path_str);
 
-        if !absolute_path.exists() {
-            return Err(ResourceError::NotFound(format!("File not found: {}", absolute_path.display())));
+        if absolute_path.exists() {
+            let canonical_base = self
+                .base_dir
+                .canonicalize()
+                .map_err(|e| ResourceError::Custom(format!("Failed to canonicalize base directory: {}", e)))?;
+
+            let canonical_path = absolute_path
+                .canonicalize()
+                .map_err(|e| ResourceError::Custom(format!("Failed to canonicalize path: {}", e)))?;
+
+            if canonical_path.starts_with(&canonical_base) || canonical_path == canonical_base {
+                return Ok(canonical_path);
+            } else {
+                return Err(ResourceError::Custom(format!(
+                    "Access denied: {} is outside the base directory",
+                    absolute_path.display()
+                )));
+            }
+        }
+
+        let relative_path = path_str.trim_start_matches('/');
+        let joined_path = self.base_dir.join(relative_path);
+
+        if !joined_path.exists() {
+            return Err(ResourceError::NotFound(format!("File not found: {}", joined_path.display())));
         }
 
         let canonical_base = self
@@ -115,9 +137,9 @@ impl FileSystem {
             .canonicalize()
             .map_err(|e| ResourceError::Custom(format!("Failed to canonicalize base directory: {}", e)))?;
 
-        let canonical_path = absolute_path.canonicalize().map_err(|e| {
+        let canonical_path = joined_path.canonicalize().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                return ResourceError::NotFound(format!("File not found: {}", absolute_path.display()));
+                return ResourceError::NotFound(format!("File not found: {}", joined_path.display()));
             }
             ResourceError::Custom(format!("Failed to canonicalize path: {}", e))
         })?;
@@ -125,7 +147,7 @@ impl FileSystem {
         if !canonical_path.starts_with(&canonical_base) && canonical_path != canonical_base {
             return Err(ResourceError::Custom(format!(
                 "Access denied: {} is outside the base directory",
-                absolute_path.display()
+                joined_path.display()
             )));
         }
 
@@ -424,7 +446,6 @@ mod tests {
         let file_path = temp_dir.path().join("test.txt");
         let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
-        // Create initial file
         {
             let mut file = File::create(&file_path).unwrap();
             write!(file, "Initial content").unwrap();
@@ -433,31 +454,60 @@ mod tests {
         let relative_path = file_path.strip_prefix(temp_dir.path()).unwrap();
         let uri = format!("file:///{}", relative_path.display());
 
-        println!("uri: {}", uri);
-
-        // Subscribe to the file
         fs_resource.subscribe(uri.clone()).await.unwrap();
 
-        // Modify the file
         {
             let mut file = File::create(&file_path).unwrap();
             write!(file, "Updated content").unwrap();
         }
 
-        // Wait a bit for the notification to be processed
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Unsubscribe from the file
         fs_resource.unsubscribe(uri.clone()).await.unwrap();
 
-        // Verify the file content was updated
         let result = fs_resource.read(uri.clone()).await.unwrap();
         let content = &result.contents[0];
         let text = content["text"].as_str().expect("text field should be a string");
         assert_eq!(text, "Updated content");
 
-        // Verify the watcher was cleaned up
         let watchers = fs_resource.watchers.lock().await;
         assert!(!watchers.contains_key(&uri));
+    }
+
+    #[tokio::test]
+    async fn test_filesystem_absolute_path() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+
+        {
+            let mut file = File::create(&file_path).unwrap();
+            write!(file, "Hello, absolute path!").unwrap();
+        }
+
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
+
+        let uri = format!("file://{}", file_path.display());
+        let result = fs_resource.read(uri).await.unwrap();
+
+        let content = &result.contents[0];
+        let text = content["text"].as_str().expect("text field should be a string");
+        assert_eq!(text, "Hello, absolute path!");
+
+        let outside_temp_dir = tempdir().unwrap();
+        let outside_file_path = outside_temp_dir.path().join("outside.txt");
+
+        {
+            let mut file = File::create(&outside_file_path).unwrap();
+            write!(file, "I'm outside the base directory!").unwrap();
+        }
+
+        let outside_uri = format!("file://{}", outside_file_path.display());
+        let result = fs_resource.read(outside_uri).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(ResourceError::Custom(msg)) if msg.contains("Access denied") => {}
+            _ => panic!("Expected Access denied error"),
+        }
     }
 }
