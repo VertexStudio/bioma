@@ -302,7 +302,9 @@ mod tests {
 
         let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
-        let uri = format!("file://{}", file_path.display());
+        let relative_path = file_path.strip_prefix(temp_dir.path()).unwrap();
+        let uri = format!("file:///{}", relative_path.display());
+
         let result = fs_resource.read(uri).await.unwrap();
 
         let content = &result.contents[0];
@@ -346,8 +348,8 @@ mod tests {
 
         let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
-        let uri = format!("file://{}", temp_dir.path().display());
-        let result = fs_resource.read(uri).await.unwrap();
+        let uri = "file:///";
+        let result = fs_resource.read(uri.to_string()).await.unwrap();
 
         assert_eq!(result.contents.len(), 3);
 
@@ -417,5 +419,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscription_and_notification() {}
+    async fn test_subscription_and_notification() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
+
+        // Create initial file
+        {
+            let mut file = File::create(&file_path).unwrap();
+            write!(file, "Initial content").unwrap();
+        }
+
+        let relative_path = file_path.strip_prefix(temp_dir.path()).unwrap();
+        let uri = format!("file:///{}", relative_path.display());
+
+        println!("uri: {}", uri);
+
+        // Subscribe to the file
+        fs_resource.subscribe(uri.clone()).await.unwrap();
+
+        // Modify the file
+        {
+            let mut file = File::create(&file_path).unwrap();
+            write!(file, "Updated content").unwrap();
+        }
+
+        // Wait a bit for the notification to be processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Unsubscribe from the file
+        fs_resource.unsubscribe(uri.clone()).await.unwrap();
+
+        // Verify the file content was updated
+        let result = fs_resource.read(uri.clone()).await.unwrap();
+        let content = &result.contents[0];
+        let text = content["text"].as_str().expect("text field should be a string");
+        assert_eq!(text, "Updated content");
+
+        // Verify the watcher was cleaned up
+        let watchers = fs_resource.watchers.lock().await;
+        assert!(!watchers.contains_key(&uri));
+    }
 }
