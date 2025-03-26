@@ -54,19 +54,15 @@ struct SamplingChat {
 }
 
 impl SamplingChat {
-    /// Creates a new ChatSampling instance
     pub async fn new() -> Result<Self> {
         let engine = Engine::test().await?;
 
-        // Create a single Chat actor for all requests
         let chat_id = ActorId::of::<Chat>("/llm/sampling");
         let chat = Chat::default();
 
-        // Spawn the Chat actor
         let (mut chat_ctx, mut chat_actor) =
             Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await?;
 
-        // Start the Chat actor in a separate task
         let chat_handle = tokio::spawn(async move {
             if let Err(e) = chat_actor.start(&mut chat_ctx).await {
                 tracing::error!("Chat actor error: {}", e);
