@@ -384,11 +384,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let mut errors = Vec::new();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
-
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
-
+        for (server_name, connection) in &mut self.connections {
             {
                 let mut conn_roots = connection.roots.write().await;
                 *conn_roots = roots.clone();
@@ -421,10 +417,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut results = HashMap::new();
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             let capabilities = client.read().await.get_capabilities().await;
             let params = InitializeRequestParams {
                 protocol_version: "2024-11-05".to_string(),
@@ -441,7 +435,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                             let mut server_capabilities = connection.server_capabilities.write().await;
                             *server_capabilities = Some(result.capabilities.clone());
                         }
-                        results.insert(server_name, result);
+                        results.insert(server_name.clone(), result);
                     }
                     Err(e) => {
                         errors.push(format!("Failed to deserialize initialize result from '{}': {:?}", server_name, e));
@@ -470,10 +464,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let mut errors = Vec::new();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             let params = InitializedNotificationParams { meta: None };
             if let Err(e) =
                 Self::notify(connection, "notifications/initialized".to_string(), serde_json::to_value(params)?).await
@@ -500,10 +492,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut all_resources = Vec::new();
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "resources/list".to_string(),
@@ -543,10 +533,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "resources/read".to_string(),
@@ -581,10 +569,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut all_templates = Vec::new();
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "resources/templates/list".to_string(),
@@ -622,10 +608,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut successful = 0;
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             let params = serde_json::json!({ "uri": uri.clone() });
             match Self::request(connection, "resources/subscribe".to_string(), params, client.clone()).await {
                 Ok(_) => {
@@ -655,10 +639,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut successful = 0;
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             let params = serde_json::json!({ "uri": uri.clone() });
             match Self::request(connection, "resources/unsubscribe".to_string(), params, client.clone()).await {
                 Ok(_) => {
@@ -691,10 +673,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut all_prompts = Vec::new();
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "prompts/list".to_string(),
@@ -731,10 +711,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "prompts/get".to_string(),
@@ -766,10 +744,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let mut all_tools = Vec::new();
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "tools/list".to_string(),
@@ -806,10 +782,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut errors = Vec::new();
         let client = self.client.clone();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             match Self::request(
                 connection,
                 "tools/call".to_string(),
@@ -843,11 +817,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
             client_capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
 
         let mut errors = Vec::new();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
-
+        for (server_name, connection) in &mut self.connections {
             let should_notify = {
                 let mut conn_roots = connection.roots.write().await;
                 let root_is_new = conn_roots.insert(root.uri.clone(), root.clone()).is_none();
@@ -885,11 +856,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
             client_capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
 
         let mut errors = Vec::new();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
-
+        for (server_name, connection) in &mut self.connections {
             let should_notify = {
                 let mut conn_roots = connection.roots.write().await;
                 let root_existed = conn_roots.remove(&uri).is_some();
@@ -923,10 +891,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let mut errors = Vec::new();
-        let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
-        for server_name in server_names {
-            let connection = self.connections.get_mut(&server_name).unwrap();
+        for (server_name, connection) in &mut self.connections {
             if let Err(e) = connection.transport.close().await {
                 errors.push(format!("Failed to close '{}': {}", server_name, e));
             }
