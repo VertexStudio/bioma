@@ -1,51 +1,63 @@
 # Use NVIDIA CUDA base image
 FROM nvidia/cuda:12.3.1-base-ubuntu22.04
 
-# Evitar interacciones interactivas durante la instalación
+# Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias necesarias
+# Install necessary dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     git \
     ca-certificates \
     curl \
     build-essential \
-    nvidia-container-runtime
+    nvidia-container-runtime \
+    tree \
+    vim
 
-# Descargar y extraer Go
-RUN wget https://github.com/golang/go/archive/refs/tags/go1.24.0.tar.gz && \
-    tar -xzf go1.24.0.tar.gz && \
-    mv go-go1.24.0 /usr/local/go
+# Download and install Go
+RUN wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.24.0.linux-amd64.tar.gz && \
+    rm go1.24.0.linux-amd64.tar.gz
 
-# Configurar variables de entorno para Go
+# Configure Go environment variables
 ENV GOROOT=/usr/local/go
 ENV PATH=$GOROOT/bin:$PATH
+ENV GOPATH=/go
+ENV PATH=$GOPATH/bin:$PATH
 
-# Establecer directorio de trabajo
+# Verify Go installation
+RUN go version
+
+# Set working directory
 WORKDIR /workdir
 
-# Clonar el repositorio de Ollama
+# Clone Ollama repository
 RUN git clone --branch bug/tool-prop-type https://github.com/rozgo/ollama.git .
 
-# Cambiar al directorio del repositorio clonado
-WORKDIR /workdir/ollama
+# Change to repository directory
+WORKDIR /workdir
 
-# Construir Ollama
+# Build Ollama
 RUN go mod tidy && \
     go mod download && \
-    go build -o /usr/local/bin/ollama
+    go build -v -o /usr/local/bin/ollama
 
-# Descargar modelo
-RUN /usr/local/bin/ollama pull qwq:latest
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+ollama serve &\n\
+sleep 5\n\
+ollama pull qwq:latest\n\
+wait' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
-# Configurar variables de entorno para GPU
+# Configure GPU environment variables
 ENV OLLAMA_HOST=0.0.0.0
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-# Exponer puerto
+# Expose port
 EXPOSE 11434
 
-# Punto de entrada
-ENTRYPOINT ["/usr/local/bin/ollama", "serve"]
+# Use the custom entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
