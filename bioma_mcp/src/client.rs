@@ -93,7 +93,7 @@ pub struct ClientConfig {
 }
 
 pub trait ModelContextProtocolClient: Send + Sync + 'static {
-    fn get_server_config(&self) -> impl Future<Output = ServerConfig> + Send;
+    fn get_servers_configs(&self) -> impl Future<Output = Vec<ServerConfig>> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ClientCapabilities> + Send;
     fn get_roots(&self) -> impl Future<Output = Vec<Root>> + Send;
     fn on_create_message(&self, params: CreateMessageRequestParams)
@@ -130,15 +130,22 @@ pub struct Client<T: ModelContextProtocolClient> {
 
 impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
-        let client_arc = Arc::new(RwLock::new(client));
-        let server_config = client_arc.read().await.get_server_config().await;
-        let server_name = server_config.name.clone();
+        let client = Arc::new(RwLock::new(client));
+        let server_configs = client.read().await.get_servers_configs().await;
 
-        let mut client = Self { client: client_arc, connections: HashMap::new() };
+        if server_configs.is_empty() {
+            return Err(ClientError::Request("No server configurations available".into()));
+        }
 
-        client.add_server(server_name, server_config).await?;
+        let mut client_instance = Self { client, connections: HashMap::new() };
 
-        Ok(client)
+        // Add all servers from the configurations
+        for config in server_configs {
+            let name = config.name.clone();
+            client_instance.add_server(name, config).await?;
+        }
+
+        Ok(client_instance)
     }
 
     pub async fn add_server(&mut self, name: String, server_config: ServerConfig) -> Result<(), ClientError> {
@@ -301,7 +308,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         connection: &mut ServerConnection,
         method: String,
         params: serde_json::Value,
-        client_arc: Arc<RwLock<T>>,
+        client: Arc<RwLock<T>>,
     ) -> Result<serde_json::Value, ClientError> {
         let mut counter = connection.request_counter.write().await;
         *counter += 1;
@@ -329,7 +336,15 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Transport(format!("Send: {}", e).into()));
         }
 
-        let timeout = client_arc.read().await.get_server_config().await.request_timeout;
+        let timeout = client
+            .read()
+            .await
+            .get_servers_configs()
+            .await
+            .iter()
+            .find(|cfg| connection.conn_id.to_string().contains(&cfg.name))
+            .map(|cfg| cfg.request_timeout)
+            .unwrap_or(5);
 
         match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
             Ok(response) => match response {
@@ -406,19 +421,19 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut results = HashMap::new();
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
             let connection = self.connections.get_mut(&server_name).unwrap();
-            let capabilities = client_arc.read().await.get_capabilities().await;
+            let capabilities = client.read().await.get_capabilities().await;
             let params = InitializeRequestParams {
                 protocol_version: "2024-11-05".to_string(),
                 capabilities,
                 client_info: client_info.clone(),
             };
 
-            match Self::request(connection, "initialize".to_string(), serde_json::to_value(params)?, client_arc.clone())
+            match Self::request(connection, "initialize".to_string(), serde_json::to_value(params)?, client.clone())
                 .await
             {
                 Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
@@ -485,7 +500,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut all_resources = Vec::new();
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -494,7 +509,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "resources/list".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {
@@ -528,7 +543,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -537,7 +552,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "resources/read".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {
@@ -566,7 +581,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut all_templates = Vec::new();
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -575,7 +590,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "resources/templates/list".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {
@@ -607,13 +622,13 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut successful = 0;
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
             let connection = self.connections.get_mut(&server_name).unwrap();
             let params = serde_json::json!({ "uri": uri.clone() });
-            match Self::request(connection, "resources/subscribe".to_string(), params, client_arc.clone()).await {
+            match Self::request(connection, "resources/subscribe".to_string(), params, client.clone()).await {
                 Ok(_) => {
                     successful += 1;
                 }
@@ -640,13 +655,13 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut successful = 0;
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
             let connection = self.connections.get_mut(&server_name).unwrap();
             let params = serde_json::json!({ "uri": uri.clone() });
-            match Self::request(connection, "resources/unsubscribe".to_string(), params, client_arc.clone()).await {
+            match Self::request(connection, "resources/unsubscribe".to_string(), params, client.clone()).await {
                 Ok(_) => {
                     successful += 1;
                 }
@@ -676,7 +691,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut all_prompts = Vec::new();
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -685,7 +700,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "prompts/list".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {
@@ -716,7 +731,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -725,7 +740,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "prompts/get".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {
@@ -751,7 +766,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut all_tools = Vec::new();
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -760,7 +775,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "tools/list".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {
@@ -791,7 +806,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         let mut errors = Vec::new();
-        let client_arc = self.client.clone();
+        let client = self.client.clone();
         let server_names: Vec<String> = self.connections.keys().cloned().collect();
 
         for server_name in server_names {
@@ -800,7 +815,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 connection,
                 "tools/call".to_string(),
                 serde_json::to_value(params.clone())?,
-                client_arc.clone(),
+                client.clone(),
             )
             .await
             {

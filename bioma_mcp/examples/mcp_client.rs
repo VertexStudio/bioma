@@ -46,8 +46,8 @@ pub struct ExampleMcpClient {
 }
 
 impl ModelContextProtocolClient for ExampleMcpClient {
-    async fn get_server_config(&self) -> ServerConfig {
-        self.server_config.clone()
+    async fn get_servers_configs(&self) -> Vec<ServerConfig> {
+        vec![self.server_config.clone()]
     }
 
     async fn get_capabilities(&self) -> ClientCapabilities {
@@ -114,7 +114,7 @@ async fn main() -> Result<()> {
     let init_result = client
         .initialize(Implementation { name: "mcp_client_example".to_string(), version: "0.1.0".to_string() })
         .await?;
-    info!("Server capabilities: {:?}", init_result.capabilities);
+    info!("Server capabilities: {:?}", init_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
