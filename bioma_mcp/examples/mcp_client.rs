@@ -5,7 +5,10 @@ use bioma_llm::{
     prelude::ChatMessage,
 };
 use bioma_mcp::{
-    client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    client::{
+        Client, ClientError, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig,
+        WsConfig,
+    },
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
         CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root, SamplingMessage,
@@ -52,8 +55,8 @@ struct SamplingChat {
 
 impl SamplingChat {
     /// Creates a new ChatSampling instance
-    pub async fn new() -> Self {
-        let engine = Engine::test().await.unwrap();
+    pub async fn new() -> Result<Self> {
+        let engine = Engine::test().await?;
 
         // Create a single Chat actor for all requests
         let chat_id = ActorId::of::<Chat>("/llm/sampling");
@@ -61,7 +64,7 @@ impl SamplingChat {
 
         // Spawn the Chat actor
         let (mut chat_ctx, mut chat_actor) =
-            Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await.unwrap();
+            Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await?;
 
         // Start the Chat actor in a separate task
         let chat_handle = tokio::spawn(async move {
@@ -70,7 +73,7 @@ impl SamplingChat {
             }
         });
 
-        Self { engine, chat_handle }
+        Ok(Self { engine, chat_handle })
     }
 }
 
@@ -102,7 +105,7 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         self.roots.clone()
     }
 
-    async fn on_create_message(&self, params: CreateMessageRequestParams) -> CreateMessageResult {
+    async fn on_create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
         info!("Params: {:#?}", params);
 
         print!("Accept request? (y/n): ");
@@ -113,11 +116,16 @@ impl ModelContextProtocolClient for ExampleMcpClient {
 
         info!("User response: {}", input);
 
+        if input.trim() != "y" {
+            return Err(ClientError::SamplingRequestRejected);
+        }
+
         let engine = self.engine.clone();
 
         let relay_id = ActorId::of::<Relay>("/relay");
-        let (relay_ctx, _relay_actor) =
-            Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await.unwrap();
+        let (relay_ctx, _relay_actor) = Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default())
+            .await
+            .map_err(|_| ClientError::Request("Error creating relay actor".into()))?;
 
         let chat_id = ActorId::of::<Relay>("/llm/sampling");
 
@@ -150,15 +158,17 @@ impl ModelContextProtocolClient for ExampleMcpClient {
                 SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )
             .await
-            .unwrap();
+            .map_err(|e| ClientError::Request(e.to_string().into()))?;
 
-        CreateMessageResult {
+        let content = serde_json::to_value(chat_response.message.content).map_err(|e| ClientError::JsonError(e))?;
+
+        Ok(CreateMessageResult {
             meta: None,
-            content: serde_json::to_value(chat_response.message.content).unwrap(),
-            model: "llama3.2".to_string(),
+            content,
+            model: chat_response.model,
             role: Role::Assistant,
             stop_reason: None,
-        }
+        })
     }
 }
 
@@ -203,7 +213,7 @@ async fn main() -> Result<()> {
         ClientCapabilities { roots: Some(ClientCapabilitiesRoots { list_changed: Some(true) }), ..Default::default() };
 
     info!("Starting sampling actor...");
-    let chat_sampling = SamplingChat::new().await;
+    let chat_sampling = SamplingChat::new().await?;
 
     let client = ExampleMcpClient {
         server_config: server,
@@ -339,7 +349,7 @@ async fn main() -> Result<()> {
 
     let sampling_call = CallToolRequestParams {
         name: "sampling".to_string(),
-        arguments: serde_json::from_value(sampling_args).unwrap(),
+        arguments: serde_json::from_value(sampling_args).map_err(|e| ClientError::JsonError(e))?,
     };
 
     let sampling_result = client.call_tool(sampling_call).await?;
@@ -353,8 +363,10 @@ async fn main() -> Result<()> {
     let echo_args = serde_json::json!({
         "message": "Hello from MCP client!"
     });
-    let echo_args =
-        CallToolRequestParams { name: "echo".to_string(), arguments: serde_json::from_value(echo_args).unwrap() };
+    let echo_args = CallToolRequestParams {
+        name: "echo".to_string(),
+        arguments: serde_json::from_value(echo_args).map_err(|e| ClientError::JsonError(e))?,
+    };
     let echo_result = client.call_tool(echo_args).await?;
 
     info!("Echo response: {:?}", echo_result);
