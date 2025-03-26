@@ -90,23 +90,14 @@ impl Sampling {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::tools::ToolCallHandler;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn test_auto_generated_schema() {
-//         let tool = Sampling.def();
-//         let schema_json = serde_json::to_string_pretty(&tool).unwrap();
-//         println!("Tool Schema:\n{}", schema_json);
-//     }
-
-//     #[tokio::test]
-//     async fn test_random_number_tool() {
-//         let tool = Sampling;
-//         let args = SamplingArgs { query: "Explain Rust programming language.".to_string() };
-//         let result = tool.call(args).await.unwrap();
-//         assert!(result.content[0]["text"].as_str().unwrap().contains("Generated number:"));
-//     }
-// }
+    #[test]
+    fn test_auto_generated_schema() {
+        let tool = Sampling { context: Context::test() };
+        let schema_json = serde_json::to_string_pretty(&tool).unwrap();
+        println!("Tool Schema:\n{}", schema_json);
+    }
+}
