@@ -103,9 +103,8 @@ impl FileSystem {
             return Ok((*self.base_dir).clone());
         }
 
-        let path = Path::new(path_str);
-
-        let absolute_path = if path.is_absolute() { path.to_path_buf() } else { self.base_dir.join(path) };
+        let path = Path::new(path_str.trim_start_matches('/'));
+        let absolute_path = self.base_dir.join(path);
 
         if !absolute_path.exists() {
             return Err(ResourceError::NotFound(format!("File not found: {}", absolute_path.display())));
@@ -265,9 +264,15 @@ impl ResourceDef for FileSystem {
     }
 
     async fn unsubscribe(&self, uri: String) -> Result<(), ResourceError> {
-        self.watchers.lock().await.remove(&uri);
-        info!("Unsubscribed from resource: {}", uri);
-        Ok(())
+        let mut watchers = self.watchers.lock().await;
+        if let Some(handle) = watchers.remove(&uri) {
+            handle.abort();
+            info!("Unsubscribed from resource: {}", uri);
+            Ok(())
+        } else {
+            info!("Already unsubscribed from resource: {}", uri);
+            Ok(())
+        }
     }
 }
 

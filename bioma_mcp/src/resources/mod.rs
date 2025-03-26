@@ -36,7 +36,7 @@ pub trait ResourceReadHandler: Send + Sync {
     fn def(&self) -> Resource;
 
     fn supports(&self, uri: &str) -> bool {
-        self.def().uri == uri
+        uri.starts_with(&self.def().uri)
     }
 
     fn templates(&self) -> Vec<ResourceTemplate> {
@@ -115,7 +115,7 @@ impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
     }
 
     fn supports(&self, uri: &str) -> bool {
-        self.def().uri == uri
+        uri.starts_with(&self.def().uri)
     }
 
     fn templates(&self) -> Vec<ResourceTemplate> {
