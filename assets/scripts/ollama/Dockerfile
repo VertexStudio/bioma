@@ -1,5 +1,5 @@
 # Use NVIDIA CUDA base image
-FROM nvidia/cuda:12.3.1-base-ubuntu22.04
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
 # Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     nvidia-container-runtime \
     tree \
-    vim
+    vim \
+    nvidia-cuda-toolkit
 
 # Download and install Go
 RUN wget https://go.dev/dl/go1.24.0.linux-amd64.tar.gz && \
@@ -41,7 +42,7 @@ WORKDIR /workdir
 # Build Ollama
 RUN go mod tidy && \
     go mod download && \
-    go build -v -o /usr/local/bin/ollama
+    CGO_ENABLED=1 GOARCH=amd64 go build -ldflags="-s -w" -o /usr/local/bin/ollama
 
 # Create entrypoint script
 RUN echo '#!/bin/bash\n\
@@ -54,7 +55,7 @@ wait' > /entrypoint.sh && \
 # Configure GPU environment variables
 ENV OLLAMA_HOST=0.0.0.0
 ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
 
 # Expose port
 EXPOSE 11434
