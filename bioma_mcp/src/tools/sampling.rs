@@ -1,11 +1,10 @@
 use crate::{
-    schema::{CallToolResult, CreateMessageRequestParams, ModelPreferences, TextContent},
+    schema::{CallToolResult, CreateMessageRequestParams, ModelPreferences, SamplingMessage, TextContent},
     server::Context,
     tools::{ToolDef, ToolError},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 #[derive(Serialize, Clone)]
 pub struct Sampling {
@@ -32,7 +31,7 @@ impl ToolDef for Sampling {
     const DESCRIPTION: &'static str = "Query to ask to the LLM.";
     type Args = SamplingArgs;
 
-    async fn call(&self, _args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         let model_preferences = Some(ModelPreferences {
             cost_priority: Some(0.5),
             hints: None,
@@ -43,7 +42,10 @@ impl ToolDef for Sampling {
         let params = CreateMessageRequestParams {
             include_context: None,
             max_tokens: 100,
-            messages: vec![],
+            messages: vec![SamplingMessage {
+                content: serde_json::to_value(args.query).unwrap_or_default(),
+                role: crate::schema::Role::Assistant,
+            }],
             metadata: None,
             model_preferences,
             stop_sequences: None,
@@ -51,11 +53,7 @@ impl ToolDef for Sampling {
             temperature: Some(0.5),
         };
 
-        debug!("Sending request to client...");
-
         let sampling = &self.context.create_message(params).await;
-
-        debug!("Got result from client...");
 
         match sampling {
             Ok(message_result) => Ok(Self::success(format!("Sampling result: {:#?}", message_result))),

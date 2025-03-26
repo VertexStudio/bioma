@@ -3,11 +3,11 @@ use bioma_mcp::{
     client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ReadResourceRequestParams, Root,
+        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root, SamplingMessage,
     },
 };
 use clap::{Parser, Subcommand};
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use std::io;
 use std::{collections::HashMap, io::Write};
 use tracing::{error, info};
@@ -39,6 +39,13 @@ enum Transport {
     },
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<SamplingMessage>,
+    stream: bool,
+}
+
 #[derive(Clone)]
 pub struct ExampleMcpClient {
     server_config: ServerConfig,
@@ -68,18 +75,23 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         let mut input = String::new();
         io::stdin().read_line(&mut input).expect("Failed to read line");
 
-        let result = json!({
-            "meta": null,
-            "content": {
-                "text": "This is a stub response.",
-                "type": "text"
-            },
-            "model": "stub-model",
-            "role": "assistant",
-            "stop_reason": "endTurn"
-        });
+        let body = OllamaRequest { model: "llama3.2".to_string(), messages: params.messages, stream: false };
 
-        serde_json::from_value(result).unwrap()
+        let client = reqwest::Client::new();
+        let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
+
+        let llm_response = match res {
+            Ok(res) => res.text().await.unwrap(),
+            Err(_) => "Error while sending request".to_string(),
+        };
+
+        CreateMessageResult {
+            meta: None,
+            content: serde_json::to_value(llm_response).unwrap(),
+            model: body.model,
+            role: Role::Assistant,
+            stop_reason: None,
+        }
     }
 }
 
@@ -251,7 +263,7 @@ async fn main() -> Result<()> {
         arguments: serde_json::from_value(sampling_args).unwrap(),
     };
     let sampling_result = client.call_tool(sampling_call).await;
-    info!("Sampling response: {:?}", sampling_result);
+    info!("Sampling response: {:#?}", sampling_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
