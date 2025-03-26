@@ -283,8 +283,8 @@ pub struct McpBasicClient {
 }
 
 impl ModelContextProtocolClient for McpBasicClient {
-    async fn get_server_config(&self) -> ServerConfig {
-        self.server.clone()
+    async fn get_server_configs(&self) -> Vec<ServerConfig> {
+        vec![self.server.clone()]
     }
 
     async fn get_capabilities(&self) -> ClientCapabilities {
@@ -311,7 +311,7 @@ impl Actor for ModelContextProtocolClientActor {
         // Initialize the client
         let init_result =
             client.initialize(Implementation { name: self.server.name.clone(), version: "0.1.0".to_string() }).await?;
-        info!("Server {} capabilities: {:?}", self.server.name, init_result.capabilities);
+        info!("Server {} capabilities: {:?}", self.server.name, init_result);
 
         // Notify the server that the client has initialized
         client.initialized().await?;
