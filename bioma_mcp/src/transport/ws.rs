@@ -316,10 +316,8 @@ impl Transport for WsTransport {
                         }
                     }
 
-                    // Create channel for coordinating the close handshake
                     let (close_tx, close_rx) = oneshot::channel();
 
-                    // Store the receiver in shared state for close() to access
                     {
                         let mut handshake = close_handshake_clone.lock().await;
                         *handshake = Some(close_rx);
@@ -347,7 +345,7 @@ impl Transport for WsTransport {
                                 }
                                 Ok(WsMessage::Close(_)) => {
                                     debug!("Received close frame from server, close handshake complete");
-                                    // Signal that the close handshake is complete
+
                                     let _ = close_tx.send(());
                                     break;
                                 }
@@ -355,7 +353,7 @@ impl Transport for WsTransport {
                                     let err_str = err.to_string();
                                     if err_str.contains("Connection reset") {
                                         debug!("Connection reset during close handshake (expected)");
-                                        // Signal completion even though it wasn't a clean close
+
                                         let _ = close_tx.send(());
                                     } else {
                                         error!("WebSocket connection error: {}", err);
@@ -443,13 +441,11 @@ impl Transport for WsTransport {
                 if let Some(ref mut sender) = *sender_guard {
                     info!("Initiating graceful shutdown of WebSocket connection");
 
-                    // Get the handshake coordination channel
                     let close_handshake_rx = {
                         let mut handshake = client.close_handshake.lock().await;
                         handshake.take()
                     };
 
-                    // Send close frame
                     let close_frame = WsMessage::Close(Some(CloseFrame {
                         code: CloseCode::Normal,
                         reason: "Client initiated shutdown".into(),
@@ -458,10 +454,9 @@ impl Transport for WsTransport {
                     match sender.send(close_frame).await {
                         Ok(_) => {
                             debug!("WebSocket close frame sent successfully");
-                            // Don't set sender to None yet - we need it for the handshake
+
                             drop(sender_guard);
 
-                            // Wait for the close handshake to complete with a timeout
                             if let Some(rx) = close_handshake_rx {
                                 match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
                                     Ok(Ok(())) => debug!("WebSocket close handshake completed successfully"),
@@ -470,7 +465,6 @@ impl Transport for WsTransport {
                                 }
                             }
 
-                            // Now we can set the sender to None
                             if let Ok(mut sender_guard) = client.sender.try_lock() {
                                 *sender_guard = None;
                             }
