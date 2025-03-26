@@ -139,7 +139,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let mut client_instance = Self { client, connections: HashMap::new() };
 
-        // Add all servers from the configurations
         for config in server_configs {
             let name = config.name.clone();
             client_instance.add_server(name, config).await?;
