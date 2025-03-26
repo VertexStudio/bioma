@@ -14,7 +14,7 @@ jsonrpc-core = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 lazy_static = { workspace = true }
-reqwest = { workspace = true, features = ["json"]}
+reqwest = { workspace = true, features = ["json"] }
 html2md = { workspace = true }
 readability-rs = { workspace = true }
 rand = { workspace = true }
@@ -41,3 +41,7 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 clap = { workspace = true }
 tempfile = "3.3.0"
+
+ollama-rs = { workspace = true }
+bioma_llm = { path = "../bioma_llm" }
+bioma_actor = { path = "../bioma_actor" }

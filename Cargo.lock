@@ -996,6 +996,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.13.1",
+ "bioma_actor",
+ "bioma_llm",
  "bon",
  "bytes",
  "clap",
@@ -1011,6 +1013,7 @@ dependencies = [
  "lazy_static",
  "mockito",
  "notify",
+ "ollama-rs",
  "rand 0.8.5",
  "readability-rs",
  "reqwest 0.12.15",

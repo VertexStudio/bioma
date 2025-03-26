@@ -1,4 +1,9 @@
 use anyhow::Result;
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions};
+use bioma_llm::{
+    chat::{Chat, ChatMessages},
+    prelude::ChatMessage,
+};
 use bioma_mcp::{
     client::{Client, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig, WsConfig},
     schema::{
@@ -39,6 +44,36 @@ enum Transport {
     },
 }
 
+#[derive(Debug)]
+struct SamplingChat {
+    engine: Engine,
+    chat_handle: tokio::task::JoinHandle<()>,
+}
+
+impl SamplingChat {
+    /// Creates a new ChatSampling instance
+    pub async fn new() -> Self {
+        let engine = Engine::test().await.unwrap();
+
+        // Create a single Chat actor for all requests
+        let chat_id = ActorId::of::<Chat>("/llm/sampling");
+        let chat = Chat::default();
+
+        // Spawn the Chat actor
+        let (mut chat_ctx, mut chat_actor) =
+            Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await.unwrap();
+
+        // Start the Chat actor in a separate task
+        let chat_handle = tokio::spawn(async move {
+            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
+                tracing::error!("Chat actor error: {}", e);
+            }
+        });
+
+        Self { engine, chat_handle }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct OllamaRequest {
     model: String,
@@ -51,6 +86,7 @@ pub struct ExampleMcpClient {
     server_config: ServerConfig,
     capabilities: ClientCapabilities,
     roots: Vec<Root>,
+    engine: Engine,
 }
 
 impl ModelContextProtocolClient for ExampleMcpClient {
@@ -75,20 +111,51 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         let mut input = String::new();
         io::stdin().read_line(&mut input).expect("Failed to read line");
 
-        let body = OllamaRequest { model: "llama3.2".to_string(), messages: params.messages, stream: false };
+        info!("User response: {}", input);
 
-        let client = reqwest::Client::new();
-        let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
+        let engine = self.engine.clone();
 
-        let llm_response = match res {
-            Ok(res) => res.text().await.unwrap(),
-            Err(_) => "Error while sending request".to_string(),
-        };
+        let relay_id = ActorId::of::<Relay>("/relay");
+        let (relay_ctx, _relay_actor) =
+            Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default()).await.unwrap();
+
+        let chat_id = ActorId::of::<Relay>("/llm/sampling");
+
+        let chat_messages = params
+            .messages
+            .iter()
+            .map(|sampling_message| ChatMessage {
+                role: match sampling_message.role {
+                    Role::User => ollama_rs::generation::chat::MessageRole::User,
+                    Role::Assistant => ollama_rs::generation::chat::MessageRole::Assistant,
+                },
+                content: sampling_message.content.to_string(),
+                tool_calls: vec![],
+                images: None,
+            })
+            .collect();
+
+        let chat_response = relay_ctx
+            .send_and_wait_reply::<Chat, ChatMessages>(
+                ChatMessages {
+                    messages: chat_messages,
+                    restart: true,
+                    persist: false,
+                    stream: false,
+                    format: None,
+                    tools: None,
+                    options: None,
+                },
+                &chat_id,
+                SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
+            )
+            .await
+            .unwrap();
 
         CreateMessageResult {
             meta: None,
-            content: serde_json::to_value(llm_response).unwrap(),
-            model: body.model,
+            content: serde_json::to_value(chat_response.message.content).unwrap(),
+            model: "llama3.2".to_string(),
             role: Role::Assistant,
             stop_reason: None,
         }
@@ -113,6 +180,7 @@ async fn main() -> Result<()> {
                     command: command.clone(),
                     args: args.clone().unwrap_or_default(),
                 }))
+                .request_timeout(60)
                 .build()
         }
         Transport::Sse { endpoint } => {
@@ -134,18 +202,24 @@ async fn main() -> Result<()> {
     let capabilities =
         ClientCapabilities { roots: Some(ClientCapabilitiesRoots { list_changed: Some(true) }), ..Default::default() };
 
+    info!("Starting sampling actor...");
+    let chat_sampling = SamplingChat::new().await;
+
     let client = ExampleMcpClient {
         server_config: server,
         capabilities,
         roots: vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }],
+        engine: chat_sampling.engine.clone(),
     };
 
     let mut client = Client::new(client).await?;
 
     info!("Initializing client...");
+
     let init_result = client
         .initialize(Implementation { name: "mcp_client_example".to_string(), version: "0.1.0".to_string() })
         .await?;
+
     info!("Server capabilities: {:?}", init_result.capabilities);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -164,7 +238,9 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing resources...");
+
     let resources_result = client.list_resources(None).await;
+
     match resources_result {
         Ok(resources_result) => {
             info!("Available resources: {:?}", resources_result.resources);
@@ -243,7 +319,9 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing tools...");
+
     let tools_result = client.list_tools(None).await;
+
     match tools_result {
         Ok(tools_result) => {
             info!("Available tools:");
@@ -256,24 +334,29 @@ async fn main() -> Result<()> {
 
     info!("Making sampling tool call...");
     let sampling_args = serde_json::json!({
-        "query": "Hello from MCP client!"
+        "query": "Why the sky is blue?"
     });
+
     let sampling_call = CallToolRequestParams {
         name: "sampling".to_string(),
         arguments: serde_json::from_value(sampling_args).unwrap(),
     };
-    let sampling_result = client.call_tool(sampling_call).await;
+
+    let sampling_result = client.call_tool(sampling_call).await?;
+
     info!("Sampling response: {:#?}", sampling_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Making echo tool call...");
+
     let echo_args = serde_json::json!({
         "message": "Hello from MCP client!"
     });
     let echo_args =
         CallToolRequestParams { name: "echo".to_string(), arguments: serde_json::from_value(echo_args).unwrap() };
     let echo_result = client.call_tool(echo_args).await?;
+
     info!("Echo response: {:?}", echo_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -283,10 +366,12 @@ async fn main() -> Result<()> {
         "workspace".to_string(),
         Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() },
     )]);
+
     client.update_roots(roots).await?;
 
     info!("Shutting down client...");
     client.close().await?;
+    chat_sampling.chat_handle.abort();
 
     Ok(())
 }
