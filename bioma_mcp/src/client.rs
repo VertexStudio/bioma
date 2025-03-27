@@ -87,9 +87,10 @@ fn default_request_timeout() -> u64 {
     5
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder, Default)]
 pub struct ClientConfig {
-    pub server: ServerConfig,
+    pub name: String,
+    pub servers: Vec<ServerConfig>,
 }
 
 pub trait ModelContextProtocolClient: Send + Sync + 'static {

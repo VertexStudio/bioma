@@ -30,7 +30,7 @@ impl ActorError for ToolsHubError {}
 // -----------------------------------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolClient {
-    pub server: ServerConfig,
+    pub servers: Vec<ServerConfig>,
     pub client_id: ActorId,
     #[serde(skip)]
     pub _client_handle: Option<JoinHandle<()>>,
@@ -72,7 +72,7 @@ impl ToolClient {
                 SendOptions::default(),
             )
             .await?;
-        info!("Tools from {} ({})", self.server.name, list_tools.tools.len());
+        info!("Tools from {} ({})", self.servers.len(), list_tools.tools.len());
         for tool in &list_tools.tools {
             info!("├─ {}", tool.name);
         }
@@ -105,33 +105,35 @@ pub struct ToolsHub {
 }
 
 impl ToolsHub {
-    pub async fn new(engine: &Engine, configs: Vec<ClientConfig>, base_id: String) -> Result<Self, ToolsHubError> {
+    pub async fn new(engine: &Engine, config: ClientConfig, base_id: String) -> Result<Self, ToolsHubError> {
         let mut hub = Self { clients: vec![] };
 
-        for config in configs {
-            let server = config.server;
-            let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", base_id, server.name));
+        let client_id = ActorId::of::<ModelContextProtocolClientActor>(format!("{}/{}", base_id, config.name));
 
-            let client_handle = {
-                debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
-                let (mut client_ctx, mut client_actor) = Actor::spawn(
-                    engine.clone(),
-                    client_id.clone(),
-                    ModelContextProtocolClientActor::new(server.clone()),
-                    SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-                )
-                .await?;
+        let client_handle = {
+            debug!("Spawning ModelContextProtocolClient actor for client {}", client_id);
+            let (mut client_ctx, mut client_actor) = Actor::spawn(
+                engine.clone(),
+                client_id.clone(),
+                ModelContextProtocolClientActor::new(config.servers.clone()),
+                SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+            )
+            .await?;
 
-                let client_id_spawn = client_id.clone();
-                Some(tokio::spawn(async move {
-                    if let Err(e) = client_actor.start(&mut client_ctx).await {
-                        error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
-                    }
-                }))
-            };
+            let client_id_spawn = client_id.clone();
+            Some(tokio::spawn(async move {
+                if let Err(e) = client_actor.start(&mut client_ctx).await {
+                    error!("ModelContextProtocolClient actor error: {} for client {}", e, client_id_spawn);
+                }
+            }))
+        };
 
-            hub.clients.push(ToolClient { server, client_id, _client_handle: client_handle, tools: vec![] });
-        }
+        hub.clients.push(ToolClient {
+            servers: config.servers,
+            client_id,
+            _client_handle: client_handle,
+            tools: vec![],
+        });
 
         Ok(hub)
     }
@@ -266,25 +268,25 @@ impl ActorError for ModelContextProtocolClientError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelContextProtocolClientActor {
-    server: ServerConfig,
+    servers: Vec<ServerConfig>,
     #[serde(skip)]
     client: Option<Arc<Mutex<Client<McpBasicClient>>>>,
     tools: Option<ListToolsResult>,
 }
 
 impl ModelContextProtocolClientActor {
-    pub fn new(server: ServerConfig) -> Self {
-        ModelContextProtocolClientActor { server, client: None, tools: None }
+    pub fn new(servers: Vec<ServerConfig>) -> Self {
+        ModelContextProtocolClientActor { servers, client: None, tools: None }
     }
 }
 
 pub struct McpBasicClient {
-    server: ServerConfig,
+    servers: Vec<ServerConfig>,
 }
 
 impl ModelContextProtocolClient for McpBasicClient {
     async fn get_server_configs(&self) -> Vec<ServerConfig> {
-        vec![self.server.clone()]
+        self.servers.clone()
     }
 
     async fn get_capabilities(&self) -> ClientCapabilities {
@@ -304,14 +306,15 @@ impl Actor for ModelContextProtocolClientActor {
     type Error = ModelContextProtocolClientError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
-        info!("{} Started (server: {})", ctx.id(), self.server.name);
+        info!("{} Started (servers: {})", ctx.id(), self.servers.len());
 
-        let mut client = Client::new(McpBasicClient { server: self.server.clone() }).await?;
+        let mut client = Client::new(McpBasicClient { servers: self.servers.clone() }).await?;
 
         // Initialize the client
-        let init_result =
-            client.initialize(Implementation { name: self.server.name.clone(), version: "0.1.0".to_string() }).await?;
-        info!("Server {} capabilities: {:?}", self.server.name, init_result);
+        let init_result = client
+            .initialize(Implementation { name: "tools-client".to_string(), version: "0.1.0".to_string() })
+            .await?;
+        info!("Server {} capabilities: {:?}", self.servers.len(), init_result);
 
         // Notify the server that the client has initialized
         client.initialized().await?;
@@ -323,17 +326,17 @@ impl Actor for ModelContextProtocolClientActor {
             if let Some(input) = frame.is::<CallTool>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
-                    error!("{} {} {:?}", ctx.id(), self.server.name, err);
+                    error!("{} {} {:?}", ctx.id(), self.servers.len(), err);
                 }
             } else if let Some(input) = frame.is::<ListTools>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
-                    error!("{} {} {:?}", ctx.id(), self.server.name, err);
+                    error!("{} {} {:?}", ctx.id(), self.servers.len(), err);
                 }
             }
         }
 
-        info!("{} Finished (server: {})", ctx.id(), self.server.name);
+        info!("{} Finished (servers: {})", ctx.id(), self.servers.len());
         Ok(())
     }
 }

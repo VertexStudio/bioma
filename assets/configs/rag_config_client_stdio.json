@@ -1,4 +1,5 @@
 {
+  "name": "bioma-client",
   "engine": {
     "endpoint": "ws://0.0.0.0:9123",
     "namespace": "dev",
@@ -9,14 +10,12 @@
     "hf_cache_dir": ".output/cache/huggingface/hub"
   },
   "rag_endpoint": "http://0.0.0.0:5766",
-  "tools": [
+  "servers": [
     {
-      "server": {
-        "name": "bioma-tool",
-        "transport": "stdio",
-        "command": "target/release/examples/mcp_server",
-        "args": ["--log-file", ".output/mcp_server-bioma.log", "stdio"]
-      }
+      "name": "bioma-tool",
+      "transport": "stdio",
+      "command": "target/release/examples/mcp_server",
+      "args": ["--log-file", ".output/mcp_server-bioma.log", "stdio"]
     }
   ]
 }
