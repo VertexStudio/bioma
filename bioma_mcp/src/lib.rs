@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod client;
+pub mod pagination;
 pub mod prompts;
 pub mod resources;
 pub mod schema;
