@@ -13,7 +13,6 @@ use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
-// use anyhow::{Context, Error, Result};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -408,9 +407,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         io_handler.add_method_with_meta("resources/list", {
             let sessions = self.sessions.clone();
+            let server = self.server.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let sessions = sessions.clone();
+                let server = server.clone();
 
                 debug!("Handling resources/list request");
 
@@ -431,10 +432,26 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
                     };
 
-                    let resources = session.list_resources();
-                    let response = ListResourcesResult { next_cursor: None, resources, meta: None };
+                    let all_resources = session.list_resources();
+                    
+                    if !crate::pagination::validate_cursor(params.cursor.as_deref()) {
+                        error!("Invalid cursor provided: {:?}", params.cursor);
+                        return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
+                    }
+                    
+                    let pagination_config = server.read().await.get_pagination_config().await;
+                    
+                    let (resources, next_cursor) = crate::pagination::paginate(
+                        &all_resources,
+                        params.cursor.as_deref(),
+                        &pagination_config,
+                        None,
+                    );
+                    
+                    let response = ListResourcesResult { next_cursor, resources: resources.clone(), meta: None };
 
-                    info!("Successfully handled resources/list request");
+                    info!("Successfully handled resources/list request, returned {} of {} resources with page size {}", 
+                        resources.len(), all_resources.len(), pagination_config.page_size);
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
             }
@@ -490,8 +507,12 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         io_handler.add_method_with_meta("resources/templates/list", {
             let sessions = self.sessions.clone();
+            let server = self.server.clone();
+            
             move |params: Params, meta: ServerMetadata| {
                 let sessions = sessions.clone();
+                let server = server.clone();
+                
                 async move {
                     debug!("Handling resources/templates/list request");
 
@@ -511,14 +532,31 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
                     };
 
-                    let resource_templates =
-                        session.resources.iter().map(|resource| resource.templates()).flatten().collect::<Vec<_>>();
+                    let all_templates = session.resources.iter()
+                        .flat_map(|resource| resource.templates())
+                        .collect::<Vec<_>>();
 
-                    let response = ListResourceTemplatesResult { next_cursor: None, resource_templates, meta: None };
+                    if !crate::pagination::validate_cursor(params.cursor.as_deref()) {
+                        error!("Invalid cursor provided: {:?}", params.cursor);
+                        return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
+                    }
+
+                    let pagination_config = server.read().await.get_pagination_config().await;
+                    
+                    let (resource_templates, next_cursor) = crate::pagination::paginate(
+                        &all_templates,
+                        params.cursor.as_deref(),
+                        &pagination_config,
+                        None,
+                    );
+
+                    let response = ListResourceTemplatesResult { next_cursor, resource_templates: resource_templates.clone(), meta: None };
 
                     info!(
-                        "Successfully handled resources/templates/list request, found {} templates",
-                        response.resource_templates.len()
+                        "Successfully handled resources/templates/list request, returned {} of {} templates with page size {}",
+                        resource_templates.len(),
+                        all_templates.len(),
+                        pagination_config.page_size
                     );
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
@@ -634,8 +672,12 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         io_handler.add_method_with_meta("prompts/list", {
             let sessions = self.sessions.clone();
+            let server = self.server.clone();
+            
             move |params: Params, meta: ServerMetadata| {
                 let sessions = sessions.clone();
+                let server = server.clone();
+                
                 debug!("Handling prompts/list request");
 
                 async move {
@@ -655,11 +697,26 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
                     };
 
-                    let prompts = session.list_prompts();
+                    let all_prompts = session.list_prompts();
 
-                    let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
+                    if !crate::pagination::validate_cursor(params.cursor.as_deref()) {
+                        error!("Invalid cursor provided: {:?}", params.cursor);
+                        return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
+                    }
 
-                    info!("Successfully handled prompts/list request");
+                    let pagination_config = server.read().await.get_pagination_config().await;
+                    
+                    let (prompts, next_cursor) = crate::pagination::paginate(
+                        &all_prompts,
+                        params.cursor.as_deref(),
+                        &pagination_config,
+                        None,
+                    );
+
+                    let response = ListPromptsResult { next_cursor, prompts: prompts.clone(), meta: None };
+
+                    info!("Successfully handled prompts/list request, returned {} of {} prompts with page size {}", 
+                        prompts.len(), all_prompts.len(), pagination_config.page_size);
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
             }
@@ -711,9 +768,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         io_handler.add_method_with_meta("tools/list", {
             let sessions = self.sessions.clone();
+            let server = self.server.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let sessions = sessions.clone();
+                let server = server.clone();
 
                 debug!("Handling tools/list request");
 
@@ -731,9 +790,30 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let conn_id = meta.conn_id.clone();
                     let sessions = sessions.read().await;
 
-                    let tools = if let Some(session) = sessions.get(&conn_id) { session.list_tools() } else { vec![] };
-                    let response = ListToolsResult { next_cursor: None, tools, meta: None };
-                    info!("Successfully handled tools/list request");
+                    let all_tools = if let Some(session) = sessions.get(&conn_id) { 
+                        session.list_tools() 
+                    } else { 
+                        vec![] 
+                    };
+                    
+                    if !crate::pagination::validate_cursor(params.cursor.as_deref()) {
+                        error!("Invalid cursor provided: {:?}", params.cursor);
+                        return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
+                    }
+                    
+                    let pagination_config = server.read().await.get_pagination_config().await;
+                    
+                    let (tools, next_cursor) = crate::pagination::paginate(
+                        &all_tools,
+                        params.cursor.as_deref(),
+                        &pagination_config,
+                        None,
+                    );
+                    
+                    let response = ListToolsResult { next_cursor, tools: tools.clone(), meta: None };
+                    
+                    info!("Successfully handled tools/list request, returned {} of {} tools with page size {}", 
+                        tools.len(), all_tools.len(), pagination_config.page_size);
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
             }
