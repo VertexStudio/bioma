@@ -18,12 +18,18 @@ impl Sampling {
     }
 }
 
+#[derive(JsonSchema, Serialize, Deserialize)]
+struct SamplingMessageSchema {
+    pub content: serde_json::Value,
+    pub role: String,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SamplingArgs {
     #[schemars(required = true)]
     #[schemars(description = "Query to ask to the LLM.")]
-    #[schemars(with = "String")]
-    pub query: String,
+    #[schemars(with = "Vec<SamplingMessageSchema>")]
+    pub messages: Vec<SamplingMessage>,
     #[schemars(required = false)]
     #[schemars(description = "Collection of LLM models to suggest.")]
     #[schemars(with = "Vec<String>")]
@@ -56,13 +62,7 @@ impl ToolDef for Sampling {
         let params = CreateMessageRequestParams {
             include_context: args.context,
             max_tokens: args.max_tokens,
-            messages: vec![SamplingMessage {
-                content: match serde_json::to_value(&args.query) {
-                    Ok(value) => value,
-                    Err(e) => return Ok(Self::error(format!("Failed to serialize query: {}", e))),
-                },
-                role: crate::schema::Role::Assistant,
-            }],
+            messages: args.messages,
             model_preferences: Some(model_preferences),
             ..CreateMessageRequestParams::default()
         };

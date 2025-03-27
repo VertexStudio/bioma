@@ -341,8 +341,7 @@ async fn main() -> Result<()> {
 
     info!("Making sampling tool call...");
     let sampling_args = serde_json::json!({
-        // "query": "Explain the history of Rust programming language.",
-        "query": "Hello!",
+        "messages": [{"content":"Explain the history of Rust programming language.", "role":"user"}],
         "max_tokens": 100,
         "models_suggestions": ["llama3.2"],
     });
