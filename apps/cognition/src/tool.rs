@@ -306,7 +306,10 @@ impl Actor for ModelContextProtocolClientActor {
     type Error = ModelContextProtocolClientError;
 
     async fn start(&mut self, ctx: &mut ActorContext<Self>) -> Result<(), ModelContextProtocolClientError> {
-        info!("{} Started (servers: {})", ctx.id(), self.servers.len());
+        info!("{} Started", ctx.id());
+        for server in &self.servers {
+            info!("└─ Server: {}", server.name);
+        }
 
         let mut client = Client::new(McpBasicClient { servers: self.servers.clone() }).await?;
 
@@ -314,7 +317,10 @@ impl Actor for ModelContextProtocolClientActor {
         let init_result = client
             .initialize(Implementation { name: "tools-client".to_string(), version: "0.1.0".to_string() })
             .await?;
-        info!("Server {} capabilities: {:?}", self.servers.len(), init_result);
+
+        for (server, result) in init_result {
+            info!("Server '{}' capabilities: {:#?}", server, result.capabilities);
+        }
 
         // Notify the server that the client has initialized
         client.initialized().await?;
@@ -326,12 +332,12 @@ impl Actor for ModelContextProtocolClientActor {
             if let Some(input) = frame.is::<CallTool>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
-                    error!("{} {} {:?}", ctx.id(), self.servers.len(), err);
+                    error!("{} {:?}", ctx.id(), err);
                 }
             } else if let Some(input) = frame.is::<ListTools>() {
                 let response = self.reply(ctx, &input, &frame).await;
                 if let Err(err) = response {
-                    error!("{} {} {:?}", ctx.id(), self.servers.len(), err);
+                    error!("{} {:?}", ctx.id(), err);
                 }
             }
         }
