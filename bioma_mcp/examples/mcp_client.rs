@@ -330,6 +330,8 @@ async fn main() -> Result<()> {
         Err(e) => error!("Error listing tools: {:?}", e),
     }
 
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
     info!("Making sampling tool call...");
     let sampling_args = serde_json::json!({
         "query": "Why the sky is blue?"

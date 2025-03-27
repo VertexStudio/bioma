@@ -34,9 +34,9 @@ impl ToolDef for Sampling {
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
         let model_preferences = Some(ModelPreferences {
             cost_priority: Some(0.5),
-            hints: None,
             intelligence_priority: Some(0.7),
             speed_priority: Some(0.4),
+            ..ModelPreferences::default()
         });
 
         let params = CreateMessageRequestParams {
