@@ -87,9 +87,10 @@ fn default_request_timeout() -> u64 {
     5
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder, Default)]
 pub struct ClientConfig {
-    pub server: ServerConfig,
+    pub name: String,
+    pub servers: Vec<ServerConfig>,
 }
 
 pub trait ModelContextProtocolClient: Send + Sync + 'static {
@@ -373,34 +374,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             .send(notification.into(), conn_id)
             .await
             .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
-    }
-
-    pub async fn update_roots(&mut self, roots: HashMap<String, Root>) -> Result<(), ClientError> {
-        if self.connections.is_empty() {
-            return Err(ClientError::Request("No server connections available".into()));
-        }
-
-        {
-            let mut client_roots = self.roots.write().await;
-            *client_roots = roots.clone();
-        }
-
-        let mut errors = Vec::new();
-        for (server_name, connection) in &mut self.connections {
-            let params = RootsListChangedNotificationParams { meta: None };
-            if let Err(e) =
-                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
-                    .await
-            {
-                errors.push(format!("Failed to update roots for '{}': {:?}", server_name, e));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(ClientError::Request(errors.join(", ").into()))
-        }
     }
 
     pub async fn initialize(
@@ -827,7 +800,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         for (server_name, connection) in &mut self.connections {
             let params = RootsListChangedNotificationParams { meta: meta.clone() };
             if let Err(e) =
-                Self::notify(connection, "notifications/rootsListChanged".to_string(), serde_json::to_value(params)?)
+                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
                     .await
             {
                 errors.push(format!("Failed to notify root change on '{}': {:?}", server_name, e));
@@ -864,7 +837,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         for (server_name, connection) in &mut self.connections {
             let params = RootsListChangedNotificationParams { meta: meta.clone() };
             if let Err(e) =
-                Self::notify(connection, "notifications/rootsListChanged".to_string(), serde_json::to_value(params)?)
+                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
                     .await
             {
                 errors.push(format!("Failed to notify root removal on '{}': {:?}", server_name, e));
