@@ -71,7 +71,7 @@ impl Args {
         info!("│  ├─ Local Store Directory: {}", config.engine.local_store_dir.display());
         info!("│  └─ HuggingFace Cache Directory: {}", config.engine.hf_cache_dir.display());
         info!("├─ RAG Endpoint: {}", config.rag_endpoint);
-        info!("├─ Tool Servers: {}", config.tools.servers.len());
+        info!("├─ Tool Servers: {} configured", config.tools.servers.len());
         for (i, tool) in config.tools.servers.iter().enumerate() {
             let prefix = if i == config.tools.servers.len() - 1 { "└──" } else { "├──" };
             info!("{}  {}", prefix, tool.name);
