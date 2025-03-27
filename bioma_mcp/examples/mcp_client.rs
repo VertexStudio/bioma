@@ -5,18 +5,17 @@ use bioma_llm::{
     prelude::ChatMessage,
 };
 use bioma_mcp::{
-    client::{
-        Client, ClientError, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, TransportConfig,
-        WsConfig,
-    },
+    client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
         CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root,
     },
 };
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::io;
-use std::{collections::HashMap, io::Write};
+use std::io::Write;
+use std::path::PathBuf;
 use tracing::{error, info};
 
 const DEFAULT_MODEL: &str = "llama3.2";
@@ -24,28 +23,13 @@ const DEFAULT_MODEL: &str = "llama3.2";
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[command(subcommand)]
-    transport: Transport,
+    #[arg(long, short)]
+    pub config: Option<PathBuf>,
 }
 
-#[derive(Subcommand)]
-enum Transport {
-    Stdio {
-        command: String,
-
-        #[arg(num_args = 0.., value_delimiter = ' ')]
-        args: Option<Vec<String>>,
-    },
-
-    Sse {
-        #[arg(long, short, default_value = "http://127.0.0.1:8090")]
-        endpoint: String,
-    },
-
-    Ws {
-        #[arg(long, short, default_value = "ws://127.0.0.1:9090")]
-        endpoint: String,
-    },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClientConfig {
+    pub servers: Vec<ServerConfig>,
 }
 
 #[derive(Debug)]
@@ -75,14 +59,14 @@ impl SamplingChat {
 
 #[derive(Clone)]
 pub struct ExampleMcpClient {
-    server_config: ServerConfig,
+    server_configs: Vec<ServerConfig>,
     capabilities: ClientCapabilities,
     roots: Vec<Root>,
 }
 
 impl ModelContextProtocolClient for ExampleMcpClient {
-    async fn get_server_config(&self) -> ServerConfig {
-        self.server_config.clone()
+    async fn get_server_configs(&self) -> Vec<ServerConfig> {
+        self.server_configs.clone()
     }
 
     async fn get_capabilities(&self) -> ClientCapabilities {
@@ -189,39 +173,37 @@ async fn main() -> Result<()> {
     info!("Starting MCP client...");
     let args = Args::parse();
 
-    let server = match &args.transport {
-        Transport::Stdio { command, args } => {
-            info!("Starting to MCP server process with command: {}", command);
-            ServerConfig::builder()
-                .name("bioma-tool".to_string())
-                .transport(TransportConfig::Stdio(StdioConfig {
-                    command: command.clone(),
-                    args: args.clone().unwrap_or_default(),
-                }))
-                .request_timeout(60)
-                .build()
-        }
-        Transport::Sse { endpoint } => {
-            info!("Connecting to MCP server at {}", endpoint);
-            ServerConfig::builder()
-                .name("bioma-tool".to_string())
-                .transport(TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()))
-                .build()
-        }
-        Transport::Ws { endpoint } => {
-            info!("Connecting to MCP server at {}", endpoint);
-            ServerConfig::builder()
-                .name("bioma-tool".to_string())
-                .transport(TransportConfig::Ws(WsConfig { endpoint: endpoint.clone() }))
-                .build()
-        }
+    let server_configs: Vec<ServerConfig> = if let Some(config_path) = &args.config {
+        info!("Loading server configurations from: {}", config_path.display());
+        let config_content =
+            std::fs::read_to_string(config_path).map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
+
+        let client_config: ClientConfig =
+            serde_json::from_str(&config_content).map_err(|e| anyhow::anyhow!("Failed to parse config file: {}", e))?;
+
+        client_config.servers
+    } else {
+        info!("No configuration file provided. Using default stdio server configuration.");
+        vec![ServerConfig::builder()
+            .name("bioma-tool".to_string())
+            .transport(TransportConfig::Stdio(StdioConfig {
+                command: "target/release/examples/mcp_server".to_string(),
+                args: vec!["stdio".to_string()],
+            }))
+            .request_timeout(60)
+            .build()]
     };
+
+    info!("Loaded {} server configurations", server_configs.len());
+    for (i, server) in server_configs.iter().enumerate() {
+        info!("Server {}: {}", i + 1, server.name);
+    }
 
     let capabilities =
         ClientCapabilities { roots: Some(ClientCapabilitiesRoots { list_changed: Some(true) }), ..Default::default() };
 
     let client = ExampleMcpClient {
-        server_config: server,
+        server_configs,
         capabilities,
         roots: vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }],
     };
@@ -233,8 +215,7 @@ async fn main() -> Result<()> {
     let init_result = client
         .initialize(Implementation { name: "mcp_client_example".to_string(), version: "0.1.0".to_string() })
         .await?;
-
-    info!("Server capabilities: {:?}", init_result.capabilities);
+    info!("Server capabilities: {:?}", init_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
@@ -309,6 +290,16 @@ async fn main() -> Result<()> {
                         }
 
                         info!("Trying to subscribe to filesystem changes...");
+                        let filesystem_uri = "file:///mcp_server.log";
+                        match client.subscribe_resource(filesystem_uri.to_string()).await {
+                            Ok(_) => info!("Successfully subscribed to filesystem changes at {}", filesystem_uri),
+                            Err(e) => error!("Failed to subscribe to filesystem changes: {:?}", e),
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        match client.unsubscribe_resource(filesystem_uri.to_string()).await {
+                            Ok(_) => info!("Successfully unsubscribed from filesystem changes"),
+                            Err(e) => error!("Failed to unsubscribe from filesystem changes: {:?}", e),
+                        }
                     }
                     Err(e) => info!("Resource templates not supported: {:?}", e),
                 }
@@ -350,9 +341,10 @@ async fn main() -> Result<()> {
 
     info!("Making sampling tool call...");
     let sampling_args = serde_json::json!({
-        "query": "Explain the history of Rust programming language.",
+        // "query": "Explain the history of Rust programming language.",
+        "query": "Hello!",
         "max_tokens": 100,
-        "models_suggestions": ["llama3.1:8b"],
+        "models_suggestions": ["llama3.2"],
     });
 
     let sampling_call = CallToolRequestParams {
@@ -382,12 +374,8 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Updating roots...");
-    let roots = HashMap::from([(
-        "workspace".to_string(),
-        Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() },
-    )]);
-
-    client.update_roots(roots).await?;
+    let root = Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() };
+    client.add_root(root, None).await?;
 
     info!("Shutting down client...");
     client.close().await?;

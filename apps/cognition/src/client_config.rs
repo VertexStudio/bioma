@@ -15,7 +15,8 @@ pub struct ClientConfig {
     pub engine: EngineOptions,
     #[serde(default = "default_rag_endpoint")]
     pub rag_endpoint: Url,
-    pub tools: Vec<ToolClientConfig>,
+    #[serde(flatten)]
+    pub tools: ToolClientConfig,
 }
 
 fn default_engine() -> EngineOptions {
@@ -28,7 +29,7 @@ fn default_rag_endpoint() -> Url {
 
 impl Default for ClientConfig {
     fn default() -> Self {
-        Self { engine: default_engine(), rag_endpoint: default_rag_endpoint(), tools: vec![] }
+        Self { engine: default_engine(), rag_endpoint: default_rag_endpoint(), tools: ToolClientConfig::default() }
     }
 }
 
@@ -70,10 +71,10 @@ impl Args {
         info!("│  ├─ Local Store Directory: {}", config.engine.local_store_dir.display());
         info!("│  └─ HuggingFace Cache Directory: {}", config.engine.hf_cache_dir.display());
         info!("├─ RAG Endpoint: {}", config.rag_endpoint);
-        info!("├─ Tool Servers: {} configured", config.tools.len());
-        for (i, tool) in config.tools.iter().enumerate() {
-            let prefix = if i == config.tools.len() - 1 { "└──" } else { "├──" };
-            info!("{}  {}", prefix, tool.server.name);
+        info!("├─ Tool Servers: {} configured", config.tools.servers.len());
+        for (i, tool) in config.tools.servers.iter().enumerate() {
+            let prefix = if i == config.tools.servers.len() - 1 { "└──" } else { "├──" };
+            info!("{}  {}", prefix, tool.name);
         }
 
         Ok(config)

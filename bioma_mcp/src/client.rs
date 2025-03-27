@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StdioConfig {
@@ -87,13 +87,14 @@ fn default_request_timeout() -> u64 {
     5
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder, Default)]
 pub struct ClientConfig {
-    pub server: ServerConfig,
+    pub name: String,
+    pub servers: Vec<ServerConfig>,
 }
 
 pub trait ModelContextProtocolClient: Send + Sync + 'static {
-    fn get_server_config(&self) -> impl Future<Output = ServerConfig> + Send;
+    fn get_server_configs(&self) -> impl Future<Output = Vec<ServerConfig>> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ClientCapabilities> + Send;
     fn get_roots(&self) -> impl Future<Output = Vec<Root>> + Send;
     fn on_create_message(
@@ -106,14 +107,10 @@ type RequestId = u64;
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
 type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 
-pub struct Client<T: ModelContextProtocolClient> {
-    client: Arc<RwLock<T>>,
+struct ServerConnection {
     transport: TransportType,
     transport_sender: TransportSender,
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
-    roots: Arc<RwLock<HashMap<String, Root>>>,
-    #[allow(unused)]
-    io_handler: MetaIoHandler<()>,
     request_counter: Arc<RwLock<u64>>,
     start_handle: JoinHandle<Result<(), Error>>,
     #[allow(unused)]
@@ -126,44 +123,21 @@ pub struct Client<T: ModelContextProtocolClient> {
     conn_id: ConnectionId,
 }
 
+pub struct Client<T: ModelContextProtocolClient> {
+    client: Arc<RwLock<T>>,
+    connections: HashMap<String, ServerConnection>,
+    io_handler: MetaIoHandler<()>,
+    roots: Arc<RwLock<HashMap<String, Root>>>,
+}
+
 impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
         let client = Arc::new(RwLock::new(client));
+        let server_configs = client.read().await.get_server_configs().await;
 
-        let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
-        let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
-        let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
-
-        let server_config = client.read().await.get_server_config().await;
-
-        let mut transport = match &server_config.transport {
-            TransportConfig::Stdio(config) => {
-                let transport = StdioTransport::new_client(&config, on_message_tx, on_error_tx, on_close_tx).await;
-                let transport = match transport {
-                    Ok(transport) => transport,
-                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
-                };
-                TransportType::Stdio(transport)
-            }
-            TransportConfig::Sse(config) => {
-                let transport = SseTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
-                let transport = match transport {
-                    Ok(transport) => transport,
-                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
-                };
-                TransportType::Sse(transport)
-            }
-            TransportConfig::Ws(config) => {
-                let transport = WsTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
-                let transport = match transport {
-                    Ok(transport) => transport,
-                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
-                };
-                TransportType::Ws(transport)
-            }
-        };
-
-        let conn_id = ConnectionId::new();
+        if server_configs.is_empty() {
+            return Err(ClientError::Request("No server configurations available".into()));
+        }
 
         let mut io_handler = MetaIoHandler::default();
 
@@ -213,12 +187,55 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         });
 
+        let mut client =
+            Self { client, connections: HashMap::new(), io_handler, roots: Arc::new(RwLock::new(HashMap::new())) };
+
+        for config in server_configs {
+            let name = config.name.clone();
+            client.add_server(name, config).await?;
+        }
+
+        Ok(client)
+    }
+
+    pub async fn add_server(&mut self, name: String, server_config: ServerConfig) -> Result<(), ClientError> {
+        let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
+        let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
+        let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
+
+        let mut transport = match &server_config.transport {
+            TransportConfig::Stdio(config) => {
+                let transport = StdioTransport::new_client(&config, on_message_tx, on_error_tx, on_close_tx).await;
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
+                };
+                TransportType::Stdio(transport)
+            }
+            TransportConfig::Sse(config) => {
+                let transport = SseTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
+                };
+                TransportType::Sse(transport)
+            }
+            TransportConfig::Ws(config) => {
+                let transport = WsTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
+                };
+                TransportType::Ws(transport)
+            }
+        };
+
+        let conn_id = ConnectionId::new();
         let transport_sender = transport.sender();
-        let conn_id = conn_id.clone();
+        let conn_id_clone = conn_id.clone();
 
         let transport_sender_clone = transport_sender.clone();
-        let io_handler_clone = io_handler.clone();
-        let conn_id_clone = conn_id.clone();
+        let io_handler_clone = self.io_handler.clone();
         let start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
 
@@ -274,13 +291,10 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         });
 
-        Ok(Self {
-            client,
+        let server_connection = ServerConnection {
             transport,
             transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
-            roots: Arc::new(RwLock::new(HashMap::new())),
-            io_handler,
             request_counter: Arc::new(RwLock::new(0)),
             start_handle,
             message_handler,
@@ -288,153 +302,23 @@ impl<T: ModelContextProtocolClient> Client<T> {
             on_error_rx,
             on_close_rx,
             conn_id,
-        })
-    }
-
-    pub async fn update_roots(&mut self, roots: HashMap<String, Root>) -> Result<(), ClientError> {
-        let mut old_roots = self.roots.write().await;
-        *old_roots = roots.clone();
-        let params = RootsListChangedNotificationParams { meta: None };
-        self.notify("notifications/roots/list_changed".to_string(), serde_json::to_value(params)?).await?;
-        Ok(())
-    }
-
-    pub async fn initialize(&mut self, client_info: Implementation) -> Result<InitializeResult, ClientError> {
-        let params = InitializeRequestParams {
-            protocol_version: "2024-11-05".to_string(),
-            capabilities: self.client.read().await.get_capabilities().await,
-            client_info,
         };
-        let response = self.request("initialize".to_string(), serde_json::to_value(params)?).await?;
-        let result: InitializeResult = serde_json::from_value(response)?;
-        let mut server_capabilities = self.server_capabilities.write().await;
-        *server_capabilities = Some(result.capabilities.clone());
-        Ok(result)
-    }
 
-    pub async fn initialized(&mut self) -> Result<(), ClientError> {
-        let params = InitializedNotificationParams { meta: None };
-        self.notify("notifications/initialized".to_string(), serde_json::to_value(params)?).await?;
+        self.connections.insert(name, server_connection);
         Ok(())
     }
 
-    pub async fn list_resources(
-        &mut self,
-        params: Option<ListResourcesRequestParams>,
-    ) -> Result<ListResourcesResult, ClientError> {
-        debug!("Server {} - Sending resources/list request", self.client.read().await.get_server_config().await.name);
-        let response = self.request("resources/list".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
+    fn list_servers(&self) -> Vec<String> {
+        self.connections.keys().cloned().collect()
     }
 
-    pub async fn read_resource(
-        &mut self,
-        params: ReadResourceRequestParams,
-    ) -> Result<ReadResourceResult, ClientError> {
-        debug!("Server {} - Sending resources/read request", self.client.read().await.get_server_config().await.name);
-        let response = self.request("resources/read".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    pub async fn list_resource_templates(
-        &mut self,
-        params: Option<ListResourceTemplatesRequestParams>,
-    ) -> Result<ListResourceTemplatesResult, ClientError> {
-        debug!(
-            "Server {} - Sending resources/templates/list request",
-            self.client.read().await.get_server_config().await.name
-        );
-        let response = self.request("resources/templates/list".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    pub async fn subscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
-        debug!(
-            "Server {} - Sending resources/subscribe request for {}",
-            self.client.read().await.get_server_config().await.name,
-            uri
-        );
-        let params = serde_json::json!({ "uri": uri });
-        let _response = self.request("resources/subscribe".to_string(), params).await?;
-        Ok(())
-    }
-
-    pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
-        debug!(
-            "Server {} - Sending resources/unsubscribe request for {}",
-            self.client.read().await.get_server_config().await.name,
-            uri
-        );
-        let params = serde_json::json!({ "uri": uri });
-        let _response = self.request("resources/unsubscribe".to_string(), params).await?;
-        Ok(())
-    }
-
-    pub async fn list_prompts(
-        &mut self,
-        params: Option<ListPromptsRequestParams>,
-    ) -> Result<ListPromptsResult, ClientError> {
-        debug!("Server {} - Sending prompts/list request", self.client.read().await.get_server_config().await.name);
-        let response = self.request("prompts/list".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
-        debug!("Server {} - Sending prompts/get request", self.client.read().await.get_server_config().await.name);
-        let response = self.request("prompts/get".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    pub async fn list_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<ListToolsResult, ClientError> {
-        debug!("Server {} - Sending tools/list request", self.client.read().await.get_server_config().await.name);
-        let response = self.request("tools/list".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
-        debug!("Server {} - Sending tools/call request", self.client.read().await.get_server_config().await.name);
-        let response = self.request("tools/call".to_string(), serde_json::to_value(params)?).await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    pub async fn add_root(&mut self, root: Root, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
-        let capabilities = self.client.read().await.get_capabilities().await;
-        let supports_root_notifications = capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
-        let should_notify = {
-            let mut roots = self.roots.write().await;
-            let root = roots.insert(root.uri.clone(), root.clone());
-            root.is_none() && supports_root_notifications
-        };
-        if should_notify {
-            let params = RootsListChangedNotificationParams { meta };
-            self.notify("notifications/rootsListChanged".to_string(), serde_json::to_value(params)?).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn remove_root(&mut self, uri: String, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
-        let capabilities = self.client.read().await.get_capabilities().await;
-        let supports_root_notifications = capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
-        let should_notify = {
-            let mut roots = self.roots.write().await;
-            let root = roots.remove(&uri);
-            root.is_some() && supports_root_notifications
-        };
-        if should_notify {
-            let params = RootsListChangedNotificationParams { meta };
-            self.notify("notifications/rootsListChanged".to_string(), serde_json::to_value(params)?).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn close(&mut self) -> Result<(), ClientError> {
-        self.transport.close().await.map_err(|e| ClientError::Transport(format!("Close: {}", e).into()))?;
-        self.start_handle.abort();
-        Ok(())
-    }
-
-    async fn request(&self, method: String, params: serde_json::Value) -> Result<serde_json::Value, ClientError> {
-        let mut counter = self.request_counter.write().await;
+    async fn request(
+        connection: &mut ServerConnection,
+        method: String,
+        params: serde_json::Value,
+        client: Arc<RwLock<T>>,
+    ) -> Result<serde_json::Value, ClientError> {
+        let mut counter = connection.request_counter.write().await;
         *counter += 1;
         let id = *counter;
 
@@ -448,49 +332,555 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let (response_tx, response_rx) = oneshot::channel();
 
         {
-            let mut pending = self.pending_requests.lock().await;
+            let mut pending = connection.pending_requests.lock().await;
             pending.insert(id, response_tx);
         }
 
-        let conn_id = self.conn_id.clone();
+        let conn_id = connection.conn_id.clone();
 
-        if let Err(e) = self.transport_sender.send(request.into(), conn_id).await {
-            let mut pending = self.pending_requests.lock().await;
+        if let Err(e) = connection.transport_sender.send(request.into(), conn_id).await {
+            let mut pending = connection.pending_requests.lock().await;
             pending.remove(&id);
             return Err(ClientError::Transport(format!("Send: {}", e).into()));
         }
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(self.client.read().await.get_server_config().await.request_timeout),
-            response_rx,
-        )
-        .await
-        {
+        let timeout = client
+            .read()
+            .await
+            .get_server_configs()
+            .await
+            .iter()
+            .find(|cfg| connection.conn_id.to_string().contains(&cfg.name))
+            .map(|cfg| cfg.request_timeout)
+            .unwrap_or(5);
+
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
             Ok(response) => match response {
                 Ok(result) => result,
                 Err(_) => Err(ClientError::Request("Response channel closed".into())),
             },
             Err(_) => {
-                let mut pending = self.pending_requests.lock().await;
+                let mut pending = connection.pending_requests.lock().await;
                 pending.remove(&id);
                 Err(ClientError::Request("Request timed out".into()))
             }
         }
     }
 
-    async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
+    async fn notify(
+        connection: &mut ServerConnection,
+        method: String,
+        params: serde_json::Value,
+    ) -> Result<(), ClientError> {
         let notification = jsonrpc_core::Notification {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
             params: Params::Map(params.as_object().cloned().unwrap_or_default()),
         };
 
-        let conn_id = self.conn_id.clone();
+        let conn_id = connection.conn_id.clone();
 
-        self.transport_sender
+        connection
+            .transport_sender
             .send(notification.into(), conn_id)
             .await
             .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
+    }
+
+    pub async fn initialize(
+        &mut self,
+        client_info: Implementation,
+    ) -> Result<HashMap<String, InitializeResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut results = HashMap::new();
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            let capabilities = client.read().await.get_capabilities().await;
+            let params = InitializeRequestParams {
+                protocol_version: "2024-11-05".to_string(),
+                capabilities,
+                client_info: client_info.clone(),
+            };
+
+            match Self::request(connection, "initialize".to_string(), serde_json::to_value(params)?, client.clone())
+                .await
+            {
+                Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
+                    Ok(result) => {
+                        {
+                            let mut server_capabilities = connection.server_capabilities.write().await;
+                            *server_capabilities = Some(result.capabilities.clone());
+                        }
+                        results.insert(server_name.clone(), result);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to deserialize initialize result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Failed to initialize '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            warn!("Some servers failed to initialize: {}", errors.join(", "));
+        }
+
+        if results.is_empty() {
+            Err(ClientError::Request("All servers failed to initialize".into()))
+        } else {
+            Ok(results)
+        }
+    }
+
+    pub async fn initialized(&mut self) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut errors = Vec::new();
+
+        for (server_name, connection) in &mut self.connections {
+            let params = InitializedNotificationParams { meta: None };
+            if let Err(e) =
+                Self::notify(connection, "notifications/initialized".to_string(), serde_json::to_value(params)?).await
+            {
+                errors.push(format!("Failed to send initialized notification to '{}': {:?}", server_name, e));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ClientError::Request(errors.join(", ").into()))
+        }
+    }
+
+    pub async fn list_resources(
+        &mut self,
+        params: Option<ListResourcesRequestParams>,
+    ) -> Result<ListResourcesResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut all_resources = Vec::new();
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "resources/list".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<ListResourcesResult>(response) {
+                    Ok(result) => {
+                        all_resources.extend(result.resources);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if all_resources.is_empty() && !errors.is_empty() {
+            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
+        } else {
+            Ok(ListResourcesResult { resources: all_resources, meta: None, next_cursor: None })
+        }
+    }
+
+    pub async fn read_resource(
+        &mut self,
+        params: ReadResourceRequestParams,
+    ) -> Result<ReadResourceResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "resources/read".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<ReadResourceResult>(response) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        Err(ClientError::Request(format!("Unable to read resource from any server: {}", errors.join(", ")).into()))
+    }
+
+    pub async fn list_resource_templates(
+        &mut self,
+        params: Option<ListResourceTemplatesRequestParams>,
+    ) -> Result<ListResourceTemplatesResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut all_templates = Vec::new();
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "resources/templates/list".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<ListResourceTemplatesResult>(response) {
+                    Ok(result) => {
+                        all_templates.extend(result.resource_templates);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if all_templates.is_empty() && !errors.is_empty() {
+            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
+        } else {
+            Ok(ListResourceTemplatesResult { resource_templates: all_templates, meta: None, next_cursor: None })
+        }
+    }
+
+    pub async fn subscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut successful = 0;
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            let params = serde_json::json!({ "uri": uri.clone() });
+            match Self::request(connection, "resources/subscribe".to_string(), params, client.clone()).await {
+                Ok(_) => {
+                    successful += 1;
+                }
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if successful > 0 {
+            if !errors.is_empty() {
+                warn!("Some servers failed to subscribe: {}", errors.join(", "));
+            }
+            Ok(())
+        } else {
+            Err(ClientError::Request(format!("Failed to subscribe on all servers: {}", errors.join(", ")).into()))
+        }
+    }
+
+    pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut successful = 0;
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            let params = serde_json::json!({ "uri": uri.clone() });
+            match Self::request(connection, "resources/unsubscribe".to_string(), params, client.clone()).await {
+                Ok(_) => {
+                    successful += 1;
+                }
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if successful > 0 {
+            if !errors.is_empty() {
+                warn!("Some servers failed to unsubscribe: {}", errors.join(", "));
+            }
+            Ok(())
+        } else {
+            Err(ClientError::Request(format!("Failed to unsubscribe on all servers: {}", errors.join(", ")).into()))
+        }
+    }
+
+    pub async fn list_prompts(
+        &mut self,
+        params: Option<ListPromptsRequestParams>,
+    ) -> Result<ListPromptsResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut all_prompts = Vec::new();
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "prompts/list".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<ListPromptsResult>(response) {
+                    Ok(result) => {
+                        all_prompts.extend(result.prompts);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if all_prompts.is_empty() && !errors.is_empty() {
+            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
+        } else {
+            Ok(ListPromptsResult { prompts: all_prompts, meta: None, next_cursor: None })
+        }
+    }
+
+    pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "prompts/get".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<GetPromptResult>(response) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        Err(ClientError::Request(format!("Unable to get prompt from any server: {}", errors.join(", ")).into()))
+    }
+
+    pub async fn list_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<ListToolsResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut all_tools = Vec::new();
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "tools/list".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<ListToolsResult>(response) {
+                    Ok(result) => {
+                        all_tools.extend(result.tools);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if all_tools.is_empty() && !errors.is_empty() {
+            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
+        } else {
+            Ok(ListToolsResult { tools: all_tools, meta: None, next_cursor: None })
+        }
+    }
+
+    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            match Self::request(
+                connection,
+                "tools/call".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<CallToolResult>(response) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        Err(ClientError::Request(format!("Unable to call tool on any server: {}", errors.join(", ")).into()))
+    }
+
+    pub async fn add_root(&mut self, root: Root, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let client_capabilities = self.client.read().await.get_capabilities().await;
+        let supports_root_notifications =
+            client_capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
+
+        let root_is_new = {
+            let mut client_roots = self.roots.write().await;
+            client_roots.insert(root.uri.clone(), root.clone()).is_none()
+        };
+
+        if !root_is_new || !supports_root_notifications {
+            return Ok(());
+        }
+
+        let mut errors = Vec::new();
+
+        for (server_name, connection) in &mut self.connections {
+            let params = RootsListChangedNotificationParams { meta: meta.clone() };
+            if let Err(e) =
+                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
+                    .await
+            {
+                errors.push(format!("Failed to notify root change on '{}': {:?}", server_name, e));
+            }
+        }
+
+        if !errors.is_empty() {
+            warn!("Failed to add root to some servers: {}", errors.join(", "));
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_root(&mut self, uri: String, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let client_capabilities = self.client.read().await.get_capabilities().await;
+        let supports_root_notifications =
+            client_capabilities.roots.map_or(false, |roots| roots.list_changed.unwrap_or(false));
+
+        let root_existed = {
+            let mut client_roots = self.roots.write().await;
+            client_roots.remove(&uri).is_some()
+        };
+
+        if !root_existed || !supports_root_notifications {
+            return Ok(());
+        }
+
+        let mut errors = Vec::new();
+
+        for (server_name, connection) in &mut self.connections {
+            let params = RootsListChangedNotificationParams { meta: meta.clone() };
+            if let Err(e) =
+                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
+                    .await
+            {
+                errors.push(format!("Failed to notify root removal on '{}': {:?}", server_name, e));
+            }
+        }
+
+        if !errors.is_empty() {
+            warn!("Failed to remove root from some servers: {}", errors.join(", "));
+        }
+
+        Ok(())
+    }
+
+    pub async fn close(&mut self) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Ok(());
+        }
+
+        let mut errors = Vec::new();
+
+        for (server_name, connection) in &mut self.connections {
+            if let Err(e) = connection.transport.close().await {
+                errors.push(format!("Failed to close '{}': {}", server_name, e));
+            }
+            connection.start_handle.abort();
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ClientError::Request(errors.join(", ").into()))
+        }
     }
 }
 
@@ -508,6 +898,6 @@ pub enum ClientError {
 
 impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ModelContextProtocolClient")
+        f.debug_struct("Client").field("servers", &self.list_servers()).finish()
     }
 }
