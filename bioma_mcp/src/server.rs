@@ -46,6 +46,9 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
     fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
     fn on_error(&self, error: anyhow::Error) -> impl Future<Output = ()> + Send;
+    fn get_pagination_config(&self) -> impl Future<Output = crate::pagination::PaginationConfig> + Send {
+        async { crate::pagination::PaginationConfig::default() }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
