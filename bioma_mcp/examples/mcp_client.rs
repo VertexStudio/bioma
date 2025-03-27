@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -231,11 +230,8 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Updating roots...");
-    let roots = HashMap::from([(
-        "workspace".to_string(),
-        Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() },
-    )]);
-    client.update_roots(roots).await?;
+    let root = Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() };
+    client.add_root(root, None).await?;
 
     info!("Shutting down client...");
     client.close().await?;
