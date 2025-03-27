@@ -19,6 +19,8 @@ use std::io;
 use std::{collections::HashMap, io::Write};
 use tracing::{error, info};
 
+const DEFAULT_MODEL: &str = "llama3.2";
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -49,26 +51,25 @@ enum Transport {
 #[derive(Debug)]
 struct SamplingChat {
     engine: Engine,
-    chat_handle: tokio::task::JoinHandle<()>,
+    chat_id: ActorId,
 }
 
 impl SamplingChat {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(chat: Chat) -> Result<Self> {
         let engine = Engine::test().await?;
 
         let chat_id = ActorId::of::<Chat>("/llm/sampling");
-        let chat = Chat::default();
 
         let (mut chat_ctx, mut chat_actor) =
             Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await?;
 
-        let chat_handle = tokio::spawn(async move {
+        let _chat_handle = tokio::spawn(async move {
             if let Err(e) = chat_actor.start(&mut chat_ctx).await {
                 tracing::error!("Chat actor error: {}", e);
             }
         });
 
-        Ok(Self { engine, chat_handle })
+        Ok(Self { engine, chat_id })
     }
 }
 
@@ -77,7 +78,6 @@ pub struct ExampleMcpClient {
     server_config: ServerConfig,
     capabilities: ClientCapabilities,
     roots: Vec<Root>,
-    engine: Engine,
 }
 
 impl ModelContextProtocolClient for ExampleMcpClient {
@@ -108,14 +108,34 @@ impl ModelContextProtocolClient for ExampleMcpClient {
             return Err(ClientError::SamplingRequestRejected);
         }
 
-        let engine = self.engine.clone();
+        info!("Starting sampling actor...");
+
+        let model = match params.model_preferences {
+            Some(model_preferences) => match model_preferences.hints {
+                Some(hints) => hints.iter().find_map(|hint| hint.name.clone()).unwrap_or(DEFAULT_MODEL.to_string()),
+                None => {
+                    info!("Using default model");
+                    DEFAULT_MODEL.to_string()
+                }
+            },
+            None => {
+                info!("Using default model");
+                DEFAULT_MODEL.to_string()
+            }
+        };
+
+        info!("Model: {}", model);
+
+        let chat = Chat::builder().model(model.into()).build();
+
+        let chat_sampling = SamplingChat::new(chat).await.map_err(|e| ClientError::Request(e.to_string().into()))?;
+
+        let engine = chat_sampling.engine.clone();
 
         let relay_id = ActorId::of::<Relay>("/relay");
-        let (relay_ctx, _relay_actor) = Actor::spawn(engine.clone(), relay_id.clone(), Relay, SpawnOptions::default())
+        let (relay_ctx, _relay_actor) = Actor::spawn(engine, relay_id.clone(), Relay, SpawnOptions::default())
             .await
             .map_err(|_| ClientError::Request("Error creating relay actor".into()))?;
-
-        let chat_id = ActorId::of::<Relay>("/llm/sampling");
 
         let chat_messages = params
             .messages
@@ -142,7 +162,7 @@ impl ModelContextProtocolClient for ExampleMcpClient {
                     tools: None,
                     options: None,
                 },
-                &chat_id,
+                &chat_sampling.chat_id,
                 SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
             )
             .await
@@ -200,14 +220,10 @@ async fn main() -> Result<()> {
     let capabilities =
         ClientCapabilities { roots: Some(ClientCapabilitiesRoots { list_changed: Some(true) }), ..Default::default() };
 
-    info!("Starting sampling actor...");
-    let chat_sampling = SamplingChat::new().await?;
-
     let client = ExampleMcpClient {
         server_config: server,
         capabilities,
         roots: vec![Root { name: Some("workspace".to_string()), uri: "file:///workspace".to_string() }],
-        engine: chat_sampling.engine.clone(),
     };
 
     let mut client = Client::new(client).await?;
@@ -334,7 +350,9 @@ async fn main() -> Result<()> {
 
     info!("Making sampling tool call...");
     let sampling_args = serde_json::json!({
-        "query": "Why the sky is blue?"
+        "query": "Explain the history of Rust programming language.",
+        "max_tokens": 100,
+        "models_suggestions": ["llama3.1:8b"],
     });
 
     let sampling_call = CallToolRequestParams {
@@ -373,7 +391,6 @@ async fn main() -> Result<()> {
 
     info!("Shutting down client...");
     client.close().await?;
-    chat_sampling.chat_handle.abort();
 
     Ok(())
 }
