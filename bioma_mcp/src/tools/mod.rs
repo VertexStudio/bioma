@@ -53,6 +53,7 @@ pub trait ToolDef: Serialize {
             name: Self::NAME.to_string(),
             description: Some(Self::DESCRIPTION.to_string()),
             input_schema: schema,
+            annotations: None,
         }
     }
 

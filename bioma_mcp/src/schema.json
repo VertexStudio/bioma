@@ -1,28 +1,51 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
-        "Annotated": {
-            "description": "Base for objects that include optional annotations for the client. The client can use annotations to inform how objects are used or displayed",
+        "Annotations": {
+            "description": "Optional annotations for the client. The client can use annotations to inform how objects are used or displayed",
             "properties": {
-                "annotations": {
-                    "properties": {
-                        "audience": {
-                            "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
-                            "items": {
-                                "$ref": "#/definitions/Role"
-                            },
-                            "type": "array"
-                        },
-                        "priority": {
-                            "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
-                            "maximum": 1,
-                            "minimum": 0,
-                            "type": "number"
-                        }
+                "audience": {
+                    "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
+                    "items": {
+                        "$ref": "#/definitions/Role"
                     },
-                    "type": "object"
+                    "type": "array"
+                },
+                "priority": {
+                    "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
                 }
             },
+            "type": "object"
+        },
+        "AudioContent": {
+            "description": "Audio provided to or from an LLM.",
+            "properties": {
+                "annotations": {
+                    "$ref": "#/definitions/Annotations",
+                    "description": "Optional annotations for the client."
+                },
+                "data": {
+                    "description": "The base64-encoded audio data.",
+                    "format": "byte",
+                    "type": "string"
+                },
+                "mimeType": {
+                    "description": "The MIME type of the audio. Different providers may support different audio types.",
+                    "type": "string"
+                },
+                "type": {
+                    "const": "audio",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "data",
+                "mimeType",
+                "type"
+            ],
             "type": "object"
         },
         "BlobResourceContents": {
@@ -93,6 +116,9 @@
                             },
                             {
                                 "$ref": "#/definitions/ImageContent"
+                            },
+                            {
+                                "$ref": "#/definitions/AudioContent"
                             },
                             {
                                 "$ref": "#/definitions/EmbeddedResource"
@@ -198,9 +224,6 @@
                 },
                 {
                     "$ref": "#/definitions/ListResourcesRequest"
-                },
-                {
-                    "$ref": "#/definitions/ListResourceTemplatesRequest"
                 },
                 {
                     "$ref": "#/definitions/ReadResourceRequest"
@@ -412,6 +435,9 @@
                         },
                         {
                             "$ref": "#/definitions/ImageContent"
+                        },
+                        {
+                            "$ref": "#/definitions/AudioContent"
                         }
                     ]
                 },
@@ -442,22 +468,8 @@
             "description": "The contents of a resource, embedded into a prompt or tool call result.\n\nIt is up to the client how best to render embedded resources for the benefit\nof the LLM and/or the user.",
             "properties": {
                 "annotations": {
-                    "properties": {
-                        "audience": {
-                            "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
-                            "items": {
-                                "$ref": "#/definitions/Role"
-                            },
-                            "type": "array"
-                        },
-                        "priority": {
-                            "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
-                            "maximum": 1,
-                            "minimum": 0,
-                            "type": "number"
-                        }
-                    },
-                    "type": "object"
+                    "$ref": "#/definitions/Annotations",
+                    "description": "Optional annotations for the client."
                 },
                 "resource": {
                     "anyOf": [
@@ -544,22 +556,8 @@
             "description": "An image provided to or from an LLM.",
             "properties": {
                 "annotations": {
-                    "properties": {
-                        "audience": {
-                            "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
-                            "items": {
-                                "$ref": "#/definitions/Role"
-                            },
-                            "type": "array"
-                        },
-                        "priority": {
-                            "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
-                            "maximum": 1,
-                            "minimum": 0,
-                            "type": "number"
-                        }
-                    },
-                    "type": "object"
+                    "$ref": "#/definitions/Annotations",
+                    "description": "Optional annotations for the client."
                 },
                 "data": {
                     "description": "The base64-encoded image data.",
@@ -686,6 +684,34 @@
             ],
             "type": "object"
         },
+        "JSONRPCBatchRequest": {
+            "description": "A JSON-RPC batch request, as described in https://www.jsonrpc.org/specification#batch.",
+            "items": {
+                "anyOf": [
+                    {
+                        "$ref": "#/definitions/JSONRPCRequest"
+                    },
+                    {
+                        "$ref": "#/definitions/JSONRPCNotification"
+                    }
+                ]
+            },
+            "type": "array"
+        },
+        "JSONRPCBatchResponse": {
+            "description": "A JSON-RPC batch response, as described in https://www.jsonrpc.org/specification#batch.",
+            "items": {
+                "anyOf": [
+                    {
+                        "$ref": "#/definitions/JSONRPCResponse"
+                    },
+                    {
+                        "$ref": "#/definitions/JSONRPCError"
+                    }
+                ]
+            },
+            "type": "array"
+        },
         "JSONRPCError": {
             "description": "A response to a request that indicates an error occurred.",
             "properties": {
@@ -733,12 +759,41 @@
                     "$ref": "#/definitions/JSONRPCNotification"
                 },
                 {
+                    "description": "A JSON-RPC batch request, as described in https://www.jsonrpc.org/specification#batch.",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/definitions/JSONRPCRequest"
+                            },
+                            {
+                                "$ref": "#/definitions/JSONRPCNotification"
+                            }
+                        ]
+                    },
+                    "type": "array"
+                },
+                {
                     "$ref": "#/definitions/JSONRPCResponse"
                 },
                 {
                     "$ref": "#/definitions/JSONRPCError"
+                },
+                {
+                    "description": "A JSON-RPC batch response, as described in https://www.jsonrpc.org/specification#batch.",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/definitions/JSONRPCResponse"
+                            },
+                            {
+                                "$ref": "#/definitions/JSONRPCError"
+                            }
+                        ]
+                    },
+                    "type": "array"
                 }
-            ]
+            ],
+            "description": "Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent."
         },
         "JSONRPCNotification": {
             "description": "A notification which does not expect a response.",
@@ -1239,6 +1294,10 @@
                 },
                 "params": {
                     "properties": {
+                        "message": {
+                            "description": "An optional message describing the current progress.",
+                            "type": "string"
+                        },
                         "progress": {
                             "description": "The progress thus far. This should increase every time progress is made, even if the total is unknown.",
                             "type": "number"
@@ -1351,6 +1410,9 @@
                         },
                         {
                             "$ref": "#/definitions/ImageContent"
+                        },
+                        {
+                            "$ref": "#/definitions/AudioContent"
                         },
                         {
                             "$ref": "#/definitions/EmbeddedResource"
@@ -1476,22 +1538,8 @@
             "description": "A known resource that the server is capable of reading.",
             "properties": {
                 "annotations": {
-                    "properties": {
-                        "audience": {
-                            "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
-                            "items": {
-                                "$ref": "#/definitions/Role"
-                            },
-                            "type": "array"
-                        },
-                        "priority": {
-                            "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
-                            "maximum": 1,
-                            "minimum": 0,
-                            "type": "number"
-                        }
-                    },
-                    "type": "object"
+                    "$ref": "#/definitions/Annotations",
+                    "description": "Optional annotations for the client."
                 },
                 "description": {
                     "description": "A description of what this resource represents.\n\nThis can be used by clients to improve the LLM's understanding of available resources. It can be thought of like a \"hint\" to the model.",
@@ -1582,22 +1630,8 @@
             "description": "A template description for resources available on the server.",
             "properties": {
                 "annotations": {
-                    "properties": {
-                        "audience": {
-                            "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
-                            "items": {
-                                "$ref": "#/definitions/Role"
-                            },
-                            "type": "array"
-                        },
-                        "priority": {
-                            "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
-                            "maximum": 1,
-                            "minimum": 0,
-                            "type": "number"
-                        }
-                    },
-                    "type": "object"
+                    "$ref": "#/definitions/Annotations",
+                    "description": "Optional annotations for the client."
                 },
                 "description": {
                     "description": "A description of what this template is for.\n\nThis can be used by clients to improve the LLM's understanding of available resources. It can be thought of like a \"hint\" to the model.",
@@ -1721,6 +1755,9 @@
                         },
                         {
                             "$ref": "#/definitions/ImageContent"
+                        },
+                        {
+                            "$ref": "#/definitions/AudioContent"
                         }
                     ]
                 },
@@ -1737,6 +1774,12 @@
         "ServerCapabilities": {
             "description": "Capabilities that a server may support. Known capabilities are defined here, in this schema, but this is not a closed set: any server can define its own, additional capabilities.",
             "properties": {
+                "completions": {
+                    "additionalProperties": true,
+                    "description": "Present if the server supports argument autocompletion suggestions.",
+                    "properties": {},
+                    "type": "object"
+                },
                 "experimental": {
                     "additionalProperties": {
                         "additionalProperties": true,
@@ -1839,9 +1882,6 @@
                     "$ref": "#/definitions/ListResourcesResult"
                 },
                 {
-                    "$ref": "#/definitions/ListResourceTemplatesResult"
-                },
-                {
                     "$ref": "#/definitions/ReadResourceResult"
                 },
                 {
@@ -1872,7 +1912,7 @@
                     "properties": {
                         "level": {
                             "$ref": "#/definitions/LoggingLevel",
-                            "description": "The level of logging that the client wants to receive from the server. The server should send all logs at this level and higher (i.e., more severe) to the client as notifications/logging/message."
+                            "description": "The level of logging that the client wants to receive from the server. The server should send all logs at this level and higher (i.e., more severe) to the client as notifications/message."
                         }
                     },
                     "required": [
@@ -1918,22 +1958,8 @@
             "description": "Text provided to or from an LLM.",
             "properties": {
                 "annotations": {
-                    "properties": {
-                        "audience": {
-                            "description": "Describes who the intended customer of this object or data is.\n\nIt can include multiple entries to indicate content useful for multiple audiences (e.g., `[\"user\", \"assistant\"]`).",
-                            "items": {
-                                "$ref": "#/definitions/Role"
-                            },
-                            "type": "array"
-                        },
-                        "priority": {
-                            "description": "Describes how important this data is for operating the server.\n\nA value of 1 means \"most important,\" and indicates that the data is\neffectively required, while 0 means \"least important,\" and indicates that\nthe data is entirely optional.",
-                            "maximum": 1,
-                            "minimum": 0,
-                            "type": "number"
-                        }
-                    },
-                    "type": "object"
+                    "$ref": "#/definitions/Annotations",
+                    "description": "Optional annotations for the client."
                 },
                 "text": {
                     "description": "The text content of the message.",
@@ -1975,8 +2001,12 @@
         "Tool": {
             "description": "Definition for a tool the client can call.",
             "properties": {
+                "annotations": {
+                    "$ref": "#/definitions/ToolAnnotations",
+                    "description": "Optional additional tool information."
+                },
                 "description": {
-                    "description": "A human-readable description of the tool.",
+                    "description": "A human-readable description of the tool.\n\nThis can be used by clients to improve the LLM's understanding of available tools. It can be thought of like a \"hint\" to the model.",
                     "type": "string"
                 },
                 "inputSchema": {
@@ -2015,6 +2045,32 @@
                 "inputSchema",
                 "name"
             ],
+            "type": "object"
+        },
+        "ToolAnnotations": {
+            "description": "Additional properties describing a Tool to clients.\n\nNOTE: all properties in ToolAnnotations are **hints**. \nThey are not guaranteed to provide a faithful description of \ntool behavior (including descriptive properties like `title`).\n\nClients should never make tool use decisions based on ToolAnnotations\nreceived from untrusted servers.",
+            "properties": {
+                "destructiveHint": {
+                    "description": "If true, the tool may perform destructive updates to its environment.\nIf false, the tool performs only additive updates.\n\n(This property is meaningful only when `readOnlyHint == false`)\n\nDefault: true",
+                    "type": "boolean"
+                },
+                "idempotentHint": {
+                    "description": "If true, calling the tool repeatedly with the same arguments \nwill have no additional effect on the its environment.\n\n(This property is meaningful only when `readOnlyHint == false`)\n\nDefault: false",
+                    "type": "boolean"
+                },
+                "openWorldHint": {
+                    "description": "If true, this tool may interact with an \"open world\" of external\nentities. If false, the tool's domain of interaction is closed.\nFor example, the world of a web search tool is open, whereas that\nof a memory tool is not.\n\nDefault: true",
+                    "type": "boolean"
+                },
+                "readOnlyHint": {
+                    "description": "If true, the tool does not modify its environment.\n\nDefault: false",
+                    "type": "boolean"
+                },
+                "title": {
+                    "description": "A human-readable title for the tool.",
+                    "type": "string"
+                }
+            },
             "type": "object"
         },
         "ToolListChangedNotification": {
@@ -2070,4 +2126,3 @@
         }
     }
 }
-

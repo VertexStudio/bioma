@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+#[doc = " Optional annotations for the client. The client can use annotations to inform how objects are "]
+#[doc = " used or displayed"]
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct AnnotatedAnnotations {
+pub struct Annotations {
     #[doc = " Describes who the intended customer of this object or data is."]
     #[doc = " "]
     #[doc = " It can include multiple entries to indicate content useful for multiple audiences (e.g., "]
@@ -16,12 +18,19 @@ pub struct AnnotatedAnnotations {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<f64>,
 }
-#[doc = " Base for objects that include optional annotations for the client. The client can use "]
-#[doc = " annotations to inform how objects are used or displayed"]
-#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct Annotated {
+#[doc = " Audio provided to or from an LLM."]
+#[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
+pub struct AudioContent {
+    #[doc = " Optional annotations for the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<AnnotatedAnnotations>,
+    pub annotations: Option<Annotations>,
+    #[doc = " The base64-encoded audio data."]
+    pub data: String,
+    #[doc = " The MIME type of the audio. Different providers may support different audio types."]
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    #[serde(rename = "type")]
+    pub type_: String,
 }
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct BlobResourceContents {
@@ -228,30 +237,15 @@ pub struct CreateMessageResult {
 }
 #[doc = " An opaque token used to represent a cursor for pagination."]
 pub type Cursor = String;
-#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct EmbeddedResourceAnnotations {
-    #[doc = " Describes who the intended customer of this object or data is."]
-    #[doc = " "]
-    #[doc = " It can include multiple entries to indicate content useful for multiple audiences (e.g., "]
-    #[doc = " `[\"user\", \"assistant\"]`)."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audience: Option<Vec<Role>>,
-    #[doc = " Describes how important this data is for operating the server."]
-    #[doc = " "]
-    #[doc = " A value of 1 means \"most important,\" and indicates that the data is"]
-    #[doc = " effectively required, while 0 means \"least important,\" and indicates that"]
-    #[doc = " the data is entirely optional."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<f64>,
-}
 #[doc = " The contents of a resource, embedded into a prompt or tool call result."]
 #[doc = " "]
 #[doc = " It is up to the client how best to render embedded resources for the benefit"]
 #[doc = " of the LLM and/or the user."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct EmbeddedResource {
+    #[doc = " Optional annotations for the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<EmbeddedResourceAnnotations>,
+    pub annotations: Option<Annotations>,
     pub resource: serde_json::Value,
     #[serde(rename = "type")]
     pub type_: String,
@@ -291,27 +285,12 @@ pub struct GetPromptResult {
     pub description: Option<String>,
     pub messages: Vec<PromptMessage>,
 }
-#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct ImageContentAnnotations {
-    #[doc = " Describes who the intended customer of this object or data is."]
-    #[doc = " "]
-    #[doc = " It can include multiple entries to indicate content useful for multiple audiences (e.g., "]
-    #[doc = " `[\"user\", \"assistant\"]`)."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audience: Option<Vec<Role>>,
-    #[doc = " Describes how important this data is for operating the server."]
-    #[doc = " "]
-    #[doc = " A value of 1 means \"most important,\" and indicates that the data is"]
-    #[doc = " effectively required, while 0 means \"least important,\" and indicates that"]
-    #[doc = " the data is entirely optional."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<f64>,
-}
 #[doc = " An image provided to or from an LLM."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct ImageContent {
+    #[doc = " Optional annotations for the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<ImageContentAnnotations>,
+    pub annotations: Option<Annotations>,
     #[doc = " The base64-encoded image data."]
     pub data: String,
     #[doc = " The MIME type of the image. Different providers may support different image types."]
@@ -382,6 +361,10 @@ pub struct InitializedNotification {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<InitializedNotificationParams>,
 }
+#[doc = " A JSON-RPC batch request, as described in https://www.jsonrpc.org/specification#batch."]
+pub type JsonrpcbatchRequest = Vec<serde_json::Value>;
+#[doc = " A JSON-RPC batch response, as described in https://www.jsonrpc.org/specification#batch."]
+pub type JsonrpcbatchResponse = Vec<serde_json::Value>;
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct JsonrpcerrorError {
     #[doc = " The error type that occurred."]
@@ -402,6 +385,7 @@ pub struct Jsonrpcerror {
     pub id: RequestId,
     pub jsonrpc: String,
 }
+#[doc = " Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent."]
 pub type Jsonrpcmessage = serde_json::Value;
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
 pub struct JsonrpcnotificationParams {
@@ -779,6 +763,9 @@ pub struct PingRequest {
 }
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct ProgressNotificationParams {
+    #[doc = " An optional message describing the current progress."]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     #[doc = " The progress thus far. This should increase every time progress is made, even if the total "]
     #[doc = " is unknown."]
     pub progress: f64,
@@ -903,27 +890,12 @@ pub struct Request {
 }
 #[doc = " A uniquely identifying ID for a request in JSON-RPC."]
 pub type RequestId = serde_json::Value;
-#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct ResourceAnnotations {
-    #[doc = " Describes who the intended customer of this object or data is."]
-    #[doc = " "]
-    #[doc = " It can include multiple entries to indicate content useful for multiple audiences (e.g., "]
-    #[doc = " `[\"user\", \"assistant\"]`)."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audience: Option<Vec<Role>>,
-    #[doc = " Describes how important this data is for operating the server."]
-    #[doc = " "]
-    #[doc = " A value of 1 means \"most important,\" and indicates that the data is"]
-    #[doc = " effectively required, while 0 means \"least important,\" and indicates that"]
-    #[doc = " the data is entirely optional."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<f64>,
-}
 #[doc = " A known resource that the server is capable of reading."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct Resource {
+    #[doc = " Optional annotations for the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<ResourceAnnotations>,
+    pub annotations: Option<Annotations>,
     #[doc = " A description of what this resource represents."]
     #[doc = " "]
     #[doc = " This can be used by clients to improve the LLM's understanding of available resources. It "]
@@ -976,27 +948,12 @@ pub struct ResourceReference {
     #[doc = " The URI or URI template of the resource."]
     pub uri: String,
 }
-#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct ResourceTemplateAnnotations {
-    #[doc = " Describes who the intended customer of this object or data is."]
-    #[doc = " "]
-    #[doc = " It can include multiple entries to indicate content useful for multiple audiences (e.g., "]
-    #[doc = " `[\"user\", \"assistant\"]`)."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audience: Option<Vec<Role>>,
-    #[doc = " Describes how important this data is for operating the server."]
-    #[doc = " "]
-    #[doc = " A value of 1 means \"most important,\" and indicates that the data is"]
-    #[doc = " effectively required, while 0 means \"least important,\" and indicates that"]
-    #[doc = " the data is entirely optional."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<f64>,
-}
 #[doc = " A template description for resources available on the server."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct ResourceTemplate {
+    #[doc = " Optional annotations for the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<ResourceTemplateAnnotations>,
+    pub annotations: Option<Annotations>,
     #[doc = " A description of what this template is for."]
     #[doc = " "]
     #[doc = " This can be used by clients to improve the LLM's understanding of available resources. It "]
@@ -1110,6 +1067,9 @@ pub struct ServerCapabilitiesPromptsResourcesTools {
 #[doc = " but this is not a closed set: any server can define its own, additional capabilities."]
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
 pub struct ServerCapabilities {
+    #[doc = " Present if the server supports argument autocompletion suggestions."]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completions: Option<::std::collections::BTreeMap<String, serde_json::Value>>,
     #[doc = " Experimental, non-standard capabilities that the server supports."]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experimental:
@@ -1134,7 +1094,7 @@ pub type ServerResult = serde_json::Value;
 pub struct SetLevelRequestParams {
     #[doc = " The level of logging that the client wants to receive from the server. The server should "]
     #[doc = " send all logs at this level and higher (i.e., more severe) to the client as "]
-    #[doc = " notifications/logging/message."]
+    #[doc = " notifications/message."]
     pub level: LoggingLevel,
 }
 #[doc = " A request from the client to the server, to enable or adjust logging."]
@@ -1156,27 +1116,12 @@ pub struct SubscribeRequest {
     pub method: String,
     pub params: SubscribeRequestParams,
 }
-#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
-pub struct TextContentAnnotations {
-    #[doc = " Describes who the intended customer of this object or data is."]
-    #[doc = " "]
-    #[doc = " It can include multiple entries to indicate content useful for multiple audiences (e.g., "]
-    #[doc = " `[\"user\", \"assistant\"]`)."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audience: Option<Vec<Role>>,
-    #[doc = " Describes how important this data is for operating the server."]
-    #[doc = " "]
-    #[doc = " A value of 1 means \"most important,\" and indicates that the data is"]
-    #[doc = " effectively required, while 0 means \"least important,\" and indicates that"]
-    #[doc = " the data is entirely optional."]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<f64>,
-}
 #[doc = " Text provided to or from an LLM."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct TextContent {
+    #[doc = " Optional annotations for the client."]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annotations: Option<TextContentAnnotations>,
+    pub annotations: Option<Annotations>,
     #[doc = " The text content of the message."]
     pub text: String,
     #[serde(rename = "type")]
@@ -1207,7 +1152,13 @@ pub struct ToolInputSchema {
 #[doc = " Definition for a tool the client can call."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
 pub struct Tool {
+    #[doc = " Optional additional tool information."]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
     #[doc = " A human-readable description of the tool."]
+    #[doc = " "]
+    #[doc = " This can be used by clients to improve the LLM's understanding of available tools. It can "]
+    #[doc = " be thought of like a \"hint\" to the model."]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[doc = " A JSON Schema object defining the expected parameters for the tool."]
@@ -1215,6 +1166,53 @@ pub struct Tool {
     pub input_schema: schemars::schema::RootSchema,
     #[doc = " The name of the tool."]
     pub name: String,
+}
+#[doc = " Additional properties describing a Tool to clients."]
+#[doc = " "]
+#[doc = " NOTE: all properties in ToolAnnotations are **hints**. "]
+#[doc = " They are not guaranteed to provide a faithful description of "]
+#[doc = " tool behavior (including descriptive properties like `title`)."]
+#[doc = " "]
+#[doc = " Clients should never make tool use decisions based on ToolAnnotations"]
+#[doc = " received from untrusted servers."]
+#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
+pub struct ToolAnnotations {
+    #[doc = " If true, the tool may perform destructive updates to its environment."]
+    #[doc = " If false, the tool performs only additive updates."]
+    #[doc = " "]
+    #[doc = " (This property is meaningful only when `readOnlyHint == false`)"]
+    #[doc = " "]
+    #[doc = " Default: true"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "destructiveHint")]
+    pub destructive_hint: Option<bool>,
+    #[doc = " If true, calling the tool repeatedly with the same arguments "]
+    #[doc = " will have no additional effect on the its environment."]
+    #[doc = " "]
+    #[doc = " (This property is meaningful only when `readOnlyHint == false`)"]
+    #[doc = " "]
+    #[doc = " Default: false"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "idempotentHint")]
+    pub idempotent_hint: Option<bool>,
+    #[doc = " If true, this tool may interact with an \"open world\" of external"]
+    #[doc = " entities. If false, the tool's domain of interaction is closed."]
+    #[doc = " For example, the world of a web search tool is open, whereas that"]
+    #[doc = " of a memory tool is not."]
+    #[doc = " "]
+    #[doc = " Default: true"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "openWorldHint")]
+    pub open_world_hint: Option<bool>,
+    #[doc = " If true, the tool does not modify its environment."]
+    #[doc = " "]
+    #[doc = " Default: false"]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "readOnlyHint")]
+    pub read_only_hint: Option<bool>,
+    #[doc = " A human-readable title for the tool."]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
 pub struct ToolListChangedNotificationParams {
