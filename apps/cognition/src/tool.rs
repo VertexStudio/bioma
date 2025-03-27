@@ -72,7 +72,7 @@ impl ToolClient {
                 SendOptions::default(),
             )
             .await?;
-        info!("Tools from {} ({})", self.servers.len(), list_tools.tools.len());
+        info!("Fetched tools:");
         for tool in &list_tools.tools {
             info!("├─ {}", tool.name);
         }
