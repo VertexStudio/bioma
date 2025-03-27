@@ -57,7 +57,10 @@ impl ToolDef for Sampling {
             include_context: args.context,
             max_tokens: args.max_tokens,
             messages: vec![SamplingMessage {
-                content: serde_json::to_value(args.query).unwrap_or_default(),
+                content: match serde_json::to_value(&args.query) {
+                    Ok(value) => value,
+                    Err(e) => return Ok(Self::error(format!("Failed to serialize query: {}", e))),
+                },
                 role: crate::schema::Role::Assistant,
             }],
             model_preferences: Some(model_preferences),
