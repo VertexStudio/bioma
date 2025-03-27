@@ -295,7 +295,7 @@ impl ModelContextProtocolClient for McpBasicClient {
         vec![]
     }
 
-    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> CreateMessageResult {
+    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
         todo!()
     }
 }
