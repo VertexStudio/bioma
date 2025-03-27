@@ -445,7 +445,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         &all_resources,
                         params.cursor.as_deref(),
                         &pagination_config,
-                        None,
                     );
                     
                     let response = ListResourcesResult { next_cursor, resources: resources.clone(), meta: None };
@@ -547,7 +546,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         &all_templates,
                         params.cursor.as_deref(),
                         &pagination_config,
-                        None,
                     );
 
                     let response = ListResourceTemplatesResult { next_cursor, resource_templates: resource_templates.clone(), meta: None };
@@ -710,7 +708,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         &all_prompts,
                         params.cursor.as_deref(),
                         &pagination_config,
-                        None,
                     );
 
                     let response = ListPromptsResult { next_cursor, prompts: prompts.clone(), meta: None };
@@ -807,7 +804,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         &all_tools,
                         params.cursor.as_deref(),
                         &pagination_config,
-                        None,
                     );
                     
                     let response = ListToolsResult { next_cursor, tools: tools.clone(), meta: None };
