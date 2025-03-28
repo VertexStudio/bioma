@@ -78,7 +78,7 @@ struct ExampleMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
     base_dir: PathBuf,
-    pagination_config: pagination::PaginationConfig,
+    pagination: pagination::Pagination,
 }
 
 impl ModelContextProtocolServer for ExampleMcpServer {
@@ -115,8 +115,8 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         error!("Error: {}", error);
     }
 
-    async fn get_pagination_config(&self) -> pagination::PaginationConfig {
-        self.pagination_config.clone()
+    async fn get_pagination(&self) -> pagination::Pagination {
+        self.pagination.clone()
     }
 }
 
@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
         transport_config,
         capabilities,
         base_dir: args.base_dir,
-        pagination_config: pagination::PaginationConfig { page_size: 20 },
+        pagination: pagination::Pagination { size: 20 },
     };
 
     let mcp_server = Server::new(server);
