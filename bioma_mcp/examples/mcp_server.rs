@@ -27,7 +27,7 @@ struct Args {
     base_dir: PathBuf,
 
     #[arg(long, help = "Page size for pagination (omit to disable pagination)")]
-    page_size: Option<usize>,
+    size: Option<usize>,
 
     #[command(subcommand)]
     transport: Transport,
@@ -141,7 +141,7 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let pagination = args.page_size.map(|size| pagination::Pagination { size });
+    let pagination = args.size.map(|size| pagination::Pagination { size });
 
     let server = ExampleMcpServer {
         transport_config,
