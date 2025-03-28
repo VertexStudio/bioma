@@ -26,6 +26,9 @@ struct Args {
     #[arg(long, short, default_value = ".")]
     base_dir: PathBuf,
 
+    #[arg(long, help = "Page size for pagination (omit to disable pagination)")]
+    page_size: Option<usize>,
+
     #[command(subcommand)]
     transport: Transport,
 }
@@ -78,7 +81,7 @@ struct ExampleMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
     base_dir: PathBuf,
-    pagination: pagination::Pagination,
+    pagination: Option<pagination::Pagination>,
 }
 
 impl ModelContextProtocolServer for ExampleMcpServer {
@@ -115,7 +118,7 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         error!("Error: {}", error);
     }
 
-    async fn get_pagination(&self) -> pagination::Pagination {
+    async fn get_pagination(&self) -> Option<pagination::Pagination> {
         self.pagination.clone()
     }
 }
@@ -138,11 +141,13 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
+    let pagination = args.page_size.map(|size| pagination::Pagination { size });
+
     let server = ExampleMcpServer {
         transport_config,
         capabilities,
         base_dir: args.base_dir,
-        pagination: pagination::Pagination { size: 20 },
+        pagination,
     };
 
     let mcp_server = Server::new(server);

@@ -45,8 +45,8 @@ pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
     fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
     fn on_error(&self, error: anyhow::Error) -> impl Future<Output = ()> + Send;
-    fn get_pagination(&self) -> impl Future<Output = crate::pagination::Pagination> + Send {
-        async { crate::pagination::Pagination::default() }
+    fn get_pagination(&self) -> impl Future<Output = Option<crate::pagination::Pagination>> + Send {
+        async { Some(crate::pagination::Pagination::default()) }
     }
 }
 
@@ -439,17 +439,30 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
                     }
                     
-                    let pagination = server.read().await.get_pagination().await;
+                    let pagination_option = server.read().await.get_pagination().await;
                     
-                    let (resources, next_cursor) = pagination.paginate(
-                        &all_resources,
-                        params.cursor.as_deref(),
-                    );
+                    let (resources, next_cursor) = match pagination_option {
+                        Some(pagination) => {
+                            pagination.paginate(
+                                &all_resources,
+                                params.cursor.as_deref(),
+                            )
+                        },
+                        None => {
+                            (all_resources.clone(), None)
+                        }
+                    };
                     
                     let response = ListResourcesResult { next_cursor, resources: resources.clone(), meta: None };
 
-                    info!("Successfully handled resources/list request, returned {} of {} resources with page size {}", 
-                        resources.len(), all_resources.len(), pagination.size);
+                    info!("Successfully handled resources/list request, returned {} of {} resources{}", 
+                        resources.len(),
+                        all_resources.len(),
+                        match pagination_option {
+                            Some(p) => format!(" with page size {}", p.size),
+                            None => " (pagination disabled)".to_string(),
+                        }
+                    );
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
             }
@@ -539,20 +552,30 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
                     }
 
-                    let pagination = server.read().await.get_pagination().await;
+                    let pagination_option = server.read().await.get_pagination().await;
                     
-                    let (resource_templates, next_cursor) = pagination.paginate(
-                        &all_templates,
-                        params.cursor.as_deref(),
-                    );
+                    let (resource_templates, next_cursor) = match pagination_option {
+                        Some(pagination) => {
+                            pagination.paginate(
+                                &all_templates,
+                                params.cursor.as_deref(),
+                            )
+                        },
+                        None => {
+                            (all_templates.clone(), None)
+                        }
+                    };
 
                     let response = ListResourceTemplatesResult { next_cursor, resource_templates: resource_templates.clone(), meta: None };
 
                     info!(
-                        "Successfully handled resources/templates/list request, returned {} of {} templates with page size {}",
+                        "Successfully handled resources/templates/list request, returned {} of {} templates{}",
                         resource_templates.len(),
                         all_templates.len(),
-                        pagination.size
+                        match pagination_option {
+                            Some(p) => format!(" with page size {}", p.size),
+                            None => " (pagination disabled)".to_string(),
+                        }
                     );
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
@@ -700,17 +723,30 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
                     }
 
-                    let pagination = server.read().await.get_pagination().await;
+                    let pagination_option = server.read().await.get_pagination().await;
                     
-                    let (prompts, next_cursor) = pagination.paginate(
-                        &all_prompts,
-                        params.cursor.as_deref(),
-                    );
+                    let (prompts, next_cursor) = match pagination_option {
+                        Some(pagination) => {
+                            pagination.paginate(
+                                &all_prompts,
+                                params.cursor.as_deref(),
+                            )
+                        },
+                        None => {
+                            (all_prompts.clone(), None)
+                        }
+                    };
 
                     let response = ListPromptsResult { next_cursor, prompts: prompts.clone(), meta: None };
 
-                    info!("Successfully handled prompts/list request, returned {} of {} prompts with page size {}", 
-                        prompts.len(), all_prompts.len(), pagination.size);
+                    info!("Successfully handled prompts/list request, returned {} of {} prompts{}", 
+                        prompts.len(),
+                        all_prompts.len(),
+                        match pagination_option {
+                            Some(p) => format!(" with page size {}", p.size),
+                            None => " (pagination disabled)".to_string(),
+                        }
+                    );
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
             }
@@ -795,17 +831,30 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
                     }
                     
-                    let pagination = server.read().await.get_pagination().await;
+                    let pagination_option = server.read().await.get_pagination().await;
                     
-                    let (tools, next_cursor) = pagination.paginate(
-                        &all_tools,
-                        params.cursor.as_deref(),
-                    );
+                    let (tools, next_cursor) = match pagination_option {
+                        Some(pagination) => {
+                            pagination.paginate(
+                                &all_tools,
+                                params.cursor.as_deref(),
+                            )
+                        },
+                        None => {
+                            (all_tools.clone(), None)
+                        }
+                    };
                     
                     let response = ListToolsResult { next_cursor, tools: tools.clone(), meta: None };
                     
-                    info!("Successfully handled tools/list request, returned {} of {} tools with page size {}", 
-                        tools.len(), all_tools.len(), pagination.size);
+                    info!("Successfully handled tools/list request, returned {} of {} tools{}", 
+                        tools.len(),
+                        all_tools.len(),
+                        match pagination_option {
+                            Some(p) => format!(" with page size {}", p.size),
+                            None => " (pagination disabled)".to_string(),
+                        }
+                    );
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
             }
