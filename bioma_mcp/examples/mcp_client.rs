@@ -205,15 +205,17 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing tools...");
-    let tools_result = client.list_tools(None).await;
+    let tools_result = client.list_all_tools().await;
     match tools_result {
-        Ok(tools_result) => {
-            info!("Available tools:");
-            for tool in tools_result.tools {
+        Ok(result) => {
+            info!("Available tools (total: {}):", result.items.len());
+            for tool in result.items {
                 info!("- {}", tool.name);
             }
         }
-        Err(e) => error!("Error listing tools: {:?}", e),
+        Err(e) => {
+            error!("Error listing all tools: {:?}", e);
+        }
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;

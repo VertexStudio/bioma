@@ -1,5 +1,6 @@
 use anyhow::{Context as AnyhowContext, Error, Result};
 use bioma_mcp::{
+    pagination,
     prompts::{self, PromptGetHandler},
     resources::{self, ResourceReadHandler},
     schema::{
@@ -24,6 +25,9 @@ struct Args {
 
     #[arg(long, short, default_value = ".")]
     base_dir: PathBuf,
+
+    #[arg(long, help = "Page size for pagination (omit to disable pagination)")]
+    size: Option<usize>,
 
     #[command(subcommand)]
     transport: Transport,
@@ -77,6 +81,7 @@ struct ExampleMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
     base_dir: PathBuf,
+    pagination: Option<pagination::Pagination>,
 }
 
 impl ModelContextProtocolServer for ExampleMcpServer {
@@ -112,6 +117,10 @@ impl ModelContextProtocolServer for ExampleMcpServer {
     async fn on_error(&self, error: Error) {
         error!("Error: {}", error);
     }
+
+    async fn get_pagination(&self) -> Option<pagination::Pagination> {
+        self.pagination.clone()
+    }
 }
 
 #[tokio::main]
@@ -132,7 +141,14 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let server = ExampleMcpServer { transport_config, capabilities, base_dir: args.base_dir };
+    let pagination = args.size.map(|size| pagination::Pagination { size });
+
+    let server = ExampleMcpServer {
+        transport_config,
+        capabilities,
+        base_dir: args.base_dir,
+        pagination,
+    };
 
     let mcp_server = Server::new(server);
 
