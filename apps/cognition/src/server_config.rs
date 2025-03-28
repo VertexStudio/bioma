@@ -147,6 +147,10 @@ impl Default for ServerConfig {
 #[derive(Parser)]
 pub struct Args {
     pub config: Option<PathBuf>,
+    #[clap(long)] // Optional parameter for engine.endpoint
+    pub engine_endpoint: Option<String>,
+    #[clap(long)] // Optional parameter for engine.namespace
+    pub chat_endpoint: Option<String>,
     #[clap(long, default_value = "/rag/tools_hub")]
     pub tools_hub_id: String,
 }
@@ -164,6 +168,17 @@ impl Args {
                 ServerConfig::default()
             }
         };
+
+        // Override endpoints if provided from command line
+        if let Some(engine_endpoint) = &self.engine_endpoint {
+            info!("Received engine endpoint: {}", engine_endpoint);
+            config.engine.endpoint = engine_endpoint.clone();
+        }
+
+        if let Some(chat_endpoint) = &self.chat_endpoint {
+            info!("Received chat endpoint: {}", chat_endpoint);
+            config.chat_endpoint = Url::parse(chat_endpoint)?;
+        }
         info!("├─ Engine Configuration:");
         info!("│  ├─ Endpoint: {}", config.engine.endpoint);
         info!("│  ├─ Namespace: {}", config.engine.namespace);
