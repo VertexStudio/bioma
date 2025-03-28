@@ -262,7 +262,7 @@ impl Transport for WsTransport {
                         info!("WebSocket server listening on {}", endpoint_clone);
 
                         while let Ok((stream, addr)) = listener.accept().await {
-                            let conn_id = ConnectionId::new();
+                            let conn_id = ConnectionId::new(None);
                             debug!("Accepting connection from {} with ID {}", addr, conn_id);
 
                             let ws_stream = accept_async(stream).await.map_err(|e| {

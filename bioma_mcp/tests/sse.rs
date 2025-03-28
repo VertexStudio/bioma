@@ -11,8 +11,8 @@ use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_client_id() {
-    let id1 = ConnectionId::new();
-    let id2 = ConnectionId::new();
+    let id1 = ConnectionId::new(None);
+    let id2 = ConnectionId::new(None);
     assert_ne!(id1, id2, "Generated IDs should be unique");
 
     let id_str = id1.to_string();
@@ -143,7 +143,7 @@ async fn test_error_handling() -> Result<()> {
     let test_message = json!({"jsonrpc":"2.0","method":"test","params":{},"id":"test"});
     let json_rpc_message: JsonRpcMessage = serde_json::from_value(test_message)?;
 
-    let result = client.send(json_rpc_message, ConnectionId::new()).await;
+    let result = client.send(json_rpc_message, ConnectionId::new(None)).await;
     assert!(result.is_err(), "Sending without connection should fail");
 
     Ok(())
