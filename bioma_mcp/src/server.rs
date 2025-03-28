@@ -433,33 +433,27 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     };
 
                     let all_resources = session.list_resources();
-                    
+
                     if !crate::pagination::Cursor::validate(params.cursor.as_deref()) {
                         error!("Invalid cursor provided: {:?}", params.cursor);
                         return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
                     }
-                    
+
                     let pagination_option = server.read().await.get_pagination().await;
-                    
+
                     let (resources, next_cursor) = match pagination_option {
-                        Some(pagination) => {
-                            pagination.paginate(
-                                &all_resources,
-                                params.cursor.as_deref(),
-                            )
-                        },
-                        None => {
-                            (all_resources.clone(), None)
-                        }
+                        Some(ref pagination) => pagination.paginate(&all_resources, params.cursor.as_deref()),
+                        None => (all_resources.clone(), None),
                     };
-                    
+
                     let response = ListResourcesResult { next_cursor, resources: resources.clone(), meta: None };
 
-                    info!("Successfully handled resources/list request, returned {} of {} resources{}", 
+                    info!(
+                        "Successfully handled resources/list request, returned {} of {} resources{}",
                         resources.len(),
                         all_resources.len(),
                         match pagination_option {
-                            Some(p) => format!(" with page size {}", p.size),
+                            Some(ref p) => format!(" with page size {}", p.size),
                             None => " (pagination disabled)".to_string(),
                         }
                     );
@@ -519,11 +513,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
         io_handler.add_method_with_meta("resources/templates/list", {
             let sessions = self.sessions.clone();
             let server = self.server.clone();
-            
+
             move |params: Params, meta: ServerMetadata| {
                 let sessions = sessions.clone();
                 let server = server.clone();
-                
+
                 async move {
                     debug!("Handling resources/templates/list request");
 
@@ -543,9 +537,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
                     };
 
-                    let all_templates = session.resources.iter()
-                        .flat_map(|resource| resource.templates())
-                        .collect::<Vec<_>>();
+                    let all_templates =
+                        session.resources.iter().flat_map(|resource| resource.templates()).collect::<Vec<_>>();
 
                     if !crate::pagination::Cursor::validate(params.cursor.as_deref()) {
                         error!("Invalid cursor provided: {:?}", params.cursor);
@@ -553,27 +546,24 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     }
 
                     let pagination_option = server.read().await.get_pagination().await;
-                    
+
                     let (resource_templates, next_cursor) = match pagination_option {
-                        Some(pagination) => {
-                            pagination.paginate(
-                                &all_templates,
-                                params.cursor.as_deref(),
-                            )
-                        },
-                        None => {
-                            (all_templates.clone(), None)
-                        }
+                        Some(ref pagination) => pagination.paginate(&all_templates, params.cursor.as_deref()),
+                        None => (all_templates.clone(), None),
                     };
 
-                    let response = ListResourceTemplatesResult { next_cursor, resource_templates: resource_templates.clone(), meta: None };
+                    let response = ListResourceTemplatesResult {
+                        next_cursor,
+                        resource_templates: resource_templates.clone(),
+                        meta: None,
+                    };
 
                     info!(
                         "Successfully handled resources/templates/list request, returned {} of {} templates{}",
                         resource_templates.len(),
                         all_templates.len(),
                         match pagination_option {
-                            Some(p) => format!(" with page size {}", p.size),
+                            Some(ref p) => format!(" with page size {}", p.size),
                             None => " (pagination disabled)".to_string(),
                         }
                     );
@@ -692,11 +682,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
         io_handler.add_method_with_meta("prompts/list", {
             let sessions = self.sessions.clone();
             let server = self.server.clone();
-            
+
             move |params: Params, meta: ServerMetadata| {
                 let sessions = sessions.clone();
                 let server = server.clone();
-                
+
                 debug!("Handling prompts/list request");
 
                 async move {
@@ -724,26 +714,20 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     }
 
                     let pagination_option = server.read().await.get_pagination().await;
-                    
+
                     let (prompts, next_cursor) = match pagination_option {
-                        Some(pagination) => {
-                            pagination.paginate(
-                                &all_prompts,
-                                params.cursor.as_deref(),
-                            )
-                        },
-                        None => {
-                            (all_prompts.clone(), None)
-                        }
+                        Some(ref pagination) => pagination.paginate(&all_prompts, params.cursor.as_deref()),
+                        None => (all_prompts.clone(), None),
                     };
 
                     let response = ListPromptsResult { next_cursor, prompts: prompts.clone(), meta: None };
 
-                    info!("Successfully handled prompts/list request, returned {} of {} prompts{}", 
+                    info!(
+                        "Successfully handled prompts/list request, returned {} of {} prompts{}",
                         prompts.len(),
                         all_prompts.len(),
                         match pagination_option {
-                            Some(p) => format!(" with page size {}", p.size),
+                            Some(ref p) => format!(" with page size {}", p.size),
                             None => " (pagination disabled)".to_string(),
                         }
                     );
@@ -820,38 +804,29 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let conn_id = meta.conn_id.clone();
                     let sessions = sessions.read().await;
 
-                    let all_tools = if let Some(session) = sessions.get(&conn_id) { 
-                        session.list_tools() 
-                    } else { 
-                        vec![] 
-                    };
-                    
+                    let all_tools =
+                        if let Some(session) = sessions.get(&conn_id) { session.list_tools() } else { vec![] };
+
                     if !crate::pagination::Cursor::validate(params.cursor.as_deref()) {
                         error!("Invalid cursor provided: {:?}", params.cursor);
                         return Err(jsonrpc_core::Error::invalid_params("Invalid cursor".to_string()));
                     }
-                    
+
                     let pagination_option = server.read().await.get_pagination().await;
-                    
+
                     let (tools, next_cursor) = match pagination_option {
-                        Some(pagination) => {
-                            pagination.paginate(
-                                &all_tools,
-                                params.cursor.as_deref(),
-                            )
-                        },
-                        None => {
-                            (all_tools.clone(), None)
-                        }
+                        Some(ref pagination) => pagination.paginate(&all_tools, params.cursor.as_deref()),
+                        None => (all_tools.clone(), None),
                     };
-                    
+
                     let response = ListToolsResult { next_cursor, tools: tools.clone(), meta: None };
-                    
-                    info!("Successfully handled tools/list request, returned {} of {} tools{}", 
+
+                    info!(
+                        "Successfully handled tools/list request, returned {} of {} tools{}",
                         tools.len(),
                         all_tools.len(),
                         match pagination_option {
-                            Some(p) => format!(" with page size {}", p.size),
+                            Some(ref p) => format!(" with page size {}", p.size),
                             None => " (pagination disabled)".to_string(),
                         }
                     );

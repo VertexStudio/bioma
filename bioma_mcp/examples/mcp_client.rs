@@ -5,7 +5,7 @@ use bioma_mcp::{
     client::{Client, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ReadResourceRequestParams, Root,
+        CreateMessageResult, Implementation, ListToolsRequestParams, ReadResourceRequestParams, Root,
     },
 };
 use clap::Parser;
@@ -207,9 +207,9 @@ async fn main() -> Result<()> {
     info!("Listing tools...");
     let mut tools = Vec::new();
     let mut cursor: Option<String> = None;
-    
+
     loop {
-        let tools_result = client.list_tools(cursor.clone()).await;
+        let tools_result = client.list_tools(Some(ListToolsRequestParams { cursor: cursor.clone() })).await;
         match tools_result {
             Ok(result) => {
                 tools.extend(result.tools);
@@ -226,7 +226,7 @@ async fn main() -> Result<()> {
             }
         }
     }
-    
+
     info!("Available tools (total: {}):", tools.len());
     for tool in tools {
         info!("- {}", tool.name);
