@@ -14,8 +14,8 @@ pub mod transport;
 pub struct ConnectionId(String);
 
 impl ConnectionId {
-    pub fn new(server_name: Option<String>) -> Self {
-        let connection_id = match server_name {
+    pub fn new(prefix: Option<String>) -> Self {
+        let connection_id = match prefix {
             Some(name) => format!("{}-{}", name, Uuid::new_v4()),
             None => Uuid::new_v4().to_string(),
         };
