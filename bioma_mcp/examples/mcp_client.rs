@@ -205,15 +205,31 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing tools...");
-    let tools_result = client.list_tools(None).await;
-    match tools_result {
-        Ok(tools_result) => {
-            info!("Available tools:");
-            for tool in tools_result.tools {
-                info!("- {}", tool.name);
+    let mut tools = Vec::new();
+    let mut cursor: Option<String> = None;
+    
+    loop {
+        let tools_result = client.list_tools(cursor.clone()).await;
+        match tools_result {
+            Ok(result) => {
+                tools.extend(result.tools);
+                if let Some(next) = result.next_cursor {
+                    info!("More tools available, fetching next page...");
+                    cursor = Some(next);
+                } else {
+                    break;
+                }
+            }
+            Err(e) => {
+                error!("Error listing tools: {:?}", e);
+                break;
             }
         }
-        Err(e) => error!("Error listing tools: {:?}", e),
+    }
+    
+    info!("Available tools (total: {}):", tools.len());
+    for tool in tools {
+        info!("- {}", tool.name);
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
