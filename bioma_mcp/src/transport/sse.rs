@@ -325,7 +325,7 @@ impl Transport for SseTransport {
                                                 debug!("New SSE client connected");
 
                                                 let (client_tx, mut client_rx) = mpsc::channel::<SseEvent>(capacity);
-                                                let conn_id = ConnectionId::new();
+                                                let conn_id = ConnectionId::new(None);
 
                                                 {
                                                     let mut clients_map = clients.lock().await;
@@ -391,7 +391,7 @@ impl Transport for SseTransport {
                                             (&Method::POST, path) => {
                                                 let conn_id = if let Some(id_str) = path.strip_prefix("/sse/") {
                                                     if let Ok(uuid) = Uuid::parse_str(id_str) {
-                                                        ConnectionId(uuid)
+                                                        ConnectionId(uuid.to_string())
                                                     } else {
                                                         let response = Response::builder()
                                                             .status(StatusCode::BAD_REQUEST)

@@ -230,7 +230,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         };
 
-        let conn_id = ConnectionId::new();
+        let conn_id = ConnectionId::new(Some(server_config.name.clone()));
         let transport_sender = transport.sender();
         let conn_id_clone = conn_id.clone();
 
@@ -350,7 +350,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             .get_server_configs()
             .await
             .iter()
-            .find(|cfg| connection.conn_id.to_string().contains(&cfg.name))
+            .find(|cfg| connection.conn_id.contains(&cfg.name))
             .map(|cfg| cfg.request_timeout)
             .unwrap_or(5);
 
