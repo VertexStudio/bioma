@@ -41,7 +41,3 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 clap = { workspace = true }
 tempfile = "3.3.0"
-
-ollama-rs = { workspace = true }
-bioma_llm = { path = "../bioma_llm" }
-bioma_actor = { path = "../bioma_actor" }

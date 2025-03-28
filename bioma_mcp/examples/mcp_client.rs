@@ -1,14 +1,9 @@
 use anyhow::Result;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions};
-use bioma_llm::{
-    chat::{Chat, ChatMessages},
-    prelude::ChatMessage,
-};
 use bioma_mcp::{
     client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root,
+        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root, SamplingMessage,
     },
 };
 use clap::Parser;
@@ -32,29 +27,11 @@ struct ClientConfig {
     pub servers: Vec<ServerConfig>,
 }
 
-#[derive(Debug)]
-struct SamplingChat {
-    engine: Engine,
-    chat_id: ActorId,
-}
-
-impl SamplingChat {
-    pub async fn new(chat: Chat) -> Result<Self> {
-        let engine = Engine::test().await?;
-
-        let chat_id = ActorId::of::<Chat>("/llm/sampling");
-
-        let (mut chat_ctx, mut chat_actor) =
-            Actor::spawn(engine.clone(), chat_id.clone(), chat, SpawnOptions::default()).await?;
-
-        let _chat_handle = tokio::spawn(async move {
-            if let Err(e) = chat_actor.start(&mut chat_ctx).await {
-                tracing::error!("Chat actor error: {}", e);
-            }
-        });
-
-        Ok(Self { engine, chat_id })
-    }
+#[derive(Serialize, Deserialize, Debug)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<SamplingMessage>,
+    stream: bool,
 }
 
 #[derive(Clone)]
@@ -110,54 +87,20 @@ impl ModelContextProtocolClient for ExampleMcpClient {
 
         info!("Model: {}", model);
 
-        let chat = Chat::builder().model(model.into()).build();
+        let body = OllamaRequest { model: "llama3.2".to_string(), messages: params.messages, stream: false };
 
-        let chat_sampling = SamplingChat::new(chat).await.map_err(|e| ClientError::Request(e.to_string().into()))?;
+        let client = reqwest::Client::new();
+        let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
 
-        let engine = chat_sampling.engine.clone();
-
-        let relay_id = ActorId::of::<Relay>("/relay");
-        let (relay_ctx, _relay_actor) = Actor::spawn(engine, relay_id.clone(), Relay, SpawnOptions::default())
-            .await
-            .map_err(|_| ClientError::Request("Error creating relay actor".into()))?;
-
-        let chat_messages = params
-            .messages
-            .iter()
-            .map(|sampling_message| ChatMessage {
-                role: match sampling_message.role {
-                    Role::User => ollama_rs::generation::chat::MessageRole::User,
-                    Role::Assistant => ollama_rs::generation::chat::MessageRole::Assistant,
-                },
-                content: sampling_message.content.to_string(),
-                tool_calls: vec![],
-                images: None,
-            })
-            .collect();
-
-        let chat_response = relay_ctx
-            .send_and_wait_reply::<Chat, ChatMessages>(
-                ChatMessages {
-                    messages: chat_messages,
-                    restart: true,
-                    persist: false,
-                    stream: false,
-                    format: None,
-                    tools: None,
-                    options: None,
-                },
-                &chat_sampling.chat_id,
-                SendOptions::builder().timeout(std::time::Duration::from_secs(600)).build(),
-            )
-            .await
-            .map_err(|e| ClientError::Request(e.to_string().into()))?;
-
-        let content = serde_json::to_value(chat_response.message.content).map_err(|e| ClientError::JsonError(e))?;
+        let llm_response = match res {
+            Ok(res) => res.text().await.unwrap(),
+            Err(_) => "Error while sending request".to_string(),
+        };
 
         Ok(CreateMessageResult {
             meta: None,
-            content,
-            model: chat_response.model,
+            content: serde_json::to_value(llm_response).unwrap(),
+            model: body.model,
             role: Role::Assistant,
             stop_reason: None,
         })
