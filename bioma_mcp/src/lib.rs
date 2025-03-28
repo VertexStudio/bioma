@@ -11,11 +11,16 @@ pub mod tools;
 pub mod transport;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Deref)]
-pub struct ConnectionId(Uuid);
+pub struct ConnectionId(String);
 
 impl ConnectionId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    pub fn new(prefix: Option<String>) -> Self {
+        let connection_id = match prefix {
+            Some(name) => format!("{}-{}", name, Uuid::new_v4()),
+            None => Uuid::new_v4().to_string(),
+        };
+
+        Self(connection_id)
     }
 }
 

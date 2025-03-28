@@ -150,7 +150,7 @@ impl Context {
         Self {
             client_capabilities: ClientCapabilities::default(),
             server_capabilities: ServerCapabilities::default(),
-            conn_id: ConnectionId(uuid::Uuid::new_v4()),
+            conn_id: ConnectionId::new(None),
             sender: TransportSender::new_nop(),
             pending_requests: PendingRequests::default(),
             request_counter: RequestCounter::default(),

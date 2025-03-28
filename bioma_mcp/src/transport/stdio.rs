@@ -112,7 +112,7 @@ impl Transport for StdioTransport {
         let handle = tokio::spawn(async move {
             match &*mode {
                 StdioMode::Server { on_message, stdout: _stdout } => {
-                    let conn_id = ConnectionId::new();
+                    let conn_id = ConnectionId::new(None);
                     let stdin = tokio::io::stdin();
                     let mut lines = BufReader::new(stdin).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
