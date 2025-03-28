@@ -157,7 +157,7 @@ pub struct Args {
 
 impl Args {
     pub fn load_config(&self) -> Result<ServerConfig> {
-        let config: ServerConfig = match &self.config {
+        let mut config: ServerConfig = match &self.config {
             Some(path) => {
                 let config = std::fs::read_to_string(path)?;
                 info!("Loaded config: {}", path.display());
@@ -172,7 +172,7 @@ impl Args {
         // Override endpoints if provided from command line
         if let Some(engine_endpoint) = &self.engine_endpoint {
             info!("Received engine endpoint: {}", engine_endpoint);
-            config.engine.endpoint = engine_endpoint.clone();
+            config.engine.endpoint = engine_endpoint.clone().into();
         }
 
         if let Some(chat_endpoint) = &self.chat_endpoint {
