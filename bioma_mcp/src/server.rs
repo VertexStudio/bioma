@@ -41,13 +41,13 @@ pub enum ServerError {
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
+    fn get_pagination(&self) -> impl Future<Output = Option<crate::pagination::Pagination>> + Send {
+        async { Some(crate::pagination::Pagination::default()) }
+    }
     fn new_resources(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
     fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
     fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
     fn on_error(&self, error: anyhow::Error) -> impl Future<Output = ()> + Send;
-    fn get_pagination(&self) -> impl Future<Output = Option<crate::pagination::Pagination>> + Send {
-        async { Some(crate::pagination::Pagination::default()) }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
