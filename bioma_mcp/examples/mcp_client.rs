@@ -5,7 +5,7 @@ use bioma_mcp::{
     client::{Client, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ListToolsRequestParams, ReadResourceRequestParams, Root,
+        CreateMessageResult, Implementation, ReadResourceRequestParams, Root,
     },
 };
 use clap::Parser;
@@ -205,31 +205,17 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing tools...");
-    let mut tools = Vec::new();
-    let mut cursor: Option<String> = None;
-
-    loop {
-        let tools_result = client.list_tools(Some(ListToolsRequestParams { cursor: cursor.clone() })).await;
-        match tools_result {
-            Ok(result) => {
-                tools.extend(result.tools);
-                if let Some(next) = result.next_cursor {
-                    info!("More tools available, fetching next page...");
-                    cursor = Some(next);
-                } else {
-                    break;
-                }
-            }
-            Err(e) => {
-                error!("Error listing tools: {:?}", e);
-                break;
+    let tools_result = client.list_all_tools().await;
+    match tools_result {
+        Ok(result) => {
+            info!("Available tools (total: {}):", result.items.len());
+            for tool in result.items {
+                info!("- {}", tool.name);
             }
         }
-    }
-
-    info!("Available tools (total: {}):", tools.len());
-    for tool in tools {
-        info!("- {}", tool.name);
+        Err(e) => {
+            error!("Error listing all tools: {:?}", e);
+        }
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;

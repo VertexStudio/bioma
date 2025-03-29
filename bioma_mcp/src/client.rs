@@ -871,6 +871,144 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(ClientError::Request(errors.join(", ").into()))
         }
     }
+
+    pub async fn paginate<Req, Res, Item>(
+        &mut self,
+        method: &str,
+        mut request_fn: impl FnMut(Option<String>) -> Req,
+        extract_items: impl Fn(&Res) -> Vec<Item>,
+        extract_cursor: impl Fn(&Res) -> Option<String>,
+    ) -> Result<PaginatedResult<Item>, ClientError>
+    where
+        Req: Serialize + Clone,
+        for<'de> Res: Deserialize<'de> + Serialize,
+        Item: Clone,
+    {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut all_items = Vec::new();
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+        let mut meta = None;
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let request = request_fn(cursor.clone());
+
+            let mut success = false;
+            for (server_name, connection) in &mut self.connections {
+                match Self::request(
+                    connection,
+                    method.to_string(),
+                    serde_json::to_value(request.clone())?,
+                    client.clone(),
+                )
+                .await
+                {
+                    Ok(response) => match serde_json::from_value::<Res>(response) {
+                        Ok(result) => {
+                            success = true;
+                            all_items.extend(extract_items(&result));
+
+                            // Save metadata from the last successful response
+                            if let Some(m) = Self::extract_meta(&result) {
+                                meta = Some(m);
+                            }
+
+                            // Get next cursor if available
+                            cursor = extract_cursor(&result);
+
+                            // If no next cursor, we're done
+                            if cursor.is_none() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
+                }
+            }
+
+            // If we couldn't get results from any server or no next cursor, we're done
+            if !success || cursor.is_none() {
+                break;
+            }
+        }
+
+        if all_items.is_empty() && !errors.is_empty() {
+            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
+        } else {
+            Ok(PaginatedResult { items: all_items, meta })
+        }
+    }
+
+    // Helper method to extract metadata from responses
+    fn extract_meta<Res>(result: &Res) -> Option<BTreeMap<String, Value>>
+    where
+        Res: Serialize,
+    {
+        let value = serde_json::to_value(result).ok()?;
+        if let Some(obj) = value.as_object() {
+            if let Some(meta) = obj.get("meta") {
+                if let Some(meta_obj) = meta.as_object() {
+                    return Some(meta_obj.clone().into_iter().collect());
+                }
+            }
+        }
+        None
+    }
+
+    // Helper method to list all tools using pagination
+    pub async fn list_all_tools(&mut self) -> Result<PaginatedResult<crate::schema::Tool>, ClientError> {
+        self.paginate(
+            "tools/list",
+            |cursor| ListToolsRequestParams { cursor },
+            |result: &ListToolsResult| result.tools.clone(),
+            |result: &ListToolsResult| result.next_cursor.clone(),
+        )
+        .await
+    }
+
+    // Helper method to list all resources using pagination
+    pub async fn list_all_resources(&mut self) -> Result<PaginatedResult<crate::schema::Resource>, ClientError> {
+        self.paginate(
+            "resources/list",
+            |cursor| ListResourcesRequestParams { cursor },
+            |result: &ListResourcesResult| result.resources.clone(),
+            |result: &ListResourcesResult| result.next_cursor.clone(),
+        )
+        .await
+    }
+
+    // Helper method to list all prompts using pagination
+    pub async fn list_all_prompts(&mut self) -> Result<PaginatedResult<crate::schema::Prompt>, ClientError> {
+        self.paginate(
+            "prompts/list",
+            |cursor| ListPromptsRequestParams { cursor },
+            |result: &ListPromptsResult| result.prompts.clone(),
+            |result: &ListPromptsResult| result.next_cursor.clone(),
+        )
+        .await
+    }
+
+    // Helper method to list all resource templates using pagination
+    pub async fn list_all_resource_templates(
+        &mut self,
+    ) -> Result<PaginatedResult<crate::schema::ResourceTemplate>, ClientError> {
+        self.paginate(
+            "resources/templates/list",
+            |cursor| ListResourceTemplatesRequestParams { cursor },
+            |result: &ListResourceTemplatesResult| result.resource_templates.clone(),
+            |result: &ListResourceTemplatesResult| result.next_cursor.clone(),
+        )
+        .await
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -887,4 +1025,10 @@ impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client").field("servers", &self.list_servers()).finish()
     }
+}
+
+#[derive(Debug)]
+pub struct PaginatedResult<T> {
+    pub items: Vec<T>,
+    pub meta: Option<BTreeMap<String, Value>>,
 }
