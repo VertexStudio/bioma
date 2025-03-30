@@ -129,6 +129,7 @@ async fn main() -> Result<()> {
         tools: Some(ServerCapabilitiesPromptsResourcesTools { list_changed: Some(false) }),
         resources: Some(ServerCapabilitiesPromptsResources { list_changed: Some(true), subscribe: Some(true) }),
         prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
+        completions: Some(std::collections::BTreeMap::new()),
         ..Default::default()
     };
 

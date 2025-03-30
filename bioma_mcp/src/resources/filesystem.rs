@@ -1,4 +1,4 @@
-use crate::resources::{ResourceDef, ResourceError};
+use crate::resources::{ResourceCompletionHandler, ResourceDef, ResourceError};
 use crate::schema::{ReadResourceResult, ResourceTemplate, ResourceUpdatedNotificationParams};
 use crate::server::Context;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -159,6 +159,8 @@ impl FileSystem {
         format!("file://{}", path_str)
     }
 }
+
+impl ResourceCompletionHandler for FileSystem {}
 
 impl ResourceDef for FileSystem {
     const NAME: &'static str = "filesystem";
