@@ -1,9 +1,10 @@
 use crate::schema::{
-    CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequestParams, CreateMessageResult,
-    GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
-    InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
-    ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
-    ListToolsResult, Prompt, ReadResourceRequestParams, ReadResourceResult, Resource, ResourceTemplate, Root,
+    CallToolRequestParams, CallToolResult, ClientCapabilities, CompleteRequestParams, CompleteRequestParamsArgument,
+    CompleteResult, CompleteResultCompletion, CreateMessageRequestParams, CreateMessageResult, GetPromptRequestParams,
+    GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, InitializedNotificationParams,
+    ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult,
+    ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult, Prompt, PromptReference,
+    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceReference, ResourceTemplate, Root,
     RootsListChangedNotificationParams, ServerCapabilities, Tool,
 };
 use crate::transport::sse::SseTransport;
@@ -692,6 +693,88 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         Err(ClientError::Request(format!("Unable to call tool on any server: {}", errors.join(", ")).into()))
+    }
+
+    async fn complete(&mut self, params: CompleteRequestParams) -> Result<CompleteResult, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut errors = Vec::new();
+        let client = self.client.clone();
+
+        for (server_name, connection) in &mut self.connections {
+            let supports_completions = {
+                let server_caps = connection.server_capabilities.read().await;
+                server_caps.as_ref().and_then(|caps| caps.completions.as_ref()).is_some()
+            };
+
+            if !supports_completions {
+                continue;
+            }
+
+            match Self::request(
+                connection,
+                "completion/complete".to_string(),
+                serde_json::to_value(params.clone())?,
+                client.clone(),
+            )
+            .await
+            {
+                Ok(response) => match serde_json::from_value::<CompleteResult>(response) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                    }
+                },
+                Err(e) => {
+                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(CompleteResult {
+                meta: None,
+                completion: CompleteResultCompletion { values: vec![], total: None, has_more: None },
+            })
+        } else {
+            Err(ClientError::Request(
+                format!("Unable to get completions from any server: {}", errors.join(", ")).into(),
+            ))
+        }
+    }
+
+    pub async fn complete_prompt(
+        &mut self,
+        prompt_name: String,
+        name: String,
+        value: String,
+    ) -> Result<CompleteResult, ClientError> {
+        let prompt_ref = PromptReference { type_: "ref/prompt".to_string(), name: prompt_name };
+
+        let params = CompleteRequestParams {
+            ref_: serde_json::to_value(prompt_ref)?,
+            argument: CompleteRequestParamsArgument { name, value },
+        };
+
+        self.complete(params).await
+    }
+
+    pub async fn complete_resource(
+        &mut self,
+        resource_uri: String,
+        name: String,
+        value: String,
+    ) -> Result<CompleteResult, ClientError> {
+        let resource_ref = ResourceReference { type_: "ref/resource".to_string(), uri: resource_uri };
+
+        let params = CompleteRequestParams {
+            ref_: serde_json::to_value(resource_ref)?,
+            argument: CompleteRequestParamsArgument { name, value },
+        };
+
+        self.complete(params).await
     }
 
     pub async fn add_root(&mut self, root: Root, meta: Option<BTreeMap<String, Value>>) -> Result<(), ClientError> {

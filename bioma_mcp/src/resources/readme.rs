@@ -1,9 +1,11 @@
-use crate::resources::{ResourceDef, ResourceError};
+use crate::resources::{ResourceCompletionHandler, ResourceDef, ResourceError};
 use crate::schema::ReadResourceResult;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Readme;
+
+impl ResourceCompletionHandler for Readme {}
 
 impl ResourceDef for Readme {
     const NAME: &'static str = "readme";

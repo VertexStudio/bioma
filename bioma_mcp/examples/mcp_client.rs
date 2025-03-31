@@ -109,7 +109,20 @@ async fn main() -> Result<()> {
     info!("Listing prompts...");
     let prompts_result = client.list_all_prompts(None).await;
     match prompts_result {
-        Ok(prompts) => info!("Available prompts: {:?}", prompts),
+        Ok(prompts_result) => {
+            info!("Available prompts: {:?}", prompts_result);
+
+            if prompts_result.iter().any(|p| p.name == "greet") {
+                info!("Testing completion for 'greet' prompt's 'name' argument...");
+
+                match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await {
+                    Ok(result) => {
+                        info!("Completions for 'name' starting with 'a': {:?}", result.completion.values);
+                    }
+                    Err(e) => error!("Error getting completions: {:?}", e),
+                }
+            }
+        }
         Err(e) => error!("Error listing prompts: {:?}", e),
     }
 
@@ -123,6 +136,14 @@ async fn main() -> Result<()> {
 
             if let Some(filesystem) = resources_result.resources.iter().find(|r| r.name == "filesystem") {
                 info!("Found filesystem resource: {}", filesystem.uri);
+
+                info!("Testing completion for filesystem resource paths...");
+                match client.complete_resource("file:///".to_string(), "path".to_string(), "/READ".to_string()).await {
+                    Ok(result) => {
+                        info!("Completions for file paths: {:?}", result.completion.values);
+                    }
+                    Err(e) => error!("Error getting completions: {:?}", e),
+                }
 
                 let readme_uri = "file:///bioma/README.md";
                 info!("Reading file: {}", readme_uri);

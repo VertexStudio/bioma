@@ -1,7 +1,9 @@
-use crate::prompts::{PromptDef, PromptError};
+use crate::prompts::{PromptCompletionHandler, PromptDef, PromptError};
 use crate::schema::{GetPromptResult, PromptMessage, Role, TextContent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct GreetArgs {
@@ -11,6 +13,32 @@ pub struct GreetArgs {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Greet;
+
+impl PromptCompletionHandler for Greet {
+    fn complete_argument<'a>(
+        &'a self,
+        argument_name: &'a str,
+        argument_value: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, PromptError>> + Send + 'a>> {
+        let name = argument_name.to_string();
+        let value = argument_value.to_string();
+
+        Box::pin(async move {
+            if name == "name" && !value.is_empty() {
+                let suggestions =
+                    ["Alice", "Bob", "Charlie", "David", "Emma", "Frank", "Grace", "Hannah", "Ian", "Julia"]
+                        .iter()
+                        .filter(|name| name.to_lowercase().starts_with(&value.to_lowercase()))
+                        .map(|name| name.to_string())
+                        .collect();
+
+                Ok(suggestions)
+            } else {
+                Ok(vec![])
+            }
+        })
+    }
+}
 
 impl PromptDef for Greet {
     const NAME: &'static str = "greet";
@@ -69,6 +97,27 @@ mod tests {
         let result = greet.get(props).await.unwrap();
         let text_content: TextContent = serde_json::from_value(result.messages[0].content.clone()).unwrap();
         assert_eq!(text_content.text, "Hello, Alice! Welcome to Bioma!");
+    }
+
+    #[tokio::test]
+    async fn test_greet_completion() {
+        let greet = Greet;
+
+        let completion_future = greet.complete_argument("name", "a");
+        let completions = completion_future.await.unwrap();
+        assert!(completions.contains(&"Alice".to_string()));
+
+        let completion_future = greet.complete_argument("name", "A");
+        let completions = completion_future.await.unwrap();
+        assert!(completions.contains(&"Alice".to_string()));
+
+        let completion_future = greet.complete_argument("unknown", "test");
+        let completions = completion_future.await.unwrap();
+        assert!(completions.is_empty());
+
+        let completion_future = greet.complete_argument("name", "");
+        let completions = completion_future.await.unwrap();
+        assert!(completions.is_empty());
     }
 
     #[test]

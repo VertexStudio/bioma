@@ -866,6 +866,100 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         });
 
+        io_handler.add_method_with_meta("completion/complete", {
+            let sessions = self.sessions.clone();
+
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
+
+                async move {
+                    debug!("Handling completion/complete request");
+
+                    let params: crate::schema::CompleteRequestParams = params.parse().map_err(|e| {
+                        error!("Failed to parse completion params: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?;
+
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&meta.conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    match &params.ref_ {
+                        serde_json::Value::Object(obj) => {
+                            if let Some(type_val) = obj.get("type") {
+                                if let Some(type_str) = type_val.as_str() {
+                                    if type_str == "ref/prompt" {
+                                        if let Some(name_val) = obj.get("name") {
+                                            if let Some(name_str) = name_val.as_str() {
+                                                if let Some(prompt) = session.find_prompt(name_str) {
+                                                    let completions = prompt
+                                                        .complete_argument_boxed(
+                                                            params.argument.name.clone(),
+                                                            params.argument.value.clone(),
+                                                        )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            error!("Prompt completion error: {}", e);
+                                                            jsonrpc_core::Error::internal_error()
+                                                        })?;
+
+                                                    return Ok(serde_json::to_value(crate::schema::CompleteResult {
+                                                        meta: None,
+                                                        completion: crate::schema::CompleteResultCompletion {
+                                                            values: completions,
+                                                            total: None,
+                                                            has_more: Some(false),
+                                                        },
+                                                    })
+                                                    .unwrap());
+                                                }
+                                            }
+                                        }
+                                    } else if type_str == "ref/resource" {
+                                        if let Some(uri_val) = obj.get("uri") {
+                                            if let Some(uri_str) = uri_val.as_str() {
+                                                if let Some(resource) = session.find_resource(uri_str) {
+                                                    let completions = resource
+                                                        .complete_boxed(
+                                                            params.argument.name.clone(),
+                                                            params.argument.value.clone(),
+                                                        )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            error!("Resource completion error: {}", e);
+                                                            jsonrpc_core::Error::internal_error()
+                                                        })?;
+
+                                                    return Ok(serde_json::to_value(crate::schema::CompleteResult {
+                                                        meta: None,
+                                                        completion: crate::schema::CompleteResultCompletion {
+                                                            values: completions,
+                                                            total: None,
+                                                            has_more: Some(false),
+                                                        },
+                                                    })
+                                                    .unwrap());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            error!("Invalid reference format");
+                            Err(jsonrpc_core::Error::invalid_params("Invalid reference format"))
+                        }
+                        _ => {
+                            error!("Invalid reference type");
+                            Err(jsonrpc_core::Error::invalid_params("Invalid reference type"))
+                        }
+                    }
+                }
+            }
+        });
+
         {
             let mut transport_lock = transport.lock().await;
             if let Err(e) = transport_lock.start().await {
