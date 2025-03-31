@@ -107,21 +107,21 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing prompts...");
-    let prompts_result = client.list_prompts(None).await;
+    let prompts_result = client.list_all_prompts(None).await;
     match prompts_result {
-        Ok(prompts_result) => info!("Available prompts: {:?}", prompts_result.prompts),
+        Ok(prompts_result) => info!("Available prompts: {:?}", prompts_result),
         Err(e) => error!("Error listing prompts: {:?}", e),
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing resources...");
-    let resources_result = client.list_resources(None).await;
+    let resources_result = client.list_all_resources(None).await;
     match resources_result {
         Ok(resources_result) => {
-            info!("Available resources: {:?}", resources_result.resources);
+            info!("Available resources: {:?}", resources_result);
 
-            if let Some(filesystem) = resources_result.resources.iter().find(|r| r.name == "filesystem") {
+            if let Some(filesystem) = resources_result.iter().find(|r| r.name == "filesystem") {
                 info!("Found filesystem resource: {}", filesystem.uri);
 
                 let readme_uri = "file:///bioma/README.md";
@@ -162,11 +162,11 @@ async fn main() -> Result<()> {
                 }
 
                 info!("Checking for resource templates...");
-                let templates_result = client.list_resource_templates(None).await;
+                let templates_result = client.list_all_resource_templates(None).await;
                 match templates_result {
                     Ok(templates) => {
-                        info!("Found {} resource templates", templates.resource_templates.len());
-                        for template in templates.resource_templates {
+                        info!("Found {} resource templates", templates.len());
+                        for template in templates {
                             info!("- Template: {} URI: {}", template.name, template.uri_template);
                         }
 
@@ -187,10 +187,9 @@ async fn main() -> Result<()> {
             } else {
                 info!("Filesystem resource not found, falling back to readme resource");
 
-                if !resources_result.resources.is_empty() {
-                    let read_result = client
-                        .read_resource(ReadResourceRequestParams { uri: resources_result.resources[0].uri.clone() })
-                        .await;
+                if !resources_result.is_empty() {
+                    let read_result =
+                        client.read_resource(ReadResourceRequestParams { uri: resources_result[0].uri.clone() }).await;
 
                     match read_result {
                         Ok(result) => info!("Resource content: {:?}", result),
@@ -204,18 +203,20 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    info!("Listing tools...");
-    let mut tools_result = client.iter_tools(None);
-    while let Some(tools) = tools_result.next().await {
-        match tools {
+    info!("Listing tools (Paginated)...");
+    let mut tools_iter = client.iter_tools(None);
+    let mut all_tools = Vec::new();
+    while let Some(tools_result) = tools_iter.next().await {
+        match tools_result {
             Ok(tools) => {
-                info!("Available tools:");
-                for tool in tools {
-                    info!("- {}", tool.name);
-                }
+                all_tools.extend(tools);
             }
             Err(e) => error!("Error listing tools: {:?}", e),
         }
+    }
+    info!("Available tools:");
+    for tool in all_tools {
+        info!("- {}", tool.name);
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
