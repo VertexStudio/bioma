@@ -748,14 +748,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn complete_prompt(
         &mut self,
         prompt_name: String,
-        argument_name: String,
-        argument_value: String,
+        name: String,
+        value: String,
     ) -> Result<CompleteResult, ClientError> {
         let prompt_ref = PromptReference { type_: "ref/prompt".to_string(), name: prompt_name };
 
         let params = CompleteRequestParams {
             ref_: serde_json::to_value(prompt_ref)?,
-            argument: CompleteRequestParamsArgument { name: argument_name, value: argument_value },
+            argument: CompleteRequestParamsArgument { name, value },
         };
 
         self.complete(params).await
@@ -764,14 +764,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn complete_resource(
         &mut self,
         resource_uri: String,
-        argument_name: String,
-        argument_value: String,
+        name: String,
+        value: String,
     ) -> Result<CompleteResult, ClientError> {
         let resource_ref = ResourceReference { type_: "ref/resource".to_string(), uri: resource_uri };
 
         let params = CompleteRequestParams {
             ref_: serde_json::to_value(resource_ref)?,
-            argument: CompleteRequestParamsArgument { name: argument_name, value: argument_value },
+            argument: CompleteRequestParamsArgument { name, value },
         };
 
         self.complete(params).await

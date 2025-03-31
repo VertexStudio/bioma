@@ -922,7 +922,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                             if let Some(uri_str) = uri_val.as_str() {
                                                 if let Some(resource) = session.find_resource(uri_str) {
                                                     let completions = resource
-                                                        .complete_argument_boxed(
+                                                        .complete_boxed(
                                                             params.argument.name.clone(),
                                                             params.argument.value.clone(),
                                                         )

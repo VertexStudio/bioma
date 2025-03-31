@@ -163,23 +163,19 @@ impl FileSystem {
 }
 
 impl ResourceCompletionHandler for FileSystem {
-    fn complete_argument<'a>(
+    fn complete<'a>(
         &'a self,
-        argument_name: &'a str,
-        argument_value: &'a str,
+        name: &'a str,
+        value: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
         Box::pin(async move {
             // Only handle path argument completions
-            if argument_name != "path" {
+            if name != "path" {
                 return Ok(vec![]);
             }
 
             // Normalize the input path
-            let input_path = if argument_value.starts_with('/') {
-                argument_value.to_string()
-            } else {
-                format!("/{}", argument_value)
-            };
+            let input_path = if value.starts_with('/') { value.to_string() } else { format!("/{}", value) };
 
             // Determine the directory we should look in and the prefix to match
             let (dir_to_search, prefix_to_match) = if input_path.ends_with('/') || input_path == "/" {
@@ -637,7 +633,7 @@ mod tests {
         let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
         // Test completion with empty input (should list root)
-        let completions = fs_resource.complete_argument("path", "").await.unwrap();
+        let completions = fs_resource.complete("path", "").await.unwrap();
 
         assert!(completions.contains(&"test1.txt".to_string()));
         assert!(completions.contains(&"test2.txt".to_string()));

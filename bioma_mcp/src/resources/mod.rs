@@ -59,18 +59,18 @@ pub trait ResourceReadHandler: Send + Sync {
         })
     }
 
-    fn complete_argument_boxed<'a>(
+    fn complete_boxed<'a>(
         &'a self,
-        argument_name: String,
-        argument_value: String,
+        name: String,
+        value: String,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>>;
 }
 
 pub trait ResourceCompletionHandler {
-    fn complete_argument<'a>(
+    fn complete<'a>(
         &'a self,
-        _argument_name: &'a str,
-        _argument_value: &'a str,
+        _name: &'a str,
+        _value: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
         Box::pin(async move { Ok(vec![]) })
     }
@@ -150,14 +150,14 @@ impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
         Box::pin(async move { self.unsubscribe(uri).await })
     }
 
-    fn complete_argument_boxed<'a>(
+    fn complete_boxed<'a>(
         &'a self,
-        argument_name: String,
-        argument_value: String,
+        name: String,
+        value: String,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
-        let name = argument_name.clone();
-        let value = argument_value.clone();
+        let name = name.clone();
+        let value = value.clone();
 
-        Box::pin(async move { self.complete_argument(&name, &value).await })
+        Box::pin(async move { self.complete(&name, &value).await })
     }
 }

@@ -110,9 +110,9 @@ async fn main() -> Result<()> {
     let prompts_result = client.list_all_prompts(None).await;
     match prompts_result {
         Ok(prompts_result) => {
-            info!("Available prompts: {:?}", prompts_result.prompts);
+            info!("Available prompts: {:?}", prompts_result);
 
-            if prompts_result.prompts.iter().any(|p| p.name == "greet") {
+            if prompts_result.iter().any(|p| p.name == "greet") {
                 info!("Testing completion for 'greet' prompt's 'name' argument...");
 
                 match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await {
@@ -139,7 +139,7 @@ async fn main() -> Result<()> {
 
                 // Test completions for filesystem resource
                 info!("Testing completion for filesystem resource paths...");
-                match client.complete_resource("file:///".to_string(), "path".to_string(), "/".to_string()).await {
+                match client.complete_resource("file:///".to_string(), "path".to_string(), "/READ".to_string()).await {
                     Ok(result) => {
                         info!("Completions for file paths: {:?}", result.completion.values);
                     }
