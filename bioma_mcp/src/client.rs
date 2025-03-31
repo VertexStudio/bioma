@@ -695,7 +695,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         Err(ClientError::Request(format!("Unable to call tool on any server: {}", errors.join(", ")).into()))
     }
 
-    pub async fn complete(&mut self, params: CompleteRequestParams) -> Result<CompleteResult, ClientError> {
+    async fn complete(&mut self, params: CompleteRequestParams) -> Result<CompleteResult, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
