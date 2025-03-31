@@ -47,12 +47,6 @@ impl MultiServerCursor {
     }
 }
 
-pub struct ServerResult<T> {
-    pub server_name: String,
-    pub items: Vec<T>,
-    pub next_cursor: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StdioConfig {
     pub command: String,
@@ -485,83 +479,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: Option<ListResourcesRequestParams>,
     ) -> Result<ListResourcesResult, ClientError> {
-        if self.connections.is_empty() {
-            return Err(ClientError::Request("No server connections available".into()));
-        }
+        self.list_items::<ListResourcesResult, ListResourcesRequestParams>("resources/list", params).await
+    }
 
-        let mut all_resources = Vec::new();
-        let mut errors = Vec::new();
-        let mut has_more = false;
-        let mut server_cursors = HashMap::new();
-
-        let initial_server_cursors: HashMap<String, Option<String>> = if let Some(params) = &params {
-            if let Some(cursor) = &params.cursor {
-                match MultiServerCursor::from_string(cursor) {
-                    Ok(multi_cursor) => multi_cursor.server_cursors,
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            } else {
-                self.connections.keys().map(|k| (k.clone(), None)).collect()
-            }
-        } else {
-            self.connections.keys().map(|k| (k.clone(), None)).collect()
-        };
-
-        let client = self.client.clone();
-
-        for (server_name, cursor) in initial_server_cursors {
-            if let Some(connection) = self.connections.get_mut(&server_name) {
-                let mut req_params = params.clone().unwrap_or_default();
-                req_params.cursor = cursor;
-
-                match Self::request(
-                    connection,
-                    "resources/list".to_string(),
-                    serde_json::to_value(req_params)?,
-                    client.clone(),
-                )
-                .await
-                {
-                    Ok(response) => match serde_json::from_value::<ListResourcesResult>(response) {
-                        Ok(result) => {
-                            all_resources.extend(result.resources);
-
-                            if let Some(next_cursor) = result.next_cursor {
-                                server_cursors.insert(server_name, Some(next_cursor));
-                                has_more = true;
-                            }
-                        }
-                        Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                        }
-                    },
-                    Err(e) => {
-                        errors.push(format!("Error from '{}': {:?}", server_name, e));
-                    }
-                }
-            }
-        }
-
-        if all_resources.is_empty() && !errors.is_empty() {
-            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
-        } else {
-            let next_cursor = if has_more {
-                let multi_cursor = MultiServerCursor { server_cursors };
-                match multi_cursor.to_string() {
-                    Ok(cursor) => Some(cursor),
-                    Err(e) => {
-                        warn!("Failed to encode multi-server cursor: {:?}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            Ok(ListResourcesResult { resources: all_resources, meta: None, next_cursor })
-        }
+    pub async fn list_all_resources(
+        &mut self,
+        params: Option<ListResourcesRequestParams>,
+    ) -> Result<Vec<Resource>, ClientError> {
+        self.list_all_items::<ListResourcesResult, ListResourcesRequestParams>("resources/list", params).await
     }
 
     pub async fn read_resource(
@@ -603,83 +528,22 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: Option<ListResourceTemplatesRequestParams>,
     ) -> Result<ListResourceTemplatesResult, ClientError> {
-        if self.connections.is_empty() {
-            return Err(ClientError::Request("No server connections available".into()));
-        }
+        self.list_items::<ListResourceTemplatesResult, ListResourceTemplatesRequestParams>(
+            "resources/templates/list",
+            params,
+        )
+        .await
+    }
 
-        let mut all_templates = Vec::new();
-        let mut errors = Vec::new();
-        let mut has_more = false;
-        let mut server_cursors = HashMap::new();
-
-        let initial_server_cursors: HashMap<String, Option<String>> = if let Some(params) = &params {
-            if let Some(cursor) = &params.cursor {
-                match MultiServerCursor::from_string(cursor) {
-                    Ok(multi_cursor) => multi_cursor.server_cursors,
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            } else {
-                self.connections.keys().map(|k| (k.clone(), None)).collect()
-            }
-        } else {
-            self.connections.keys().map(|k| (k.clone(), None)).collect()
-        };
-
-        let client = self.client.clone();
-
-        for (server_name, cursor) in initial_server_cursors {
-            if let Some(connection) = self.connections.get_mut(&server_name) {
-                let mut req_params = params.clone().unwrap_or_default();
-                req_params.cursor = cursor;
-
-                match Self::request(
-                    connection,
-                    "resources/templates/list".to_string(),
-                    serde_json::to_value(req_params)?,
-                    client.clone(),
-                )
-                .await
-                {
-                    Ok(response) => match serde_json::from_value::<ListResourceTemplatesResult>(response) {
-                        Ok(result) => {
-                            all_templates.extend(result.resource_templates);
-
-                            if let Some(next_cursor) = result.next_cursor {
-                                server_cursors.insert(server_name, Some(next_cursor));
-                                has_more = true;
-                            }
-                        }
-                        Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                        }
-                    },
-                    Err(e) => {
-                        errors.push(format!("Error from '{}': {:?}", server_name, e));
-                    }
-                }
-            }
-        }
-
-        if all_templates.is_empty() && !errors.is_empty() {
-            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
-        } else {
-            let next_cursor = if has_more {
-                let multi_cursor = MultiServerCursor { server_cursors };
-                match multi_cursor.to_string() {
-                    Ok(cursor) => Some(cursor),
-                    Err(e) => {
-                        warn!("Failed to encode multi-server cursor: {:?}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            Ok(ListResourceTemplatesResult { resource_templates: all_templates, meta: None, next_cursor })
-        }
+    pub async fn list_all_resource_templates(
+        &mut self,
+        params: Option<ListResourceTemplatesRequestParams>,
+    ) -> Result<Vec<ResourceTemplate>, ClientError> {
+        self.list_all_items::<ListResourceTemplatesResult, ListResourceTemplatesRequestParams>(
+            "resources/templates/list",
+            params,
+        )
+        .await
     }
 
     pub async fn subscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
@@ -748,83 +612,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
         &mut self,
         params: Option<ListPromptsRequestParams>,
     ) -> Result<ListPromptsResult, ClientError> {
-        if self.connections.is_empty() {
-            return Err(ClientError::Request("No server connections available".into()));
-        }
+        self.list_items::<ListPromptsResult, ListPromptsRequestParams>("prompts/list", params).await
+    }
 
-        let mut all_prompts = Vec::new();
-        let mut errors = Vec::new();
-        let mut has_more = false;
-        let mut server_cursors = HashMap::new();
-
-        let initial_server_cursors: HashMap<String, Option<String>> = if let Some(params) = &params {
-            if let Some(cursor) = &params.cursor {
-                match MultiServerCursor::from_string(cursor) {
-                    Ok(multi_cursor) => multi_cursor.server_cursors,
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            } else {
-                self.connections.keys().map(|k| (k.clone(), None)).collect()
-            }
-        } else {
-            self.connections.keys().map(|k| (k.clone(), None)).collect()
-        };
-
-        let client = self.client.clone();
-
-        for (server_name, cursor) in initial_server_cursors {
-            if let Some(connection) = self.connections.get_mut(&server_name) {
-                let mut req_params = params.clone().unwrap_or_default();
-                req_params.cursor = cursor;
-
-                match Self::request(
-                    connection,
-                    "prompts/list".to_string(),
-                    serde_json::to_value(req_params)?,
-                    client.clone(),
-                )
-                .await
-                {
-                    Ok(response) => match serde_json::from_value::<ListPromptsResult>(response) {
-                        Ok(result) => {
-                            all_prompts.extend(result.prompts);
-
-                            if let Some(next_cursor) = result.next_cursor {
-                                server_cursors.insert(server_name, Some(next_cursor));
-                                has_more = true;
-                            }
-                        }
-                        Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                        }
-                    },
-                    Err(e) => {
-                        errors.push(format!("Error from '{}': {:?}", server_name, e));
-                    }
-                }
-            }
-        }
-
-        if all_prompts.is_empty() && !errors.is_empty() {
-            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
-        } else {
-            let next_cursor = if has_more {
-                let multi_cursor = MultiServerCursor { server_cursors };
-                match multi_cursor.to_string() {
-                    Ok(cursor) => Some(cursor),
-                    Err(e) => {
-                        warn!("Failed to encode multi-server cursor: {:?}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            Ok(ListPromptsResult { prompts: all_prompts, meta: None, next_cursor })
-        }
+    pub async fn list_all_prompts(
+        &mut self,
+        params: Option<ListPromptsRequestParams>,
+    ) -> Result<Vec<Prompt>, ClientError> {
+        self.list_all_items::<ListPromptsResult, ListPromptsRequestParams>("prompts/list", params).await
     }
 
     pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
@@ -860,83 +655,11 @@ impl<T: ModelContextProtocolClient> Client<T> {
     }
 
     pub async fn list_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<ListToolsResult, ClientError> {
-        if self.connections.is_empty() {
-            return Err(ClientError::Request("No server connections available".into()));
-        }
+        self.list_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
+    }
 
-        let mut all_tools = Vec::new();
-        let mut errors = Vec::new();
-        let mut has_more = false;
-        let mut server_cursors = HashMap::new();
-
-        let initial_server_cursors: HashMap<String, Option<String>> = if let Some(params) = &params {
-            if let Some(cursor) = &params.cursor {
-                match MultiServerCursor::from_string(cursor) {
-                    Ok(multi_cursor) => multi_cursor.server_cursors,
-                    Err(e) => {
-                        return Err(e);
-                    }
-                }
-            } else {
-                self.connections.keys().map(|k| (k.clone(), None)).collect()
-            }
-        } else {
-            self.connections.keys().map(|k| (k.clone(), None)).collect()
-        };
-
-        let client = self.client.clone();
-
-        for (server_name, cursor) in initial_server_cursors {
-            if let Some(connection) = self.connections.get_mut(&server_name) {
-                let mut req_params = params.clone().unwrap_or_default();
-                req_params.cursor = cursor;
-
-                match Self::request(
-                    connection,
-                    "tools/list".to_string(),
-                    serde_json::to_value(req_params)?,
-                    client.clone(),
-                )
-                .await
-                {
-                    Ok(response) => match serde_json::from_value::<ListToolsResult>(response) {
-                        Ok(result) => {
-                            all_tools.extend(result.tools);
-
-                            if let Some(next_cursor) = result.next_cursor {
-                                server_cursors.insert(server_name, Some(next_cursor));
-                                has_more = true;
-                            }
-                        }
-                        Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                        }
-                    },
-                    Err(e) => {
-                        errors.push(format!("Error from '{}': {:?}", server_name, e));
-                    }
-                }
-            }
-        }
-
-        if all_tools.is_empty() && !errors.is_empty() {
-            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
-        } else {
-            let next_cursor = if has_more {
-                let multi_cursor = MultiServerCursor { server_cursors };
-                match multi_cursor.to_string() {
-                    Ok(cursor) => Some(cursor),
-                    Err(e) => {
-                        warn!("Failed to encode multi-server cursor: {:?}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            Ok(ListToolsResult { tools: all_tools, meta: None, next_cursor })
-        }
+    pub async fn list_all_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<Vec<Tool>, ClientError> {
+        self.list_all_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
     pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
@@ -1045,99 +768,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
         Ok(())
     }
 
-    pub async fn list_all_resources(
-        &mut self,
-        params: Option<ListResourcesRequestParams>,
-    ) -> Result<Vec<Resource>, ClientError> {
-        let mut all_resources = Vec::new();
-        let mut next_cursor = None;
-
-        loop {
-            let mut req_params = params.clone().unwrap_or_default();
-            req_params.cursor = next_cursor;
-
-            let result = self.list_resources(Some(req_params)).await?;
-            all_resources.extend(result.resources);
-
-            if let Some(cursor) = result.next_cursor {
-                next_cursor = Some(cursor);
-            } else {
-                break;
-            }
-        }
-
-        Ok(all_resources)
-    }
-
-    pub async fn list_all_prompts(
-        &mut self,
-        params: Option<ListPromptsRequestParams>,
-    ) -> Result<Vec<Prompt>, ClientError> {
-        let mut all_prompts = Vec::new();
-        let mut next_cursor = None;
-
-        loop {
-            let mut req_params = params.clone().unwrap_or_default();
-            req_params.cursor = next_cursor;
-
-            let result = self.list_prompts(Some(req_params)).await?;
-            all_prompts.extend(result.prompts);
-
-            if let Some(cursor) = result.next_cursor {
-                next_cursor = Some(cursor);
-            } else {
-                break;
-            }
-        }
-
-        Ok(all_prompts)
-    }
-
-    pub async fn list_all_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<Vec<Tool>, ClientError> {
-        let mut all_tools = Vec::new();
-        let mut next_cursor = None;
-
-        loop {
-            let mut req_params = params.clone().unwrap_or_default();
-            req_params.cursor = next_cursor;
-
-            let result = self.list_tools(Some(req_params)).await?;
-            all_tools.extend(result.tools);
-
-            if let Some(cursor) = result.next_cursor {
-                next_cursor = Some(cursor);
-            } else {
-                break;
-            }
-        }
-
-        Ok(all_tools)
-    }
-
-    pub async fn list_all_resource_templates(
-        &mut self,
-        params: Option<ListResourceTemplatesRequestParams>,
-    ) -> Result<Vec<ResourceTemplate>, ClientError> {
-        let mut all_templates = Vec::new();
-        let mut next_cursor = None;
-
-        loop {
-            let mut req_params = params.clone().unwrap_or_default();
-            req_params.cursor = next_cursor;
-
-            let result = self.list_resource_templates(Some(req_params)).await?;
-            all_templates.extend(result.resource_templates);
-
-            if let Some(cursor) = result.next_cursor {
-                next_cursor = Some(cursor);
-            } else {
-                break;
-            }
-        }
-
-        Ok(all_templates)
-    }
-
     pub async fn close(&mut self) -> Result<(), ClientError> {
         if self.connections.is_empty() {
             return Ok(());
@@ -1158,6 +788,139 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(ClientError::Request(errors.join(", ").into()))
         }
     }
+
+    pub async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
+    where
+        R: ListResult,
+        P: ListRequestParams,
+    {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut all_items = Vec::new();
+        let mut errors = Vec::new();
+        let mut has_more = false;
+        let mut server_cursors = HashMap::new();
+
+        let initial_server_cursors: HashMap<String, Option<String>> = if let Some(params) = &params {
+            if let Some(cursor) = params.get_cursor() {
+                match MultiServerCursor::from_string(cursor) {
+                    Ok(multi_cursor) => multi_cursor.server_cursors,
+                    Err(e) => return Err(e),
+                }
+            } else {
+                self.connections.keys().map(|k| (k.clone(), None)).collect()
+            }
+        } else {
+            self.connections.keys().map(|k| (k.clone(), None)).collect()
+        };
+
+        let client = self.client.clone();
+
+        for (server_name, cursor) in initial_server_cursors {
+            if let Some(connection) = self.connections.get_mut(&server_name) {
+                let req_params = match params.clone() {
+                    Some(p) => p.with_cursor(cursor),
+                    None => P::default().with_cursor(cursor),
+                };
+
+                match Self::request(connection, endpoint.to_string(), serde_json::to_value(req_params)?, client.clone())
+                    .await
+                {
+                    Ok(response) => match serde_json::from_value::<R>(response) {
+                        Ok(result) => {
+                            all_items.extend(result.get_items().to_vec());
+
+                            if let Some(next_cursor) = result.get_next_cursor() {
+                                server_cursors.insert(server_name, Some(next_cursor.to_string()));
+                                has_more = true;
+                            }
+                        }
+                        Err(e) => {
+                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
+                }
+            }
+        }
+
+        if all_items.is_empty() && !errors.is_empty() {
+            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
+        } else {
+            let next_cursor = if has_more {
+                let multi_cursor = MultiServerCursor { server_cursors };
+                match multi_cursor.to_string() {
+                    Ok(cursor) => Some(cursor),
+                    Err(e) => {
+                        warn!("Failed to encode multi-server cursor: {:?}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            Ok(R::with_items_and_cursor(all_items, next_cursor, None))
+        }
+    }
+
+    pub async fn list_all_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Vec<R::Item>, ClientError>
+    where
+        R: ListResult,
+        P: ListRequestParams,
+    {
+        let mut all_items = Vec::new();
+        let mut next_cursor = None;
+
+        loop {
+            let params_with_cursor = match params.clone() {
+                Some(p) => Some(p.with_cursor(next_cursor)),
+                None => Some(P::default().with_cursor(next_cursor)),
+            };
+
+            let result = self.list_items::<R, P>(endpoint, params_with_cursor).await?;
+            all_items.extend(result.get_items().to_vec());
+
+            next_cursor = result.get_next_cursor().map(|s| s.to_string());
+            if next_cursor.is_none() {
+                break;
+            }
+        }
+
+        Ok(all_items)
+    }
+
+    pub fn iter_resources<'a>(
+        &'a mut self,
+        params: Option<ListResourcesRequestParams>,
+    ) -> ItemsIterator<'a, T, ListResourcesResult, ListResourcesRequestParams> {
+        ItemsIterator::new(self, "resources/list".to_string(), params)
+    }
+
+    pub fn iter_prompts<'a>(
+        &'a mut self,
+        params: Option<ListPromptsRequestParams>,
+    ) -> ItemsIterator<'a, T, ListPromptsResult, ListPromptsRequestParams> {
+        ItemsIterator::new(self, "prompts/list".to_string(), params)
+    }
+
+    pub fn iter_tools<'a>(
+        &'a mut self,
+        params: Option<ListToolsRequestParams>,
+    ) -> ItemsIterator<'a, T, ListToolsResult, ListToolsRequestParams> {
+        ItemsIterator::new(self, "tools/list".to_string(), params)
+    }
+
+    pub fn iter_resource_templates<'a>(
+        &'a mut self,
+        params: Option<ListResourceTemplatesRequestParams>,
+    ) -> ItemsIterator<'a, T, ListResourceTemplatesResult, ListResourceTemplatesRequestParams> {
+        ItemsIterator::new(self, "resources/templates/list".to_string(), params)
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1176,37 +939,51 @@ impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
     }
 }
 
-pub struct ResourcesIterator<'a, T: ModelContextProtocolClient> {
+pub struct ItemsIterator<'a, T, R, P>
+where
+    T: ModelContextProtocolClient,
+    R: ListResult,
+    P: ListRequestParams,
+{
     client: &'a mut Client<T>,
-    params: Option<ListResourcesRequestParams>,
+    endpoint: String,
+    params: Option<P>,
     next_cursor: Option<String>,
     done: bool,
+    _phantom: std::marker::PhantomData<R>,
 }
 
-impl<'a, T: ModelContextProtocolClient> ResourcesIterator<'a, T> {
-    pub fn new(client: &'a mut Client<T>, params: Option<ListResourcesRequestParams>) -> Self {
-        Self { client, params, next_cursor: None, done: false }
+impl<'a, T, R, P> ItemsIterator<'a, T, R, P>
+where
+    T: ModelContextProtocolClient,
+    R: ListResult,
+    P: ListRequestParams,
+{
+    pub fn new(client: &'a mut Client<T>, endpoint: String, params: Option<P>) -> Self {
+        Self { client, endpoint, params, next_cursor: None, done: false, _phantom: std::marker::PhantomData }
     }
 
-    pub async fn next(&mut self) -> Option<Result<Vec<Resource>, ClientError>> {
+    pub async fn next(&mut self) -> Option<Result<Vec<R::Item>, ClientError>> {
         if self.done {
             return None;
         }
 
-        let mut req_params = self.params.clone().unwrap_or_default();
-        req_params.cursor = self.next_cursor.clone();
+        let params_with_cursor = match self.params.clone() {
+            Some(p) => Some(p.with_cursor(self.next_cursor.clone())),
+            None => Some(P::default().with_cursor(self.next_cursor.clone())),
+        };
 
-        let result = self.client.list_resources(Some(req_params)).await;
+        let result = self.client.list_items::<R, P>(&self.endpoint, params_with_cursor).await;
 
         match result {
             Ok(response) => {
-                if response.resources.is_empty() {
+                let items = response.get_items().to_vec();
+                if items.is_empty() {
                     self.done = true;
                     return None;
                 }
 
-                let items = response.resources;
-                self.next_cursor = response.next_cursor;
+                self.next_cursor = response.get_next_cursor().map(|s| s.to_string());
                 self.done = self.next_cursor.is_none();
                 Some(Ok(items))
             }
@@ -1218,149 +995,146 @@ impl<'a, T: ModelContextProtocolClient> ResourcesIterator<'a, T> {
     }
 }
 
-pub struct PromptsIterator<'a, T: ModelContextProtocolClient> {
-    client: &'a mut Client<T>,
-    params: Option<ListPromptsRequestParams>,
-    next_cursor: Option<String>,
-    done: bool,
+pub trait ListResult: serde::de::DeserializeOwned + Serialize {
+    type Item: Clone;
+
+    fn get_items(&self) -> &[Self::Item];
+    fn get_next_cursor(&self) -> Option<&str>;
+    fn with_items_and_cursor(
+        items: Vec<Self::Item>,
+        next_cursor: Option<String>,
+        meta: Option<BTreeMap<String, Value>>,
+    ) -> Self;
 }
 
-impl<'a, T: ModelContextProtocolClient> PromptsIterator<'a, T> {
-    pub fn new(client: &'a mut Client<T>, params: Option<ListPromptsRequestParams>) -> Self {
-        Self { client, params, next_cursor: None, done: false }
+pub trait ListRequestParams: serde::de::DeserializeOwned + Serialize + Clone + Default {
+    fn with_cursor(&self, cursor: Option<String>) -> Self;
+    fn get_cursor(&self) -> Option<&str>;
+}
+
+impl ListResult for ListResourcesResult {
+    type Item = Resource;
+
+    fn get_items(&self) -> &[Self::Item] {
+        &self.resources
     }
 
-    pub async fn next(&mut self) -> Option<Result<Vec<Prompt>, ClientError>> {
-        if self.done {
-            return None;
-        }
+    fn get_next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
 
-        let mut req_params = self.params.clone().unwrap_or_default();
-        req_params.cursor = self.next_cursor.clone();
-
-        let result = self.client.list_prompts(Some(req_params)).await;
-
-        match result {
-            Ok(response) => {
-                if response.prompts.is_empty() {
-                    self.done = true;
-                    return None;
-                }
-
-                let items = response.prompts;
-                self.next_cursor = response.next_cursor;
-                self.done = self.next_cursor.is_none();
-                Some(Ok(items))
-            }
-            Err(e) => {
-                self.done = true;
-                Some(Err(e))
-            }
-        }
+    fn with_items_and_cursor(
+        items: Vec<Self::Item>,
+        next_cursor: Option<String>,
+        meta: Option<BTreeMap<String, Value>>,
+    ) -> Self {
+        Self { resources: items, next_cursor, meta }
     }
 }
 
-pub struct ToolsIterator<'a, T: ModelContextProtocolClient> {
-    client: &'a mut Client<T>,
-    params: Option<ListToolsRequestParams>,
-    next_cursor: Option<String>,
-    done: bool,
-}
-
-impl<'a, T: ModelContextProtocolClient> ToolsIterator<'a, T> {
-    pub fn new(client: &'a mut Client<T>, params: Option<ListToolsRequestParams>) -> Self {
-        Self { client, params, next_cursor: None, done: false }
+impl ListRequestParams for ListResourcesRequestParams {
+    fn with_cursor(&self, cursor: Option<String>) -> Self {
+        let mut params = self.clone();
+        params.cursor = cursor;
+        params
     }
 
-    pub async fn next(&mut self) -> Option<Result<Vec<Tool>, ClientError>> {
-        if self.done {
-            return None;
-        }
+    fn get_cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
+    }
+}
+impl ListResult for ListPromptsResult {
+    type Item = Prompt;
 
-        let mut req_params = self.params.clone().unwrap_or_default();
-        req_params.cursor = self.next_cursor.clone();
+    fn get_items(&self) -> &[Self::Item] {
+        &self.prompts
+    }
 
-        let result = self.client.list_tools(Some(req_params)).await;
+    fn get_next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
 
-        match result {
-            Ok(response) => {
-                if response.tools.is_empty() {
-                    self.done = true;
-                    return None;
-                }
-
-                let items = response.tools;
-                self.next_cursor = response.next_cursor;
-                self.done = self.next_cursor.is_none();
-                Some(Ok(items))
-            }
-            Err(e) => {
-                self.done = true;
-                Some(Err(e))
-            }
-        }
+    fn with_items_and_cursor(
+        items: Vec<Self::Item>,
+        next_cursor: Option<String>,
+        meta: Option<BTreeMap<String, Value>>,
+    ) -> Self {
+        Self { prompts: items, next_cursor, meta }
     }
 }
 
-pub struct ResourceTemplatesIterator<'a, T: ModelContextProtocolClient> {
-    client: &'a mut Client<T>,
-    params: Option<ListResourceTemplatesRequestParams>,
-    next_cursor: Option<String>,
-    done: bool,
-}
-
-impl<'a, T: ModelContextProtocolClient> ResourceTemplatesIterator<'a, T> {
-    pub fn new(client: &'a mut Client<T>, params: Option<ListResourceTemplatesRequestParams>) -> Self {
-        Self { client, params, next_cursor: None, done: false }
+impl ListRequestParams for ListPromptsRequestParams {
+    fn with_cursor(&self, cursor: Option<String>) -> Self {
+        let mut params = self.clone();
+        params.cursor = cursor;
+        params
     }
 
-    pub async fn next(&mut self) -> Option<Result<Vec<ResourceTemplate>, ClientError>> {
-        if self.done {
-            return None;
-        }
-
-        let mut req_params = self.params.clone().unwrap_or_default();
-        req_params.cursor = self.next_cursor.clone();
-
-        let result = self.client.list_resource_templates(Some(req_params)).await;
-
-        match result {
-            Ok(response) => {
-                if response.resource_templates.is_empty() {
-                    self.done = true;
-                    return None;
-                }
-
-                let items = response.resource_templates;
-                self.next_cursor = response.next_cursor;
-                self.done = self.next_cursor.is_none();
-                Some(Ok(items))
-            }
-            Err(e) => {
-                self.done = true;
-                Some(Err(e))
-            }
-        }
+    fn get_cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
     }
 }
 
-impl<T: ModelContextProtocolClient> Client<T> {
-    pub fn iter_resources<'a>(&'a mut self, params: Option<ListResourcesRequestParams>) -> ResourcesIterator<'a, T> {
-        ResourcesIterator::new(self, params)
+impl ListResult for ListToolsResult {
+    type Item = Tool;
+
+    fn get_items(&self) -> &[Self::Item] {
+        &self.tools
     }
 
-    pub fn iter_prompts<'a>(&'a mut self, params: Option<ListPromptsRequestParams>) -> PromptsIterator<'a, T> {
-        PromptsIterator::new(self, params)
+    fn get_next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
     }
 
-    pub fn iter_tools<'a>(&'a mut self, params: Option<ListToolsRequestParams>) -> ToolsIterator<'a, T> {
-        ToolsIterator::new(self, params)
+    fn with_items_and_cursor(
+        items: Vec<Self::Item>,
+        next_cursor: Option<String>,
+        meta: Option<BTreeMap<String, Value>>,
+    ) -> Self {
+        Self { tools: items, next_cursor, meta }
+    }
+}
+
+impl ListRequestParams for ListToolsRequestParams {
+    fn with_cursor(&self, cursor: Option<String>) -> Self {
+        let mut params = self.clone();
+        params.cursor = cursor;
+        params
     }
 
-    pub fn iter_resource_templates<'a>(
-        &'a mut self,
-        params: Option<ListResourceTemplatesRequestParams>,
-    ) -> ResourceTemplatesIterator<'a, T> {
-        ResourceTemplatesIterator::new(self, params)
+    fn get_cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
+    }
+}
+
+impl ListResult for ListResourceTemplatesResult {
+    type Item = ResourceTemplate;
+
+    fn get_items(&self) -> &[Self::Item] {
+        &self.resource_templates
+    }
+
+    fn get_next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
+    }
+
+    fn with_items_and_cursor(
+        items: Vec<Self::Item>,
+        next_cursor: Option<String>,
+        meta: Option<BTreeMap<String, Value>>,
+    ) -> Self {
+        Self { resource_templates: items, next_cursor, meta }
+    }
+}
+
+impl ListRequestParams for ListResourceTemplatesRequestParams {
+    fn with_cursor(&self, cursor: Option<String>) -> Self {
+        let mut params = self.clone();
+        params.cursor = cursor;
+        params
+    }
+
+    fn get_cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
     }
 }
