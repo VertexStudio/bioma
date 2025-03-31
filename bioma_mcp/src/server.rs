@@ -804,53 +804,61 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     match &params.ref_ {
                         serde_json::Value::Object(obj) => {
-                            if let (Some(type_val), Some(name_val)) = (obj.get("type"), obj.get("name")) {
-                                if let (Some(type_str), Some(name_str)) = (type_val.as_str(), name_val.as_str()) {
+                            if let Some(type_val) = obj.get("type") {
+                                if let Some(type_str) = type_val.as_str() {
                                     if type_str == "ref/prompt" {
-                                        if let Some(prompt) = session.find_prompt(name_str) {
-                                            let completions = prompt
-                                                .complete_argument_boxed(
-                                                    params.argument.name.clone(),
-                                                    params.argument.value.clone(),
-                                                )
-                                                .await
-                                                .map_err(|e| {
-                                                    error!("Prompt completion error: {}", e);
-                                                    jsonrpc_core::Error::internal_error()
-                                                })?;
+                                        if let Some(name_val) = obj.get("name") {
+                                            if let Some(name_str) = name_val.as_str() {
+                                                if let Some(prompt) = session.find_prompt(name_str) {
+                                                    let completions = prompt
+                                                        .complete_argument_boxed(
+                                                            params.argument.name.clone(),
+                                                            params.argument.value.clone(),
+                                                        )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            error!("Prompt completion error: {}", e);
+                                                            jsonrpc_core::Error::internal_error()
+                                                        })?;
 
-                                            return Ok(serde_json::to_value(crate::schema::CompleteResult {
-                                                meta: None,
-                                                completion: crate::schema::CompleteResultCompletion {
-                                                    values: completions,
-                                                    total: None,
-                                                    has_more: Some(false),
-                                                },
-                                            })
-                                            .unwrap());
+                                                    return Ok(serde_json::to_value(crate::schema::CompleteResult {
+                                                        meta: None,
+                                                        completion: crate::schema::CompleteResultCompletion {
+                                                            values: completions,
+                                                            total: None,
+                                                            has_more: Some(false),
+                                                        },
+                                                    })
+                                                    .unwrap());
+                                                }
+                                            }
                                         }
                                     } else if type_str == "ref/resource" {
-                                        if let Some(resource) = session.find_resource(name_str) {
-                                            let completions = resource
-                                                .complete_argument_boxed(
-                                                    params.argument.name.clone(),
-                                                    params.argument.value.clone(),
-                                                )
-                                                .await
-                                                .map_err(|e| {
-                                                    error!("Resource completion error: {}", e);
-                                                    jsonrpc_core::Error::internal_error()
-                                                })?;
+                                        if let Some(uri_val) = obj.get("uri") {
+                                            if let Some(uri_str) = uri_val.as_str() {
+                                                if let Some(resource) = session.find_resource(uri_str) {
+                                                    let completions = resource
+                                                        .complete_argument_boxed(
+                                                            params.argument.name.clone(),
+                                                            params.argument.value.clone(),
+                                                        )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            error!("Resource completion error: {}", e);
+                                                            jsonrpc_core::Error::internal_error()
+                                                        })?;
 
-                                            return Ok(serde_json::to_value(crate::schema::CompleteResult {
-                                                meta: None,
-                                                completion: crate::schema::CompleteResultCompletion {
-                                                    values: completions,
-                                                    total: None,
-                                                    has_more: Some(false),
-                                                },
-                                            })
-                                            .unwrap());
+                                                    return Ok(serde_json::to_value(crate::schema::CompleteResult {
+                                                        meta: None,
+                                                        completion: crate::schema::CompleteResultCompletion {
+                                                            values: completions,
+                                                            total: None,
+                                                            has_more: Some(false),
+                                                        },
+                                                    })
+                                                    .unwrap());
+                                                }
+                                            }
                                         }
                                     }
                                 }

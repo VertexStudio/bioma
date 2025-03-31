@@ -137,6 +137,15 @@ async fn main() -> Result<()> {
             if let Some(filesystem) = resources_result.resources.iter().find(|r| r.name == "filesystem") {
                 info!("Found filesystem resource: {}", filesystem.uri);
 
+                // Test completions for filesystem resource
+                info!("Testing completion for filesystem resource paths...");
+                match client.complete_resource("file:///".to_string(), "path".to_string(), "/".to_string()).await {
+                    Ok(result) => {
+                        info!("Completions for file paths: {:?}", result.completion.values);
+                    }
+                    Err(e) => error!("Error getting completions: {:?}", e),
+                }
+
                 let readme_uri = "file:///bioma/README.md";
                 info!("Reading file: {}", readme_uri);
 

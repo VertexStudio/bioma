@@ -5,7 +5,9 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -160,7 +162,107 @@ impl FileSystem {
     }
 }
 
-impl ResourceCompletionHandler for FileSystem {}
+impl ResourceCompletionHandler for FileSystem {
+    fn complete_argument<'a>(
+        &'a self,
+        argument_name: &'a str,
+        argument_value: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            // Only handle path argument completions
+            if argument_name != "path" {
+                return Ok(vec![]);
+            }
+
+            // Normalize the input path
+            let input_path = if argument_value.starts_with('/') {
+                argument_value.to_string()
+            } else {
+                format!("/{}", argument_value)
+            };
+
+            // Determine the directory we should look in and the prefix to match
+            let (dir_to_search, prefix_to_match) = if input_path.ends_with('/') || input_path == "/" {
+                // If the path ends with a slash, we're looking for contents of that directory
+                (input_path.clone(), "".to_string())
+            } else {
+                // Otherwise, we're looking for completions of the last part
+                let parent = if let Some(idx) = input_path.rfind('/') {
+                    input_path[..=idx].to_string()
+                } else {
+                    "/".to_string()
+                };
+
+                let file_prefix = if let Some(idx) = input_path.rfind('/') {
+                    input_path[(idx + 1)..].to_string()
+                } else {
+                    input_path.clone()
+                };
+
+                (parent, file_prefix)
+            };
+
+            // Convert to actual filesystem path
+            let fs_path_to_search = if dir_to_search == "/" {
+                (*self.base_dir).clone()
+            } else {
+                let relative_path = dir_to_search.trim_start_matches('/');
+                self.base_dir.join(relative_path)
+            };
+
+            // Check if directory exists
+            if !fs_path_to_search.exists() || !fs_path_to_search.is_dir() {
+                return Ok(vec![]);
+            }
+
+            // Read directory entries
+            let mut entries = match fs::read_dir(&fs_path_to_search).await {
+                Ok(entries) => entries,
+                Err(_) => return Ok(vec![]),
+            };
+
+            let mut completions = Vec::new();
+
+            // Process each entry
+            while let Some(entry) = entries.next_entry().await.ok().flatten() {
+                let file_name = match entry.file_name().to_str() {
+                    Some(name) => name.to_string(),
+                    None => continue,
+                };
+
+                // Skip hidden files and directories unless explicitly searching for them
+                if file_name.starts_with('.') && !prefix_to_match.starts_with('.') {
+                    continue;
+                }
+
+                // Check if entry matches the prefix
+                if prefix_to_match.is_empty() || file_name.to_lowercase().starts_with(&prefix_to_match.to_lowercase()) {
+                    let is_dir = match entry.file_type().await {
+                        Ok(file_type) => file_type.is_dir(),
+                        Err(_) => false,
+                    };
+
+                    // Format the suggestion
+                    let mut suggestion = if dir_to_search == "/" {
+                        file_name
+                    } else {
+                        let parent_path = dir_to_search.trim_end_matches('/');
+                        format!("{}/{}", parent_path.trim_start_matches('/'), file_name)
+                    };
+
+                    // Add trailing slash for directories
+                    if is_dir {
+                        suggestion.push('/');
+                    }
+
+                    completions.push(suggestion);
+                }
+            }
+
+            Ok(completions)
+        })
+    }
+}
 
 impl ResourceDef for FileSystem {
     const NAME: &'static str = "filesystem";
@@ -511,5 +613,34 @@ mod tests {
             Err(ResourceError::Custom(msg)) if msg.contains("Access denied") => {}
             _ => panic!("Expected Access denied error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_path_completion_empty() {
+        let temp_dir = tempdir().unwrap();
+
+        // Create test directory structure
+        let file1_path = temp_dir.path().join("test1.txt");
+        let file2_path = temp_dir.path().join("test2.txt");
+        let subdir_path = temp_dir.path().join("subdir");
+
+        {
+            let mut file1 = File::create(&file1_path).unwrap();
+            write!(file1, "File 1 content").unwrap();
+
+            let mut file2 = File::create(&file2_path).unwrap();
+            write!(file2, "File 2 content").unwrap();
+
+            std::fs::create_dir(&subdir_path).unwrap();
+        }
+
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
+
+        // Test completion with empty input (should list root)
+        let completions = fs_resource.complete_argument("path", "").await.unwrap();
+
+        assert!(completions.contains(&"test1.txt".to_string()));
+        assert!(completions.contains(&"test2.txt".to_string()));
+        assert!(completions.contains(&"subdir/".to_string()));
     }
 }
