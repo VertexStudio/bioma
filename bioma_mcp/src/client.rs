@@ -789,7 +789,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    pub async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
+    async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
     where
         R: ListResult,
         P: ListRequestParams,
@@ -868,7 +868,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    pub async fn list_all_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Vec<R::Item>, ClientError>
+    async fn list_all_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Vec<R::Item>, ClientError>
     where
         R: ListResult,
         P: ListRequestParams,
