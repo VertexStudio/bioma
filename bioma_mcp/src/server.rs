@@ -913,7 +913,10 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                                             has_more: Some(false),
                                                         },
                                                     })
-                                                    .unwrap());
+                                                    .map_err(|e| {
+                                                        error!("Failed to serialize completion result: {}", e);
+                                                        jsonrpc_core::Error::internal_error()
+                                                    })?);
                                                 }
                                             }
                                         }
@@ -940,7 +943,10 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                                             has_more: Some(false),
                                                         },
                                                     })
-                                                    .unwrap());
+                                                    .map_err(|e| {
+                                                        error!("Failed to serialize completion result: {}", e);
+                                                        jsonrpc_core::Error::internal_error()
+                                                    })?);
                                                 }
                                             }
                                         }
