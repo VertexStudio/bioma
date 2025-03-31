@@ -1,16 +1,17 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use bioma_mcp::{
-    client::{Client, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
+    client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ReadResourceRequestParams, Root,
+        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root, SamplingMessage,
     },
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tracing::{error, info};
+
+const DEFAULT_MODEL: &str = "llama3.2";
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -22,6 +23,13 @@ struct Args {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientConfig {
     pub servers: Vec<ServerConfig>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<SamplingMessage>,
+    stream: bool,
 }
 
 #[derive(Clone)]
@@ -44,8 +52,46 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         self.roots.clone()
     }
 
-    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> CreateMessageResult {
-        todo!()
+    async fn on_create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
+        info!("Params: {:#?}", params);
+
+        info!("Acceping sampling request..."); // In a real implementation, client should the capability to accept or decline the request
+
+        info!("Starting sampling actor...");
+
+        let model = match params.model_preferences {
+            Some(model_preferences) => match model_preferences.hints {
+                Some(hints) => hints.iter().find_map(|hint| hint.name.clone()).unwrap_or(DEFAULT_MODEL.to_string()),
+                None => {
+                    info!("Using default model");
+                    DEFAULT_MODEL.to_string()
+                }
+            },
+            None => {
+                info!("Using default model");
+                DEFAULT_MODEL.to_string()
+            }
+        };
+
+        info!("Model: {}", model);
+
+        let body = OllamaRequest { model: "llama3.2".to_string(), messages: params.messages, stream: false };
+
+        let client = reqwest::Client::new();
+        let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
+
+        let llm_response = match res {
+            Ok(res) => res.text().await.unwrap(),
+            Err(_) => "Error while sending request".to_string(),
+        };
+
+        Ok(CreateMessageResult {
+            meta: None,
+            content: serde_json::to_value(llm_response).unwrap(),
+            model: body.model,
+            role: Role::Assistant,
+            stop_reason: None,
+        })
     }
 }
 
@@ -75,6 +121,7 @@ async fn main() -> Result<()> {
                 command: "target/release/examples/mcp_server".to_string(),
                 args: vec!["stdio".to_string()],
             }))
+            .request_timeout(60)
             .build()]
     };
 
@@ -95,6 +142,7 @@ async fn main() -> Result<()> {
     let mut client = Client::new(client).await?;
 
     info!("Initializing client...");
+
     let init_result = client
         .initialize(Implementation { name: "mcp_client_example".to_string(), version: "0.1.0".to_string() })
         .await?;
@@ -129,7 +177,9 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing resources...");
+
     let resources_result = client.list_resources(None).await;
+
     match resources_result {
         Ok(resources_result) => {
             info!("Available resources: {:?}", resources_result.resources);
@@ -243,13 +293,35 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
+    info!("Making sampling tool call...");
+    let sampling_args = serde_json::json!({
+        "messages": [{"content":"Explain the history of Rust programming language.", "role":"user"}],
+        "max_tokens": 100,
+        "models_suggestions": ["llama3.2"],
+    });
+
+    let sampling_call = CallToolRequestParams {
+        name: "sampling".to_string(),
+        arguments: serde_json::from_value(sampling_args).map_err(|e| ClientError::JsonError(e))?,
+    };
+
+    let sampling_result = client.call_tool(sampling_call).await?;
+
+    info!("Sampling response: {:#?}", sampling_result);
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
     info!("Making echo tool call...");
+
     let echo_args = serde_json::json!({
         "message": "Hello from MCP client!"
     });
-    let echo_args =
-        CallToolRequestParams { name: "echo".to_string(), arguments: serde_json::from_value(echo_args).unwrap() };
+    let echo_args = CallToolRequestParams {
+        name: "echo".to_string(),
+        arguments: serde_json::from_value(echo_args).map_err(|e| ClientError::JsonError(e))?,
+    };
     let echo_result = client.call_tool(echo_args).await?;
+
     info!("Echo response: {:?}", echo_result);
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;

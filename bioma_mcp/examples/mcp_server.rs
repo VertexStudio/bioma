@@ -78,7 +78,8 @@ fn setup_logging(log_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-struct ExampleMcpServer {
+#[derive(Clone)]
+pub struct ExampleMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
     base_dir: PathBuf,
@@ -109,13 +110,14 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         vec![Arc::new(prompts::greet::Greet)]
     }
 
-    async fn new_tools(&self, _context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
+    async fn new_tools(&self, context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
         vec![
             Arc::new(tools::echo::Echo),
             Arc::new(tools::memory::Memory),
             Arc::new(tools::fetch::Fetch::default()),
             Arc::new(tools::random::RandomNumber),
             Arc::new(tools::workflow::Workflow::new(true, None)),
+            Arc::new(tools::sampling::Sampling::new(context)),
         ]
     }
 

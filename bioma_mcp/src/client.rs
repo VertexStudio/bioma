@@ -122,8 +122,10 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
     fn get_server_configs(&self) -> impl Future<Output = Vec<ServerConfig>> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ClientCapabilities> + Send;
     fn get_roots(&self) -> impl Future<Output = Vec<Root>> + Send;
-    fn on_create_message(&self, params: CreateMessageRequestParams)
-        -> impl Future<Output = CreateMessageResult> + Send;
+    fn on_create_message(
+        &self,
+        params: CreateMessageRequestParams,
+    ) -> impl Future<Output = Result<CreateMessageResult, ClientError>> + Send;
 }
 
 type RequestId = u64;
@@ -177,11 +179,20 @@ impl<T: ModelContextProtocolClient> Client<T> {
                         }
                     };
                     let result = client.read().await.on_create_message(params).await;
-                    info!("Successfully handled createMessage request");
-                    Ok(serde_json::to_value(result).map_err(|e| {
-                        error!("Failed to serialize createMessage result: {}", e);
-                        jsonrpc_core::Error::invalid_params(e.to_string())
-                    })?)
+
+                    match result {
+                        Ok(result) => {
+                            info!("Successfully handled createMessage request");
+                            Ok(serde_json::to_value(result).map_err(|e| {
+                                error!("Failed to serialize createMessage result: {}", e);
+                                jsonrpc_core::Error::invalid_params(e.to_string())
+                            })?)
+                        }
+                        Err(e) => {
+                            error!("Failed to handle createMessage request: {}", e);
+                            Err(jsonrpc_core::Error::invalid_params(e.to_string()))
+                        }
+                    }
                 }
             }
         });
@@ -1014,6 +1025,8 @@ pub enum ClientError {
     JsonError(#[from] serde_json::Error),
     #[error("Request: {0}")]
     Request(Cow<'static, str>),
+    #[error("Client rejected sampling request")]
+    SamplingRequestRejected,
 }
 
 impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {

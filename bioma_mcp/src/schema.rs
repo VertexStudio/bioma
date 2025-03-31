@@ -176,7 +176,7 @@ pub struct CompleteResult {
     pub meta: Option<::std::collections::BTreeMap<String, serde_json::Value>>,
     pub completion: CompleteResultCompletion,
 }
-#[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
 pub struct CreateMessageRequestParams {
     #[doc = " A request to include context from one or more MCP servers (including the caller), to be "]
     #[doc = " attached to the prompt. The client MAY ignore this request."]
