@@ -3,8 +3,8 @@ use crate::schema::{
     GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams, InitializeResult,
     InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
     ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
-    ListToolsResult, ReadResourceRequestParams, ReadResourceResult, Root, RootsListChangedNotificationParams,
-    ServerCapabilities,
+    ListToolsResult, Prompt, ReadResourceRequestParams, ReadResourceResult, Resource, ResourceTemplate, Root,
+    RootsListChangedNotificationParams, ServerCapabilities, Tool,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -849,6 +849,99 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         Ok(())
+    }
+
+    pub async fn list_all_resources(
+        &mut self,
+        params: Option<ListResourcesRequestParams>,
+    ) -> Result<Vec<Resource>, ClientError> {
+        let mut all_resources = Vec::new();
+        let mut cursor = None;
+
+        loop {
+            let mut req_params = params.clone().unwrap_or_default();
+            req_params.cursor = cursor;
+
+            let result = self.list_resources(Some(req_params)).await?;
+            all_resources.extend(result.resources);
+
+            if let Some(next_cursor) = result.next_cursor {
+                cursor = Some(next_cursor);
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_resources)
+    }
+
+    pub async fn list_all_prompts(
+        &mut self,
+        params: Option<ListPromptsRequestParams>,
+    ) -> Result<Vec<Prompt>, ClientError> {
+        let mut all_prompts = Vec::new();
+        let mut cursor = None;
+
+        loop {
+            let mut req_params = params.clone().unwrap_or_default();
+            req_params.cursor = cursor;
+
+            let result = self.list_prompts(Some(req_params)).await?;
+            all_prompts.extend(result.prompts);
+
+            if let Some(next_cursor) = result.next_cursor {
+                cursor = Some(next_cursor);
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_prompts)
+    }
+
+    pub async fn list_all_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<Vec<Tool>, ClientError> {
+        let mut all_tools = Vec::new();
+        let mut cursor = None;
+
+        loop {
+            let mut req_params = params.clone().unwrap_or_default();
+            req_params.cursor = cursor;
+
+            let result = self.list_tools(Some(req_params)).await?;
+            all_tools.extend(result.tools);
+
+            if let Some(next_cursor) = result.next_cursor {
+                cursor = Some(next_cursor);
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_tools)
+    }
+
+    pub async fn list_all_resource_templates(
+        &mut self,
+        params: Option<ListResourceTemplatesRequestParams>,
+    ) -> Result<Vec<ResourceTemplate>, ClientError> {
+        let mut all_templates = Vec::new();
+        let mut cursor = None;
+
+        loop {
+            let mut req_params = params.clone().unwrap_or_default();
+            req_params.cursor = cursor;
+
+            let result = self.list_resource_templates(Some(req_params)).await?;
+            all_templates.extend(result.resource_templates);
+
+            if let Some(next_cursor) = result.next_cursor {
+                cursor = Some(next_cursor);
+            } else {
+                break;
+            }
+        }
+
+        Ok(all_templates)
     }
 
     pub async fn close(&mut self) -> Result<(), ClientError> {
