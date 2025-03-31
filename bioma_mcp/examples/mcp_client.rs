@@ -107,9 +107,9 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing prompts...");
-    let prompts_result = client.list_prompts(None).await;
+    let prompts_result = client.list_all_prompts(None).await;
     match prompts_result {
-        Ok(prompts_result) => info!("Available prompts: {:?}", prompts_result.prompts),
+        Ok(prompts) => info!("Available prompts: {:?}", prompts),
         Err(e) => error!("Error listing prompts: {:?}", e),
     }
 
@@ -204,16 +204,20 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    info!("Listing tools...");
-    let tools_result = client.list_tools(None).await;
-    match tools_result {
-        Ok(tools_result) => {
-            info!("Available tools:");
-            for tool in tools_result.tools {
-                info!("- {}", tool.name);
+    info!("Listing tools (paginated)...");
+    let mut tools_result = client.iter_tools(None);
+    let mut all_tools = Vec::new();
+    while let Some(tools) = tools_result.next().await {
+        match tools {
+            Ok(tools) => {
+                all_tools.extend(tools);
             }
+            Err(e) => error!("Error listing tools: {:?}", e),
         }
-        Err(e) => error!("Error listing tools: {:?}", e),
+    }
+    info!("Available tools:");
+    for tool in all_tools {
+        info!("- {}", tool.name);
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
