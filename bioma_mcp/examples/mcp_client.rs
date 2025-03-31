@@ -109,7 +109,20 @@ async fn main() -> Result<()> {
     info!("Listing prompts...");
     let prompts_result = client.list_prompts(None).await;
     match prompts_result {
-        Ok(prompts_result) => info!("Available prompts: {:?}", prompts_result.prompts),
+        Ok(prompts_result) => {
+            info!("Available prompts: {:?}", prompts_result.prompts);
+
+            if prompts_result.prompts.iter().any(|p| p.name == "greet") {
+                info!("Testing completion for 'greet' prompt's 'name' argument...");
+
+                match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await {
+                    Ok(result) => {
+                        info!("Completions for 'name' starting with 'a': {:?}", result.completion.values);
+                    }
+                    Err(e) => error!("Error getting completions: {:?}", e),
+                }
+            }
+        }
         Err(e) => error!("Error listing prompts: {:?}", e),
     }
 

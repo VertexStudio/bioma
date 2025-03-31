@@ -20,13 +20,11 @@ impl PromptCompletionHandler for Greet {
         argument_name: &'a str,
         argument_value: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, PromptError>> + Send + 'a>> {
-        // Copy values to avoid lifetime issues
         let name = argument_name.to_string();
         let value = argument_value.to_string();
 
         Box::pin(async move {
             if name == "name" && !value.is_empty() {
-                // Suggest common names that start with the user's input
                 let suggestions =
                     ["Alice", "Bob", "Charlie", "David", "Emma", "Frank", "Grace", "Hannah", "Ian", "Julia"]
                         .iter()
@@ -105,22 +103,18 @@ mod tests {
     async fn test_greet_completion() {
         let greet = Greet;
 
-        // Test completion for "name" argument starting with "a"
         let completion_future = greet.complete_argument("name", "a");
         let completions = completion_future.await.unwrap();
         assert!(completions.contains(&"Alice".to_string()));
 
-        // Test completion for "name" argument starting with "a" (case insensitive)
         let completion_future = greet.complete_argument("name", "A");
         let completions = completion_future.await.unwrap();
         assert!(completions.contains(&"Alice".to_string()));
 
-        // Test completion for unknown argument
         let completion_future = greet.complete_argument("unknown", "test");
         let completions = completion_future.await.unwrap();
         assert!(completions.is_empty());
 
-        // Test completion for empty value
         let completion_future = greet.complete_argument("name", "");
         let completions = completion_future.await.unwrap();
         assert!(completions.is_empty());
