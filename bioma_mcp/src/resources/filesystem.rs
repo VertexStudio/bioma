@@ -169,20 +169,15 @@ impl ResourceCompletionHandler for FileSystem {
         value: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
         Box::pin(async move {
-            // Only handle path argument completions
             if name != "path" {
                 return Ok(vec![]);
             }
 
-            // Normalize the input path
             let input_path = if value.starts_with('/') { value.to_string() } else { format!("/{}", value) };
 
-            // Determine the directory we should look in and the prefix to match
             let (dir_to_search, prefix_to_match) = if input_path.ends_with('/') || input_path == "/" {
-                // If the path ends with a slash, we're looking for contents of that directory
                 (input_path.clone(), "".to_string())
             } else {
-                // Otherwise, we're looking for completions of the last part
                 let parent = if let Some(idx) = input_path.rfind('/') {
                     input_path[..=idx].to_string()
                 } else {
@@ -198,7 +193,6 @@ impl ResourceCompletionHandler for FileSystem {
                 (parent, file_prefix)
             };
 
-            // Convert to actual filesystem path
             let fs_path_to_search = if dir_to_search == "/" {
                 (*self.base_dir).clone()
             } else {
@@ -206,12 +200,10 @@ impl ResourceCompletionHandler for FileSystem {
                 self.base_dir.join(relative_path)
             };
 
-            // Check if directory exists
             if !fs_path_to_search.exists() || !fs_path_to_search.is_dir() {
                 return Ok(vec![]);
             }
 
-            // Read directory entries
             let mut entries = match fs::read_dir(&fs_path_to_search).await {
                 Ok(entries) => entries,
                 Err(_) => return Ok(vec![]),
@@ -219,26 +211,22 @@ impl ResourceCompletionHandler for FileSystem {
 
             let mut completions = Vec::new();
 
-            // Process each entry
             while let Some(entry) = entries.next_entry().await.ok().flatten() {
                 let file_name = match entry.file_name().to_str() {
                     Some(name) => name.to_string(),
                     None => continue,
                 };
 
-                // Skip hidden files and directories unless explicitly searching for them
                 if file_name.starts_with('.') && !prefix_to_match.starts_with('.') {
                     continue;
                 }
 
-                // Check if entry matches the prefix
                 if prefix_to_match.is_empty() || file_name.to_lowercase().starts_with(&prefix_to_match.to_lowercase()) {
                     let is_dir = match entry.file_type().await {
                         Ok(file_type) => file_type.is_dir(),
                         Err(_) => false,
                     };
 
-                    // Format the suggestion
                     let mut suggestion = if dir_to_search == "/" {
                         file_name
                     } else {
@@ -246,7 +234,6 @@ impl ResourceCompletionHandler for FileSystem {
                         format!("{}/{}", parent_path.trim_start_matches('/'), file_name)
                     };
 
-                    // Add trailing slash for directories
                     if is_dir {
                         suggestion.push('/');
                     }
@@ -615,7 +602,6 @@ mod tests {
     async fn test_path_completion_empty() {
         let temp_dir = tempdir().unwrap();
 
-        // Create test directory structure
         let file1_path = temp_dir.path().join("test1.txt");
         let file2_path = temp_dir.path().join("test2.txt");
         let subdir_path = temp_dir.path().join("subdir");
@@ -632,7 +618,6 @@ mod tests {
 
         let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
 
-        // Test completion with empty input (should list root)
         let completions = fs_resource.complete("path", "").await.unwrap();
 
         assert!(completions.contains(&"test1.txt".to_string()));
