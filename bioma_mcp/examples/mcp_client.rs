@@ -107,9 +107,9 @@ async fn main() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     info!("Listing prompts...");
-    let prompts_result = client.list_prompts(None).await;
+    let prompts_result = client.list_all_prompts(None).await;
     match prompts_result {
-        Ok(prompts_result) => info!("Available prompts: {:?}", prompts_result.prompts),
+        Ok(prompts) => info!("Available prompts: {:?}", prompts),
         Err(e) => error!("Error listing prompts: {:?}", e),
     }
 
