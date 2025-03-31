@@ -8,8 +8,6 @@ use bioma_mcp::{
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::io;
-use std::io::Write;
 use std::path::PathBuf;
 use tracing::{error, info};
 
@@ -57,17 +55,7 @@ impl ModelContextProtocolClient for ExampleMcpClient {
     async fn on_create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
         info!("Params: {:#?}", params);
 
-        print!("Accept request? (y/n): ");
-        io::stdout().flush().expect("Failed to flush stdout");
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).expect("Failed to read line");
-
-        info!("User response: {}", input);
-
-        if input.trim() != "y" {
-            return Err(ClientError::SamplingRequestRejected);
-        }
+        info!("Acceping sampling request..."); // In a real implementation, client should the capability to accept or decline the request
 
         info!("Starting sampling actor...");
 
