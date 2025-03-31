@@ -271,7 +271,7 @@ pub struct ModelContextProtocolClientActor {
     servers: Vec<ServerConfig>,
     #[serde(skip)]
     client: Option<Arc<Mutex<Client<McpBasicClient>>>>,
-    tools: Option<Vec<bioma_mcp::schema::Tool>>,
+    tools: Option<ListToolsResult>,
 }
 
 impl ModelContextProtocolClientActor {
@@ -360,7 +360,7 @@ impl Message<ListTools> for ModelContextProtocolClientActor {
     ) -> Result<(), ModelContextProtocolClientError> {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
-        let response = client.list_all_tools(message.0.clone()).await?;
+        let response = client.list_tools(message.0.clone()).await?;
         self.tools = Some(response.clone());
         self.save(ctx).await?;
         ctx.reply(response).await?;
