@@ -981,3 +981,180 @@ impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
         f.debug_struct("Client").field("servers", &self.list_servers()).finish()
     }
 }
+
+pub struct ResourcesIterator<'a, T: ModelContextProtocolClient> {
+    client: &'a mut Client<T>,
+    params: Option<ListResourcesRequestParams>,
+    next_cursor: Option<String>,
+    done: bool,
+}
+
+impl<'a, T: ModelContextProtocolClient> ResourcesIterator<'a, T> {
+    pub fn new(client: &'a mut Client<T>, params: Option<ListResourcesRequestParams>) -> Self {
+        Self { client, params, next_cursor: None, done: false }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<Vec<Resource>, ClientError>> {
+        if self.done {
+            return None;
+        }
+
+        let mut params = self.params.clone().unwrap_or_default();
+        if let Some(cursor) = &self.next_cursor {
+            params.cursor = Some(cursor.clone());
+        }
+
+        let result = self.client.list_resources(Some(params)).await;
+
+        match result {
+            Ok(response) => {
+                let items = response.resources;
+                self.next_cursor = response.next_cursor;
+                self.done = self.next_cursor.is_none();
+                Some(Ok(items))
+            }
+            Err(e) => {
+                self.done = true;
+                Some(Err(e))
+            }
+        }
+    }
+}
+
+pub struct PromptsIterator<'a, T: ModelContextProtocolClient> {
+    client: &'a mut Client<T>,
+    params: Option<ListPromptsRequestParams>,
+    next_cursor: Option<String>,
+    done: bool,
+}
+
+impl<'a, T: ModelContextProtocolClient> PromptsIterator<'a, T> {
+    pub fn new(client: &'a mut Client<T>, params: Option<ListPromptsRequestParams>) -> Self {
+        Self { client, params, next_cursor: None, done: false }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<Vec<Prompt>, ClientError>> {
+        if self.done {
+            return None;
+        }
+
+        let mut params = self.params.clone().unwrap_or_default();
+        if let Some(cursor) = &self.next_cursor {
+            params.cursor = Some(cursor.clone());
+        }
+
+        let result = self.client.list_prompts(Some(params)).await;
+
+        match result {
+            Ok(response) => {
+                let items = response.prompts;
+                self.next_cursor = response.next_cursor;
+                self.done = self.next_cursor.is_none();
+                Some(Ok(items))
+            }
+            Err(e) => {
+                self.done = true;
+                Some(Err(e))
+            }
+        }
+    }
+}
+
+pub struct ToolsIterator<'a, T: ModelContextProtocolClient> {
+    client: &'a mut Client<T>,
+    params: Option<ListToolsRequestParams>,
+    next_cursor: Option<String>,
+    done: bool,
+}
+
+impl<'a, T: ModelContextProtocolClient> ToolsIterator<'a, T> {
+    pub fn new(client: &'a mut Client<T>, params: Option<ListToolsRequestParams>) -> Self {
+        Self { client, params, next_cursor: None, done: false }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<Vec<Tool>, ClientError>> {
+        if self.done {
+            return None;
+        }
+
+        let mut params = self.params.clone().unwrap_or_default();
+        if let Some(cursor) = &self.next_cursor {
+            params.cursor = Some(cursor.clone());
+        }
+
+        let result = self.client.list_tools(Some(params)).await;
+
+        match result {
+            Ok(response) => {
+                let items = response.tools;
+                self.next_cursor = response.next_cursor;
+                self.done = self.next_cursor.is_none();
+                Some(Ok(items))
+            }
+            Err(e) => {
+                self.done = true;
+                Some(Err(e))
+            }
+        }
+    }
+}
+
+pub struct ResourceTemplatesIterator<'a, T: ModelContextProtocolClient> {
+    client: &'a mut Client<T>,
+    params: Option<ListResourceTemplatesRequestParams>,
+    next_cursor: Option<String>,
+    done: bool,
+}
+
+impl<'a, T: ModelContextProtocolClient> ResourceTemplatesIterator<'a, T> {
+    pub fn new(client: &'a mut Client<T>, params: Option<ListResourceTemplatesRequestParams>) -> Self {
+        Self { client, params, next_cursor: None, done: false }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<Vec<ResourceTemplate>, ClientError>> {
+        if self.done {
+            return None;
+        }
+
+        let mut params = self.params.clone().unwrap_or_default();
+        if let Some(cursor) = &self.next_cursor {
+            params.cursor = Some(cursor.clone());
+        }
+
+        let result = self.client.list_resource_templates(Some(params)).await;
+
+        match result {
+            Ok(response) => {
+                let items = response.resource_templates;
+                self.next_cursor = response.next_cursor;
+                self.done = self.next_cursor.is_none();
+                Some(Ok(items))
+            }
+            Err(e) => {
+                self.done = true;
+                Some(Err(e))
+            }
+        }
+    }
+}
+
+impl<T: ModelContextProtocolClient> Client<T> {
+    pub fn iter_resources<'a>(&'a mut self, params: Option<ListResourcesRequestParams>) -> ResourcesIterator<'a, T> {
+        ResourcesIterator::new(self, params)
+    }
+
+    pub fn iter_prompts<'a>(&'a mut self, params: Option<ListPromptsRequestParams>) -> PromptsIterator<'a, T> {
+        PromptsIterator::new(self, params)
+    }
+
+    pub fn iter_tools<'a>(&'a mut self, params: Option<ListToolsRequestParams>) -> ToolsIterator<'a, T> {
+        ToolsIterator::new(self, params)
+    }
+
+    pub fn iter_resource_templates<'a>(
+        &'a mut self,
+        params: Option<ListResourceTemplatesRequestParams>,
+    ) -> ResourceTemplatesIterator<'a, T> {
+        ResourceTemplatesIterator::new(self, params)
+    }
+}
