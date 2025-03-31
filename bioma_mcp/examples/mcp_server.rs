@@ -6,7 +6,9 @@ use bioma_mcp::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
     },
-    server::{Context, ModelContextProtocolServer, Server, SseConfig, StdioConfig, TransportConfig, WsConfig},
+    server::{
+        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, TransportConfig, WsConfig,
+    },
     tools::{self, ToolCallHandler},
 };
 use clap::{Parser, Subcommand};
@@ -24,6 +26,9 @@ struct Args {
 
     #[arg(long, short, default_value = ".")]
     base_dir: PathBuf,
+
+    #[arg(long, short, default_value = "20")]
+    page_size: usize,
 
     #[command(subcommand)]
     transport: Transport,
@@ -77,6 +82,7 @@ struct ExampleMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
     base_dir: PathBuf,
+    pagination: Pagination,
 }
 
 impl ModelContextProtocolServer for ExampleMcpServer {
@@ -86,6 +92,10 @@ impl ModelContextProtocolServer for ExampleMcpServer {
 
     async fn get_capabilities(&self) -> ServerCapabilities {
         self.capabilities.clone()
+    }
+
+    async fn get_pagination(&self) -> Option<Pagination> {
+        Some(self.pagination.clone())
     }
 
     async fn new_resources(&self, context: Context) -> Vec<Arc<dyn ResourceReadHandler>> {
@@ -133,7 +143,12 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let server = ExampleMcpServer { transport_config, capabilities, base_dir: args.base_dir };
+    let server = ExampleMcpServer {
+        transport_config,
+        capabilities,
+        base_dir: args.base_dir,
+        pagination: Pagination::new(args.page_size),
+    };
 
     let mcp_server = Server::new(server);
 
