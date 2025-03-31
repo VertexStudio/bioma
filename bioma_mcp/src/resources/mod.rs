@@ -58,9 +58,25 @@ pub trait ResourceReadHandler: Send + Sync {
             Err(ResourceError::SubscriptionNotSupported("This resource does not support subscription".to_string()))
         })
     }
+
+    fn complete_boxed<'a>(
+        &'a self,
+        name: String,
+        value: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>>;
 }
 
-pub trait ResourceDef: Serialize {
+pub trait ResourceCompletionHandler {
+    fn complete<'a>(
+        &'a self,
+        _name: &'a str,
+        _value: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
+        Box::pin(async move { Ok(vec![]) })
+    }
+}
+
+pub trait ResourceDef: Serialize + ResourceCompletionHandler {
     const NAME: &'static str;
 
     const DESCRIPTION: &'static str;
@@ -132,5 +148,16 @@ impl<T: ResourceDef + Send + Sync> ResourceReadHandler for T {
 
     fn unsubscribe<'a>(&'a self, uri: String) -> Pin<Box<dyn Future<Output = Result<(), ResourceError>> + Send + 'a>> {
         Box::pin(async move { self.unsubscribe(uri).await })
+    }
+
+    fn complete_boxed<'a>(
+        &'a self,
+        name: String,
+        value: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
+        let name = name.clone();
+        let value = value.clone();
+
+        Box::pin(async move { self.complete(&name, &value).await })
     }
 }

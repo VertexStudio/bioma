@@ -14,6 +14,7 @@ use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
 // use anyhow::{Context, Error, Result};
+use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -42,6 +43,7 @@ pub enum ServerError {
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
+    fn get_pagination(&self) -> impl Future<Output = Option<Pagination>> + Send;
     fn new_resources(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
     fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
     fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
@@ -96,6 +98,69 @@ pub enum TransportConfig {
     Ws(WsConfig),
 }
 
+#[derive(Debug, Clone)]
+pub struct Pagination {
+    pub size: usize,
+}
+
+impl Default for Pagination {
+    fn default() -> Self {
+        Self { size: 20 }
+    }
+}
+
+impl Pagination {
+    pub fn new(size: usize) -> Self {
+        Self { size }
+    }
+
+    pub fn paginate<T, U, F>(&self, items: &[T], cursor: Option<String>, converter: F) -> (Vec<U>, Option<String>)
+    where
+        F: Fn(&T) -> U,
+    {
+        let total_items = items.len();
+
+        if total_items == 0 {
+            return (vec![], None);
+        }
+
+        let offset = match cursor {
+            Some(cursor_str) => self.decode_cursor(&cursor_str).unwrap_or(0),
+            None => 0,
+        };
+
+        if offset >= total_items {
+            return (vec![], None);
+        }
+
+        let end = std::cmp::min(offset + self.size, total_items);
+        let has_more = end < total_items;
+
+        let result: Vec<U> = items[offset..end].iter().map(&converter).collect();
+
+        let next_cursor = if has_more { Some(self.encode_cursor(end)) } else { None };
+
+        (result, next_cursor)
+    }
+
+    pub fn encode_cursor(&self, offset: usize) -> String {
+        base64::encode(offset.to_string())
+    }
+
+    pub fn decode_cursor(&self, cursor: &str) -> Result<usize, ServerError> {
+        let decoded =
+            base64::decode(cursor).map_err(|e| ServerError::Request(format!("Invalid cursor format: {}", e)))?;
+
+        let cursor_str =
+            String::from_utf8(decoded).map_err(|e| ServerError::Request(format!("Invalid cursor encoding: {}", e)))?;
+
+        let offset =
+            cursor_str.parse::<usize>().map_err(|e| ServerError::Request(format!("Invalid cursor value: {}", e)))?;
+
+        Ok(offset)
+    }
+}
+
 struct Session {
     #[allow(unused)]
     context: Context,
@@ -109,24 +174,36 @@ impl Session {
         self.tools.iter().find(|tool| tool.def().name == name).cloned()
     }
 
-    fn list_tools(&self) -> Vec<crate::schema::Tool> {
-        self.tools.iter().map(|tool| tool.def()).collect()
+    fn list_tools(&self, cursor: Option<String>) -> (Vec<crate::schema::Tool>, Option<String>) {
+        if let Some(pagination) = &self.context.pagination {
+            pagination.paginate(&self.tools, cursor, |tool| tool.def())
+        } else {
+            (self.tools.iter().map(|tool| tool.def()).collect(), None)
+        }
     }
 
     fn find_resource(&self, uri: &str) -> Option<Arc<dyn ResourceReadHandler>> {
         self.resources.iter().find(|resource| resource.def().uri == uri).cloned()
     }
 
-    fn list_resources(&self) -> Vec<crate::schema::Resource> {
-        self.resources.iter().map(|resource| resource.def()).collect()
+    fn list_resources(&self, cursor: Option<String>) -> (Vec<crate::schema::Resource>, Option<String>) {
+        if let Some(pagination) = &self.context.pagination {
+            pagination.paginate(&self.resources, cursor, |resource| resource.def())
+        } else {
+            (self.resources.iter().map(|resource| resource.def()).collect(), None)
+        }
     }
 
     fn find_prompt(&self, name: &str) -> Option<Arc<dyn PromptGetHandler>> {
         self.prompts.iter().find(|prompt| prompt.def().name == name).cloned()
     }
 
-    fn list_prompts(&self) -> Vec<crate::schema::Prompt> {
-        self.prompts.iter().map(|prompt| prompt.def()).collect()
+    fn list_prompts(&self, cursor: Option<String>) -> (Vec<crate::schema::Prompt>, Option<String>) {
+        if let Some(pagination) = &self.context.pagination {
+            pagination.paginate(&self.prompts, cursor, |prompt| prompt.def())
+        } else {
+            (self.prompts.iter().map(|prompt| prompt.def()).collect(), None)
+        }
     }
 }
 
@@ -143,6 +220,7 @@ pub struct Context {
     sender: TransportSender,
     pending_requests: PendingRequests,
     request_counter: RequestCounter,
+    pagination: Option<Pagination>,
 }
 
 impl Context {
@@ -154,6 +232,7 @@ impl Context {
             sender: TransportSender::new_nop(),
             pending_requests: PendingRequests::default(),
             request_counter: RequestCounter::default(),
+            pagination: None,
         }
     }
 
@@ -331,6 +410,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     };
 
                     let conn_id = meta.conn_id;
+                    let pagination = server.read().await.get_pagination().await;
 
                     let context = Context {
                         conn_id: conn_id.clone(),
@@ -339,6 +419,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         server_capabilities: capabilities.clone(),
                         pending_requests: pending_requests.clone(),
                         request_counter: request_counter.clone(),
+                        pagination,
                     };
 
                     let server = server.read().await;
@@ -428,8 +509,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
                     };
 
-                    let resources = session.list_resources();
-                    let response = ListResourcesResult { next_cursor: None, resources, meta: None };
+                    let (resources, next_cursor) = session.list_resources(params.cursor);
+                    let response = ListResourcesResult { next_cursor, resources, meta: None };
 
                     info!("Successfully handled resources/list request");
                     Ok(serde_json::to_value(response).unwrap_or_default())
@@ -652,9 +733,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
                     };
 
-                    let prompts = session.list_prompts();
-
-                    let response = ListPromptsResult { next_cursor: None, prompts, meta: None };
+                    let (prompts, next_cursor) = session.list_prompts(params.cursor);
+                    let response = ListPromptsResult { next_cursor, prompts, meta: None };
 
                     info!("Successfully handled prompts/list request");
                     Ok(serde_json::to_value(response).unwrap_or_default())
@@ -728,8 +808,12 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let conn_id = meta.conn_id.clone();
                     let sessions = sessions.read().await;
 
-                    let tools = if let Some(session) = sessions.get(&conn_id) { session.list_tools() } else { vec![] };
-                    let response = ListToolsResult { next_cursor: None, tools, meta: None };
+                    let (tools, next_cursor) = if let Some(session) = sessions.get(&conn_id) {
+                        session.list_tools(params.cursor)
+                    } else {
+                        (vec![], None)
+                    };
+                    let response = ListToolsResult { next_cursor, tools, meta: None };
                     info!("Successfully handled tools/list request");
                     Ok(serde_json::to_value(response).unwrap_or_default())
                 }
@@ -776,6 +860,100 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         None => {
                             error!("Unknown tool requested: {}", params.name);
                             Err(jsonrpc_core::Error::method_not_found())
+                        }
+                    }
+                }
+            }
+        });
+
+        io_handler.add_method_with_meta("completion/complete", {
+            let sessions = self.sessions.clone();
+
+            move |params: Params, meta: ServerMetadata| {
+                let sessions = sessions.clone();
+
+                async move {
+                    debug!("Handling completion/complete request");
+
+                    let params: crate::schema::CompleteRequestParams = params.parse().map_err(|e| {
+                        error!("Failed to parse completion params: {}", e);
+                        jsonrpc_core::Error::invalid_params(e.to_string())
+                    })?;
+
+                    let sessions = sessions.read().await;
+                    let Some(session) = sessions.get(&meta.conn_id) else {
+                        error!("Session not found");
+                        return Err(jsonrpc_core::Error::invalid_params("Session not found".to_string()));
+                    };
+
+                    match &params.ref_ {
+                        serde_json::Value::Object(obj) => {
+                            if let Some(type_val) = obj.get("type") {
+                                if let Some(type_str) = type_val.as_str() {
+                                    if type_str == "ref/prompt" {
+                                        if let Some(name_val) = obj.get("name") {
+                                            if let Some(name_str) = name_val.as_str() {
+                                                if let Some(prompt) = session.find_prompt(name_str) {
+                                                    let completions = prompt
+                                                        .complete_argument_boxed(
+                                                            params.argument.name.clone(),
+                                                            params.argument.value.clone(),
+                                                        )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            error!("Prompt completion error: {}", e);
+                                                            jsonrpc_core::Error::internal_error()
+                                                        })?;
+
+                                                    return Ok(serde_json::to_value(crate::schema::CompleteResult {
+                                                        meta: None,
+                                                        completion: crate::schema::CompleteResultCompletion {
+                                                            values: completions,
+                                                            total: None,
+                                                            has_more: Some(false),
+                                                        },
+                                                    })
+                                                    .unwrap());
+                                                }
+                                            }
+                                        }
+                                    } else if type_str == "ref/resource" {
+                                        if let Some(uri_val) = obj.get("uri") {
+                                            if let Some(uri_str) = uri_val.as_str() {
+                                                if let Some(resource) = session.find_resource(uri_str) {
+                                                    let completions = resource
+                                                        .complete_boxed(
+                                                            params.argument.name.clone(),
+                                                            params.argument.value.clone(),
+                                                        )
+                                                        .await
+                                                        .map_err(|e| {
+                                                            error!("Resource completion error: {}", e);
+                                                            jsonrpc_core::Error::internal_error()
+                                                        })?;
+
+                                                    return Ok(serde_json::to_value(crate::schema::CompleteResult {
+                                                        meta: None,
+                                                        completion: crate::schema::CompleteResultCompletion {
+                                                            values: completions,
+                                                            total: None,
+                                                            has_more: Some(false),
+                                                        },
+                                                    })
+                                                    .unwrap());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            error!("Invalid reference format");
+                            Err(jsonrpc_core::Error::invalid_params("Invalid reference format"))
+                        }
+                        _ => {
+                            error!("Invalid reference type");
+                            Err(jsonrpc_core::Error::invalid_params("Invalid reference type"))
                         }
                     }
                 }

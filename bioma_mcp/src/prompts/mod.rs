@@ -32,9 +32,25 @@ pub trait PromptGetHandler: Send + Sync {
     fn def(&self) -> schema::Prompt {
         panic!("Not implemented");
     }
+
+    fn complete_argument_boxed<'a>(
+        &'a self,
+        argument_name: String,
+        argument_value: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, PromptError>> + Send + 'a>>;
 }
 
-pub trait PromptDef: Serialize {
+pub trait PromptCompletionHandler {
+    fn complete_argument<'a>(
+        &'a self,
+        _argument_name: &'a str,
+        _argument_value: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, PromptError>> + Send + 'a>> {
+        Box::pin(async move { Ok(vec![]) })
+    }
+}
+
+pub trait PromptDef: Serialize + PromptCompletionHandler {
     const NAME: &'static str;
 
     const DESCRIPTION: &'static str;
@@ -66,5 +82,16 @@ impl<T: PromptDef + Send + Sync> PromptGetHandler for T {
 
     fn def(&self) -> schema::Prompt {
         T::def()
+    }
+
+    fn complete_argument_boxed<'a>(
+        &'a self,
+        argument_name: String,
+        argument_value: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, PromptError>> + Send + 'a>> {
+        let name = argument_name.clone();
+        let value = argument_value.clone();
+
+        Box::pin(async move { self.complete_argument(&name, &value).await })
     }
 }

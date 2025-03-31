@@ -1,11 +1,13 @@
-use crate::resources::{ResourceDef, ResourceError};
+use crate::resources::{ResourceCompletionHandler, ResourceDef, ResourceError};
 use crate::schema::{ReadResourceResult, ResourceTemplate, ResourceUpdatedNotificationParams};
 use crate::server::Context;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -157,6 +159,91 @@ impl FileSystem {
     fn path_to_uri(&self, path: &Path) -> String {
         let path_str = path.to_string_lossy();
         format!("file://{}", path_str)
+    }
+}
+
+impl ResourceCompletionHandler for FileSystem {
+    fn complete<'a>(
+        &'a self,
+        name: &'a str,
+        value: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, ResourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            if name != "path" {
+                return Ok(vec![]);
+            }
+
+            let input_path = if value.starts_with('/') { value.to_string() } else { format!("/{}", value) };
+
+            let (dir_to_search, prefix_to_match) = if input_path.ends_with('/') || input_path == "/" {
+                (input_path.clone(), "".to_string())
+            } else {
+                let parent = if let Some(idx) = input_path.rfind('/') {
+                    input_path[..=idx].to_string()
+                } else {
+                    "/".to_string()
+                };
+
+                let file_prefix = if let Some(idx) = input_path.rfind('/') {
+                    input_path[(idx + 1)..].to_string()
+                } else {
+                    input_path.clone()
+                };
+
+                (parent, file_prefix)
+            };
+
+            let fs_path_to_search = if dir_to_search == "/" {
+                (*self.base_dir).clone()
+            } else {
+                let relative_path = dir_to_search.trim_start_matches('/');
+                self.base_dir.join(relative_path)
+            };
+
+            if !fs_path_to_search.exists() || !fs_path_to_search.is_dir() {
+                return Ok(vec![]);
+            }
+
+            let mut entries = match fs::read_dir(&fs_path_to_search).await {
+                Ok(entries) => entries,
+                Err(_) => return Ok(vec![]),
+            };
+
+            let mut completions = Vec::new();
+
+            while let Some(entry) = entries.next_entry().await.ok().flatten() {
+                let file_name = match entry.file_name().to_str() {
+                    Some(name) => name.to_string(),
+                    None => continue,
+                };
+
+                if file_name.starts_with('.') && !prefix_to_match.starts_with('.') {
+                    continue;
+                }
+
+                if prefix_to_match.is_empty() || file_name.to_lowercase().starts_with(&prefix_to_match.to_lowercase()) {
+                    let is_dir = match entry.file_type().await {
+                        Ok(file_type) => file_type.is_dir(),
+                        Err(_) => false,
+                    };
+
+                    let mut suggestion = if dir_to_search == "/" {
+                        file_name
+                    } else {
+                        let parent_path = dir_to_search.trim_end_matches('/');
+                        format!("{}/{}", parent_path.trim_start_matches('/'), file_name)
+                    };
+
+                    if is_dir {
+                        suggestion.push('/');
+                    }
+
+                    completions.push(suggestion);
+                }
+            }
+
+            Ok(completions)
+        })
     }
 }
 
@@ -509,5 +596,32 @@ mod tests {
             Err(ResourceError::Custom(msg)) if msg.contains("Access denied") => {}
             _ => panic!("Expected Access denied error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_path_completion_empty() {
+        let temp_dir = tempdir().unwrap();
+
+        let file1_path = temp_dir.path().join("test1.txt");
+        let file2_path = temp_dir.path().join("test2.txt");
+        let subdir_path = temp_dir.path().join("subdir");
+
+        {
+            let mut file1 = File::create(&file1_path).unwrap();
+            write!(file1, "File 1 content").unwrap();
+
+            let mut file2 = File::create(&file2_path).unwrap();
+            write!(file2, "File 2 content").unwrap();
+
+            std::fs::create_dir(&subdir_path).unwrap();
+        }
+
+        let fs_resource = FileSystem::new(temp_dir.path(), Context::test());
+
+        let completions = fs_resource.complete("path", "").await.unwrap();
+
+        assert!(completions.contains(&"test1.txt".to_string()));
+        assert!(completions.contains(&"test2.txt".to_string()));
+        assert!(completions.contains(&"subdir/".to_string()));
     }
 }
