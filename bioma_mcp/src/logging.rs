@@ -13,7 +13,7 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
 /// Structure to pass log data through the channel
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct QueuedLog {
     level: LoggingLevel,
     target: String,
@@ -238,7 +238,19 @@ where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        // This is the hot path. Do minimal work here.
+        // Skip internal tokio events - only process events from our library
+        let target = event.metadata().target();
+        if !target.starts_with("bioma_mcp") {
+            return;
+        }
+
+        // Apply early filtering - ignore trace level events globally
+        // This prevents filling the queue with unwanted events
+        if *event.metadata().level() == tracing::Level::TRACE {
+            return;
+        }
+
+        // Convert to MCP log level
         let mcp_level = tracing_level_to_mcp_level(event.metadata().level());
 
         // Extract message using the visitor
@@ -247,19 +259,19 @@ where
 
         let log_entry = QueuedLog {
             level: mcp_level,
-            target: event.metadata().target().to_string(),
+            target: target.to_string(),
             message: visitor.get_message(),
             connection_ids: Vec::new(), // Empty means "send to all eligible clients"
         };
 
         // Try to send to the worker task's queue
-        match self.log_sender.try_send(log_entry) {
+        match self.log_sender.try_send(log_entry.clone()) {
             Ok(_) => {
                 // Successfully queued
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 // Log queue is full - this avoids a feedback loop if we used tracing
-                eprintln!("WARNING: MCP Logging queue full. Dropping log message.");
+                eprintln!("WARNING: MCP Logging queue full. Dropping log message. {:?}, event: {:?}", log_entry, event);
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 // Worker task has stopped
