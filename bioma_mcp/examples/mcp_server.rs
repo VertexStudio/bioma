@@ -7,8 +7,7 @@ use bioma_mcp::{
         ServerCapabilitiesPromptsResourcesTools,
     },
     server::{
-        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, TracingRegistry,
-        TransportConfig, WsConfig,
+        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, TransportConfig, WsConfig,
     },
     tools::{self, ToolCallHandler},
 };
@@ -102,7 +101,7 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         Some(self.pagination.clone())
     }
 
-    async fn get_tracing_registry(&self) -> Option<TracingRegistry> {
+    async fn get_tracing_layer(&self) -> Option<bioma_mcp::server::TracingLayer> {
         // Create file appender
         let file_appender = RollingFileAppender::new(
             Rotation::NEVER,
@@ -120,12 +119,11 @@ impl ModelContextProtocolServer for ExampleMcpServer {
             .with_line_number(true)
             .with_ansi(false)
             .with_span_events(FmtSpan::CLOSE)
-            .with_writer(file_appender);
+            .with_writer(file_appender)
+            .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
 
-        // Return the registry with file layer directly
-        Some(Box::new(
-            tracing_subscriber::registry().with(tracing_subscriber::filter::LevelFilter::DEBUG).with(file_layer),
-        ))
+        // Box the layer and return it
+        Some(Box::new(file_layer))
     }
 
     async fn new_resources(&self, context: Context) -> Vec<Arc<dyn ResourceReadHandler>> {

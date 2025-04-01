@@ -24,6 +24,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{Layer, Registry};
+
+// Define a type alias for boxed layer
+pub type TracingLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 #[derive(Clone)]
 pub struct ServerMetadata {
@@ -42,13 +46,11 @@ pub enum ServerError {
     ParseResponse(String),
 }
 
-pub type TracingRegistry = Box<dyn tracing::Subscriber + Send + Sync>;
-
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
     fn get_pagination(&self) -> impl Future<Output = Option<Pagination>> + Send;
-    fn get_tracing_registry(&self) -> impl Future<Output = Option<TracingRegistry>> + Send {
+    fn get_tracing_layer(&self) -> impl Future<Output = Option<TracingLayer>> + Send {
         async { None }
     }
     fn new_resources(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
@@ -341,8 +343,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
     pub async fn start(&self) -> Result<(), ServerError> {
         let transport_config = self.server.read().await.get_transport_config().await.clone();
 
-        // Get the registry from the server implementation
-        let registry_option = self.server.read().await.get_tracing_registry().await;
+        // Get the additional layer from the server implementation
+        let additional_layer_option = self.server.read().await.get_tracing_layer().await;
 
         let (transport_type, mut on_client_rx, _on_error_rx, _on_close_rx) = match &transport_config {
             TransportConfig::Stdio(_config) => {
@@ -387,23 +389,21 @@ impl<T: ModelContextProtocolServer> Server<T> {
         // Update the logging layer with the real transport sender
         self.logging_layer.update_transport(transport_sender.clone()).await;
 
-        // If we have a registry, add our logging layer and set it as global
-        if let Some(registry) = registry_option {
-            // Create a fresh instance of the logging layer
-            let logging_layer = McpLoggingLayer::new(transport_sender.clone());
-
-            // Set the transport sender
-            logging_layer.update_transport(transport_sender.clone()).await;
-
-            // Create a registry with our layers
+        // If we have an additional layer, set up tracing
+        if let Some(file_layer) = additional_layer_option {
+            // Create a new registry
             let subscriber = tracing_subscriber::registry()
-                .with(logging_layer) // Use the new instance directly
-                .with(registry); // Use the boxed registry directly
+                // First add the file layer from the implementation<
+                .with(file_layer)
+                // Then add our MCP logging layer (cloned from the Arc)
+                .with((*self.logging_layer).clone());
 
             // Set as global default
             if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
                 error!("Failed to set global subscriber: {}", e);
-                // Continue anyway, just without MCP logging
+                // Continue anyway, just without the full tracing setup
+            } else {
+                debug!("Global tracing subscriber initialized successfully");
             }
         }
 

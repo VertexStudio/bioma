@@ -6,140 +6,208 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::field::{Field, Visit};
-use tracing::{info, Event};
+use tracing::{debug, error, trace, warn, Event};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
+/// Structure to pass log data through the channel
+#[derive(Debug)]
+struct QueuedLog {
+    level: LoggingLevel,
+    target: String,
+    message: String,
+    connection_ids: Vec<ConnectionId>,
+}
+
 #[derive(Clone)]
 pub struct McpLoggingLayer {
-    pub transport: Arc<RwLock<TransportSender>>,
+    log_sender: mpsc::Sender<QueuedLog>,
+    client_levels: Arc<RwLock<HashMap<ConnectionId, LoggingLevel>>>,
+}
+
+struct Worker {
+    log_receiver: mpsc::Receiver<QueuedLog>,
+    transport: Arc<RwLock<TransportSender>>,
     client_levels: Arc<RwLock<HashMap<ConnectionId, LoggingLevel>>>,
 }
 
 impl McpLoggingLayer {
     pub fn new(transport: TransportSender) -> Self {
-        Self { transport: Arc::new(RwLock::new(transport)), client_levels: Arc::new(RwLock::new(HashMap::new())) }
+        let (log_sender, log_receiver) = mpsc::channel(1024); // Configurable buffer size
+        let client_levels = Arc::new(RwLock::new(HashMap::new()));
+        let transport = Arc::new(RwLock::new(transport));
+
+        let worker = Worker { log_receiver, transport, client_levels: Arc::clone(&client_levels) };
+
+        // Spawn the background worker task
+        tokio::spawn(worker.run());
+
+        Self { log_sender, client_levels }
     }
 
     pub async fn update_transport(&self, transport: TransportSender) {
-        let mut t = self.transport.write().await;
-        *t = transport;
+        let transport_arc = Arc::new(RwLock::new(transport));
+
+        // Create a new worker with the updated transport
+        let (tx, rx) = mpsc::channel(1024);
+        let worker =
+            Worker { log_receiver: rx, transport: transport_arc, client_levels: Arc::clone(&self.client_levels) };
+
+        tokio::spawn(worker.run());
+
+        // Replace the sender with the new one
+        let mut old_sender = self.log_sender.clone();
+        // This effectively replaces self.log_sender with tx
+        std::mem::swap(&mut old_sender, &mut tx.clone());
     }
 
     pub async fn set_level(&self, conn_id: ConnectionId, level: LoggingLevel) {
         let mut levels = self.client_levels.write().await;
+        debug!(connection_id = ?conn_id, ?level, "Setting logging level for client");
         levels.insert(conn_id, level);
     }
 
     pub async fn remove_client(&self, conn_id: &ConnectionId) {
         let mut levels = self.client_levels.write().await;
-        levels.remove(conn_id);
+        if levels.remove(conn_id).is_some() {
+            debug!(connection_id = ?conn_id, "Removed client from logging");
+        }
     }
+}
 
-    async fn should_send(&self, conn_id: &ConnectionId, level: &LoggingLevel) -> bool {
-        let levels = self.client_levels.read().await;
+/// Compares log levels to determine if a message should be sent
+/// Returns true if the client level (first param) is "higher" (more verbose)
+/// or equal to the message level (second param)
+fn compare_log_levels(client_level: &LoggingLevel, message_level: &LoggingLevel) -> bool {
+    // For LoggingLevel, lower numerical value means higher severity
+    // So Debug > Info > Warning > Error etc.
+    match client_level {
+        LoggingLevel::Debug => true, // Debug level receives all logs
+        LoggingLevel::Info => message_level != &LoggingLevel::Debug,
+        LoggingLevel::Notice => !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info),
+        LoggingLevel::Warning => {
+            !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info | LoggingLevel::Notice)
+        }
+        LoggingLevel::Error => matches!(
+            message_level,
+            LoggingLevel::Error | LoggingLevel::Critical | LoggingLevel::Alert | LoggingLevel::Emergency
+        ),
+        LoggingLevel::Critical => {
+            matches!(message_level, LoggingLevel::Critical | LoggingLevel::Alert | LoggingLevel::Emergency)
+        }
+        LoggingLevel::Alert => matches!(message_level, LoggingLevel::Alert | LoggingLevel::Emergency),
+        LoggingLevel::Emergency => message_level == &LoggingLevel::Emergency,
+    }
+}
 
-        if let Some(client_level) = levels.get(conn_id) {
-            match client_level {
-                LoggingLevel::Emergency => matches!(level, LoggingLevel::Emergency),
-                LoggingLevel::Alert => matches!(level, LoggingLevel::Emergency | LoggingLevel::Alert),
-                LoggingLevel::Critical => {
-                    matches!(level, LoggingLevel::Emergency | LoggingLevel::Alert | LoggingLevel::Critical)
+impl Worker {
+    async fn run(mut self) {
+        debug!("MCP Logging worker task started");
+
+        while let Some(log_entry) = self.log_receiver.recv().await {
+            trace!(
+                level = ?log_entry.level,
+                target = %log_entry.target,
+                connection_count = %log_entry.connection_ids.len(),
+                "Processing log entry"
+            );
+
+            if log_entry.connection_ids.is_empty() {
+                // Get all clients that should receive this log
+                let clients_to_notify = {
+                    let client_levels = self.client_levels.read().await;
+                    client_levels
+                        .iter()
+                        .filter_map(|(conn_id, client_level)| {
+                            if compare_log_levels(client_level, &log_entry.level) {
+                                Some(conn_id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                };
+
+                if clients_to_notify.is_empty() {
+                    continue; // No clients interested in this log level
                 }
-                LoggingLevel::Error => {
-                    matches!(
-                        level,
-                        LoggingLevel::Emergency | LoggingLevel::Alert | LoggingLevel::Critical | LoggingLevel::Error
-                    )
+
+                // Create notification once for all clients
+                let notification = self.create_notification(&log_entry);
+
+                // Send to all interested clients
+                let transport_guard = self.transport.read().await;
+                for conn_id in clients_to_notify {
+                    if let Err(e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {
+                        warn!(connection_id = ?conn_id, error = %e, "Failed to send log notification");
+                    }
                 }
-                LoggingLevel::Warning => {
-                    matches!(
-                        level,
-                        LoggingLevel::Emergency
-                            | LoggingLevel::Alert
-                            | LoggingLevel::Critical
-                            | LoggingLevel::Error
-                            | LoggingLevel::Warning
-                    )
+            } else {
+                // Specific connection IDs were provided
+                // Create notification once for all clients
+                let notification = self.create_notification(&log_entry);
+
+                // Send to specified clients
+                let transport_guard = self.transport.read().await;
+                for conn_id in log_entry.connection_ids {
+                    if let Err(e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {
+                        warn!(connection_id = ?conn_id, error = %e, "Failed to send log notification");
+                    }
                 }
-                LoggingLevel::Notice => {
-                    matches!(
-                        level,
-                        LoggingLevel::Emergency
-                            | LoggingLevel::Alert
-                            | LoggingLevel::Critical
-                            | LoggingLevel::Error
-                            | LoggingLevel::Warning
-                            | LoggingLevel::Notice
-                    )
-                }
-                LoggingLevel::Info => {
-                    matches!(
-                        level,
-                        LoggingLevel::Emergency
-                            | LoggingLevel::Alert
-                            | LoggingLevel::Critical
-                            | LoggingLevel::Error
-                            | LoggingLevel::Warning
-                            | LoggingLevel::Notice
-                            | LoggingLevel::Info
-                    )
-                }
-                LoggingLevel::Debug => true,
             }
-        } else {
-            // If no level is set for this client, use Info as the default level
-            matches!(
-                level,
-                LoggingLevel::Emergency
-                    | LoggingLevel::Alert
-                    | LoggingLevel::Critical
-                    | LoggingLevel::Error
-                    | LoggingLevel::Warning
-                    | LoggingLevel::Notice
-                    | LoggingLevel::Info
-            )
         }
+
+        debug!("MCP Logging worker task stopped");
     }
 
-    async fn send_log_notification(
-        &self,
-        conn_id: ConnectionId,
-        level: LoggingLevel,
-        logger: Option<String>,
-        message: String,
-    ) {
-        // Only send if this log level should be sent to this client
-        if !self.should_send(&conn_id, &level).await {
-            info!("not sending log notification to client: {:?}", conn_id);
-            return;
-        }
-
-        let params = LoggingMessageNotificationParams { level, logger, data: message.into() };
-
-        let notification = jsonrpc_core::Notification {
-            jsonrpc: Some(jsonrpc_core::Version::V2),
-            method: "notifications/message".to_string(),
-            params: jsonrpc_core::Params::Map(
-                serde_json::to_value(params).unwrap_or_default().as_object().cloned().unwrap_or_default(),
-            ),
+    fn create_notification(&self, log_entry: &QueuedLog) -> jsonrpc_core::Notification {
+        let params = LoggingMessageNotificationParams {
+            level: log_entry.level.clone(),
+            logger: Some(log_entry.target.clone()),
+            data: log_entry.message.clone().into(),
         };
 
-        let transport = self.transport.read().await;
-        let _ = transport.send(notification.into(), conn_id).await;
+        match serde_json::to_value(&params) {
+            Ok(Value::Object(map)) => jsonrpc_core::Notification {
+                jsonrpc: Some(jsonrpc_core::Version::V2),
+                method: "notifications/message".to_string(),
+                params: jsonrpc_core::Params::Map(map),
+            },
+            Ok(_) => {
+                error!("Failed to serialize log parameters to JSON map");
+                // Fallback params
+                jsonrpc_core::Notification {
+                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                    method: "notifications/message".to_string(),
+                    params: jsonrpc_core::Params::Map(serde_json::Map::new()),
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to serialize log parameters");
+                // Fallback params
+                jsonrpc_core::Notification {
+                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                    method: "notifications/message".to_string(),
+                    params: jsonrpc_core::Params::Map(serde_json::Map::new()),
+                }
+            }
+        }
     }
 }
 
 struct LogVisitor {
-    fields: HashMap<String, String>,
     message: Option<String>,
 }
 
 impl LogVisitor {
     fn new() -> Self {
-        Self { fields: HashMap::new(), message: None }
+        Self { message: None }
+    }
+
+    fn get_message(self) -> String {
+        self.message.unwrap_or_default()
     }
 }
 
@@ -147,34 +215,19 @@ impl Visit for LogVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         if field.name() == "message" {
             self.message = Some(format!("{:?}", value));
-        } else {
-            self.fields.insert(field.name().to_string(), format!("{:?}", value));
         }
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "message" {
             self.message = Some(value.to_string());
-        } else {
-            self.fields.insert(field.name().to_string(), value.to_string());
         }
     }
 
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
-    }
-
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
-    }
-
-    fn record_bool(&mut self, field: &Field, value: bool) {
-        self.fields.insert(field.name().to_string(), value.to_string());
-    }
-
-    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        self.fields.insert(field.name().to_string(), format!("{}", value));
-    }
+    fn record_i64(&mut self, _field: &Field, _value: i64) {}
+    fn record_u64(&mut self, _field: &Field, _value: u64) {}
+    fn record_bool(&mut self, _field: &Field, _value: bool) {}
+    fn record_error(&mut self, _field: &Field, _value: &(dyn std::error::Error + 'static)) {}
 }
 
 fn tracing_level_to_mcp_level(level: &tracing::Level) -> LoggingLevel {
@@ -192,36 +245,34 @@ where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        info!("on_event called with level: {:?}", event.metadata().level());
+        // This is the hot path. Do minimal work here.
         let mcp_level = tracing_level_to_mcp_level(event.metadata().level());
-        info!("converted to mcp_level: {:?}", mcp_level);
 
+        // Extract message using the visitor
         let mut visitor = LogVisitor::new();
         event.record(&mut visitor);
 
-        let message = visitor.message.unwrap_or_default();
-        info!("message: {}", message);
+        let log_entry = QueuedLog {
+            level: mcp_level,
+            target: event.metadata().target().to_string(),
+            message: visitor.get_message(),
+            connection_ids: Vec::new(), // Empty means "send to all eligible clients"
+        };
 
-        // Include target module as logger
-        let logger = Some(event.metadata().target().to_string());
-        info!("logger target: {:?}", logger);
-
-        // Need to send to all connected clients
-        let layer = self.clone();
-
-        tokio::spawn(async move {
-            let clients: Vec<ConnectionId> = {
-                let levels = layer.client_levels.read().await;
-                levels.keys().cloned().collect()
-            };
-
-            for client_id in clients {
-                info!("sending notification to client: {:?}", client_id);
-                layer
-                    .send_log_notification(client_id.clone(), mcp_level.clone(), logger.clone(), message.clone())
-                    .await;
+        // Try to send to the worker task's queue
+        match self.log_sender.try_send(log_entry) {
+            Ok(_) => {
+                // Successfully queued
             }
-        });
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // Log queue is full - this avoids a feedback loop if we used tracing
+                eprintln!("WARNING: MCP Logging queue full. Dropping log message.");
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                // Worker task has stopped
+                eprintln!("ERROR: MCP Logging channel closed. Worker task may have stopped.");
+            }
+        }
     }
 }
 
@@ -231,13 +282,11 @@ pub async fn handle_set_level_request(
     logging_layer: Arc<McpLoggingLayer>,
 ) -> jsonrpc_core::Result<Value> {
     let params: crate::schema::SetLevelRequestParams = params.parse().map_err(|e| {
-        tracing::error!("Failed to parse logging/setLevel parameters: {}", e);
+        error!("Failed to parse logging/setLevel parameters: {}", e);
         jsonrpc_core::Error::invalid_params(e.to_string())
     })?;
 
-    logging_layer.set_level(conn_id.clone(), params.level.clone()).await;
-
-    tracing::info!("Client {} set log level to {:?}", conn_id, params.level);
+    logging_layer.set_level(conn_id.clone(), params.level).await;
 
     Ok(json!({}))
 }
