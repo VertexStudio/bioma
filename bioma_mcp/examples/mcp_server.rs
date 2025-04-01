@@ -109,6 +109,11 @@ impl ModelContextProtocolServer for ExampleMcpServer {
             self.log_path.file_name().unwrap_or_default(),
         );
 
+        // Get log filter from RUST_LOG env var or default to DEBUG
+        let filter = std::env::var("RUST_LOG")
+            .map(|val| tracing_subscriber::EnvFilter::new(val))
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
         // Create the file layer
         let file_layer = tracing_subscriber::fmt::layer()
             .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
@@ -120,7 +125,7 @@ impl ModelContextProtocolServer for ExampleMcpServer {
             .with_ansi(false)
             .with_span_events(FmtSpan::CLOSE)
             .with_writer(file_appender)
-            .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+            .with_filter(filter);
 
         // Box the layer and return it
         Some(Box::new(file_layer))

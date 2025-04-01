@@ -107,13 +107,6 @@ impl Worker {
         debug!("MCP Logging worker task started");
 
         while let Some(log_entry) = self.log_receiver.recv().await {
-            trace!(
-                level = ?log_entry.level,
-                target = %log_entry.target,
-                connection_count = %log_entry.connection_ids.len(),
-                "Processing log entry"
-            );
-
             if log_entry.connection_ids.is_empty() {
                 // Get all clients that should receive this log
                 let clients_to_notify = {
