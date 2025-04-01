@@ -1,3 +1,4 @@
+use crate::logging::{handle_set_level_request, McpLoggingLayer};
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -22,6 +23,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
+use tracing_subscriber::prelude::*;
 
 #[derive(Clone)]
 pub struct ServerMetadata {
@@ -40,10 +42,15 @@ pub enum ServerError {
     ParseResponse(String),
 }
 
+pub type TracingRegistry = Box<dyn tracing::Subscriber + Send + Sync>;
+
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
     fn get_pagination(&self) -> impl Future<Output = Option<Pagination>> + Send;
+    fn get_tracing_registry(&self) -> impl Future<Output = Option<TracingRegistry>> + Send {
+        async { None }
+    }
     fn new_resources(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
     fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
     fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
@@ -315,20 +322,27 @@ pub struct Server<T: ModelContextProtocolServer> {
     sessions: Arc<RwLock<HashMap<ConnectionId, Session>>>,
     pending_requests: PendingRequests,
     request_counter: RequestCounter,
+    logging_layer: Arc<McpLoggingLayer>,
 }
 
 impl<T: ModelContextProtocolServer> Server<T> {
     pub fn new(server: T) -> Self {
+        let logging_layer = Arc::new(McpLoggingLayer::new(TransportSender::new_nop()));
+
         Server {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             server: Arc::new(RwLock::new(server)),
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             request_counter: Arc::new(RwLock::new(0)),
+            logging_layer,
         }
     }
 
     pub async fn start(&self) -> Result<(), ServerError> {
         let transport_config = self.server.read().await.get_transport_config().await.clone();
+
+        // Get the registry from the server implementation
+        let registry_option = self.server.read().await.get_tracing_registry().await;
 
         let (transport_type, mut on_client_rx, _on_error_rx, _on_close_rx) = match &transport_config {
             TransportConfig::Stdio(_config) => {
@@ -369,6 +383,31 @@ impl<T: ModelContextProtocolServer> Server<T> {
         };
 
         let transport_sender = transport_type.sender();
+
+        // Update the logging layer with the real transport sender
+        self.logging_layer.update_transport(transport_sender.clone()).await;
+
+        // If we have a registry, add our logging layer and set it as global
+        if let Some(registry) = registry_option {
+            // Create a fresh instance of the logging layer
+            let logging_layer = McpLoggingLayer::new(transport_sender.clone());
+
+            // Set the transport sender
+            logging_layer.update_transport(transport_sender.clone()).await;
+
+            // Create a registry with our layers
+            let subscriber = tracing_subscriber::registry()
+                .with(logging_layer) // Use the new instance directly
+                .with(registry); // Use the boxed registry directly
+
+            // Set as global default
+            if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+                error!("Failed to set global subscriber: {}", e);
+                // Continue anyway, just without MCP logging
+            }
+        }
+
+        let logging_layer_clone = self.logging_layer.clone();
 
         let transport = Arc::new(Mutex::new(transport_type));
 
@@ -963,6 +1002,18 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         }
                     }
                 }
+            }
+        });
+
+        // Add logging/setLevel handler
+        io_handler.add_method_with_meta("logging/setLevel", {
+            let logging_layer = logging_layer_clone.clone();
+
+            move |params: Params, meta: ServerMetadata| {
+                let logging_layer = logging_layer.clone();
+                let conn_id = meta.conn_id.clone();
+
+                async move { handle_set_level_request(params, conn_id, logging_layer).await }
             }
         });
 

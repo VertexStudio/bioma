@@ -3,9 +3,9 @@ use crate::schema::{
     CompleteResult, CompleteResultCompletion, CreateMessageRequestParams, CreateMessageResult, GetPromptRequestParams,
     GetPromptResult, Implementation, InitializeRequestParams, InitializeResult, InitializedNotificationParams,
     ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams, ListResourceTemplatesResult,
-    ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult, Prompt, PromptReference,
-    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceReference, ResourceTemplate, Root,
-    RootsListChangedNotificationParams, ServerCapabilities, Tool,
+    ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams, ListToolsResult, LoggingLevel,
+    LoggingMessageNotificationParams, Prompt, PromptReference, ReadResourceRequestParams, ReadResourceResult, Resource,
+    ResourceReference, ResourceTemplate, Root, RootsListChangedNotificationParams, ServerCapabilities, Tool,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -24,6 +24,13 @@ use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MessageNotificationParams {
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<BTreeMap<String, Value>>,
+}
 
 #[derive(Serialize, Deserialize)]
 struct MultiServerCursor {
@@ -208,6 +215,25 @@ impl<T: ModelContextProtocolClient> Client<T> {
                         error!("Failed to serialize roots/list result: {}", e);
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?)
+                }
+            }
+        });
+
+        // TODO: Do something more useful with this
+        io_handler.add_method_with_meta("notifications/message", {
+            let client = client.clone();
+            move |params: Params, _: ()| {
+                let _client = client.clone();
+                async move {
+                    let params: LoggingMessageNotificationParams = match params.parse() {
+                        Ok(params) => params,
+                        Err(e) => {
+                            error!("Failed to parse notifications/message parameters: {}", e);
+                            return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
+                        }
+                    };
+                    info!("Got Log: {:?}", params);
+                    Ok(serde_json::json!({"success": true}))
                 }
             }
         });
@@ -1014,6 +1040,51 @@ impl<T: ModelContextProtocolClient> Client<T> {
         params: Option<ListResourceTemplatesRequestParams>,
     ) -> ItemsIterator<'a, T, ListResourceTemplatesResult, ListResourceTemplatesRequestParams> {
         ItemsIterator::new(self, "resources/templates/list".to_string(), params)
+    }
+
+    pub async fn set_log_level(&mut self, level: LoggingLevel) -> Result<(usize, Vec<String>), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut success_count = 0;
+        let mut errors = Vec::new();
+
+        for server_name in self.connections.keys().cloned().collect::<Vec<_>>() {
+            let connection = self
+                .connections
+                .get_mut(&server_name)
+                .ok_or_else(|| ClientError::Request(format!("Server '{}' not found", server_name).into()))?;
+
+            // Check if server supports logging
+            let supports_logging = {
+                let server_caps = connection.server_capabilities.read().await;
+                server_caps.as_ref().and_then(|caps| caps.logging.as_ref()).is_some()
+            };
+
+            if !supports_logging {
+                errors.push(format!("Server '{}' does not support logging", server_name));
+                continue;
+            }
+
+            let params = crate::schema::SetLevelRequestParams { level: level.clone() };
+
+            let client = self.client.clone();
+            match Self::request(connection, "logging/setLevel".to_string(), serde_json::to_value(params)?, client).await
+            {
+                Ok(_) => {
+                    info!("Set log level for server '{}' to {:?}", server_name, level);
+                    success_count += 1;
+                }
+                Err(e) => errors.push(format!("Failed to set log level for '{}': {}", server_name, e)),
+            }
+        }
+
+        if success_count > 0 {
+            Ok((success_count, errors))
+        } else {
+            Err(ClientError::Request(format!("Failed to set log level on any server: {}", errors.join(", ")).into()))
+        }
     }
 }
 

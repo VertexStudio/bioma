@@ -3,7 +3,7 @@ use bioma_mcp::{
     client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, ReadResourceRequestParams, Role, Root, SamplingMessage,
+        CreateMessageResult, Implementation, LoggingLevel, ReadResourceRequestParams, Role, Root, SamplingMessage,
     },
 };
 use clap::Parser;
@@ -153,6 +153,9 @@ async fn main() -> Result<()> {
     client.initialized().await?;
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    info!("Setting log level to debug...");
+    client.set_log_level(LoggingLevel::Debug).await?;
 
     info!("Listing prompts...");
     let prompts_result = client.list_all_prompts(None).await;
