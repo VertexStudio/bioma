@@ -1,168 +1,115 @@
-use crate::schema::{LoggingLevel, LoggingMessageNotificationParams};
+use crate::schema::{LoggingLevel, LoggingMessageNotificationParams, SetLevelRequestParams};
 use crate::transport::TransportSender;
 use crate::ConnectionId;
-use jsonrpc_core::{Params, Value};
+use dashmap::DashMap;
+use jsonrpc_core::{Error as JsonRpcError, Notification, Params, Value};
 use serde_json::json;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-use tokio::task::JoinHandle;
+use thiserror::Error;
 use tracing::field::{Field, Visit};
 use tracing::{debug, error, Event};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
-struct LoggingWorker {
-    log_receiver: mpsc::Receiver<LoggingMessageNotificationParams>,
-    transport: Arc<RwLock<TransportSender>>,
-    client_levels: Arc<RwLock<HashMap<ConnectionId, LoggingLevel>>>,
+#[derive(Debug, Error)]
+pub enum LoggingError {
+    #[error("Transport error: {0}")]
+    Transport(String),
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
 }
 
 #[derive(Clone)]
 pub struct McpLoggingLayer {
-    log_sender: Arc<RwLock<mpsc::Sender<LoggingMessageNotificationParams>>>,
-    client_levels: Arc<RwLock<HashMap<ConnectionId, LoggingLevel>>>,
-    #[allow(unused)]
-    worker_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    target_prefix: String,
+    clients: Arc<DashMap<ConnectionId, LoggingLevel>>,
+    transport: Arc<TransportSender>,
 }
 
 impl McpLoggingLayer {
     pub fn new(transport: TransportSender) -> Self {
-        let client_levels = Arc::new(RwLock::new(HashMap::new()));
-        let transport = Arc::new(RwLock::new(transport));
+        Self::with_target_prefix(transport, "bioma_mcp")
+    }
 
-        let (log_sender, log_receiver) = mpsc::channel(1024);
+    pub fn with_target_prefix(transport: TransportSender, target_prefix: impl Into<String>) -> Self {
+        Self { target_prefix: target_prefix.into(), clients: Arc::new(DashMap::new()), transport: Arc::new(transport) }
+    }
 
-        let worker = LoggingWorker {
-            log_receiver,
-            transport: Arc::clone(&transport),
-            client_levels: Arc::clone(&client_levels),
-        };
+    pub async fn set_client_level(&self, client_id: ConnectionId, level: LoggingLevel) {
+        debug!(client_id = ?client_id, level = ?level, "Setting client log level");
+        self.clients.insert(client_id, level);
+    }
 
-        let worker_handle = tokio::spawn(worker.run());
-
-        Self {
-            log_sender: Arc::new(RwLock::new(log_sender)),
-            client_levels,
-            worker_handle: Arc::new(RwLock::new(Some(worker_handle))),
+    pub async fn remove_client(&self, client_id: &ConnectionId) {
+        if self.clients.remove(client_id).is_some() {
+            debug!(client_id = ?client_id, "Removed client from logging");
         }
     }
 
-    pub async fn set_level(&self, conn_id: ConnectionId, level: LoggingLevel) {
-        let mut levels = self.client_levels.write().await;
-        debug!(connection_id = ?conn_id, ?level, "Setting logging level for client");
-        levels.insert(conn_id, level);
-    }
-
-    pub async fn remove_client(&self, conn_id: &ConnectionId) {
-        let mut levels = self.client_levels.write().await;
-        if levels.remove(conn_id).is_some() {
-            debug!(connection_id = ?conn_id, "Removed client from logging");
-        }
-    }
-
-    async fn send_log(&self, params: LoggingMessageNotificationParams) {
-        let sender = self.log_sender.read().await;
-        match sender.try_send(params.clone()) {
-            Ok(_) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {}
-            Err(mpsc::error::TrySendError::Closed(_)) => {}
-        }
-    }
-}
-
-impl LoggingWorker {
-    async fn run(mut self) {
-        debug!("MCP Logging worker task started");
-
-        while let Some(params) = self.log_receiver.recv().await {
-            eprintln!("MCP Logging worker received log: {:?}", params);
-            let clients_to_notify = {
-                let client_levels = self.client_levels.read().await;
-                client_levels
-                    .iter()
-                    .filter_map(|(conn_id, client_level)| {
-                        if compare_log_levels(client_level, &params.level) {
-                            Some(conn_id.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            };
-
-            if clients_to_notify.is_empty() {
-                continue;
-            }
-
-            let notification = self.create_notification(&params);
-
-            let transport_guard = self.transport.read().await;
-            for conn_id in clients_to_notify {
-                if let Err(_e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {}
-            }
+    async fn send_log(&self, params: LoggingMessageNotificationParams) -> Result<(), LoggingError> {
+        let eligible_clients = self.get_eligible_clients(&params.level);
+        if eligible_clients.is_empty() {
+            return Ok(());
         }
 
-        debug!("MCP Logging worker task stopped");
+        let notification = self.create_notification(&params)?;
+
+        for client_id in eligible_clients {
+            if let Err(_e) = self.transport.send(notification.clone().into(), client_id.clone()).await {}
+        }
+
+        Ok(())
     }
 
-    fn create_notification(&self, params: &LoggingMessageNotificationParams) -> jsonrpc_core::Notification {
-        match serde_json::to_value(&params) {
-            Ok(Value::Object(map)) => jsonrpc_core::Notification {
+    fn get_eligible_clients(&self, level: &LoggingLevel) -> Vec<ConnectionId> {
+        self.clients
+            .iter()
+            .filter_map(
+                |entry| {
+                    if should_receive_log_level(entry.value(), level) {
+                        Some(entry.key().clone())
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect()
+    }
+
+    fn create_notification(
+        &self,
+        params: &LoggingMessageNotificationParams,
+    ) -> Result<Notification, serde_json::Error> {
+        let value = serde_json::to_value(params)?;
+
+        match value {
+            Value::Object(map) => Ok(Notification {
                 jsonrpc: Some(jsonrpc_core::Version::V2),
                 method: "notifications/message".to_string(),
-                params: jsonrpc_core::Params::Map(map),
-            },
-            Ok(_) => {
-                error!("Failed to serialize log parameters to JSON map");
-
-                jsonrpc_core::Notification {
-                    jsonrpc: Some(jsonrpc_core::Version::V2),
-                    method: "notifications/message".to_string(),
-                    params: jsonrpc_core::Params::Map(serde_json::Map::new()),
-                }
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to serialize log parameters");
-
-                jsonrpc_core::Notification {
-                    jsonrpc: Some(jsonrpc_core::Version::V2),
-                    method: "notifications/message".to_string(),
-                    params: jsonrpc_core::Params::Map(serde_json::Map::new()),
-                }
-            }
+                params: Params::Map(map),
+            }),
+            _ => Ok(Notification {
+                jsonrpc: Some(jsonrpc_core::Version::V2),
+                method: "notifications/message".to_string(),
+                params: Params::Map(serde_json::Map::new()),
+            }),
         }
     }
 }
 
-fn compare_log_levels(client_level: &LoggingLevel, message_level: &LoggingLevel) -> bool {
-    match client_level {
-        LoggingLevel::Debug => true,
-        LoggingLevel::Info => message_level != &LoggingLevel::Debug,
-        LoggingLevel::Notice => !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info),
-        LoggingLevel::Warning => {
-            !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info | LoggingLevel::Notice)
-        }
-        LoggingLevel::Error => matches!(
-            message_level,
-            LoggingLevel::Error | LoggingLevel::Critical | LoggingLevel::Alert | LoggingLevel::Emergency
-        ),
-        LoggingLevel::Critical => {
-            matches!(message_level, LoggingLevel::Critical | LoggingLevel::Alert | LoggingLevel::Emergency)
-        }
-        LoggingLevel::Alert => matches!(message_level, LoggingLevel::Alert | LoggingLevel::Emergency),
-        LoggingLevel::Emergency => message_level == &LoggingLevel::Emergency,
-    }
-}
-
+#[derive(Default)]
 struct LogVisitor {
     message: Option<String>,
 }
 
 impl LogVisitor {
     fn new() -> Self {
-        Self { message: None }
+        Self::default()
     }
 
     fn get_message(self) -> String {
@@ -199,13 +146,34 @@ fn tracing_level_to_mcp_level(level: &tracing::Level) -> LoggingLevel {
     }
 }
 
+fn should_receive_log_level(client_level: &LoggingLevel, message_level: &LoggingLevel) -> bool {
+    match client_level {
+        LoggingLevel::Debug => true,
+        LoggingLevel::Info => message_level != &LoggingLevel::Debug,
+        LoggingLevel::Notice => !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info),
+        LoggingLevel::Warning => {
+            !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info | LoggingLevel::Notice)
+        }
+        LoggingLevel::Error => matches!(
+            message_level,
+            LoggingLevel::Error | LoggingLevel::Critical | LoggingLevel::Alert | LoggingLevel::Emergency
+        ),
+        LoggingLevel::Critical => {
+            matches!(message_level, LoggingLevel::Critical | LoggingLevel::Alert | LoggingLevel::Emergency)
+        }
+        LoggingLevel::Alert => matches!(message_level, LoggingLevel::Alert | LoggingLevel::Emergency),
+        LoggingLevel::Emergency => message_level == &LoggingLevel::Emergency,
+    }
+}
+
 impl<S> Layer<S> for McpLoggingLayer
 where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let target = event.metadata().target();
-        if !target.starts_with("bioma_mcp") {
+
+        if !target.starts_with(&self.target_prefix) {
             return;
         }
 
@@ -220,27 +188,25 @@ where
             data: visitor.get_message().into(),
         };
 
-        let rt = tokio::runtime::Handle::current();
+        let layer = self.clone();
+        let params = params.clone();
 
-        let this = self.clone();
-
-        rt.spawn(async move {
-            this.send_log(params).await;
-        });
+        tokio::spawn(async move { if let Err(_e) = layer.send_log(params).await {} });
     }
 }
 
 pub async fn handle_set_level_request(
     params: Params,
-    conn_id: ConnectionId,
+    client_id: ConnectionId,
     logging_layer: Arc<McpLoggingLayer>,
 ) -> jsonrpc_core::Result<Value> {
-    let params: crate::schema::SetLevelRequestParams = params.parse().map_err(|e| {
-        error!("Failed to parse logging/setLevel parameters: {}", e);
-        jsonrpc_core::Error::invalid_params(e.to_string())
+    let params: SetLevelRequestParams = params.parse().map_err(|e| {
+        let msg = format!("Failed to parse logging/setLevel parameters: {}", e);
+
+        JsonRpcError::invalid_params(msg)
     })?;
 
-    logging_layer.set_level(conn_id.clone(), params.level).await;
+    logging_layer.set_client_level(client_id, params.level).await;
 
     Ok(json!({}))
 }
