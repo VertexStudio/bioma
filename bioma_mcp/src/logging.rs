@@ -122,17 +122,6 @@ impl Visit for LogVisitor {
             self.message = Some(format!("{:?}", value));
         }
     }
-
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "message" {
-            self.message = Some(value.to_string());
-        }
-    }
-
-    fn record_i64(&mut self, _field: &Field, _value: i64) {}
-    fn record_u64(&mut self, _field: &Field, _value: u64) {}
-    fn record_bool(&mut self, _field: &Field, _value: bool) {}
-    fn record_error(&mut self, _field: &Field, _value: &(dyn std::error::Error + 'static)) {}
 }
 
 fn tracing_level_to_mcp_level(level: &tracing::Level) -> LoggingLevel {
