@@ -9,11 +9,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::field::{Field, Visit};
-use tracing::{debug, error, trace, warn, Event};
+use tracing::{debug, error, Event};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
-/// Structure to pass log data through the channel
 #[derive(Clone, Debug)]
 struct QueuedLog {
     level: LoggingLevel,
@@ -22,7 +21,6 @@ struct QueuedLog {
     connection_ids: Vec<ConnectionId>,
 }
 
-/// Represents a logging worker that processes log messages
 struct LoggingWorker {
     log_receiver: mpsc::Receiver<QueuedLog>,
     transport: Arc<RwLock<TransportSender>>,
@@ -30,17 +28,13 @@ struct LoggingWorker {
     shutdown_signal: mpsc::Receiver<()>,
 }
 
-/// Manages log distribution to clients
 #[derive(Clone)]
 pub struct McpLoggingLayer {
-    // Worker management
     worker_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     shutdown_sender: Arc<RwLock<Option<mpsc::Sender<()>>>>,
 
-    // Log channel
     log_sender: Arc<RwLock<mpsc::Sender<QueuedLog>>>,
 
-    // Shared state
     client_levels: Arc<RwLock<HashMap<ConnectionId, LoggingLevel>>>,
     transport: Arc<RwLock<TransportSender>>,
 }
@@ -50,11 +44,9 @@ impl McpLoggingLayer {
         let client_levels = Arc::new(RwLock::new(HashMap::new()));
         let transport = Arc::new(RwLock::new(transport));
 
-        // Create channels for the worker
         let (log_sender, log_receiver) = mpsc::channel(1024);
         let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
 
-        // Create and start the worker
         let worker = LoggingWorker {
             log_receiver,
             transport: Arc::clone(&transport),
@@ -73,49 +65,37 @@ impl McpLoggingLayer {
         }
     }
 
-    /// Updates the transport used for sending log messages to clients
     pub async fn update_transport(&self, new_transport: TransportSender) {
         debug!("Updating logging transport");
 
-        // Stop the current worker
         self.stop_worker().await;
 
-        // Update the transport
         {
             let mut transport = self.transport.write().await;
             *transport = new_transport;
         }
 
-        // Start a new worker
         self.start_worker().await;
 
         debug!("Logging transport updated successfully");
     }
 
-    /// Stops the current worker if one is running
     async fn stop_worker(&self) {
-        // Send shutdown signal
         if let Some(sender) = self.shutdown_sender.write().await.take() {
             let _ = sender.send(()).await;
             debug!("Sent shutdown signal to logging worker");
         }
 
-        // Wait for worker to finish
         if let Some(handle) = self.worker_handle.write().await.take() {
-            // Don't await the handle as it might be blocked on the channel
-            // Just drop it since we've sent the shutdown signal
             handle.abort();
             debug!("Aborted previous logging worker");
         }
     }
 
-    /// Starts a new worker
     async fn start_worker(&self) {
-        // Create new channels
         let (log_sender, log_receiver) = mpsc::channel(1024);
         let (shutdown_sender, shutdown_receiver) = mpsc::channel(1);
 
-        // Create the worker
         let worker = LoggingWorker {
             log_receiver,
             transport: Arc::clone(&self.transport),
@@ -123,7 +103,6 @@ impl McpLoggingLayer {
             shutdown_signal: shutdown_receiver,
         };
 
-        // Store the new sender and spawn the worker
         {
             let mut sender = self.log_sender.write().await;
             *sender = log_sender;
@@ -144,14 +123,12 @@ impl McpLoggingLayer {
         debug!("Started new logging worker");
     }
 
-    /// Sets the logging level for a specific client
     pub async fn set_level(&self, conn_id: ConnectionId, level: LoggingLevel) {
         let mut levels = self.client_levels.write().await;
         debug!(connection_id = ?conn_id, ?level, "Setting logging level for client");
         levels.insert(conn_id, level);
     }
 
-    /// Removes a client from the logging system
     pub async fn remove_client(&self, conn_id: &ConnectionId) {
         let mut levels = self.client_levels.write().await;
         if levels.remove(conn_id).is_some() {
@@ -159,19 +136,14 @@ impl McpLoggingLayer {
         }
     }
 
-    /// Sends a log message to the worker
     async fn send_log(&self, log_entry: QueuedLog) {
         let sender = self.log_sender.read().await;
         match sender.try_send(log_entry.clone()) {
-            Ok(_) => {
-                // Successfully queued
-            }
+            Ok(_) => {}
             Err(mpsc::error::TrySendError::Full(_)) => {
-                // Log queue is full - this avoids a feedback loop if we used tracing
                 eprintln!("WARNING: MCP Logging queue full. Dropping log message: {:?}", log_entry);
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                // Worker task has stopped
                 eprintln!("ERROR: MCP Logging channel closed. Worker task may have stopped.");
             }
         }
@@ -184,12 +156,12 @@ impl LoggingWorker {
 
         loop {
             tokio::select! {
-                // Process log messages
+
                 Some(log_entry) = self.log_receiver.recv() => {
                     self.process_log(log_entry).await;
                 }
 
-                // Check for shutdown signal
+
                 _ = self.shutdown_signal.recv() => {
                     debug!("MCP Logging worker received shutdown signal");
                     break;
@@ -202,7 +174,6 @@ impl LoggingWorker {
 
     async fn process_log(&self, log_entry: QueuedLog) {
         if log_entry.connection_ids.is_empty() {
-            // Get all clients that should receive this log
             let clients_to_notify = {
                 let client_levels = self.client_levels.read().await;
                 client_levels
@@ -218,29 +189,24 @@ impl LoggingWorker {
             };
 
             if clients_to_notify.is_empty() {
-                return; // No clients interested in this log level
+                return;
             }
 
-            // Create notification once for all clients
             let notification = self.create_notification(&log_entry);
 
-            // Send to all interested clients
             let transport_guard = self.transport.read().await;
             for conn_id in clients_to_notify {
-                if let Err(e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {
-                    warn!(connection_id = ?conn_id, error = %e, "Failed to send log notification");
+                if let Err(_e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {
+                    // Can't log here because we're in the logging worker
                 }
             }
         } else {
-            // Specific connection IDs were provided
-            // Create notification once for all clients
             let notification = self.create_notification(&log_entry);
 
-            // Send to specified clients
             let transport_guard = self.transport.read().await;
             for conn_id in log_entry.connection_ids {
-                if let Err(e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {
-                    warn!(connection_id = ?conn_id, error = %e, "Failed to send log notification");
+                if let Err(_e) = transport_guard.send(notification.clone().into(), conn_id.clone()).await {
+                    // Can't log here because we're in the logging worker
                 }
             }
         }
@@ -261,7 +227,7 @@ impl LoggingWorker {
             },
             Ok(_) => {
                 error!("Failed to serialize log parameters to JSON map");
-                // Fallback params
+
                 jsonrpc_core::Notification {
                     jsonrpc: Some(jsonrpc_core::Version::V2),
                     method: "notifications/message".to_string(),
@@ -270,7 +236,7 @@ impl LoggingWorker {
             }
             Err(e) => {
                 error!(error = %e, "Failed to serialize log parameters");
-                // Fallback params
+
                 jsonrpc_core::Notification {
                     jsonrpc: Some(jsonrpc_core::Version::V2),
                     method: "notifications/message".to_string(),
@@ -281,14 +247,9 @@ impl LoggingWorker {
     }
 }
 
-/// Compares log levels to determine if a message should be sent
-/// Returns true if the client level (first param) is "higher" (more verbose)
-/// or equal to the message level (second param)
 fn compare_log_levels(client_level: &LoggingLevel, message_level: &LoggingLevel) -> bool {
-    // For LoggingLevel, lower numerical value means higher severity
-    // So Debug > Info > Warning > Error etc.
     match client_level {
-        LoggingLevel::Debug => true, // Debug level receives all logs
+        LoggingLevel::Debug => true,
         LoggingLevel::Info => message_level != &LoggingLevel::Debug,
         LoggingLevel::Notice => !matches!(message_level, LoggingLevel::Debug | LoggingLevel::Info),
         LoggingLevel::Warning => {
@@ -345,7 +306,7 @@ fn tracing_level_to_mcp_level(level: &tracing::Level) -> LoggingLevel {
         tracing::Level::WARN => LoggingLevel::Warning,
         tracing::Level::INFO => LoggingLevel::Info,
         tracing::Level::DEBUG => LoggingLevel::Debug,
-        tracing::Level::TRACE => LoggingLevel::Debug, // MCP doesn't have a TRACE equivalent
+        tracing::Level::TRACE => LoggingLevel::Debug,
     }
 }
 
@@ -354,22 +315,19 @@ where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        // Skip internal tokio events - only process events from our library
         let target = event.metadata().target();
         if !target.starts_with("bioma_mcp") {
             return;
         }
 
-        // Apply early filtering - ignore trace level events globally
-        // This prevents filling the queue with unwanted events
+        eprintln!("Event: {:?}", event);
+
         if *event.metadata().level() == tracing::Level::TRACE {
             return;
         }
 
-        // Convert to MCP log level
         let mcp_level = tracing_level_to_mcp_level(event.metadata().level());
 
-        // Extract message using the visitor
         let mut visitor = LogVisitor::new();
         event.record(&mut visitor);
 
@@ -377,16 +335,13 @@ where
             level: mcp_level,
             target: target.to_string(),
             message: visitor.get_message(),
-            connection_ids: Vec::new(), // Empty means "send to all eligible clients"
+            connection_ids: Vec::new(),
         };
 
-        // Create a runtime handle for the current thread to spawn the send task
         let rt = tokio::runtime::Handle::current();
 
-        // Clone self for the async block
         let this = self.clone();
 
-        // Spawn a task to send the log
         rt.spawn(async move {
             this.send_log(log_entry).await;
         });

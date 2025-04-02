@@ -71,10 +71,10 @@ enum Transport {
 //         .with_ansi(false)
 //         .with_span_events(FmtSpan::CLOSE)
 //         .with_writer(file_appender)
-//         .with_max_level(Level::DEBUG)
+//         .with_max_level(tracing::Level::DEBUG)
 //         .init();
 
-//     info!("Logging system initialized");
+//     tracing::info!("Logging system initialized");
 
 //     Ok(())
 // }

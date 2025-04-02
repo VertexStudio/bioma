@@ -25,13 +25,6 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MessageNotificationParams {
-    content: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    meta: Option<BTreeMap<String, Value>>,
-}
-
 #[derive(Serialize, Deserialize)]
 struct MultiServerCursor {
     server_cursors: HashMap<String, Option<String>>,
@@ -1056,7 +1049,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .get_mut(&server_name)
                 .ok_or_else(|| ClientError::Request(format!("Server '{}' not found", server_name).into()))?;
 
-            // Check if server supports logging
             let supports_logging = {
                 let server_caps = connection.server_capabilities.read().await;
                 server_caps.as_ref().and_then(|caps| caps.logging.as_ref()).is_some()
