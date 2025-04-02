@@ -1,3 +1,4 @@
+// use anyhow::Context as AnyhowContext;
 use anyhow::{Error, Result};
 use bioma_mcp::{
     prompts::{self, PromptGetHandler},
@@ -101,6 +102,36 @@ impl ModelContextProtocolServer for ExampleMcpServer {
         Some(self.pagination.clone())
     }
 
+    async fn get_tracing_layer(&self) -> Option<bioma_mcp::server::TracingLayer> {
+        // Create file appender
+        let file_appender = RollingFileAppender::new(
+            Rotation::NEVER,
+            self.log_path.parent().unwrap_or(&PathBuf::from(".")),
+            self.log_path.file_name().unwrap_or_default(),
+        );
+
+        // Get log filter from RUST_LOG env var or default to DEBUG
+        let filter = std::env::var("RUST_LOG")
+            .map(|val| tracing_subscriber::EnvFilter::new(val))
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
+        // Create the file layer
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+            .with_level(true)
+            .with_target(true)
+            .with_thread_ids(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_ansi(false)
+            .with_span_events(FmtSpan::CLOSE)
+            .with_writer(file_appender)
+            .with_filter(filter);
+
+        // Box the layer and return it
+        Some(Box::new(file_layer))
+    }
+
     async fn new_resources(&self, context: Context) -> Vec<Arc<dyn ResourceReadHandler>> {
         vec![
             Arc::new(resources::readme::Readme),
@@ -131,6 +162,8 @@ impl ModelContextProtocolServer for ExampleMcpServer {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    // TODO: Can't setup manual logging, if we do and we have the logging capability, the mcp logging layer will not be activated, hence no logging will be sent to the clients
+    // setup_logging(args.log_file.clone())?;
 
     let transport_config = match &args.transport {
         Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),

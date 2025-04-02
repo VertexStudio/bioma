@@ -323,19 +323,15 @@ pub struct Server<T: ModelContextProtocolServer> {
     sessions: Arc<RwLock<HashMap<ConnectionId, Session>>>,
     pending_requests: PendingRequests,
     request_counter: RequestCounter,
-    logging_layer: Arc<McpLoggingLayer>,
 }
 
 impl<T: ModelContextProtocolServer> Server<T> {
     pub fn new(server: T) -> Self {
-        let logging_layer = Arc::new(McpLoggingLayer::new(TransportSender::new_nop()));
-
         Server {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             server: Arc::new(RwLock::new(server)),
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             request_counter: Arc::new(RwLock::new(0)),
-            logging_layer,
         }
     }
 
@@ -382,63 +378,19 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         let transport_sender = transport_type.sender();
 
-        self.logging_layer.update_transport(transport_sender.clone()).await;
+        let mut io_handler = MetaIoHandler::default();
 
         let capabilities = self.server.read().await.get_capabilities().await.clone();
         let logging_enabled = capabilities.logging.is_some();
 
-        // Initialize tracing
-        if logging_enabled {
-            let filter = std::env::var("RUST_LOG")
-                .map(|val| tracing_subscriber::EnvFilter::new(val))
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
-            let filter_clone = std::env::var("RUST_LOG")
-                .map(|val| tracing_subscriber::EnvFilter::new(val))
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+        let logging_layer = if logging_enabled {
+            let layer = Arc::new(McpLoggingLayer::new(transport_sender.clone()));
+            Some(layer)
+        } else {
+            None
+        };
 
-            let mcp_layer = (*self.logging_layer).clone().with_filter(filter);
-            let mcp_layer_clone = (*self.logging_layer).clone().with_filter(filter_clone);
-
-            // Try to get the base layer
-            let base_layer_result = self.server.read().await.get_tracing_layer().await;
-
-            // Initialize tracing with appropriate configuration
-            match base_layer_result {
-                Some(base_layer) => {
-                    // Use a basic approach that doesn't chain the layers in a way that confuses the type system
-                    debug!("Setting up tracing with base layer and MCP layer");
-                    let subscriber = tracing_subscriber::registry().with(base_layer).with(mcp_layer);
-
-                    // Initialize without the MCP layer first
-                    if let Err(e) = subscriber.try_init() {
-                        debug!("Could not initialize tracing with base layer: {}", e);
-                    } else {
-                        // Set default logging level for all connections
-                        debug!("MCP logging layer activated with default level");
-                    }
-                }
-                None => {
-                    // Just try with the MCP layer
-                    debug!("Setting up tracing with MCP layer only");
-                    if let Err(e) = tracing_subscriber::registry().with(mcp_layer_clone).try_init() {
-                        debug!("Could not initialize tracing with MCP layer: {}", e);
-                    }
-                }
-            }
-        } else if let Some(base_layer) = self.server.read().await.get_tracing_layer().await {
-            // Only base layer, no MCP layer
-            debug!("Setting up tracing with base layer only");
-            let _ = tracing_subscriber::registry()
-                .with(base_layer)
-                .try_init()
-                .map_err(|e| debug!("Could not initialize tracing with base layer: {}", e));
-        }
-
-        let logging_layer_clone = self.logging_layer.clone();
-
-        let transport = Arc::new(Mutex::new(transport_type));
-
-        let mut io_handler = MetaIoHandler::default();
+        self.setup_tracing(logging_enabled, logging_layer.clone()).await;
 
         io_handler.add_method_with_meta("initialize", {
             let server = self.server.clone();
@@ -1032,16 +984,20 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         });
 
-        io_handler.add_method_with_meta("logging/setLevel", {
-            let logging_layer = logging_layer_clone.clone();
+        if logging_enabled {
+            if let Some(layer) = &logging_layer {
+                let logging_layer_clone = layer.clone();
 
-            move |params: Params, meta: ServerMetadata| {
-                let logging_layer = logging_layer.clone();
-                let conn_id = meta.conn_id.clone();
+                io_handler.add_method_with_meta("logging/setLevel", move |params: Params, meta: ServerMetadata| {
+                    let logging_layer = logging_layer_clone.clone();
+                    let conn_id = meta.conn_id.clone();
 
-                async move { handle_set_level_request(params, conn_id, logging_layer).await }
+                    async move { handle_set_level_request(params, conn_id, logging_layer).await }
+                });
             }
-        });
+        }
+
+        let transport = Arc::new(Mutex::new(transport_type));
 
         {
             let mut transport_lock = transport.lock().await;
@@ -1110,5 +1066,43 @@ impl<T: ModelContextProtocolServer> Server<T> {
         }
 
         Ok(())
+    }
+
+    async fn setup_tracing(&self, logging_enabled: bool, mcp_layer: Option<Arc<McpLoggingLayer>>) {
+        let base_layer_result = self.server.read().await.get_tracing_layer().await;
+
+        let filter = std::env::var("RUST_LOG")
+            .map(|val| tracing_subscriber::EnvFilter::new(val))
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
+        match (logging_enabled, base_layer_result, mcp_layer) {
+            (true, Some(base_layer), Some(mcp_layer)) => {
+                debug!("Setting up tracing with base layer and MCP layer");
+                let mcp_layer = (*mcp_layer).clone().with_filter(filter);
+                let _ = tracing_subscriber::registry()
+                    .with(base_layer)
+                    .with(mcp_layer)
+                    .try_init()
+                    .map_err(|e| debug!("Could not initialize tracing with both layers: {}", e));
+            }
+            (true, None, Some(mcp_layer)) => {
+                debug!("Setting up tracing with MCP layer only");
+                let mcp_layer = (*mcp_layer).clone().with_filter(filter);
+                let _ = tracing_subscriber::registry()
+                    .with(mcp_layer)
+                    .try_init()
+                    .map_err(|e| debug!("Could not initialize tracing with MCP layer: {}", e));
+            }
+            (_, Some(base_layer), _) => {
+                debug!("Setting up tracing with base layer only");
+                let _ = tracing_subscriber::registry()
+                    .with(base_layer)
+                    .try_init()
+                    .map_err(|e| debug!("Could not initialize tracing with base layer: {}", e));
+            }
+            _ => {
+                debug!("No tracing layers provided or enabled");
+            }
+        }
     }
 }
