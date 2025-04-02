@@ -1,4 +1,4 @@
-use crate::logging::{handle_set_level_request, McpLoggingLayer};
+use crate::logging::McpLoggingLayer;
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -992,7 +992,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     let logging_layer = logging_layer_clone.clone();
                     let conn_id = meta.conn_id.clone();
 
-                    async move { handle_set_level_request(params, conn_id, logging_layer).await }
+                    async move {
+                        let params: crate::schema::SetLevelRequestParams = params.parse().map_err(|e| {
+                            let msg = format!("Failed to parse logging/setLevel parameters: {}", e);
+                            jsonrpc_core::Error::invalid_params(msg)
+                        })?;
+
+                        logging_layer.set_client_level(conn_id, params.level);
+
+                        Ok(serde_json::json!({}))
+                    }
                 });
             }
         }

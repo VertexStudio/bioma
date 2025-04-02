@@ -1,9 +1,8 @@
-use crate::schema::{LoggingLevel, LoggingMessageNotificationParams, SetLevelRequestParams};
+use crate::schema::{LoggingLevel, LoggingMessageNotificationParams};
 use crate::transport::TransportSender;
 use crate::ConnectionId;
 use dashmap::DashMap;
-use jsonrpc_core::{Error as JsonRpcError, Notification, Params, Value};
-use serde_json::json;
+use jsonrpc_core::{Notification, Params, Value};
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
@@ -40,12 +39,12 @@ impl McpLoggingLayer {
         Self { target_prefix: target_prefix.into(), clients: Arc::new(DashMap::new()), transport: Arc::new(transport) }
     }
 
-    pub async fn set_client_level(&self, client_id: ConnectionId, level: LoggingLevel) {
+    pub fn set_client_level(&self, client_id: ConnectionId, level: LoggingLevel) {
         debug!(client_id = ?client_id, level = ?level, "Setting client log level");
         self.clients.insert(client_id, level);
     }
 
-    pub async fn remove_client(&self, client_id: &ConnectionId) {
+    pub fn remove_client(&self, client_id: &ConnectionId) {
         if self.clients.remove(client_id).is_some() {
             debug!(client_id = ?client_id, "Removed client from logging");
         }
@@ -193,20 +192,4 @@ where
 
         tokio::spawn(async move { if let Err(_e) = layer.send_log(params).await {} });
     }
-}
-
-pub async fn handle_set_level_request(
-    params: Params,
-    client_id: ConnectionId,
-    logging_layer: Arc<McpLoggingLayer>,
-) -> jsonrpc_core::Result<Value> {
-    let params: SetLevelRequestParams = params.parse().map_err(|e| {
-        let msg = format!("Failed to parse logging/setLevel parameters: {}", e);
-
-        JsonRpcError::invalid_params(msg)
-    })?;
-
-    logging_layer.set_client_level(client_id, params.level).await;
-
-    Ok(json!({}))
 }

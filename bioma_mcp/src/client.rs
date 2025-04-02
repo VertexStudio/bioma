@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[derive(Serialize, Deserialize)]
 struct MultiServerCursor {
@@ -212,7 +212,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         });
 
-        // TODO: Do something more useful with this
         io_handler.add_method_with_meta("notifications/message", {
             let client = client.clone();
             move |params: Params, _: ()| {
@@ -225,7 +224,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                             return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
                         }
                     };
-                    info!("Got Log: {:?}", params);
+                    info!("[{}] Server Log: {:?}", params.logger.clone().unwrap_or_default(), params);
                     Ok(serde_json::json!({"success": true}))
                 }
             }
@@ -325,7 +324,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                                 }
                             }
                             jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                                info!("Got notification: {:?}", notification);
+                                debug!("[{}] Server Notification: {:?}", notification.method, notification);
                             }
                             _ => {}
                         },
