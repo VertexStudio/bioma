@@ -13,14 +13,8 @@ use tracing_subscriber::Layer;
 
 #[derive(Debug, Error)]
 pub enum LoggingError {
-    #[error("Transport error: {0}")]
-    Transport(String),
-
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
 }
 
 #[derive(Clone)]
