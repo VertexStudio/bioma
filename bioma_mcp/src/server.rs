@@ -14,7 +14,7 @@ use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
-// use anyhow::{Context, Error, Result};
+
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
@@ -25,9 +25,6 @@ use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{Layer, Registry};
-
-// Define a type alias for boxed layer
-pub type TracingLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 #[derive(Clone)]
 pub struct ServerMetadata {
@@ -45,6 +42,8 @@ pub enum ServerError {
     #[error("Failed to parse response: {0}")]
     ParseResponse(String),
 }
+
+pub type TracingLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
 
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
@@ -343,9 +342,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
     pub async fn start(&self) -> Result<(), ServerError> {
         let transport_config = self.server.read().await.get_transport_config().await.clone();
 
-        // Get the additional layer from the server implementation
-        let additional_layer_option = self.server.read().await.get_tracing_layer().await;
-
         let (transport_type, mut on_client_rx, _on_error_rx, _on_close_rx) = match &transport_config {
             TransportConfig::Stdio(_config) => {
                 let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(32);
@@ -386,25 +382,56 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         let transport_sender = transport_type.sender();
 
-        // Update the logging layer with the real transport sender
         self.logging_layer.update_transport(transport_sender.clone()).await;
 
-        // If we have an additional layer, set up tracing
-        if let Some(file_layer) = additional_layer_option {
-            // Create a new registry
-            let subscriber = tracing_subscriber::registry()
-                // First add the file layer from the implementation<
-                .with(file_layer)
-                // Then add our MCP logging layer (cloned from the Arc)
-                .with((*self.logging_layer).clone());
+        let capabilities = self.server.read().await.get_capabilities().await.clone();
+        let logging_enabled = capabilities.logging.is_some();
 
-            // Set as global default
-            if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
-                error!("Failed to set global subscriber: {}", e);
-                // Continue anyway, just without the full tracing setup
-            } else {
-                debug!("Global tracing subscriber initialized successfully");
+        // Initialize tracing
+        if logging_enabled {
+            let filter = std::env::var("RUST_LOG")
+                .map(|val| tracing_subscriber::EnvFilter::new(val))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+            let filter_clone = std::env::var("RUST_LOG")
+                .map(|val| tracing_subscriber::EnvFilter::new(val))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
+            let mcp_layer = (*self.logging_layer).clone().with_filter(filter);
+            let mcp_layer_clone = (*self.logging_layer).clone().with_filter(filter_clone);
+
+            // Try to get the base layer
+            let base_layer_result = self.server.read().await.get_tracing_layer().await;
+
+            // Initialize tracing with appropriate configuration
+            match base_layer_result {
+                Some(base_layer) => {
+                    // Use a basic approach that doesn't chain the layers in a way that confuses the type system
+                    debug!("Setting up tracing with base layer and MCP layer");
+                    let subscriber = tracing_subscriber::registry().with(base_layer).with(mcp_layer);
+
+                    // Initialize without the MCP layer first
+                    if let Err(e) = subscriber.try_init() {
+                        debug!("Could not initialize tracing with base layer: {}", e);
+                    } else {
+                        // Set default logging level for all connections
+                        debug!("MCP logging layer activated with default level");
+                    }
+                }
+                None => {
+                    // Just try with the MCP layer
+                    debug!("Setting up tracing with MCP layer only");
+                    if let Err(e) = tracing_subscriber::registry().with(mcp_layer_clone).try_init() {
+                        debug!("Could not initialize tracing with MCP layer: {}", e);
+                    }
+                }
             }
+        } else if let Some(base_layer) = self.server.read().await.get_tracing_layer().await {
+            // Only base layer, no MCP layer
+            debug!("Setting up tracing with base layer only");
+            let _ = tracing_subscriber::registry()
+                .with(base_layer)
+                .try_init()
+                .map_err(|e| debug!("Could not initialize tracing with base layer: {}", e));
         }
 
         let logging_layer_clone = self.logging_layer.clone();
@@ -1005,7 +1032,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         });
 
-        // Add logging/setLevel handler
         io_handler.add_method_with_meta("logging/setLevel", {
             let logging_layer = logging_layer_clone.clone();
 
