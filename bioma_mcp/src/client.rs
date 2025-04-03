@@ -22,7 +22,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 use tracing::{debug, error, info, warn};
 
 #[derive(Serialize, Deserialize)]
@@ -130,7 +130,8 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
 
 type RequestId = u64;
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
-type PendingRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+type PendingClientRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+type PendingServerRequests = Arc<Mutex<HashMap<u64, AbortHandle>>>;
 
 struct ServerConnection {
     transport: TransportType,
@@ -140,7 +141,7 @@ struct ServerConnection {
     start_handle: JoinHandle<Result<(), Error>>,
     #[allow(unused)]
     message_handler: JoinHandle<()>,
-    pending_requests: PendingRequests,
+    pending_requests: PendingClientRequests,
     #[allow(unused)]
     on_error_rx: mpsc::Receiver<Error>,
     #[allow(unused)]
@@ -153,6 +154,7 @@ pub struct Client<T: ModelContextProtocolClient> {
     connections: HashMap<String, ServerConnection>,
     io_handler: MetaIoHandler<()>,
     roots: Arc<RwLock<HashMap<String, Root>>>,
+    pending_server_requests: PendingServerRequests,
 }
 
 impl<T: ModelContextProtocolClient> Client<T> {
@@ -230,8 +232,13 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         });
 
-        let mut client =
-            Self { client, connections: HashMap::new(), io_handler, roots: Arc::new(RwLock::new(HashMap::new())) };
+        let mut client = Self {
+            client,
+            connections: HashMap::new(),
+            io_handler,
+            roots: Arc::new(RwLock::new(HashMap::new())),
+            pending_server_requests: Arc::new(Mutex::new(HashMap::new())),
+        };
 
         for config in server_configs {
             let name = config.name.clone();
@@ -284,9 +291,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let pending_requests = Arc::new(Mutex::new(HashMap::<u64, ResponseSender>::new()));
         let pending_requests_clone = pending_requests.clone();
+        let pending_server_requests_clone = self.pending_server_requests.clone();
 
         let message_handler = tokio::spawn({
             let pending_requests = pending_requests_clone;
+            let pending_server_requests = pending_server_requests_clone;
+
             async move {
                 while let Some(message) = on_message_rx.recv().await {
                     match &message {
@@ -311,22 +321,81 @@ impl<T: ModelContextProtocolClient> Client<T> {
                             }
                         },
                         JsonRpcMessage::Request(request) => match request {
-                            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(_call)) => {
-                                let Some(response) = io_handler_clone.handle_rpc_request(request.clone(), ()).await
-                                else {
-                                    return;
+                            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(call)) => {
+                                let request_id = match call.id {
+                                    jsonrpc_core::Id::Num(id) => id,
+                                    _ => {
+                                        warn!("Received method call with non-numeric ID: {:?}", call.id);
+                                        continue;
+                                    }
                                 };
 
-                                if let Err(e) =
-                                    transport_sender_clone.send(response.into(), conn_id_clone.clone()).await
-                                {
-                                    error!("Failed to send response: {}", e);
-                                }
+                                let request_clone = request.clone();
+                                let io_handler_clone_inner = io_handler_clone.clone();
+                                let transport_sender_clone_inner = transport_sender_clone.clone();
+                                let conn_id_clone_inner = conn_id_clone.clone();
+                                let active_reqs = pending_server_requests.clone();
+
+                                let abort_handle = {
+                                    let handle = tokio::spawn(async move {
+                                        if let Some(response) =
+                                            io_handler_clone_inner.handle_rpc_request(request_clone, ()).await
+                                        {
+                                            if let Err(e) = transport_sender_clone_inner
+                                                .send(response.into(), conn_id_clone_inner)
+                                                .await
+                                            {
+                                                error!("Failed to send response: {}", e);
+                                            }
+                                        }
+
+                                        let mut active_reqs_lock = active_reqs.lock().await;
+                                        active_reqs_lock.remove(&request_id);
+                                    });
+
+                                    handle.abort_handle()
+                                };
+
+                                let mut active_reqs = pending_server_requests.lock().await;
+                                active_reqs.insert(request_id, abort_handle);
                             }
                             jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                                debug!("[{}] Server Notification: {:?}", notification.method, notification);
+                                if notification.method == "notifications/cancelled" {
+                                    if let Ok(params) =
+                                        serde_json::from_value::<crate::schema::CancelledNotificationParams>(
+                                            serde_json::to_value(notification.params.clone()).unwrap_or_default(),
+                                        )
+                                    {
+                                        if let Some(id) = params.request_id.as_u64() {
+                                            info!(
+                                                "Server requested cancellation of request {}: {}",
+                                                id,
+                                                params.reason.as_deref().unwrap_or("No reason provided")
+                                            );
+
+                                            let mut active_reqs = pending_server_requests.lock().await;
+                                            if let Some(abort_handle) = active_reqs.remove(&id) {
+                                                abort_handle.abort();
+                                                info!("Successfully aborted processing for server request {}", id);
+                                            } else {
+                                                debug!("Server request {} not found or already completed", id);
+                                            }
+                                        } else {
+                                            error!(
+                                                "Received cancellation with non-numeric ID: {:?}",
+                                                params.request_id
+                                            );
+                                        }
+                                    } else {
+                                        error!("Failed to parse cancellation notification parameters");
+                                    }
+                                } else {
+                                    debug!("[{}] Server Notification: {:?}", notification.method, notification);
+                                }
                             }
-                            _ => {}
+                            _ => {
+                                warn!("Unsupported batch request: {:?}", request);
+                            }
                         },
                         _ => {}
                     }
@@ -1075,6 +1144,66 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Ok((success_count, errors))
         } else {
             Err(ClientError::Request(format!("Failed to set log level on any server: {}", errors.join(", ")).into()))
+        }
+    }
+
+    pub async fn cancel_request(&mut self, request_id: u64, reason: Option<String>) -> Result<(), ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let mut found = false;
+        let mut errors = Vec::new();
+
+        for (server_name, connection) in &mut self.connections {
+            let request_exists = connection.pending_requests.lock().await.contains_key(&request_id);
+
+            if request_exists {
+                found = true;
+
+                if let Some(init_id) = Self::is_initialize_request(request_id).await {
+                    return Err(ClientError::Request(
+                        format!("Cannot cancel initialize request (ID: {})", init_id).into(),
+                    ));
+                }
+
+                let params = crate::schema::CancelledNotificationParams {
+                    request_id: serde_json::json!(request_id),
+                    reason: reason.clone(),
+                };
+
+                match Self::notify(connection, "notifications/cancelled".to_string(), serde_json::to_value(params)?)
+                    .await
+                {
+                    Ok(_) => {
+                        let mut pending = connection.pending_requests.lock().await;
+                        pending.remove(&request_id);
+
+                        info!("Cancelled request {} on server '{}'", request_id, server_name);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to send cancellation to '{}': {:?}", server_name, e));
+                    }
+                }
+            }
+        }
+
+        if !found {
+            return Err(ClientError::Request(format!("Request {} not found or already completed", request_id).into()));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(ClientError::Request(errors.join(", ").into()))
+        }
+    }
+
+    async fn is_initialize_request(request_id: u64) -> Option<u64> {
+        if request_id == 1 {
+            Some(1)
+        } else {
+            None
         }
     }
 }
