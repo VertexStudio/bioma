@@ -32,16 +32,9 @@ impl std::fmt::Display for ConnectionId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RequestId {
-    id_type: RequestIdType,
-    num_value: Option<u64>,
-    str_value: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum RequestIdType {
-    Num,
-    Str,
+pub enum RequestId {
+    Num(u64),
+    Str(String),
 }
 
 impl TryFrom<&jsonrpc_core::Id> for RequestId {
@@ -49,10 +42,8 @@ impl TryFrom<&jsonrpc_core::Id> for RequestId {
 
     fn try_from(id: &jsonrpc_core::Id) -> Result<Self, Self::Error> {
         match id {
-            jsonrpc_core::Id::Num(n) => Ok(Self { id_type: RequestIdType::Num, num_value: Some(*n), str_value: None }),
-            jsonrpc_core::Id::Str(s) => {
-                Ok(Self { id_type: RequestIdType::Str, num_value: None, str_value: Some(s.clone()) })
-            }
+            jsonrpc_core::Id::Num(n) => Ok(Self::Num(*n)),
+            jsonrpc_core::Id::Str(s) => Ok(Self::Str(s.clone())),
             jsonrpc_core::Id::Null => Err(anyhow::anyhow!("Null request IDs are not supported by MCP")),
         }
     }
@@ -60,9 +51,9 @@ impl TryFrom<&jsonrpc_core::Id> for RequestId {
 
 impl std::fmt::Display for RequestId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.id_type {
-            RequestIdType::Num => write!(f, "{}", self.num_value.unwrap_or(0)),
-            RequestIdType::Str => write!(f, "\"{}\"", self.str_value.clone().unwrap_or_default()),
+        match self {
+            RequestId::Num(n) => write!(f, "{}", n),
+            RequestId::Str(s) => write!(f, "\"{}\"", s),
         }
     }
 }

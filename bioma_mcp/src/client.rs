@@ -11,7 +11,7 @@ use crate::schema::{
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, RequestId, RequestIdType};
+use crate::{ConnectionId, JsonRpcMessage, RequestId};
 use anyhow::Error;
 use base64;
 use jsonrpc_core::{MetaIoHandler, Params};
@@ -1256,8 +1256,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
     }
 
     async fn is_initialize_request(_connection: &ServerConnection, request_key: &RequestId) -> bool {
-        match request_key.id_type {
-            RequestIdType::Num => request_key.num_value == Some(1),
+        match request_key {
+            RequestId::Num(n) => *n == 1,
             _ => false,
         }
     }
