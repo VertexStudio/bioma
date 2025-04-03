@@ -1,3 +1,4 @@
+use crate::logging::McpLoggingLayer;
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -13,7 +14,7 @@ use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage};
-// use anyhow::{Context, Error, Result};
+
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{Layer, Registry};
 
 #[derive(Clone)]
 pub struct ServerMetadata {
@@ -40,10 +43,15 @@ pub enum ServerError {
     ParseResponse(String),
 }
 
+pub type TracingLayer = Box<dyn Layer<Registry> + Send + Sync + 'static>;
+
 pub trait ModelContextProtocolServer: Send + Sync + 'static {
     fn get_transport_config(&self) -> impl Future<Output = TransportConfig> + Send;
     fn get_capabilities(&self) -> impl Future<Output = ServerCapabilities> + Send;
     fn get_pagination(&self) -> impl Future<Output = Option<Pagination>> + Send;
+    fn get_tracing_layer(&self) -> impl Future<Output = Option<TracingLayer>> + Send {
+        async { None }
+    }
     fn new_resources(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ResourceReadHandler>>> + Send;
     fn new_prompts(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn PromptGetHandler>>> + Send;
     fn new_tools(&self, context: Context) -> impl Future<Output = Vec<Arc<dyn ToolCallHandler>>> + Send;
@@ -370,9 +378,19 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         let transport_sender = transport_type.sender();
 
-        let transport = Arc::new(Mutex::new(transport_type));
-
         let mut io_handler = MetaIoHandler::default();
+
+        let capabilities = self.server.read().await.get_capabilities().await.clone();
+        let logging_enabled = capabilities.logging.is_some();
+
+        let logging_layer = if logging_enabled {
+            let layer = Arc::new(McpLoggingLayer::new(transport_sender.clone()));
+            Some(layer)
+        } else {
+            None
+        };
+
+        self.setup_tracing(logging_enabled, logging_layer.clone()).await;
 
         io_handler.add_method_with_meta("initialize", {
             let server = self.server.clone();
@@ -966,6 +984,30 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         });
 
+        if logging_enabled {
+            if let Some(layer) = &logging_layer {
+                let logging_layer_clone = layer.clone();
+
+                io_handler.add_method_with_meta("logging/setLevel", move |params: Params, meta: ServerMetadata| {
+                    let logging_layer = logging_layer_clone.clone();
+                    let conn_id = meta.conn_id.clone();
+
+                    async move {
+                        let params: crate::schema::SetLevelRequestParams = params.parse().map_err(|e| {
+                            let msg = format!("Failed to parse logging/setLevel parameters: {}", e);
+                            jsonrpc_core::Error::invalid_params(msg)
+                        })?;
+
+                        logging_layer.set_client_level(conn_id, params.level);
+
+                        Ok(serde_json::json!({}))
+                    }
+                });
+            }
+        }
+
+        let transport = Arc::new(Mutex::new(transport_type));
+
         {
             let mut transport_lock = transport.lock().await;
             if let Err(e) = transport_lock.start().await {
@@ -1033,5 +1075,43 @@ impl<T: ModelContextProtocolServer> Server<T> {
         }
 
         Ok(())
+    }
+
+    async fn setup_tracing(&self, logging_enabled: bool, mcp_layer: Option<Arc<McpLoggingLayer>>) {
+        let base_layer_result = self.server.read().await.get_tracing_layer().await;
+
+        let filter = std::env::var("RUST_LOG")
+            .map(|val| tracing_subscriber::EnvFilter::new(val))
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
+        match (logging_enabled, base_layer_result, mcp_layer) {
+            (true, Some(base_layer), Some(mcp_layer)) => {
+                debug!("Setting up tracing with base layer and MCP layer");
+                let mcp_layer = (*mcp_layer).clone().with_filter(filter);
+                let _ = tracing_subscriber::registry()
+                    .with(base_layer)
+                    .with(mcp_layer)
+                    .try_init()
+                    .map_err(|e| debug!("Could not initialize tracing with both layers: {}", e));
+            }
+            (true, None, Some(mcp_layer)) => {
+                debug!("Setting up tracing with MCP layer only");
+                let mcp_layer = (*mcp_layer).clone().with_filter(filter);
+                let _ = tracing_subscriber::registry()
+                    .with(mcp_layer)
+                    .try_init()
+                    .map_err(|e| debug!("Could not initialize tracing with MCP layer: {}", e));
+            }
+            (_, Some(base_layer), _) => {
+                debug!("Setting up tracing with base layer only");
+                let _ = tracing_subscriber::registry()
+                    .with(base_layer)
+                    .try_init()
+                    .map_err(|e| debug!("Could not initialize tracing with base layer: {}", e));
+            }
+            _ => {
+                debug!("No tracing layers provided or enabled");
+            }
+        }
     }
 }

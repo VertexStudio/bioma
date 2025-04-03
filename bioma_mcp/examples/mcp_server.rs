@@ -1,4 +1,5 @@
-use anyhow::{Context as AnyhowContext, Error, Result};
+// use anyhow::Context as AnyhowContext;
+use anyhow::{Error, Result};
 use bioma_mcp::{
     prompts::{self, PromptGetHandler},
     resources::{self, ResourceReadHandler},
@@ -14,9 +15,10 @@ use bioma_mcp::{
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info, Level};
+use tracing::error;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -49,34 +51,34 @@ enum Transport {
     },
 }
 
-fn setup_logging(log_path: PathBuf) -> Result<()> {
-    if let Some(parent) = log_path.parent() {
-        std::fs::create_dir_all(parent).context("Failed to create log directory")?;
-    }
+// fn setup_logging(log_path: PathBuf) -> Result<()> {
+//     if let Some(parent) = log_path.parent() {
+//         std::fs::create_dir_all(parent).context("Failed to create log directory")?;
+//     }
 
-    let file_appender = RollingFileAppender::new(
-        Rotation::NEVER,
-        log_path.parent().unwrap_or(&PathBuf::from(".")),
-        log_path.file_name().unwrap_or_default(),
-    );
+//     let file_appender = RollingFileAppender::new(
+//         Rotation::NEVER,
+//         log_path.parent().unwrap_or(&PathBuf::from(".")),
+//         log_path.file_name().unwrap_or_default(),
+//     );
 
-    tracing_subscriber::fmt()
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_level(true)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .with_ansi(false)
-        .with_span_events(FmtSpan::CLOSE)
-        .with_writer(file_appender)
-        .with_max_level(Level::DEBUG)
-        .init();
+//     tracing_subscriber::fmt()
+//         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+//         .with_level(true)
+//         .with_target(true)
+//         .with_thread_ids(true)
+//         .with_file(true)
+//         .with_line_number(true)
+//         .with_ansi(false)
+//         .with_span_events(FmtSpan::CLOSE)
+//         .with_writer(file_appender)
+//         .with_max_level(tracing::Level::DEBUG)
+//         .init();
 
-    info!("Logging system initialized");
+//     tracing::info!("Logging system initialized");
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 #[derive(Clone)]
 pub struct ExampleMcpServer {
@@ -84,6 +86,7 @@ pub struct ExampleMcpServer {
     capabilities: ServerCapabilities,
     base_dir: PathBuf,
     pagination: Pagination,
+    log_path: PathBuf,
 }
 
 impl ModelContextProtocolServer for ExampleMcpServer {
@@ -97,6 +100,32 @@ impl ModelContextProtocolServer for ExampleMcpServer {
 
     async fn get_pagination(&self) -> Option<Pagination> {
         Some(self.pagination.clone())
+    }
+
+    async fn get_tracing_layer(&self) -> Option<bioma_mcp::server::TracingLayer> {
+        let file_appender = RollingFileAppender::new(
+            Rotation::NEVER,
+            self.log_path.parent().unwrap_or(&PathBuf::from(".")),
+            self.log_path.file_name().unwrap_or_default(),
+        );
+
+        let filter = std::env::var("RUST_LOG")
+            .map(|val| tracing_subscriber::EnvFilter::new(val))
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+            .with_level(true)
+            .with_target(true)
+            .with_thread_ids(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_ansi(false)
+            .with_span_events(FmtSpan::CLOSE)
+            .with_writer(file_appender)
+            .with_filter(filter);
+
+        Some(Box::new(file_layer))
     }
 
     async fn new_resources(&self, context: Context) -> Vec<Arc<dyn ResourceReadHandler>> {
@@ -129,7 +158,8 @@ impl ModelContextProtocolServer for ExampleMcpServer {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    setup_logging(args.log_file)?;
+    // TODO: Can't setup manual logging, if we do and we have the logging capability, the mcp logging layer will not be activated, hence no logging will be sent to the clients
+    // setup_logging(args.log_file.clone())?;
 
     let transport_config = match &args.transport {
         Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
@@ -142,6 +172,7 @@ async fn main() -> Result<()> {
         resources: Some(ServerCapabilitiesPromptsResources { list_changed: Some(true), subscribe: Some(true) }),
         prompts: Some(ServerCapabilitiesPrompts { list_changed: Some(false) }),
         completions: Some(std::collections::BTreeMap::new()),
+        logging: Some(std::collections::BTreeMap::new()),
         ..Default::default()
     };
 
@@ -150,6 +181,7 @@ async fn main() -> Result<()> {
         capabilities,
         base_dir: args.base_dir,
         pagination: Pagination::new(args.page_size),
+        log_path: args.log_file,
     };
 
     let mcp_server = Server::new(server);
