@@ -14,12 +14,18 @@ use crate::transport::{stdio::StdioTransport, Transport, TransportSender, Transp
 use crate::{ConnectionId, JsonRpcMessage, RequestId};
 use anyhow::Error;
 use base64;
+use futures::ready;
+use futures::task::{Context, Poll};
+use futures::Future;
+use futures::FutureExt;
 use jsonrpc_core::{MetaIoHandler, Params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::future::Future;
+use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -479,7 +485,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
             params: Params::Map(params.as_object().cloned().unwrap_or_default()),
-            id,
+            id: id.clone(),
         };
 
         let (response_tx, response_rx) = oneshot::channel();
@@ -1261,6 +1267,228 @@ impl<T: ModelContextProtocolClient> Client<T> {
             _ => false,
         }
     }
+
+    /// Prepare and send a request, returning a future that can be awaited or cancelled
+    async fn send_request<R>(
+        &mut self,
+        server_name: &str,
+        method: String,
+        params: serde_json::Value,
+    ) -> Result<PendingRequest<T, R>, ClientError>
+    where
+        R: DeserializeOwned + Send + 'static,
+    {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        let connection = self
+            .connections
+            .get_mut(server_name)
+            .ok_or_else(|| ClientError::Request(format!("Server '{}' not found", server_name).into()))?;
+
+        // Generate ID
+        let mut counter = connection.request_counter.write().await;
+        *counter += 1;
+        let id = *counter;
+        let id = jsonrpc_core::Id::Num(id);
+
+        // Create request
+        let request_key = match RequestId::try_from(&id) {
+            Ok(key) => key,
+            Err(e) => return Err(ClientError::Request(format!("Invalid request ID: {}", e).into())),
+        };
+
+        let request = jsonrpc_core::MethodCall {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method,
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+            id: id.clone(),
+        };
+
+        // Create channel
+        let (response_tx, response_rx) = oneshot::channel();
+
+        // Store in pending requests
+        {
+            let mut pending = connection.pending_requests.lock().await;
+            pending.insert(request_key.clone(), response_tx);
+        }
+
+        // Send request
+        let conn_id = connection.conn_id.clone();
+        if let Err(e) = connection.transport_sender.send(request.into(), conn_id).await {
+            let mut pending = connection.pending_requests.lock().await;
+            pending.remove(&request_key);
+            return Err(ClientError::Transport(format!("Send: {}", e).into()));
+        }
+
+        // Get the default timeout for this connection
+        let default_timeout = self
+            .client
+            .read()
+            .await
+            .get_server_configs()
+            .await
+            .iter()
+            .find(|cfg| connection.conn_id.contains(&cfg.name))
+            .map(|cfg| std::time::Duration::from_secs(cfg.request_timeout));
+
+        // Create a new client reference for the PendingRequest
+        let client_ref = Arc::new(RwLock::new(Client {
+            client: self.client.clone(),
+            connections: HashMap::new(), // Empty, as we only need access to cancel_request
+            io_handler: self.io_handler.clone(),
+            roots: self.roots.clone(),
+            pending_server_requests: self.pending_server_requests.clone(),
+        }));
+
+        // Return pending request object
+        Ok(PendingRequest { response_rx, client: client_ref, id, timeout: default_timeout, _marker: PhantomData })
+    }
+
+    /// Batch multiple requests and execute them concurrently
+    pub async fn join_all<R>(requests: Vec<PendingRequest<T, R>>) -> Vec<Result<R, ClientError>>
+    where
+        R: DeserializeOwned + Send + 'static,
+    {
+        let mut results = Vec::with_capacity(requests.len());
+        let futures = requests.into_iter().map(|req| req.boxed());
+
+        for future in futures {
+            results.push(future.await);
+        }
+
+        results
+    }
+
+    // Updating async request methods to return PendingRequest
+
+    pub async fn request_list_resources(
+        &mut self,
+        params: Option<ListResourcesRequestParams>,
+    ) -> Result<PendingRequest<T, ListResourcesResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        // Get the first server
+        let server_name = self
+            .connections
+            .keys()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?
+            .clone();
+
+        // Send the request
+        let params_value = serde_json::to_value(params.unwrap_or_default())?;
+        self.send_request(&server_name, "resources/list".to_string(), params_value).await
+    }
+
+    pub async fn request_read_resource(
+        &mut self,
+        params: ReadResourceRequestParams,
+    ) -> Result<PendingRequest<T, ReadResourceResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        // Get the first server
+        let server_name = self
+            .connections
+            .keys()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?
+            .clone();
+
+        // Send the request
+        let params_value = serde_json::to_value(params)?;
+        self.send_request(&server_name, "resources/read".to_string(), params_value).await
+    }
+
+    pub async fn request_list_prompts(
+        &mut self,
+        params: Option<ListPromptsRequestParams>,
+    ) -> Result<PendingRequest<T, ListPromptsResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        // Get the first server
+        let server_name = self
+            .connections
+            .keys()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?
+            .clone();
+
+        // Send the request
+        let params_value = serde_json::to_value(params.unwrap_or_default())?;
+        self.send_request(&server_name, "prompts/list".to_string(), params_value).await
+    }
+
+    pub async fn request_get_prompt(
+        &mut self,
+        params: GetPromptRequestParams,
+    ) -> Result<PendingRequest<T, GetPromptResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        // Get the first server
+        let server_name = self
+            .connections
+            .keys()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?
+            .clone();
+
+        // Send the request
+        let params_value = serde_json::to_value(params)?;
+        self.send_request(&server_name, "prompts/get".to_string(), params_value).await
+    }
+
+    pub async fn request_list_tools(
+        &mut self,
+        params: Option<ListToolsRequestParams>,
+    ) -> Result<PendingRequest<T, ListToolsResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        // Get the first server
+        let server_name = self
+            .connections
+            .keys()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?
+            .clone();
+
+        // Send the request
+        let params_value = serde_json::to_value(params.unwrap_or_default())?;
+        self.send_request(&server_name, "tools/list".to_string(), params_value).await
+    }
+
+    pub async fn request_call_tool(
+        &mut self,
+        params: CallToolRequestParams,
+    ) -> Result<PendingRequest<T, CallToolResult>, ClientError> {
+        if self.connections.is_empty() {
+            return Err(ClientError::Request("No server connections available".into()));
+        }
+
+        // Get the first server
+        let server_name = self
+            .connections
+            .keys()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?
+            .clone();
+
+        // Send the request
+        let params_value = serde_json::to_value(params)?;
+        self.send_request(&server_name, "tools/call".to_string(), params_value).await
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1478,5 +1706,111 @@ impl ListRequestParams for ListResourceTemplatesRequestParams {
 
     fn get_cursor(&self) -> Option<&str> {
         self.cursor.as_deref()
+    }
+}
+
+/// A future representing a pending request that can be cancelled
+pub struct PendingRequest<T, R>
+where
+    T: ModelContextProtocolClient,
+    R: DeserializeOwned + Send + 'static,
+{
+    // The response channel receiver
+    response_rx: oneshot::Receiver<Result<serde_json::Value, ClientError>>,
+    // Reference to client for cancellation
+    client: Arc<RwLock<Client<T>>>,
+    // Request ID for cancellation
+    id: jsonrpc_core::Id,
+    // Optional timeout
+    timeout: Option<std::time::Duration>,
+    // Type marker for deserialization
+    _marker: PhantomData<R>,
+}
+
+impl<T, R> Future for PendingRequest<T, R>
+where
+    T: ModelContextProtocolClient,
+    R: DeserializeOwned + Send + 'static,
+{
+    type Output = Result<R, ClientError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Get a mutable reference to response_rx using projection
+        let response_rx = unsafe { self.map_unchecked_mut(|s| &mut s.response_rx) };
+
+        // Poll the oneshot channel
+        match ready!(response_rx.poll(cx)) {
+            Ok(Ok(value)) => {
+                // Deserialize the result when it arrives
+                match serde_json::from_value(value) {
+                    Ok(result) => Poll::Ready(Ok(result)),
+                    Err(e) => Poll::Ready(Err(ClientError::JsonError(e))),
+                }
+            }
+            Ok(Err(e)) => Poll::Ready(Err(e)),
+            Err(_) => Poll::Ready(Err(ClientError::Request("Response channel closed".into()))),
+        }
+    }
+}
+
+impl<T, R> PendingRequest<T, R>
+where
+    T: ModelContextProtocolClient,
+    R: DeserializeOwned + Send + 'static,
+{
+    /// Cancel this request
+    pub async fn cancel(&self, reason: Option<String>) -> Result<(), ClientError> {
+        let mut client_guard = self.client.write().await;
+        client_guard.cancel_request(self.id.clone(), reason).await
+    }
+
+    /// Set a custom timeout for this request
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Execute the request with timeout handling
+    pub async fn execute(self) -> Result<R, ClientError> {
+        if let Some(timeout) = self.timeout {
+            // Create a separate timeout future and then process the original future
+            let timeout_duration = timeout;
+            let timeout_id = self.id.clone();
+            let timeout_client = self.client.clone();
+
+            let result = tokio::select! {
+                result = self => result,
+                _ = tokio::time::sleep(timeout_duration) => {
+                    // If timeout occurs, try to cancel the request
+                    let mut client_guard = timeout_client.write().await;
+                    let _ = client_guard.cancel_request(timeout_id, Some("Request timed out".to_string())).await;
+                    Err(ClientError::Request("Request timed out".into()))
+                }
+            };
+
+            result
+        } else {
+            self.await
+        }
+    }
+}
+
+// Define a useful enum for structured cancellation reasons
+#[derive(Debug, Clone)]
+pub enum CancellationReason {
+    UserRequested,
+    Timeout(std::time::Duration),
+    ConnectionClosed,
+    Custom(String),
+}
+
+impl CancellationReason {
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::UserRequested => "User requested cancellation".to_string(),
+            Self::Timeout(duration) => format!("Request timed out after {:?}", duration),
+            Self::ConnectionClosed => "Connection closed".to_string(),
+            Self::Custom(reason) => reason.clone(),
+        }
     }
 }
