@@ -52,6 +52,8 @@ impl MultiServerCursor {
 pub struct StdioConfig {
     pub command: String,
     pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]

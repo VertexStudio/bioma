@@ -120,6 +120,7 @@ async fn main() -> Result<()> {
             .transport(TransportConfig::Stdio(StdioConfig {
                 command: "target/release/examples/mcp_server".to_string(),
                 args: vec!["stdio".to_string()],
+                env: std::collections::HashMap::new(),
             }))
             .request_timeout(60)
             .build()]
