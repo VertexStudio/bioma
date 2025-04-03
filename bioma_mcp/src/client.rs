@@ -214,22 +214,66 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         });
 
-        io_handler.add_method_with_meta("notifications/message", {
-            let client = client.clone();
-            move |params: Params, _: ()| {
-                let _client = client.clone();
-                async move {
-                    let params: LoggingMessageNotificationParams = match params.parse() {
-                        Ok(params) => params,
-                        Err(e) => {
-                            error!("Failed to parse notifications/message parameters: {}", e);
-                            return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
-                        }
-                    };
-                    info!("[{}] Server Log: {:?}", params.logger.clone().unwrap_or_default(), params);
-                    Ok(serde_json::json!({"success": true}))
+        io_handler.add_notification_with_meta("notifications/message", move |params: Params, _: ()| {
+            tokio::spawn(async move {
+                match params.parse::<LoggingMessageNotificationParams>() {
+                    Ok(params) => {
+                        debug!("[{}] Server Log: {:?}", params.logger.clone().unwrap_or_default(), params);
+                    }
+                    Err(e) => {
+                        error!("Failed to parse notifications/message parameters: {}", e);
+                    }
                 }
-            }
+            });
+        });
+
+        let pending_server_requests: Arc<Mutex<HashMap<RequestId, AbortHandle>>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending_server_requests_clone = pending_server_requests.clone();
+
+        io_handler.add_notification_with_meta("notifications/cancelled", move |params: Params, _: ()| {
+            let pending_server_requests = pending_server_requests_clone.clone();
+
+            tokio::spawn(async move {
+                match params.parse::<CancelledNotificationParams>() {
+                    Ok(cancel_params) => {
+                        let id = match &cancel_params.request_id {
+                            serde_json::Value::Number(n) => {
+                                if let Some(num) = n.as_u64() {
+                                    jsonrpc_core::Id::Num(num)
+                                } else {
+                                    jsonrpc_core::Id::Null
+                                }
+                            }
+                            serde_json::Value::String(s) => jsonrpc_core::Id::Str(s.clone()),
+                            _ => jsonrpc_core::Id::Null,
+                        };
+
+                        match RequestId::try_from(&id) {
+                            Ok(request_key) => {
+                                info!(
+                                    "Server requested cancellation of request {}: {}",
+                                    request_key,
+                                    cancel_params.reason.as_deref().unwrap_or("No reason provided")
+                                );
+
+                                let mut active_reqs_lock = pending_server_requests.lock().await;
+                                if let Some(abort_handle) = active_reqs_lock.remove(&request_key) {
+                                    abort_handle.abort();
+                                    info!("Successfully aborted processing for server request {}", request_key);
+                                } else {
+                                    debug!("Server request {} not found or already completed", request_key);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Received cancellation with invalid request ID type: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to parse cancellation notification parameters: {}", e);
+                    }
+                }
+            });
         });
 
         let mut client = Self {
@@ -237,7 +281,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             connections: HashMap::new(),
             io_handler,
             roots: Arc::new(RwLock::new(HashMap::new())),
-            pending_server_requests: Arc::new(Mutex::new(HashMap::new())),
+            pending_server_requests,
         };
 
         for config in server_configs {
@@ -295,6 +339,9 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let message_handler = tokio::spawn({
             let pending_requests = pending_requests_clone;
+            let io_handler_clone = io_handler_clone;
+            let transport_sender_clone = transport_sender_clone;
+            let conn_id_clone = conn_id_clone;
             let pending_server_requests = pending_server_requests_clone;
 
             async move {
@@ -370,48 +417,16 @@ impl<T: ModelContextProtocolClient> Client<T> {
                                 }
                             }
                             jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                                if notification.method == "notifications/cancelled" {
-                                    if let Ok(params) = serde_json::from_value::<CancelledNotificationParams>(
-                                        serde_json::to_value(notification.params.clone()).unwrap_or_default(),
-                                    ) {
-                                        let id = match &params.request_id {
-                                            serde_json::Value::Number(n) => {
-                                                if let Some(num) = n.as_u64() {
-                                                    jsonrpc_core::Id::Num(num)
-                                                } else {
-                                                    jsonrpc_core::Id::Null
-                                                }
-                                            }
-                                            serde_json::Value::String(s) => jsonrpc_core::Id::Str(s.clone()),
-                                            _ => jsonrpc_core::Id::Null,
-                                        };
-
-                                        let request_key = match RequestId::try_from(&id) {
-                                            Ok(key) => key,
-                                            Err(e) => {
-                                                error!("Failed to parse cancellation notification ID: {}", e);
-                                                return;
-                                            }
-                                        };
-
-                                        info!(
-                                            "Server requested cancellation of request {}: {}",
-                                            request_key,
-                                            params.reason.as_deref().unwrap_or("No reason provided")
-                                        );
-
-                                        let mut active_reqs = pending_server_requests.lock().await;
-                                        if let Some(abort_handle) = active_reqs.remove(&request_key) {
-                                            abort_handle.abort();
-                                            info!("Successfully aborted processing for server request {}", request_key);
-                                        } else {
-                                            debug!("Server request {} not found or already completed", request_key);
-                                        }
-                                    } else {
-                                        error!("Failed to parse cancellation notification parameters");
-                                    }
-                                } else {
-                                    debug!("[{}] Server Notification: {:?}", notification.method, notification);
+                                if let Some(result) = io_handler_clone
+                                    .handle_rpc_request(
+                                        jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(
+                                            notification.clone(),
+                                        )),
+                                        (),
+                                    )
+                                    .await
+                                {
+                                    debug!("Notification handled successfully {:?}", result);
                                 }
                             }
                             _ => {

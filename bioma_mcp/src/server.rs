@@ -1187,7 +1187,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
                             active_requests.insert(request_key, abort_handle);
                         }
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
-                            debug!("Handled notification: {:?}", notification.method);
+                            let metadata = ServerMetadata { conn_id: message.conn_id.clone() };
+                            let request_clone =
+                                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification.clone()));
+
+                            if let Some(result) = io_handler_clone.handle_rpc_request(request_clone, metadata).await {
+                                debug!("Notification handled successfully {:?}", result);
+                            }
                         }
                         _ => {
                             warn!("Unsupported batch request: {:?}", request);
