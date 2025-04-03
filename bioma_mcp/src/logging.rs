@@ -26,7 +26,8 @@ pub struct McpLoggingLayer {
 
 impl McpLoggingLayer {
     pub fn new(transport: TransportSender) -> Self {
-        Self::with_target_prefix(transport, "bioma_mcp")
+        let package_name = env!("CARGO_PKG_NAME");
+        Self::with_target_prefix(transport, package_name)
     }
 
     pub fn with_target_prefix(transport: TransportSender, target_prefix: impl Into<String>) -> Self {
