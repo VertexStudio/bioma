@@ -1,4 +1,5 @@
 use crate::logging::McpLoggingLayer;
+use crate::operation::{Operation, ServerOperation};
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -246,11 +247,26 @@ impl Context {
         }
     }
 
-    pub async fn create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ServerError> {
+    pub async fn create_message(
+        &self,
+        params: CreateMessageRequestParams,
+    ) -> Result<ServerOperation<CreateMessageResult>, ServerError> {
         let params = serde_json::to_value(params).unwrap_or_default();
-        let result =
-            self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(10)).await?;
-        Ok(serde_json::from_value(result).map_err(|e| ServerError::ParseResponse(e.to_string()))?)
+        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(10)).await.map(|op| {
+            let conn_id = op.connection_id().clone();
+            let req_id = op.request_id().clone();
+
+            let future = async move {
+                match op.await {
+                    Ok(result) => {
+                        Ok(serde_json::from_value(result).map_err(|e| ServerError::ParseResponse(e.to_string()))?)
+                    }
+                    Err(e) => Err(e),
+                }
+            };
+
+            Operation::new(Box::pin(future), oneshot::channel().0, conn_id, req_id)
+        })
     }
 
     pub async fn resource_updated(&self, params: ResourceUpdatedNotificationParams) -> Result<(), ServerError> {
@@ -264,7 +280,7 @@ impl Context {
         method: String,
         params: serde_json::Value,
         timeout: std::time::Duration,
-    ) -> Result<serde_json::Value, ServerError> {
+    ) -> Result<ServerOperation<serde_json::Value>, ServerError> {
         let mut counter = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
@@ -288,24 +304,63 @@ impl Context {
         }
 
         let conn_id = self.conn_id.clone();
+        let conn_id_for_cancel = conn_id.clone();
+        let conn_id_for_operation = conn_id.clone();
+        let request_key_for_cancel = request_key.clone();
+        let request_key_for_operation = request_key.clone();
+        let request_key_for_return = request_key.clone();
 
-        if let Err(e) = self.sender.send(request.into(), conn_id).await {
-            let mut pending = self.pending_requests.lock().await;
-            pending.remove(&request_key);
-            return Err(ServerError::Transport(format!("Send: {}", e).into()));
-        }
+        let (cancel_tx, cancel_rx) = oneshot::channel();
 
-        match tokio::time::timeout(timeout, response_rx).await {
-            Ok(response) => match response {
-                Ok(result) => result,
-                Err(_) => Err(ServerError::Request("Response channel closed".into())),
-            },
-            Err(_) => {
-                let mut pending = self.pending_requests.lock().await;
-                pending.remove(&request_key);
-                Err(ServerError::Request("Request timed out".into()))
+        // Set up the cancellation task
+        let transport_sender = self.sender.clone();
+        let cancel_task = async move {
+            if let Ok(reason) = cancel_rx.await {
+                let cancel_id = match &request_key_for_cancel {
+                    RequestId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                    RequestId::Str(s) => serde_json::Value::String(s.clone()),
+                };
+
+                let params = CancelledNotificationParams { request_id: cancel_id, reason };
+
+                let notification = jsonrpc_core::Notification {
+                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                    method: "notifications/cancelled".to_string(),
+                    params: Params::Map(
+                        serde_json::to_value(params).unwrap_or_default().as_object().cloned().unwrap_or_default(),
+                    ),
+                };
+
+                let _ = transport_sender.send(notification.into(), conn_id_for_cancel.clone()).await;
             }
-        }
+        };
+
+        tokio::spawn(cancel_task);
+
+        // Set up the operation future
+        let sender = self.sender.clone();
+        let pending_requests = self.pending_requests.clone();
+        let operation_future = async move {
+            if let Err(e) = sender.send(request.into(), conn_id_for_operation.clone()).await {
+                let mut pending = pending_requests.lock().await;
+                pending.remove(&request_key_for_operation);
+                return Err(ServerError::Transport(format!("Send: {}", e)));
+            }
+
+            match tokio::time::timeout(timeout, response_rx).await {
+                Ok(response) => match response {
+                    Ok(result) => result,
+                    Err(_) => Err(ServerError::Request("Response channel closed".into())),
+                },
+                Err(_) => {
+                    let mut pending = pending_requests.lock().await;
+                    pending.remove(&request_key_for_operation);
+                    Err(ServerError::Request("Request timed out".into()))
+                }
+            }
+        };
+
+        Ok(Operation::new(Box::pin(operation_future), cancel_tx, conn_id, request_key_for_return))
     }
 
     pub async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ServerError> {
@@ -323,11 +378,7 @@ impl Context {
             .map_err(|e| ServerError::Transport(format!("Send: {}", e).into()))
     }
 
-    pub async fn cancel_request(
-        &self,
-        request_id: jsonrpc_core::Id,
-        reason: Option<String>,
-    ) -> Result<(), ServerError> {
+    pub async fn cancel(&self, request_id: jsonrpc_core::Id, reason: Option<String>) -> Result<(), ServerError> {
         let request_key = match RequestId::try_from(&request_id) {
             Ok(key) => key,
             Err(e) => return Err(ServerError::Request(format!("Invalid request ID: {}", e))),

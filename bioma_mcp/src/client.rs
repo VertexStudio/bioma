@@ -1,3 +1,4 @@
+use crate::operation::{ClientOperation, Operation};
 use crate::schema::{
     CallToolRequestParams, CallToolResult, CancelledNotificationParams, ClientCapabilities, CompleteRequestParams,
     CompleteRequestParamsArgument, CompleteResult, CompleteResultCompletion, CreateMessageRequestParams,
@@ -488,7 +489,20 @@ impl<T: ModelContextProtocolClient> Client<T> {
         self.connections.keys().cloned().collect()
     }
 
-    async fn request(
+    async fn request<R>(
+        connection: &mut ServerConnection,
+        method: String,
+        params: serde_json::Value,
+        client: Arc<RwLock<T>>,
+    ) -> Result<R, ClientError>
+    where
+        R: serde::de::DeserializeOwned + Send + Sync + 'static,
+    {
+        let operation = Self::operation::<R>(connection, method, params, client).await?;
+        operation.await
+    }
+
+    async fn request_raw(
         connection: &mut ServerConnection,
         method: String,
         params: serde_json::Value,
@@ -536,8 +550,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
             .unwrap_or(5);
 
         match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
-            Ok(response) => match response {
-                Ok(result) => result,
+            Ok(outer_result) => match outer_result {
+                Ok(inner_result) => inner_result,
                 Err(_) => Err(ClientError::Request("Response channel closed".into())),
             },
             Err(_) => {
@@ -546,6 +560,111 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 Err(ClientError::Request("Request timed out".into()))
             }
         }
+    }
+
+    async fn operation<R>(
+        connection: &mut ServerConnection,
+        method: String,
+        params: serde_json::Value,
+        client: Arc<RwLock<T>>,
+    ) -> Result<ClientOperation<R>, ClientError>
+    where
+        R: serde::de::DeserializeOwned + Send + Sync + 'static,
+    {
+        let mut counter = connection.request_counter.write().await;
+        *counter += 1;
+        let id = *counter;
+
+        let id = jsonrpc_core::Id::Num(id);
+        let request_key = match RequestId::try_from(&id) {
+            Ok(key) => key,
+            Err(e) => return Err(ClientError::Request(format!("Invalid request ID: {}", e).into())),
+        };
+
+        let request = jsonrpc_core::MethodCall {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method: method.clone(),
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+            id,
+        };
+
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let conn_id = connection.conn_id.clone();
+        let conn_id_clone = conn_id.clone();
+        let request_key_clone = request_key.clone();
+        let transport_sender_clone = connection.transport_sender.clone();
+
+        let conn_id_for_cancel = conn_id.clone();
+        let cancel_task = async move {
+            if let Ok(reason) = cancel_rx.await {
+                let cancel_id = match &request_key_clone {
+                    RequestId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                    RequestId::Str(s) => serde_json::Value::String(s.clone()),
+                };
+
+                let params = CancelledNotificationParams { request_id: cancel_id, reason };
+
+                let notification = jsonrpc_core::Notification {
+                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                    method: "notifications/cancelled".to_string(),
+                    params: Params::Map(
+                        serde_json::to_value(params).unwrap_or_default().as_object().cloned().unwrap_or_default(),
+                    ),
+                };
+
+                let _ = transport_sender_clone.send(notification.into(), conn_id_for_cancel.clone()).await;
+            }
+        };
+
+        tokio::spawn(cancel_task);
+
+        let (response_tx, response_rx) = oneshot::channel();
+        let pending_requests_clone = connection.pending_requests.clone();
+        {
+            let mut pending = pending_requests_clone.lock().await;
+            pending.insert((conn_id.clone(), request_key.clone()), response_tx);
+        }
+
+        let transport_sender = connection.transport_sender.clone();
+        let request_key_for_future = request_key.clone();
+        let conn_id_for_future = conn_id.clone();
+        let operation_future = async move {
+            if let Err(e) = transport_sender.send(request.into(), conn_id_for_future.clone()).await {
+                let mut pending = pending_requests_clone.lock().await;
+                pending.remove(&(conn_id_for_future.clone(), request_key_for_future.clone()));
+                return Err(ClientError::Transport(format!("Send: {}", e).into()));
+            }
+
+            let timeout = client
+                .read()
+                .await
+                .get_server_configs()
+                .await
+                .iter()
+                .find(|cfg| conn_id_for_future.contains(&cfg.name))
+                .map(|cfg| cfg.request_timeout)
+                .unwrap_or(5);
+
+            match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
+                Ok(outer_result) => match outer_result {
+                    Ok(inner_result) => match inner_result {
+                        Ok(json_value) => match serde_json::from_value::<R>(json_value) {
+                            Ok(typed_result) => Ok(typed_result),
+                            Err(e) => Err(ClientError::JsonError(e)),
+                        },
+                        Err(e) => Err(e),
+                    },
+                    Err(_) => Err(ClientError::Request("Response channel closed".into())),
+                },
+                Err(_) => {
+                    let mut pending = pending_requests_clone.lock().await;
+                    pending.remove(&(conn_id_for_future, request_key_for_future));
+                    Err(ClientError::Request("Request timed out".into()))
+                }
+            }
+        };
+
+        Ok(Operation::new(Box::pin(operation_future), cancel_tx, conn_id_clone, request_key))
     }
 
     async fn notify(
@@ -588,7 +707,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 client_info: client_info.clone(),
             };
 
-            match Self::request(connection, "initialize".to_string(), serde_json::to_value(params)?, client.clone())
+            match Self::request_raw(connection, "initialize".to_string(), serde_json::to_value(params)?, client.clone())
                 .await
             {
                 Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
@@ -725,7 +844,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             let params = serde_json::json!({ "uri": uri.clone() });
-            match Self::request(connection, "resources/subscribe".to_string(), params, client.clone()).await {
+            match Self::request::<serde_json::Value>(
+                connection,
+                "resources/subscribe".to_string(),
+                params,
+                client.clone(),
+            )
+            .await
+            {
                 Ok(_) => {
                     successful += 1;
                 }
@@ -756,7 +882,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             let params = serde_json::json!({ "uri": uri.clone() });
-            match Self::request(connection, "resources/unsubscribe".to_string(), params, client.clone()).await {
+            match Self::request::<serde_json::Value>(
+                connection,
+                "resources/unsubscribe".to_string(),
+                params,
+                client.clone(),
+            )
+            .await
+            {
                 Ok(_) => {
                     successful += 1;
                 }
@@ -1039,10 +1172,15 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
+    async fn list_items_operation<R, P>(
+        &mut self,
+        endpoint: &str,
+        params: Option<P>,
+    ) -> Result<ClientOperation<R>, ClientError>
     where
-        R: ListResult,
-        P: ListRequestParams,
+        R: ListResult + Send + Sync + 'static,
+        P: ListRequestParams + Clone,
+        R::Item: Send + Sync + 'static,
     {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
@@ -1066,6 +1204,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             self.connections.keys().map(|k| (k.clone(), None)).collect()
         };
 
+        let mut operation_futures = Vec::new();
         let client = self.client.clone();
 
         for (server_name, cursor) in initial_server_cursors {
@@ -1075,70 +1214,109 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     None => P::default().with_cursor(cursor),
                 };
 
-                match Self::request(connection, endpoint.to_string(), serde_json::to_value(req_params)?, client.clone())
-                    .await
+                match Self::operation::<R>(
+                    connection,
+                    endpoint.to_string(),
+                    serde_json::to_value(req_params)?,
+                    client.clone(),
+                )
+                .await
                 {
-                    Ok(response) => match serde_json::from_value::<R>(response) {
-                        Ok(result) => {
-                            all_items.extend(result.get_items().to_vec());
+                    Ok(operation) => {
+                        operation_futures.push((server_name.clone(), operation));
+                    }
+                    Err(e) => {
+                        errors.push(format!("Error creating operation for '{}': {:?}", server_name, e));
+                    }
+                }
+            }
+        }
 
-                            if let Some(next_cursor) = result.get_next_cursor() {
-                                server_cursors.insert(server_name, Some(next_cursor.to_string()));
-                                has_more = true;
-                            }
+        let operation_future = async move {
+            for (server_name, operation) in operation_futures {
+                match operation.await {
+                    Ok(result) => {
+                        all_items.extend(result.get_items().to_vec());
+
+                        if let Some(next_cursor) = result.get_next_cursor() {
+                            server_cursors.insert(server_name, Some(next_cursor.to_string()));
+                            has_more = true;
                         }
-                        Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                        }
-                    },
+                    }
                     Err(e) => {
                         errors.push(format!("Error from '{}': {:?}", server_name, e));
                     }
                 }
             }
-        }
 
-        if all_items.is_empty() && !errors.is_empty() {
-            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
-        } else {
-            let next_cursor = if has_more {
-                let multi_cursor = MultiServerCursor { server_cursors };
-                match multi_cursor.to_string() {
-                    Ok(cursor) => Some(cursor),
-                    Err(e) => {
-                        warn!("Failed to encode multi-server cursor: {:?}", e);
-                        None
-                    }
-                }
+            if all_items.is_empty() && !errors.is_empty() {
+                Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
             } else {
-                None
-            };
+                let next_cursor = if has_more {
+                    let multi_cursor = MultiServerCursor { server_cursors };
+                    match multi_cursor.to_string() {
+                        Ok(cursor) => Some(cursor),
+                        Err(e) => {
+                            warn!("Failed to encode multi-server cursor: {:?}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
 
-            Ok(R::with_items_and_cursor(all_items, next_cursor, None))
-        }
+                Ok(R::with_items_and_cursor(all_items, next_cursor, None))
+            }
+        };
+
+        let first_conn = self
+            .connections
+            .values()
+            .next()
+            .ok_or_else(|| ClientError::Request("No server connections available".into()))?;
+
+        let mut request_counter = first_conn.request_counter.write().await;
+        *request_counter += 1;
+        let request_id = RequestId::Num(*request_counter);
+        let (cancel_tx, _) = oneshot::channel();
+
+        Ok(Operation::new(Box::pin(operation_future), cancel_tx, first_conn.conn_id.clone(), request_id))
+    }
+
+    async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
+    where
+        R: ListResult + Send + Sync + 'static,
+        P: ListRequestParams + Clone,
+        R::Item: Send + Sync + 'static,
+    {
+        let operation = self.list_items_operation::<R, P>(endpoint, params).await?;
+        operation.await
     }
 
     async fn list_all_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Vec<R::Item>, ClientError>
     where
-        R: ListResult,
-        P: ListRequestParams,
+        R: ListResult + Send + Sync + 'static,
+        P: ListRequestParams + Clone,
+        R::Item: Send + Sync + 'static,
     {
         let mut all_items = Vec::new();
-        let mut next_cursor = None;
+        let mut current_params = params.clone();
 
         loop {
-            let params_with_cursor = match params.clone() {
-                Some(p) => Some(p.with_cursor(next_cursor)),
-                None => Some(P::default().with_cursor(next_cursor)),
-            };
+            let operation = self.list_items_operation::<R, P>(endpoint, current_params.clone()).await?;
+            let result = operation.await?;
 
-            let result = self.list_items::<R, P>(endpoint, params_with_cursor).await?;
-            all_items.extend(result.get_items().to_vec());
+            let items = result.get_items().to_vec();
+            all_items.extend(items);
 
-            next_cursor = result.get_next_cursor().map(|s| s.to_string());
-            if next_cursor.is_none() {
+            if result.get_next_cursor().is_none() {
                 break;
             }
+
+            current_params = match current_params {
+                Some(p) => Some(p.with_cursor(result.get_next_cursor().map(|s| s.to_string()))),
+                None => Some(P::default().with_cursor(result.get_next_cursor().map(|s| s.to_string()))),
+            };
         }
 
         Ok(all_items)
@@ -1199,7 +1377,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
             let params = crate::schema::SetLevelRequestParams { level: level.clone() };
 
             let client = self.client.clone();
-            match Self::request(connection, "logging/setLevel".to_string(), serde_json::to_value(params)?, client).await
+            match Self::request_raw(connection, "logging/setLevel".to_string(), serde_json::to_value(params)?, client)
+                .await
             {
                 Ok(_) => {
                     info!("Set log level for server '{}' to {:?}", server_name, level);
@@ -1216,7 +1395,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    pub async fn cancel_request(
+    pub async fn cancel(
         &mut self,
         connection_id: ConnectionId,
         request_id: RequestId,
@@ -1310,14 +1489,15 @@ where
 impl<'a, T, R, P> ItemsIterator<'a, T, R, P>
 where
     T: ModelContextProtocolClient,
-    R: ListResult,
-    P: ListRequestParams,
+    R: ListResult + Send + Sync + 'static,
+    P: ListRequestParams + Clone,
+    R::Item: Send + Sync + 'static,
 {
     pub fn new(client: &'a mut Client<T>, endpoint: String, params: Option<P>) -> Self {
         Self { client, endpoint, params, next_cursor: None, done: false, _phantom: std::marker::PhantomData }
     }
 
-    pub async fn next(&mut self) -> Option<Result<Vec<R::Item>, ClientError>> {
+    pub async fn next_operation(&mut self) -> Option<Result<ClientOperation<Vec<R::Item>>, ClientError>> {
         if self.done {
             return None;
         }
@@ -1327,25 +1507,122 @@ where
             None => Some(P::default().with_cursor(self.next_cursor.clone())),
         };
 
-        let result = self.client.list_items::<R, P>(&self.endpoint, params_with_cursor).await;
+        match self.client.list_items_operation::<R, P>(&self.endpoint, params_with_cursor).await {
+            Ok(operation) => {
+                let next_cursor_ptr = Arc::new(Mutex::new(None::<String>));
+                let done_ptr = Arc::new(Mutex::new(false));
+                let next_cursor_clone = next_cursor_ptr.clone();
+                let done_clone = done_ptr.clone();
 
-        match result {
-            Ok(response) => {
-                let items = response.get_items().to_vec();
-                if items.is_empty() {
-                    self.done = true;
-                    return None;
-                }
+                let conn_id = operation.connection_id().clone();
+                let request_id = operation.request_id().clone();
 
-                self.next_cursor = response.get_next_cursor().map(|s| s.to_string());
-                self.done = self.next_cursor.is_none();
-                Some(Ok(items))
+                let future = async move {
+                    match operation.await {
+                        Ok(response) => {
+                            let items = response.get_items().to_vec();
+                            if items.is_empty() {
+                                let mut done = done_ptr.lock().await;
+                                *done = true;
+                                return Ok(vec![]);
+                            }
+
+                            let next_cursor = response.get_next_cursor().map(|s| s.to_string());
+                            let is_done = next_cursor.is_none();
+
+                            {
+                                let mut next_cursor_lock = next_cursor_ptr.lock().await;
+                                *next_cursor_lock = next_cursor;
+                            }
+
+                            {
+                                let mut done_lock = done_ptr.lock().await;
+                                *done_lock = is_done;
+                            }
+
+                            Ok(items)
+                        }
+                        Err(e) => {
+                            let mut done = done_ptr.lock().await;
+                            *done = true;
+                            Err(e)
+                        }
+                    }
+                };
+
+                let done_state = Arc::new(Mutex::new(false));
+                let next_cursor_state = Arc::new(Mutex::new(None::<String>));
+                let done_state_clone = done_state.clone();
+                let next_cursor_state_clone = next_cursor_state.clone();
+
+                let post_future = async move {
+                    let result = future.await;
+
+                    {
+                        let mut done = done_state.lock().await;
+                        *done = {
+                            let lock = done_clone.lock().await;
+                            *lock
+                        };
+                    }
+
+                    {
+                        let mut next_cursor = next_cursor_state.lock().await;
+                        *next_cursor = {
+                            let lock = next_cursor_clone.lock().await;
+                            lock.clone()
+                        };
+                    }
+
+                    result
+                };
+
+                let shared_state_future = async move {
+                    let result = post_future.await;
+                    result
+                };
+
+                let (cancel_tx, _) = oneshot::channel();
+                let op = Operation::new(Box::pin(shared_state_future), cancel_tx, conn_id, request_id);
+
+                tokio::spawn({
+                    let done_state = done_state_clone;
+                    let next_cursor_state = next_cursor_state_clone;
+                    async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        if let Ok(done) = done_state.try_lock() {
+                            if *done {
+                                if let Ok(mut lock) = next_cursor_state.try_lock() {
+                                    *lock = None;
+                                }
+                            }
+                        }
+                    }
+                });
+
+                Some(Ok(op))
             }
             Err(e) => {
                 self.done = true;
                 Some(Err(e))
             }
         }
+    }
+
+    pub async fn next(&mut self) -> Option<Result<Vec<R::Item>, ClientError>> {
+        let operation = match self.next_operation().await {
+            Some(Ok(op)) => op,
+            Some(Err(e)) => return Some(Err(e)),
+            None => return None,
+        };
+
+        let result = operation.await;
+
+        if result.is_err() {
+            self.done = true;
+        }
+
+        Some(result)
     }
 }
 
