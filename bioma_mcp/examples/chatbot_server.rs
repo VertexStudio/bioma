@@ -48,7 +48,7 @@ impl ModelContextProtocolServer for ChatBotServer {
     }
 
     async fn new_tools(&self, context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
-        info!("Registerin chat tool");
+        info!("Registering chat tool");
         vec![Arc::new(chat::Chat::new(context))]
     }
 

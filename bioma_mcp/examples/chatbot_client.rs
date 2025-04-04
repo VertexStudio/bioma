@@ -196,7 +196,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     } else {
-                        info!("Response content did not containt text field: {:?}", content);
+                        info!("Response content did not contain text field: {:?}", content);
                     }
                 }
             }

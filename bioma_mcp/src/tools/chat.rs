@@ -41,7 +41,7 @@ impl Chat {
 
 impl ToolDef for Chat {
     const NAME: &'static str = "chat";
-    const DESCRIPTION: &'static str = "Chat with and AI assistant";
+    const DESCRIPTION: &'static str = "Chat with an AI assistant";
     type Args = ChatArgs;
 
     async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
