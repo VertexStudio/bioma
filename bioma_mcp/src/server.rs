@@ -220,7 +220,7 @@ impl Session {
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ServerError>>;
 type RequestCounter = Arc<RwLock<u64>>;
 type PendingServerRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
-type PendingClientRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
+type PendingClientRequests = Arc<Mutex<HashMap<(ConnectionId, RequestId), AbortHandle>>>;
 
 #[derive(Clone)]
 pub struct Context {
@@ -519,8 +519,9 @@ impl<T: ModelContextProtocolServer> Server<T> {
         io_handler.add_notification_with_meta("cancelled", {
             let pending_client_requests = self.pending_client_requests.clone();
 
-            move |params: Params, _meta: ServerMetadata| {
+            move |params: Params, meta: ServerMetadata| {
                 let active_requests = pending_client_requests.clone();
+                let conn_id = meta.conn_id.clone();
 
                 let params_clone = params.clone();
 
@@ -548,17 +549,25 @@ impl<T: ModelContextProtocolServer> Server<T> {
                             };
 
                             info!(
-                                "Received cancellation for client request {}: {}",
+                                "Received cancellation for client request {} from connection {}: {}",
                                 request_key,
+                                conn_id,
                                 cancel_params.reason.as_deref().unwrap_or("No reason provided")
                             );
 
                             let mut requests = active_requests.lock().await;
-                            if let Some(abort_handle) = requests.remove(&request_key) {
+                            let key = (conn_id.clone(), request_key.clone());
+                            if let Some(abort_handle) = requests.remove(&key) {
                                 abort_handle.abort();
-                                info!("Successfully aborted processing for request {}", request_key);
+                                info!(
+                                    "Successfully aborted processing for request {} from connection {}",
+                                    request_key, conn_id
+                                );
                             } else {
-                                debug!("Request {} not found or already completed", request_key);
+                                debug!(
+                                    "Request {} from connection {} not found or already completed",
+                                    request_key, conn_id
+                                );
                             }
                         }
                         Err(e) => {
@@ -592,7 +601,10 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                 return;
                             }
                         };
-                        debug!("Received cancellation notification for request ID: {}", request_key);
+                        debug!(
+                            "Received cancellation notification for request ID: {} from connection {}",
+                            request_key, meta.conn_id
+                        );
                     }
                     Err(e) => {
                         error!("Failed to parse cancellation params (sync): {}", e);
@@ -1156,6 +1168,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                             };
 
                             let request_key_clone = request_key.clone();
+                            let conn_id_clone = message.conn_id.clone();
 
                             let abort_handle = {
                                 let request_clone = request.clone();
@@ -1177,14 +1190,14 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                     }
 
                                     let mut requests = active_requests_inner.lock().await;
-                                    requests.remove(&request_key_clone);
+                                    requests.remove(&(message_conn_id.clone(), request_key_clone));
                                 });
 
                                 handle.abort_handle()
                             };
 
                             let mut active_requests = pending_client_requests_clone.lock().await;
-                            active_requests.insert(request_key, abort_handle);
+                            active_requests.insert((conn_id_clone, request_key), abort_handle);
                         }
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(notification)) => {
                             let metadata = ServerMetadata { conn_id: message.conn_id.clone() };
