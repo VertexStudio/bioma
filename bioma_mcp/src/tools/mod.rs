@@ -24,6 +24,9 @@ pub enum ToolError {
     #[error("Failed to serialize tool result: {0}")]
     ResultSerialize(serde_json::Error),
 
+    #[error("Server error: {0}")]
+    Server(#[from] crate::server::ServerError),
+
     #[error("Custom error: {0}")]
     Custom(String),
 }

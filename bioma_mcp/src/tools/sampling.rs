@@ -67,9 +67,9 @@ impl ToolDef for Sampling {
             ..CreateMessageRequestParams::default()
         };
 
-        let sampling = &self.context.create_message(params).await;
+        let operation = self.context.create_message(params).await?;
 
-        match sampling.result().await {
+        match operation.await {
             Ok(message_result) => Ok(Self::success(format!("Sampling result: {:#?}", message_result))),
             Err(e) => Ok(Self::error(format!("Failed to sample: {}", e))),
         }

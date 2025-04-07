@@ -1,4 +1,3 @@
-use crate::operation::OperationRequest;
 use crate::schema::{
     CallToolRequestParams, CallToolResult, CancelledNotificationParams, ClientCapabilities, CompleteRequestParams,
     CompleteRequestParamsArgument, CompleteResult, CompleteResultCompletion, CreateMessageRequestParams,
@@ -16,7 +15,6 @@ use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
 use anyhow::Error;
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
@@ -139,8 +137,6 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
 }
 
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
-type ResponseReceiver = oneshot::Receiver<Result<serde_json::Value, ClientError>>;
-type RequestReceiver = Arc<Mutex<HashMap<RequestId, ResponseReceiver>>>;
 type PendingClientRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 type PendingServerRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
@@ -151,7 +147,6 @@ struct ServerConnection {
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     conn_id: ConnectionId,
     pending_requests: PendingClientRequests,
-    request_receivers: RequestReceiver,
     request_counter: Arc<RwLock<u64>>,
 }
 
@@ -549,7 +544,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
-            request_receivers: RequestReceiver::default(),
             pending_requests,
             conn_id,
         };
@@ -1241,97 +1235,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             MessageId::Num(n) => *n == 1,
             _ => false,
         }
-    }
-}
-
-impl<T: ModelContextProtocolClient> OperationRequest<ClientError> for Client<T> {
-    async fn result<R: DeserializeOwned>(&self, request_id: &RequestId) -> Result<R, ClientError> {
-        let request_id = request_id.clone();
-
-        let (conn_id, _) = &request_id;
-
-        let server_name = conn_id.to_string();
-        let connection = match self.connections.get(&server_name) {
-            Some(conn) => conn,
-            None => return Err(ClientError::Request(format!("No connection found for '{}'", server_name).into())),
-        };
-
-        let receiver = {
-            let mut receivers = connection.request_receivers.lock().await;
-            match receivers.remove(&request_id) {
-                Some(rx) => rx,
-                None => {
-                    return Err(ClientError::Request(format!("No pending request found for {:?}", request_id).into()))
-                }
-            }
-        };
-
-        let timeout = self
-            .client
-            .read()
-            .await
-            .get_server_configs()
-            .await
-            .iter()
-            .find(|cfg| self.connections.contains_key(&cfg.name))
-            .map(|cfg| cfg.request_timeout)
-            .unwrap_or(5);
-
-        match tokio::time::timeout(std::time::Duration::from_secs(timeout), receiver).await {
-            Ok(response) => match response {
-                Ok(result) => result.and_then(|v| serde_json::from_value(v).map_err(|e| ClientError::JsonError(e))),
-                Err(_) => Err(ClientError::Request("Response channel closed".into())),
-            },
-            Err(_) => {
-                let mut pending = connection.pending_requests.lock().await;
-                pending.remove(&request_id);
-                Err(ClientError::Request("Request timed out".into()))
-            }
-        }
-    }
-
-    async fn cancel(&self, request_id: &RequestId, reason: Option<String>) -> Result<(), ClientError> {
-        let request_id = request_id.clone();
-        let reason = reason.clone();
-
-        let (conn_id, message_id) = &request_id;
-        let server_name = conn_id.to_string();
-        let mut connection = match self.connections.get(&server_name) {
-            Some(conn) => conn.clone(),
-            None => return Err(ClientError::Request(format!("No connection found for '{}'", server_name).into())),
-        };
-
-        let conn_id_clone = conn_id.clone();
-        let request_exists = {
-            let pending = connection.pending_requests.lock().await;
-            pending.contains_key(&(conn_id_clone.clone(), message_id.clone()))
-        };
-
-        if !request_exists {
-            return Err(ClientError::Request(
-                format!("Request {:?} not found or already completed", message_id).into(),
-            ));
-        }
-
-        let id_value = match message_id {
-            MessageId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-            MessageId::Str(s) => serde_json::Value::String(s.clone()),
-        };
-
-        let params = CancelledNotificationParams { request_id: id_value, reason };
-        let params_json = match serde_json::to_value(params) {
-            Ok(v) => v,
-            Err(e) => return Err(ClientError::JsonError(e)),
-        };
-
-        if let Err(e) = connection.notify("notifications/cancelled".to_string(), params_json).await {
-            return Err(e);
-        }
-
-        let mut pending = connection.pending_requests.lock().await;
-        pending.remove(&(conn_id_clone, message_id.clone()));
-
-        Ok(())
     }
 }
 
