@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
             if prompts_result.iter().any(|p| p.name == "greet") {
                 info!("Testing completion for 'greet' prompt's 'name' argument...");
 
-                match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await {
+                match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await?.await {
                     Ok(result) => {
                         info!("Completions for 'name' starting with 'a': {:?}", result.completion.values);
                     }
@@ -191,7 +191,11 @@ async fn main() -> Result<()> {
                 info!("Found filesystem resource: {}", filesystem.uri);
 
                 info!("Testing completion for filesystem resource paths...");
-                match client.complete_resource("file:///".to_string(), "path".to_string(), "/READ".to_string()).await {
+                match client
+                    .complete_resource("file:///".to_string(), "path".to_string(), "/READ".to_string())
+                    .await?
+                    .await
+                {
                     Ok(result) => {
                         info!("Completions for file paths: {:?}", result.completion.values);
                     }
@@ -309,7 +313,7 @@ async fn main() -> Result<()> {
         arguments: serde_json::from_value(sampling_args).map_err(|e| ClientError::JsonError(e))?,
     };
 
-    let sampling_result = client.call_tool(sampling_call).await?;
+    let sampling_result = client.call_tool(sampling_call).await?.await?;
 
     info!("Sampling response: {:#?}", sampling_result);
 
@@ -324,7 +328,7 @@ async fn main() -> Result<()> {
         name: "echo".to_string(),
         arguments: serde_json::from_value(echo_args).map_err(|e| ClientError::JsonError(e))?,
     };
-    let echo_result = client.call_tool(echo_args).await?;
+    let echo_result = client.call_tool(echo_args).await?.await?;
 
     info!("Echo response: {:?}", echo_result);
 

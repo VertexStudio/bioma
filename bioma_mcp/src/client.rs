@@ -715,82 +715,86 @@ impl<T: ModelContextProtocolClient> Client<T> {
         .await
     }
 
-    pub async fn subscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
+    pub async fn subscribe_resource(&mut self, uri: String) -> Result<Operation<()>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut successful = 0;
-        let mut errors = Vec::new();
         let client = self.client.clone();
+        let params = serde_json::json!({ "uri": uri.clone() });
 
         for (server_name, connection) in &mut self.connections {
-            let params = serde_json::json!({ "uri": uri.clone() });
             match connection
-                .request::<_, serde_json::Value>("resources/subscribe".to_string(), params, client.clone())
+                .request::<_, serde_json::Value>("resources/subscribe".to_string(), params.clone(), client.clone())
                 .await
             {
-                Ok(operation) => match operation.await {
-                    Ok(_) => {
-                        successful += 1;
-                    }
-                    Err(e) => {
-                        errors.push(format!("Failed to subscribe on '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => {
+                    // Create a new operation with unit return type
+                    let request_id = {
+                        let mut counter = connection.request_counter.write().await;
+                        *counter += 1;
+                        let id = *counter;
+                        let message_id = MessageId::Num(id);
+                        (connection.conn_id.clone(), message_id)
+                    };
+
+                    let operation_clone = operation;
+                    let transport_sender = connection.transport_sender.clone();
+                    let future = async move {
+                        operation_clone.await?;
+                        Ok(())
+                    };
+
+                    return Ok(Operation::new(request_id, future, transport_sender));
+                }
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        if successful > 0 {
-            if !errors.is_empty() {
-                warn!("Some servers failed to subscribe: {}", errors.join(", "));
-            }
-            Ok(())
-        } else {
-            Err(ClientError::Request(format!("Failed to subscribe on all servers: {}", errors.join(", ")).into()))
-        }
+        Err(ClientError::Request("Unable to subscribe resource on any server".into()))
     }
 
-    pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
+    pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<Operation<()>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut successful = 0;
-        let mut errors = Vec::new();
         let client = self.client.clone();
+        let params = serde_json::json!({ "uri": uri.clone() });
 
         for (server_name, connection) in &mut self.connections {
-            let params = serde_json::json!({ "uri": uri.clone() });
             match connection
-                .request::<_, serde_json::Value>("resources/unsubscribe".to_string(), params, client.clone())
+                .request::<_, serde_json::Value>("resources/unsubscribe".to_string(), params.clone(), client.clone())
                 .await
             {
-                Ok(operation) => match operation.await {
-                    Ok(_) => {
-                        successful += 1;
-                    }
-                    Err(e) => {
-                        errors.push(format!("Failed to unsubscribe on '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => {
+                    // Create a new operation with unit return type
+                    let request_id = {
+                        let mut counter = connection.request_counter.write().await;
+                        *counter += 1;
+                        let id = *counter;
+                        let message_id = MessageId::Num(id);
+                        (connection.conn_id.clone(), message_id)
+                    };
+
+                    let operation_clone = operation;
+                    let transport_sender = connection.transport_sender.clone();
+                    let future = async move {
+                        operation_clone.await?;
+                        Ok(())
+                    };
+
+                    return Ok(Operation::new(request_id, future, transport_sender));
+                }
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        if successful > 0 {
-            if !errors.is_empty() {
-                warn!("Some servers failed to unsubscribe: {}", errors.join(", "));
-            }
-            Ok(())
-        } else {
-            Err(ClientError::Request(format!("Failed to unsubscribe on all servers: {}", errors.join(", ")).into()))
-        }
+        Err(ClientError::Request("Unable to unsubscribe resource on any server".into()))
     }
 
     pub async fn list_prompts(
@@ -807,12 +811,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
         self.list_all_items::<ListPromptsResult, ListPromptsRequestParams>("prompts/list", params).await
     }
 
-    pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
+    pub async fn get_prompt(
+        &mut self,
+        params: GetPromptRequestParams,
+    ) -> Result<Operation<GetPromptResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
@@ -824,19 +830,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 )
                 .await
             {
-                Ok(operation) => match operation.await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Failed to get prompt from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => return Ok(operation),
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        Err(ClientError::Request(format!("Unable to get prompt from any server: {}", errors.join(", ")).into()))
+        Err(ClientError::Request("Unable to get prompt from any server".into()))
     }
 
     pub async fn list_tools(
@@ -853,12 +854,11 @@ impl<T: ModelContextProtocolClient> Client<T> {
         self.list_all_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
-    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
+    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<Operation<CallToolResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
@@ -870,27 +870,21 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 )
                 .await
             {
-                Ok(operation) => match operation.await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Failed to call tool on '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => return Ok(operation),
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        Err(ClientError::Request(format!("Unable to call tool on any server: {}", errors.join(", ")).into()))
+        Err(ClientError::Request("Unable to call tool on any server".into()))
     }
 
-    async fn complete(&mut self, params: CompleteRequestParams) -> Result<CompleteResult, ClientError> {
+    async fn complete(&mut self, params: CompleteRequestParams) -> Result<Operation<CompleteResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
@@ -911,27 +905,34 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 )
                 .await
             {
-                Ok(operation) => match operation.await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Failed to get completions from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => return Ok(operation),
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        if errors.is_empty() {
-            Ok(CompleteResult {
-                meta: None,
-                completion: CompleteResultCompletion { values: vec![], total: None, has_more: None },
-            })
+        if let Some(connection) = self.connections.values_mut().next() {
+            // Return empty completion operation if no server supports completions
+            let request_id = {
+                let mut counter = connection.request_counter.write().await;
+                *counter += 1;
+                let id = *counter;
+                let message_id = MessageId::Num(id);
+                (connection.conn_id.clone(), message_id)
+            };
+
+            let transport_sender = connection.transport_sender.clone();
+            let future = async {
+                Ok(CompleteResult {
+                    meta: None,
+                    completion: CompleteResultCompletion { values: vec![], total: None, has_more: None },
+                })
+            };
+
+            Ok(Operation::new(request_id, future, transport_sender))
         } else {
-            Err(ClientError::Request(
-                format!("Unable to get completions from any server: {}", errors.join(", ")).into(),
-            ))
+            Err(ClientError::Request("No server connections available".into()))
         }
     }
 
@@ -940,7 +941,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         prompt_name: String,
         name: String,
         value: String,
-    ) -> Result<CompleteResult, ClientError> {
+    ) -> Result<Operation<CompleteResult>, ClientError> {
         let prompt_ref = PromptReference { type_: "ref/prompt".to_string(), name: prompt_name };
 
         let params = CompleteRequestParams {
@@ -956,7 +957,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         resource_uri: String,
         name: String,
         value: String,
-    ) -> Result<CompleteResult, ClientError> {
+    ) -> Result<Operation<CompleteResult>, ClientError> {
         let resource_ref = ResourceReference { type_: "ref/resource".to_string(), uri: resource_uri };
 
         let params = CompleteRequestParams {
