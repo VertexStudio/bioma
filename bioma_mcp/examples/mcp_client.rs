@@ -313,9 +313,14 @@ async fn main() -> Result<()> {
         arguments: serde_json::from_value(sampling_args).map_err(|e| ClientError::JsonError(e))?,
     };
 
-    let sampling_result = client.call_tool(sampling_call).await?.await?;
+    let sampling_result = client.call_tool(sampling_call).await?;
 
-    info!("Sampling response: {:#?}", sampling_result);
+    sampling_result.cancel(Some("test".to_string())).await?;
+
+    match sampling_result.await {
+        Ok(result) => info!("Sampling response: {:#?}", result),
+        Err(e) => error!("Error getting sampling response: {:?}", e),
+    }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 

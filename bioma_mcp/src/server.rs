@@ -489,7 +489,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         });
 
-        io_handler.add_notification_with_meta("cancelled", {
+        io_handler.add_notification_with_meta("notifications/cancelled", {
             let pending_client_requests = self.pending_client_requests.clone();
 
             move |params: Params, meta: ServerMetadata| {
