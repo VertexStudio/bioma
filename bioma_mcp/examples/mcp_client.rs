@@ -181,9 +181,9 @@ async fn main() -> Result<()> {
 
     info!("Listing resources...");
 
-    let resources_result = client.list_resources(None).await;
+    let resources_operation = client.list_resources(None).await?;
 
-    match resources_result {
+    match resources_operation.await {
         Ok(resources_result) => {
             info!("Available resources: {:?}", resources_result.resources);
 
@@ -237,8 +237,8 @@ async fn main() -> Result<()> {
                 }
 
                 info!("Checking for resource templates...");
-                let templates_result = client.list_resource_templates(None).await;
-                match templates_result {
+                let templates_operation = client.list_resource_templates(None).await?;
+                match templates_operation.await {
                     Ok(templates) => {
                         info!("Found {} resource templates", templates.resource_templates.len());
                         for template in templates.resource_templates {
