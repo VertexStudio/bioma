@@ -158,8 +158,8 @@ async fn main() -> Result<()> {
     client.set_log_level(LoggingLevel::Debug).await?;
 
     info!("Listing prompts...");
-    let prompts_result = client.list_all_prompts(None).await;
-    match prompts_result {
+    let prompts_operation = client.list_all_prompts(None).await?;
+    match prompts_operation.await {
         Ok(prompts_result) => {
             info!("Available prompts: {:?}", prompts_result);
 
