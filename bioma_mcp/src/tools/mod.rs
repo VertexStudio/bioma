@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 
+pub mod chat;
 pub mod echo;
 pub mod fetch;
 pub mod memory;
