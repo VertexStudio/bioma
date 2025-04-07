@@ -1,3 +1,4 @@
+use crate::operation::Operation;
 use crate::schema::{
     CallToolRequestParams, CallToolResult, CancelledNotificationParams, ClientCapabilities, CompleteRequestParams,
     CompleteRequestParamsArgument, CompleteResult, CompleteResultCompletion, CreateMessageRequestParams,
@@ -15,6 +16,7 @@ use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
 use anyhow::Error;
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
@@ -151,12 +153,12 @@ struct ServerConnection {
 }
 
 impl ServerConnection {
-    async fn request<T: ModelContextProtocolClient>(
+    async fn request<T: ModelContextProtocolClient, R: DeserializeOwned>(
         &mut self,
         method: String,
         params: serde_json::Value,
         client: Arc<RwLock<T>>,
-    ) -> Result<serde_json::Value, ClientError> {
+    ) -> Result<Operation<R>, ClientError> {
         let mut counter = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
@@ -176,6 +178,7 @@ impl ServerConnection {
 
         let (response_tx, response_rx) = oneshot::channel();
         let conn_id = self.conn_id.clone();
+        let request_id = (conn_id.clone(), request_key.clone());
 
         {
             let mut pending = self.pending_requests.lock().await;
@@ -198,17 +201,29 @@ impl ServerConnection {
             .map(|cfg| cfg.request_timeout)
             .unwrap_or(5);
 
-        match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
-            Ok(response) => match response {
-                Ok(result) => result,
-                Err(_) => Err(ClientError::Request("Response channel closed".into())),
-            },
-            Err(_) => {
-                let mut pending = self.pending_requests.lock().await;
-                pending.remove(&(conn_id, request_key));
-                Err(ClientError::Request("Request timed out".into()))
+        let pending_requests = self.pending_requests.clone();
+        let request_id_clone = request_id.clone();
+        let transport_sender = self.transport_sender.clone();
+
+        let future = async move {
+            match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
+                Ok(response) => match response {
+                    Ok(result) => match result {
+                        Ok(json_value) => serde_json::from_value::<R>(json_value)
+                            .map_err(|e| anyhow::anyhow!("Failed to deserialize response: {}", e)),
+                        Err(e) => Err(anyhow::anyhow!("RPC error: {}", e)),
+                    },
+                    Err(e) => Err(anyhow::anyhow!("Response channel closed: {}", e)),
+                },
+                Err(_) => {
+                    let mut pending = pending_requests.lock().await;
+                    pending.remove(&request_id_clone);
+                    Err(anyhow::anyhow!("Request timed out"))
+                }
             }
-        }
+        };
+
+        Ok(Operation::new(request_id, future, transport_sender))
     }
 
     async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
@@ -577,20 +592,28 @@ impl<T: ModelContextProtocolClient> Client<T> {
             };
 
             match connection.request("initialize".to_string(), serde_json::to_value(params)?, client.clone()).await {
-                Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
-                    Ok(result) => {
-                        {
-                            let mut server_capabilities = connection.server_capabilities.write().await;
-                            *server_capabilities = Some(result.capabilities.clone());
+                Ok(operation) => match operation.await {
+                    Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
+                        Ok(result) => {
+                            {
+                                let mut server_capabilities = connection.server_capabilities.write().await;
+                                *server_capabilities = Some(result.capabilities.clone());
+                            }
+                            results.insert(server_name.clone(), result);
                         }
-                        results.insert(server_name.clone(), result);
-                    }
+                        Err(e) => {
+                            errors.push(format!(
+                                "Failed to deserialize initialize result from '{}': {:?}",
+                                server_name, e
+                            ));
+                        }
+                    },
                     Err(e) => {
-                        errors.push(format!("Failed to deserialize initialize result from '{}': {:?}", server_name, e));
+                        errors.push(format!("Failed to initialize '{}': {:?}", server_name, e));
                     }
                 },
                 Err(e) => {
-                    errors.push(format!("Failed to initialize '{}': {:?}", server_name, e));
+                    errors.push(format!("Failed to create initialize request for '{}': {:?}", server_name, e));
                 }
             }
         }
@@ -646,7 +669,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn read_resource(
         &mut self,
         params: ReadResourceRequestParams,
-    ) -> Result<ReadResourceResult, ClientError> {
+    ) -> Result<Operation<ReadResourceResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
@@ -656,15 +679,16 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             match connection
-                .request("resources/read".to_string(), serde_json::to_value(params.clone())?, client.clone())
+                .request::<_, ReadResourceResult>(
+                    "resources/read".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
                 .await
             {
-                Ok(response) => match serde_json::from_value::<ReadResourceResult>(response) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => {
+                    return Ok(operation);
+                }
                 Err(e) => {
                     errors.push(format!("Error from '{}': {:?}", server_name, e));
                 }
@@ -707,10 +731,18 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             let params = serde_json::json!({ "uri": uri.clone() });
-            match connection.request("resources/subscribe".to_string(), params, client.clone()).await {
-                Ok(_) => {
-                    successful += 1;
-                }
+            match connection
+                .request::<_, serde_json::Value>("resources/subscribe".to_string(), params, client.clone())
+                .await
+            {
+                Ok(operation) => match operation.await {
+                    Ok(_) => {
+                        successful += 1;
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to subscribe on '{}': {:?}", server_name, e));
+                    }
+                },
                 Err(e) => {
                     errors.push(format!("Error from '{}': {:?}", server_name, e));
                 }
@@ -738,10 +770,18 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             let params = serde_json::json!({ "uri": uri.clone() });
-            match connection.request("resources/unsubscribe".to_string(), params, client.clone()).await {
-                Ok(_) => {
-                    successful += 1;
-                }
+            match connection
+                .request::<_, serde_json::Value>("resources/unsubscribe".to_string(), params, client.clone())
+                .await
+            {
+                Ok(operation) => match operation.await {
+                    Ok(_) => {
+                        successful += 1;
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to unsubscribe on '{}': {:?}", server_name, e));
+                    }
+                },
                 Err(e) => {
                     errors.push(format!("Error from '{}': {:?}", server_name, e));
                 }
@@ -782,13 +822,17 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             match connection
-                .request("prompts/get".to_string(), serde_json::to_value(params.clone())?, client.clone())
+                .request::<_, GetPromptResult>(
+                    "prompts/get".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
                 .await
             {
-                Ok(response) => match serde_json::from_value::<GetPromptResult>(response) {
+                Ok(operation) => match operation.await {
                     Ok(result) => return Ok(result),
                     Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                        errors.push(format!("Failed to get prompt from '{}': {:?}", server_name, e));
                     }
                 },
                 Err(e) => {
@@ -818,13 +862,17 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             match connection
-                .request("tools/call".to_string(), serde_json::to_value(params.clone())?, client.clone())
+                .request::<_, CallToolResult>(
+                    "tools/call".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
                 .await
             {
-                Ok(response) => match serde_json::from_value::<CallToolResult>(response) {
+                Ok(operation) => match operation.await {
                     Ok(result) => return Ok(result),
                     Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                        errors.push(format!("Failed to call tool on '{}': {:?}", server_name, e));
                     }
                 },
                 Err(e) => {
@@ -855,13 +903,17 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
 
             match connection
-                .request("completion/complete".to_string(), serde_json::to_value(params.clone())?, client.clone())
+                .request::<_, CompleteResult>(
+                    "completion/complete".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
                 .await
             {
-                Ok(response) => match serde_json::from_value::<CompleteResult>(response) {
+                Ok(operation) => match operation.await {
                     Ok(result) => return Ok(result),
                     Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                        errors.push(format!("Failed to get completions from '{}': {:?}", server_name, e));
                     }
                 },
                 Err(e) => {
@@ -1008,7 +1060,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
     async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
     where
-        R: ListResult,
+        R: ListResult + DeserializeOwned,
         P: ListRequestParams,
     {
         if self.connections.is_empty() {
@@ -1042,9 +1094,11 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     None => P::default().with_cursor(cursor),
                 };
 
-                match connection.request(endpoint.to_string(), serde_json::to_value(req_params)?, client.clone()).await
+                match connection
+                    .request::<_, R>(endpoint.to_string(), serde_json::to_value(req_params)?, client.clone())
+                    .await
                 {
-                    Ok(response) => match serde_json::from_value::<R>(response) {
+                    Ok(operation) => match operation.await {
                         Ok(result) => {
                             all_items.extend(result.get_items().to_vec());
 
@@ -1054,7 +1108,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                             }
                         }
                         Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                            errors.push(format!("Failed to list items from '{}': {:?}", server_name, e));
                         }
                     },
                     Err(e) => {
@@ -1165,11 +1219,19 @@ impl<T: ModelContextProtocolClient> Client<T> {
             let params = crate::schema::SetLevelRequestParams { level: level.clone() };
 
             let client = self.client.clone();
-            match connection.request("logging/setLevel".to_string(), serde_json::to_value(params)?, client).await {
-                Ok(_) => {
-                    info!("Set log level for server '{}' to {:?}", server_name, level);
-                    success_count += 1;
-                }
+            match connection
+                .request::<_, serde_json::Value>("logging/setLevel".to_string(), serde_json::to_value(params)?, client)
+                .await
+            {
+                Ok(operation) => match operation.await {
+                    Ok(_) => {
+                        info!("Set log level for server '{}' to {:?}", server_name, level);
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to set log level on '{}': {:?}", server_name, e));
+                    }
+                },
                 Err(e) => errors.push(format!("Failed to set log level for '{}': {}", server_name, e)),
             }
         }
