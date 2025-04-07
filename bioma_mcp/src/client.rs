@@ -161,7 +161,7 @@ impl ServerConnection {
         method: String,
         params: serde_json::Value,
         client: Arc<RwLock<T>>,
-    ) -> Result<RequestId, ClientError> {
+    ) -> Result<serde_json::Value, ClientError> {
         let mut counter = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
@@ -187,18 +187,33 @@ impl ServerConnection {
             pending.insert((conn_id.clone(), request_key.clone()), response_tx);
         }
 
-        {
-            let mut pending = self.request_receivers.lock().await;
-            pending.insert((conn_id.clone(), request_key.clone()), response_rx);
-        }
-
         if let Err(e) = self.transport_sender.send(request.into(), conn_id.clone()).await {
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&(conn_id, request_key));
             return Err(ClientError::Transport(format!("Send: {}", e).into()));
         }
 
-        Ok((conn_id, request_key))
+        let timeout = client
+            .read()
+            .await
+            .get_server_configs()
+            .await
+            .iter()
+            .find(|cfg| self.conn_id.contains(&cfg.name))
+            .map(|cfg| cfg.request_timeout)
+            .unwrap_or(5);
+
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
+            Ok(response) => match response {
+                Ok(result) => result,
+                Err(_) => Err(ClientError::Request("Response channel closed".into())),
+            },
+            Err(_) => {
+                let mut pending = self.pending_requests.lock().await;
+                pending.remove(&(conn_id, request_key));
+                Err(ClientError::Request("Request timed out".into()))
+            }
+        }
     }
 
     async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
@@ -568,40 +583,18 @@ impl<T: ModelContextProtocolClient> Client<T> {
             };
 
             match connection.request("initialize".to_string(), serde_json::to_value(params)?, client.clone()).await {
-                Ok(request_id) => {
-                    let receiver = {
-                        let mut receivers = connection.request_receivers.lock().await;
-                        receivers
-                            .remove(&request_id)
-                            .unwrap_or_else(|| panic!("No receiver found for request ID {:?}", request_id))
-                    };
-
-                    match receiver.await {
-                        Ok(response) => match response {
-                            Ok(value) => match serde_json::from_value::<InitializeResult>(value) {
-                                Ok(result) => {
-                                    {
-                                        let mut server_capabilities = connection.server_capabilities.write().await;
-                                        *server_capabilities = Some(result.capabilities.clone());
-                                    }
-                                    results.insert(server_name.clone(), result);
-                                }
-                                Err(e) => {
-                                    errors.push(format!(
-                                        "Failed to deserialize initialize result from '{}': {:?}",
-                                        server_name, e
-                                    ));
-                                }
-                            },
-                            Err(e) => {
-                                errors.push(format!("RPC error from '{}': {:?}", server_name, e));
-                            }
-                        },
-                        Err(_) => {
-                            errors.push(format!("Response channel for '{}' closed", server_name));
+                Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
+                    Ok(result) => {
+                        {
+                            let mut server_capabilities = connection.server_capabilities.write().await;
+                            *server_capabilities = Some(result.capabilities.clone());
                         }
+                        results.insert(server_name.clone(), result);
                     }
-                }
+                    Err(e) => {
+                        errors.push(format!("Failed to deserialize initialize result from '{}': {:?}", server_name, e));
+                    }
+                },
                 Err(e) => {
                     errors.push(format!("Failed to initialize '{}': {:?}", server_name, e));
                 }
