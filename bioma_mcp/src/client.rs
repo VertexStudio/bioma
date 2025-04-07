@@ -591,25 +591,20 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 client_info: client_info.clone(),
             };
 
-            match connection.request("initialize".to_string(), serde_json::to_value(params)?, client.clone()).await {
+            match connection
+                .request::<_, InitializeResult>("initialize".to_string(), serde_json::to_value(params)?, client.clone())
+                .await
+            {
                 Ok(operation) => match operation.await {
-                    Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
-                        Ok(result) => {
-                            {
-                                let mut server_capabilities = connection.server_capabilities.write().await;
-                                *server_capabilities = Some(result.capabilities.clone());
-                            }
-                            results.insert(server_name.clone(), result);
+                    Ok(result) => {
+                        {
+                            let mut server_capabilities = connection.server_capabilities.write().await;
+                            *server_capabilities = Some(result.capabilities.clone());
                         }
-                        Err(e) => {
-                            errors.push(format!(
-                                "Failed to deserialize initialize result from '{}': {:?}",
-                                server_name, e
-                            ));
-                        }
-                    },
+                        results.insert(server_name.clone(), result);
+                    }
                     Err(e) => {
-                        errors.push(format!("Failed to initialize '{}': {:?}", server_name, e));
+                        errors.push(format!("Failed to deserialize initialize result from '{}': {:?}", server_name, e));
                     }
                 },
                 Err(e) => {
