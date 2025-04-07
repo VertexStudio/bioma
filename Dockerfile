@@ -1,10 +1,9 @@
-FROM nvcr.io/nvidia/cuda:12.6.1-cudnn-devel-ubuntu22.04
+FROM nvcr.io/nvidia/cuda:12.6.1-cudnn-devel-ubuntu22.04 AS builder
 
-ARG ONNXRUNTIME_VERSION=1.19.0
+ARG ONNXRUNTIME_VERSION=1.20.0
 ENV DEBIAN_FRONTEND=noninteractive
-ENV APP_NAME=bioma-service
 
-# Install necessary packages
+# Instalar paquetes necesarios
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     libssl-dev \
@@ -13,49 +12,86 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user with UID 1000 to match the docker-compose configuration
+# Crear usuario no-root
 RUN useradd -m -u 1000 bioma
 
-# Switch to non-root user
+# Cambiar al usuario no-root
 USER bioma
 WORKDIR /home/bioma
 
-# Install Rust for the non-root user
+# Instalar Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="/home/bioma/.cargo/bin:${PATH}"
 
-# Download and install ONNXRuntime for the non-root user
+# Descargar e instalar ONNXRuntime
 RUN wget https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz \
     && tar -xzf onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz \
     && mv onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION} /home/bioma/onnxruntime \
     && rm onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz
 
-# Set the working directory for the application
+# Configurar el directorio de trabajo para la aplicación
 WORKDIR /app
 
 # Copy the entire application directory
 COPY --chown=bioma:bioma . .
 
-# Set CUDA and ONNXRuntime environment variables
+# Configurar variables de entorno para CUDA y ONNXRuntime
 ENV PATH="/home/bioma/onnxruntime/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/home/bioma/onnxruntime/lib:/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
 
-# Build the application
-RUN cargo build --release
+# Compilar la aplicación
+RUN cargo build --release -p cognition --bin cognition-server
 
-# Ensure the binary is in the correct location
-RUN cp target/release/bioma-service /app/
+# Segunda etapa: imagen final más ligera
+FROM nvcr.io/nvidia/cuda:12.6.1-cudnn-runtime-ubuntu22.04
 
-# Create and set permissions for the /data directory
-USER root
+ARG ONNXRUNTIME_VERSION=1.20.0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Instalar solo las dependencias necesarias para la ejecución
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Crear usuario no-root
+RUN useradd -m -u 1000 bioma
+
+# Crear directorio de datos
 RUN mkdir -p /data && chown bioma:bioma /data
-USER bioma
 
-# Expose the necessary port
+# Cambiar al usuario no-root
+USER bioma
+WORKDIR /home/bioma
+
+# Copiar ONNXRuntime del builder
+COPY --from=builder --chown=bioma:bioma /home/bioma/onnxruntime /home/bioma/onnxruntime
+
+# Copiar los directorios necesarios
+COPY --from=builder --chown=bioma:bioma /app/assets /app/assets
+COPY --from=builder --chown=bioma:bioma /app/apps/cognition/templates /app/apps/cognition/templates
+COPY --from=builder --chown=bioma:bioma /app/apps/cognition/docs /app/apps/cognition/docs
+
+# Configurar el directorio de trabajo para la aplicación
+WORKDIR /app
+
+# Copiar solo los archivos necesarios para la ejecución
+COPY --from=builder --chown=bioma:bioma /app/target/release/cognition-server /app/
+COPY --chown=bioma:bioma assets/configs/rag_config_server.json /app/assets/configs/
+
+# Configurar variables de entorno para CUDA y ONNXRuntime
+ENV PATH="/home/bioma/onnxruntime/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/home/bioma/onnxruntime/lib:/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+
+# Exponer el puerto necesario
 EXPOSE 7123
 
-# Expose the target directory as a volume
+# Exponer el directorio de datos como volumen
 VOLUME ["/data"]
 
-# Set the startup command to run your application
-CMD ["./bioma-service", "arg1", "arg2"]
+# Configurar el nivel de log
+ENV RUST_LOG=info
+
+# Comando para iniciar la aplicación
+ENTRYPOINT ["/app/cognition-server"]
+CMD ["/app/assets/configs/rag_config_server.json"]
