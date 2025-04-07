@@ -33,12 +33,12 @@ impl std::fmt::Display for ConnectionId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum RequestId {
+pub enum MessageId {
     Num(u64),
     Str(String),
 }
 
-impl TryFrom<&jsonrpc_core::Id> for RequestId {
+impl TryFrom<&jsonrpc_core::Id> for MessageId {
     type Error = anyhow::Error;
 
     fn try_from(id: &jsonrpc_core::Id) -> Result<Self, Self::Error> {
@@ -50,14 +50,16 @@ impl TryFrom<&jsonrpc_core::Id> for RequestId {
     }
 }
 
-impl std::fmt::Display for RequestId {
+impl std::fmt::Display for MessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RequestId::Num(n) => write!(f, "{}", n),
-            RequestId::Str(s) => write!(f, "\"{}\"", s),
+            MessageId::Num(n) => write!(f, "{}", n),
+            MessageId::Str(s) => write!(f, "\"{}\"", s),
         }
     }
 }
+
+pub type RequestId = (ConnectionId, MessageId);
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
