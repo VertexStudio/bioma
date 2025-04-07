@@ -96,6 +96,7 @@ pub struct WsTransport {
     #[allow(unused)]
     on_error: mpsc::Sender<anyhow::Error>,
 
+    #[allow(unused)]
     on_close: mpsc::Sender<()>,
 }
 
@@ -429,10 +430,6 @@ impl Transport for WsTransport {
 
                 info!("All client connections marked for closure");
 
-                if let Err(e) = self.on_close.send(()).await {
-                    error!("Failed to send close notification: {}", e);
-                }
-
                 Ok(())
             }
             WsMode::Client(client) => {
@@ -476,10 +473,6 @@ impl Transport for WsTransport {
                     }
                 } else {
                     debug!("WebSocket connection already closed");
-                }
-
-                if let Err(e) = self.on_close.send(()).await {
-                    error!("Failed to send close notification: {}", e);
                 }
 
                 Ok(())
