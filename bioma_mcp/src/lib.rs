@@ -31,6 +31,33 @@ impl std::fmt::Display for ConnectionId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RequestId {
+    Num(u64),
+    Str(String),
+}
+
+impl TryFrom<&jsonrpc_core::Id> for RequestId {
+    type Error = anyhow::Error;
+
+    fn try_from(id: &jsonrpc_core::Id) -> Result<Self, Self::Error> {
+        match id {
+            jsonrpc_core::Id::Num(n) => Ok(Self::Num(*n)),
+            jsonrpc_core::Id::Str(s) => Ok(Self::Str(s.clone())),
+            jsonrpc_core::Id::Null => Err(anyhow::anyhow!("Null request IDs are not supported by MCP")),
+        }
+    }
+}
+
+impl std::fmt::Display for RequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RequestId::Num(n) => write!(f, "{}", n),
+            RequestId::Str(s) => write!(f, "\"{}\"", s),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[serde(untagged)]
