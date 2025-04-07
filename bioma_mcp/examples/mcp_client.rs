@@ -201,44 +201,39 @@ async fn main() -> Result<()> {
                 let readme_uri = "file:///bioma/README.md";
                 info!("Reading file: {}", readme_uri);
 
-                let readme_result =
-                    client.read_resource(ReadResourceRequestParams { uri: readme_uri.to_string() }).await;
-                match readme_result {
-                    Ok(operation) => match operation.await {
-                        Ok(result) => {
-                            if let Some(content) = result.contents.first() {
-                                if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
-                                    info!(
-                                        "README.md content preview (first 100 chars): {}",
-                                        text.chars().take(100).collect::<String>()
-                                    );
-                                } else if let Some(blob) = content.get("blob").and_then(|b| b.as_str()) {
-                                    info!("README.md is a binary file with {} bytes", blob.len());
-                                }
+                let readme_operation =
+                    client.read_resource(ReadResourceRequestParams { uri: readme_uri.to_string() }).await?;
+                match readme_operation.await {
+                    Ok(result) => {
+                        if let Some(content) = result.contents.first() {
+                            if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
+                                info!(
+                                    "README.md content preview (first 100 chars): {}",
+                                    text.chars().take(100).collect::<String>()
+                                );
+                            } else if let Some(blob) = content.get("blob").and_then(|b| b.as_str()) {
+                                info!("README.md is a binary file with {} bytes", blob.len());
                             }
                         }
-                        Err(e) => error!("Error reading README.md: {:?}", e),
-                    },
-                    Err(e) => error!("Error initiating README.md read: {:?}", e),
+                    }
+                    Err(e) => error!("Error reading README.md: {:?}", e),
                 }
 
                 let dir_uri = "file:///";
                 info!("Reading directory: {}", dir_uri);
 
-                let dir_result = client.read_resource(ReadResourceRequestParams { uri: dir_uri.to_string() }).await;
-                match dir_result {
-                    Ok(operation) => match operation.await {
-                        Ok(result) => {
-                            info!("Directory contents:");
-                            for content in result.contents {
-                                if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
-                                    info!("- {}", text);
-                                }
+                let dir_operation =
+                    client.read_resource(ReadResourceRequestParams { uri: dir_uri.to_string() }).await?;
+                match dir_operation.await {
+                    Ok(result) => {
+                        info!("Directory contents:");
+                        for content in result.contents {
+                            if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
+                                info!("- {}", text);
                             }
                         }
-                        Err(e) => error!("Error reading root directory: {:?}", e),
-                    },
-                    Err(e) => error!("Error initiating directory read: {:?}", e),
+                    }
+                    Err(e) => error!("Error reading root directory: {:?}", e),
                 }
 
                 info!("Checking for resource templates...");
@@ -268,16 +263,13 @@ async fn main() -> Result<()> {
                 info!("Filesystem resource not found, falling back to readme resource");
 
                 if !resources_result.resources.is_empty() {
-                    let read_result = client
+                    let read_operation = client
                         .read_resource(ReadResourceRequestParams { uri: resources_result.resources[0].uri.clone() })
-                        .await;
+                        .await?;
 
-                    match read_result {
-                        Ok(operation) => match operation.await {
-                            Ok(result) => info!("Resource content: {:?}", result),
-                            Err(e) => error!("Error reading resource: {:?}", e),
-                        },
-                        Err(e) => error!("Error initiating resource read: {:?}", e),
+                    match read_operation.await {
+                        Ok(result) => info!("Resource content: {:?}", result),
+                        Err(e) => error!("Error reading resource: {:?}", e),
                     }
                 }
             }
