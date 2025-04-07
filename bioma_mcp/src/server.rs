@@ -1,4 +1,5 @@
 use crate::logging::McpLoggingLayer;
+use crate::operation::{Operation, OperationRequest};
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -13,10 +14,11 @@ use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, RequestId};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
 
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
@@ -218,9 +220,11 @@ impl Session {
 }
 
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ServerError>>;
+type ResponseReceiver = oneshot::Receiver<Result<serde_json::Value, ServerError>>;
+type RequestReceiver = Arc<Mutex<HashMap<RequestId, ResponseReceiver>>>;
 type RequestCounter = Arc<RwLock<u64>>;
 type PendingServerRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
-type PendingClientRequests = Arc<Mutex<HashMap<(ConnectionId, RequestId), AbortHandle>>>;
+type PendingClientRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
 #[derive(Clone)]
 pub struct Context {
@@ -229,6 +233,7 @@ pub struct Context {
     conn_id: ConnectionId,
     sender: TransportSender,
     pending_requests: PendingServerRequests,
+    request_receivers: RequestReceiver,
     request_counter: RequestCounter,
     pagination: Option<Pagination>,
 }
@@ -241,16 +246,22 @@ impl Context {
             conn_id: ConnectionId::new(None),
             sender: TransportSender::new_nop(),
             pending_requests: PendingServerRequests::default(),
+            request_receivers: RequestReceiver::default(),
             request_counter: RequestCounter::default(),
             pagination: None,
         }
     }
 
-    pub async fn create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ServerError> {
+    pub async fn create_message(
+        &self,
+        params: CreateMessageRequestParams,
+    ) -> Operation<CreateMessageResult, ServerError, Self> {
         let params = serde_json::to_value(params).unwrap_or_default();
-        let result =
-            self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(10)).await?;
-        Ok(serde_json::from_value(result).map_err(|e| ServerError::ParseResponse(e.to_string()))?)
+        let request_id = self
+            .request("sampling/createMessage".to_string(), params)
+            .await
+            .expect("Failed to send create_message request");
+        Operation::new(request_id, self.clone())
     }
 
     pub async fn resource_updated(&self, params: ResourceUpdatedNotificationParams) -> Result<(), ServerError> {
@@ -259,12 +270,7 @@ impl Context {
         Ok(())
     }
 
-    pub async fn request(
-        &self,
-        method: String,
-        params: serde_json::Value,
-        timeout: std::time::Duration,
-    ) -> Result<serde_json::Value, ServerError> {
+    pub async fn request(&self, method: String, params: serde_json::Value) -> Result<RequestId, ServerError> {
         let mut counter = self.request_counter.write().await;
         *counter += 1;
         let id = *counter;
@@ -277,35 +283,31 @@ impl Context {
         };
 
         let (response_tx, response_rx) = oneshot::channel();
-        let request_key = match RequestId::try_from(&request.id) {
+        let request_key = match MessageId::try_from(&request.id) {
             Ok(key) => key,
             Err(e) => return Err(ServerError::Request(format!("Invalid request ID: {}", e))),
         };
+        let request_id = (self.conn_id.clone(), request_key.clone());
 
         {
             let mut pending = self.pending_requests.lock().await;
-            pending.insert(request_key.clone(), response_tx);
+            pending.insert(request_id.clone(), response_tx);
+        }
+
+        {
+            let mut pending = self.request_receivers.lock().await;
+            pending.insert(request_id.clone(), response_rx);
         }
 
         let conn_id = self.conn_id.clone();
 
-        if let Err(e) = self.sender.send(request.into(), conn_id).await {
+        if let Err(e) = self.sender.send(request.into(), conn_id.clone()).await {
             let mut pending = self.pending_requests.lock().await;
-            pending.remove(&request_key);
+            pending.remove(&(conn_id, request_key));
             return Err(ServerError::Transport(format!("Send: {}", e).into()));
         }
 
-        match tokio::time::timeout(timeout, response_rx).await {
-            Ok(response) => match response {
-                Ok(result) => result,
-                Err(_) => Err(ServerError::Request("Response channel closed".into())),
-            },
-            Err(_) => {
-                let mut pending = self.pending_requests.lock().await;
-                pending.remove(&request_key);
-                Err(ServerError::Request("Request timed out".into()))
-            }
-        }
+        Ok(request_id)
     }
 
     pub async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ServerError> {
@@ -322,30 +324,40 @@ impl Context {
             .await
             .map_err(|e| ServerError::Transport(format!("Send: {}", e).into()))
     }
+}
 
-    pub async fn cancel_request(
-        &self,
-        request_id: jsonrpc_core::Id,
-        reason: Option<String>,
-    ) -> Result<(), ServerError> {
-        let request_key = match RequestId::try_from(&request_id) {
-            Ok(key) => key,
-            Err(e) => return Err(ServerError::Request(format!("Invalid request ID: {}", e))),
+impl OperationRequest<ServerError> for Context {
+    async fn result<T: DeserializeOwned>(&self, request_id: &RequestId) -> Result<T, ServerError> {
+        let receiver = {
+            let mut receivers = self.request_receivers.lock().await;
+            receivers
+                .remove(request_id)
+                .ok_or_else(|| ServerError::Request(format!("Request {:?} not found", request_id)))?
         };
 
+        match tokio::time::timeout(std::time::Duration::from_secs(10), receiver).await {
+            Ok(result) => match result {
+                Ok(result) => result
+                    .and_then(|v| serde_json::from_value(v).map_err(|e| ServerError::ParseResponse(e.to_string()))),
+                Err(_) => Err(ServerError::Request("Channel closed before receiving response".to_string())),
+            },
+            Err(_) => Err(ServerError::Request("Request timed out after 10 seconds".to_string())),
+        }
+    }
+
+    async fn cancel(&self, request_id: &RequestId, reason: Option<String>) -> Result<(), ServerError> {
         let request_exists = {
             let pending = self.pending_requests.lock().await;
-            pending.contains_key(&request_key)
+            pending.contains_key(&request_id)
         };
 
         if !request_exists {
-            return Err(ServerError::Request(format!("Request {} not found or already completed", request_key)));
+            return Err(ServerError::Request(format!("Request {:?} not found or already completed", request_id)));
         }
 
-        let id_value = match &request_id {
-            jsonrpc_core::Id::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-            jsonrpc_core::Id::Str(s) => serde_json::Value::String(s.clone()),
-            jsonrpc_core::Id::Null => serde_json::Value::Null,
+        let id_value = match &request_id.1 {
+            MessageId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+            MessageId::Str(s) => serde_json::Value::String(s.clone()),
         };
 
         let params = CancelledNotificationParams { request_id: id_value, reason };
@@ -356,8 +368,8 @@ impl Context {
 
         {
             let mut pending = self.pending_requests.lock().await;
-            pending.remove(&request_key);
-            debug!("Removed request {} from pending requests", request_key);
+            pending.remove(&request_id);
+            debug!("Removed request {:?} from pending requests", request_id);
         }
 
         Ok(())
@@ -368,7 +380,6 @@ pub struct Server<T: ModelContextProtocolServer> {
     server: Arc<RwLock<T>>,
     sessions: Arc<RwLock<HashMap<ConnectionId, Session>>>,
     pending_requests: PendingServerRequests,
-    request_counter: RequestCounter,
     pending_client_requests: PendingClientRequests,
 }
 
@@ -378,7 +389,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             server: Arc::new(RwLock::new(server)),
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
-            request_counter: Arc::new(RwLock::new(0)),
             pending_client_requests: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -445,14 +455,12 @@ impl<T: ModelContextProtocolServer> Server<T> {
             let sessions = self.sessions.clone();
             let transport_sender = transport_sender.clone();
             let pending_requests = self.pending_requests.clone();
-            let request_counter = self.request_counter.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let server = server.clone();
                 let sessions = sessions.clone();
                 let transport_sender = transport_sender.clone();
                 let pending_requests = pending_requests.clone();
-                let request_counter = request_counter.clone();
 
                 debug!("Handling initialize request");
 
@@ -484,7 +492,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         client_capabilities: init_params.capabilities.clone(),
                         server_capabilities: capabilities.clone(),
                         pending_requests: pending_requests.clone(),
-                        request_counter: request_counter.clone(),
+                        request_receivers: RequestReceiver::default(),
+                        request_counter: RequestCounter::default(),
                         pagination,
                     };
 
@@ -540,7 +549,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                 _ => jsonrpc_core::Id::Null,
                             };
 
-                            let request_key = match RequestId::try_from(&id) {
+                            let request_key = match MessageId::try_from(&id) {
                                 Ok(key) => key,
                                 Err(e) => {
                                     error!("Invalid request ID in cancellation request: {}", e);
@@ -594,7 +603,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                             }
                         };
 
-                        let request_key = match RequestId::try_from(&id) {
+                        let request_key = match MessageId::try_from(&id) {
                             Ok(key) => key,
                             Err(e) => {
                                 error!("Invalid request ID in cancellation request: {}", e);
@@ -1159,7 +1168,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     JsonRpcMessage::Request(request) => match request {
                         jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(call)) => {
                             let metadata = ServerMetadata { conn_id: message.conn_id.clone() };
-                            let request_key = match RequestId::try_from(&call.id) {
+                            let request_key = match MessageId::try_from(&call.id) {
                                 Ok(key) => key,
                                 Err(e) => {
                                     error!("Invalid request ID: {}", e);
@@ -1215,7 +1224,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     JsonRpcMessage::Response(response) => match response {
                         jsonrpc_core::Response::Single(output) => match output {
                             jsonrpc_core::Output::Success(success) => {
-                                let request_key = match RequestId::try_from(&success.id) {
+                                let request_key = match MessageId::try_from(&success.id) {
                                     Ok(key) => key,
                                     Err(e) => {
                                         error!("Invalid request ID: {}", e);
@@ -1223,12 +1232,13 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                     }
                                 };
                                 let mut requests = pending_requests.lock().await;
-                                if let Some(sender) = requests.remove(&request_key) {
+                                let request_id = (message.conn_id.clone(), request_key);
+                                if let Some(sender) = requests.remove(&request_id) {
                                     let _ = sender.send(Ok(success.result.clone()));
                                 }
                             }
                             jsonrpc_core::Output::Failure(failure) => {
-                                let request_key = match RequestId::try_from(&failure.id) {
+                                let request_key = match MessageId::try_from(&failure.id) {
                                     Ok(key) => key,
                                     Err(e) => {
                                         error!("Invalid request ID: {}", e);
@@ -1236,7 +1246,8 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                     }
                                 };
                                 let mut requests = pending_requests.lock().await;
-                                if let Some(sender) = requests.remove(&request_key) {
+                                let request_id = (message.conn_id.clone(), request_key);
+                                if let Some(sender) = requests.remove(&request_id) {
                                     let _ = sender
                                         .send(Err(ServerError::Request(format!("RPC error: {:?}", failure.error))));
                                 }
