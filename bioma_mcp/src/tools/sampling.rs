@@ -69,7 +69,7 @@ impl ToolDef for Sampling {
 
         let sampling = &self.context.create_message(params).await;
 
-        match sampling {
+        match sampling.result().await {
             Ok(message_result) => Ok(Self::success(format!("Sampling result: {:#?}", message_result))),
             Err(e) => Ok(Self::error(format!("Failed to sample: {}", e))),
         }
