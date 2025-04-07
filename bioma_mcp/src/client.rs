@@ -657,7 +657,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn list_all_resources(
         &mut self,
         params: Option<ListResourcesRequestParams>,
-    ) -> Result<Vec<Resource>, ClientError> {
+    ) -> Result<Operation<Vec<Resource>>, ClientError> {
         self.list_all_items::<ListResourcesResult, ListResourcesRequestParams>("resources/list", params).await
     }
 
@@ -707,7 +707,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn list_all_resource_templates(
         &mut self,
         params: Option<ListResourceTemplatesRequestParams>,
-    ) -> Result<Vec<ResourceTemplate>, ClientError> {
+    ) -> Result<Operation<Vec<ResourceTemplate>>, ClientError> {
         self.list_all_items::<ListResourceTemplatesResult, ListResourceTemplatesRequestParams>(
             "resources/templates/list",
             params,
@@ -803,7 +803,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn list_all_prompts(
         &mut self,
         params: Option<ListPromptsRequestParams>,
-    ) -> Result<Vec<Prompt>, ClientError> {
+    ) -> Result<Operation<Vec<Prompt>>, ClientError> {
         self.list_all_items::<ListPromptsResult, ListPromptsRequestParams>("prompts/list", params).await
     }
 
@@ -846,7 +846,10 @@ impl<T: ModelContextProtocolClient> Client<T> {
         self.list_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
-    pub async fn list_all_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<Vec<Tool>, ClientError> {
+    pub async fn list_all_tools(
+        &mut self,
+        params: Option<ListToolsRequestParams>,
+    ) -> Result<Operation<Vec<Tool>>, ClientError> {
         self.list_all_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
@@ -1164,33 +1167,52 @@ impl<T: ModelContextProtocolClient> Client<T> {
         Ok(Operation::new(request_id, future, transport_sender))
     }
 
-    async fn list_all_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Vec<R::Item>, ClientError>
+    async fn list_all_items<R, P>(
+        &mut self,
+        endpoint: &str,
+        params: Option<P>,
+    ) -> Result<Operation<Vec<R::Item>>, ClientError>
     where
         R: ListResult + DeserializeOwned + Send + 'static,
         P: ListRequestParams + Send + 'static,
     {
-        let mut all_items = Vec::new();
-        let mut next_cursor = None;
+        let endpoint = endpoint.to_string();
+        let client = self.client.clone();
+        let connections = self.connections.clone();
+        let params = params.clone();
 
-        loop {
-            let params_with_cursor = match params.clone() {
-                Some(p) => Some(p.with_cursor(next_cursor)),
-                None => Some(P::default().with_cursor(next_cursor)),
+        let future = async move {
+            let mut all_items = Vec::new();
+            let mut next_cursor = None;
+            let mut client_instance = Client {
+                client,
+                connections,
+                io_handler: MetaIoHandler::default(),
+                roots: Arc::new(RwLock::new(HashMap::new())),
+                pending_server_requests: Arc::new(Mutex::new(HashMap::new())),
             };
 
-            let operation = self.list_items::<R, P>(endpoint, params_with_cursor).await?;
-            let result =
-                operation.await.map_err(|e| ClientError::Request(format!("Operation failed: {}", e).into()))?;
+            loop {
+                let params_with_cursor = match params.clone() {
+                    Some(p) => Some(p.with_cursor(next_cursor)),
+                    None => Some(P::default().with_cursor(next_cursor)),
+                };
 
-            all_items.extend(result.get_items().to_vec());
+                let operation = client_instance.list_items::<R, P>(&endpoint, params_with_cursor).await?;
+                let result = operation.await?;
 
-            next_cursor = result.get_next_cursor().map(|s| s.to_string());
-            if next_cursor.is_none() {
-                break;
+                all_items.extend(result.get_items().to_vec());
+
+                next_cursor = result.get_next_cursor().map(|s| s.to_string());
+                if next_cursor.is_none() {
+                    break;
+                }
             }
-        }
 
-        Ok(all_items)
+            Ok(all_items)
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub fn iter_resources<'a>(
