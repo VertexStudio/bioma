@@ -147,23 +147,27 @@ impl Default for ServerConfig {
 #[derive(Parser)]
 pub struct Args {
     pub config: Option<PathBuf>,
+    #[clap(long)] // Optional parameter for whole json config
+    pub config_json: Option<String>,
     #[clap(long, default_value = "/rag/tools_hub")]
     pub tools_hub_id: String,
 }
 
 impl Args {
     pub fn load_config(&self) -> Result<ServerConfig> {
-        let config: ServerConfig = match &self.config {
-            Some(path) => {
-                let config = std::fs::read_to_string(path)?;
-                info!("Loaded config: {}", path.display());
-                serde_json::from_str::<ServerConfig>(&config)?
-            }
-            None => {
-                info!("Default config:");
-                ServerConfig::default()
-            }
+        let config: ServerConfig = if let Some(json_string) = &self.config_json {
+            info!("Loaded config from --config-json parameter");
+            serde_json::from_str::<ServerConfig>(json_string)?
+        } else if let Some(path) = &self.config {
+            info!("Loading config from --config parameter {}", path.display());
+            let config = std::fs::read_to_string(path)?;
+            info!("Loaded config from file: {}", path.display());
+            serde_json::from_str::<ServerConfig>(&config)?
+        } else {
+            info!("Using default config");
+            ServerConfig::default()
         };
+
         info!("├─ Engine Configuration:");
         info!("│  ├─ Endpoint: {}", config.engine.endpoint);
         info!("│  ├─ Namespace: {}", config.engine.namespace);
