@@ -1,11 +1,13 @@
-use crate::schema::CancelledNotificationParams;
+use crate::schema::{CancelledNotificationParams, ProgressNotificationParams};
 use crate::transport::TransportSender;
 use crate::{MessageId, RequestId};
 use anyhow::Error;
+use futures::stream::Stream;
 use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
@@ -18,10 +20,16 @@ pub struct Operation<T> {
     operation_type: OperationType,
     future: Pin<Box<dyn Future<Output = Result<T, Error>> + Send>>,
     cancel_token: CancellationToken,
+    progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
 }
 
 impl<T> Operation<T> {
-    pub fn new<F>(request_id: RequestId, future: F, transport_sender: TransportSender) -> Self
+    pub fn new<F>(
+        request_id: RequestId,
+        future: F,
+        transport_sender: TransportSender,
+        progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
+    ) -> Self
     where
         F: Future<Output = Result<T, Error>> + Send + 'static,
     {
@@ -42,6 +50,7 @@ impl<T> Operation<T> {
             operation_type: OperationType::Single(request_id, transport_sender),
             future: Box::pin(wrapped_future),
             cancel_token,
+            progress_rx,
         }
     }
 
@@ -62,7 +71,12 @@ impl<T> Operation<T> {
             }
         };
 
-        Self { operation_type: OperationType::Multiple, future: Box::pin(wrapped_future), cancel_token }
+        Self {
+            operation_type: OperationType::Multiple,
+            future: Box::pin(wrapped_future),
+            cancel_token,
+            progress_rx: None,
+        }
     }
 
     pub async fn cancel(&self, reason: Option<String>) -> Result<(), Error> {
@@ -98,6 +112,20 @@ impl<T> Operation<T> {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancel_token.is_cancelled()
+    }
+
+    pub fn recv(&mut self) -> impl Stream<Item = ProgressNotificationParams> {
+        let progress_rx = self.progress_rx.take();
+
+        futures::stream::unfold(progress_rx, |rx| async move {
+            match rx {
+                Some(receiver) => match receiver.await {
+                    Ok(notification) => Some((notification, None)),
+                    Err(_) => None,
+                },
+                None => None,
+            }
+        })
     }
 }
 

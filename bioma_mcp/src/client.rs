@@ -210,14 +210,6 @@ impl ServerConnection {
             pending.insert((conn_id.clone(), request_key.clone()), response_tx);
         }
 
-        if progress {
-            if let Some(token) = progress_token {
-                let (progress_tx, _progress_rx) = oneshot::channel();
-                let mut pending_progress = self.pending_progress_requests.lock().await;
-                pending_progress.insert(token.into(), progress_tx);
-            }
-        }
-
         if let Err(e) = self.transport_sender.send(request.into(), conn_id.clone()).await {
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&(conn_id, request_key));
@@ -238,6 +230,19 @@ impl ServerConnection {
         let request_id_clone = request_id.clone();
         let transport_sender = self.transport_sender.clone();
 
+        let progress_rx = if progress {
+            if let Some(token) = progress_token {
+                let (progress_tx, progress_rx) = oneshot::channel();
+                let mut pending_progress = self.pending_progress_requests.lock().await;
+                pending_progress.insert(token.into(), progress_tx);
+                Some(progress_rx)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let future = async move {
             match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(response) => match response {
@@ -256,7 +261,7 @@ impl ServerConnection {
             }
         };
 
-        Ok(Operation::new(request_id, future, transport_sender))
+        Ok(Operation::new(request_id, future, transport_sender, progress_rx))
     }
 
     async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
