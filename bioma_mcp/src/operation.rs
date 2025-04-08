@@ -109,6 +109,8 @@ impl<T: DeserializeOwned> Future for Operation<T> {
     }
 }
 
+// TODO: We're mostly using Multi type (in client.rs), which only kills the future, so the current operation.await within the future is not cancelled. Remember that we're performing sequential request operations within these futures, so it's not parallel.
+//
 // Originally planned to send cancellation notifications when operations are dropped.
 // However, not all operations need to send notifications when dropped - many might have
 // already completed successfully. This was primarily needed for list_all_items since it
