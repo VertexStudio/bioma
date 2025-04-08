@@ -734,29 +734,38 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
+        let connections = self.connections.clone();
         let client = self.client.clone();
+        let params_clone = params.clone();
 
-        for (server_name, connection) in &mut self.connections {
-            match connection
-                .request::<_, ReadResourceResult>(
-                    "resources/read".to_string(),
-                    serde_json::to_value(params.clone())?,
-                    false,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => {
-                    return Ok(operation);
-                }
-                Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+        let future = async move {
+            let mut errors = Vec::new();
+
+            for (server_name, mut connection) in connections {
+                match connection
+                    .request::<_, ReadResourceResult>(
+                        "resources/read".to_string(),
+                        serde_json::to_value(params_clone.clone())?,
+                        client.clone(),
+                    )
+                    .await
+                {
+                    Ok(operation) => match operation.await {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
                 }
             }
-        }
 
-        Err(ClientError::Request(format!("Unable to read resource from any server: {}", errors.join(", ")).into()))
+            Err(anyhow::anyhow!("Unable to read resource from any server: {}", errors.join(", ")))
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub async fn list_resource_templates(
@@ -786,44 +795,35 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        let connections = self.connections.clone();
         let client = self.client.clone();
-        let params = serde_json::json!({ "uri": uri.clone() });
+        let uri_clone = uri.clone();
+        let params = serde_json::json!({ "uri": uri });
 
-        for (server_name, connection) in &mut self.connections {
-            match connection
-                .request::<_, serde_json::Value>(
-                    "resources/subscribe".to_string(),
-                    params.clone(),
-                    false,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => {
-                    let request_id = {
-                        let mut counter = connection.request_counter.write().await;
-                        *counter += 1;
-                        let id = *counter;
-                        let message_id = MessageId::Num(id);
-                        (connection.conn_id.clone(), message_id)
-                    };
+        let future = async move {
+            let mut errors = Vec::new();
 
-                    let operation_clone = operation;
-                    let transport_sender = connection.transport_sender.clone();
-                    let future = async move {
-                        operation_clone.await?;
-                        Ok(())
-                    };
-
-                    return Ok(Operation::new(request_id, future, transport_sender));
-                }
-                Err(e) => {
-                    warn!("Error from '{}': {:?}", server_name, e);
+            for (server_name, mut connection) in connections {
+                match connection
+                    .request::<_, serde_json::Value>("resources/subscribe".to_string(), params.clone(), client.clone())
+                    .await
+                {
+                    Ok(operation) => match operation.await {
+                        Ok(_) => return Ok(()),
+                        Err(e) => {
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
                 }
             }
-        }
 
-        Err(ClientError::Request("Unable to subscribe resource on any server".into()))
+            Err(anyhow::anyhow!("Unable to subscribe resource {} on any server: {}", uri_clone, errors.join(", ")))
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<Operation<()>, ClientError> {
@@ -831,44 +831,39 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        let connections = self.connections.clone();
         let client = self.client.clone();
-        let params = serde_json::json!({ "uri": uri.clone() });
+        let uri_clone = uri.clone();
+        let params = serde_json::json!({ "uri": uri });
 
-        for (server_name, connection) in &mut self.connections {
-            match connection
-                .request::<_, serde_json::Value>(
-                    "resources/unsubscribe".to_string(),
-                    params.clone(),
-                    false,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => {
-                    let request_id = {
-                        let mut counter = connection.request_counter.write().await;
-                        *counter += 1;
-                        let id = *counter;
-                        let message_id = MessageId::Num(id);
-                        (connection.conn_id.clone(), message_id)
-                    };
+        let future = async move {
+            let mut errors = Vec::new();
 
-                    let operation_clone = operation;
-                    let transport_sender = connection.transport_sender.clone();
-                    let future = async move {
-                        operation_clone.await?;
-                        Ok(())
-                    };
-
-                    return Ok(Operation::new(request_id, future, transport_sender));
-                }
-                Err(e) => {
-                    warn!("Error from '{}': {:?}", server_name, e);
+            for (server_name, mut connection) in connections {
+                match connection
+                    .request::<_, serde_json::Value>(
+                        "resources/unsubscribe".to_string(),
+                        params.clone(),
+                        client.clone(),
+                    )
+                    .await
+                {
+                    Ok(operation) => match operation.await {
+                        Ok(_) => return Ok(()),
+                        Err(e) => {
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
                 }
             }
-        }
 
-        Err(ClientError::Request("Unable to unsubscribe resource on any server".into()))
+            Err(anyhow::anyhow!("Unable to unsubscribe resource {} on any server: {}", uri_clone, errors.join(", ")))
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub async fn list_prompts(
@@ -893,26 +888,38 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        let connections = self.connections.clone();
         let client = self.client.clone();
+        let params_clone = params.clone();
 
-        for (server_name, connection) in &mut self.connections {
-            match connection
-                .request::<_, GetPromptResult>(
-                    "prompts/get".to_string(),
-                    serde_json::to_value(params.clone())?,
-                    false,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => return Ok(operation),
-                Err(e) => {
-                    warn!("Error from '{}': {:?}", server_name, e);
+        let future = async move {
+            let mut errors = Vec::new();
+
+            for (server_name, mut connection) in connections {
+                match connection
+                    .request::<_, GetPromptResult>(
+                        "prompts/get".to_string(),
+                        serde_json::to_value(params_clone.clone())?,
+                        client.clone(),
+                    )
+                    .await
+                {
+                    Ok(operation) => match operation.await {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
                 }
             }
-        }
 
-        Err(ClientError::Request("Unable to get prompt from any server".into()))
+            Err(anyhow::anyhow!("Unable to get prompt from any server: {}", errors.join(", ")))
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub async fn list_tools(
@@ -934,26 +941,38 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        let connections = self.connections.clone();
         let client = self.client.clone();
+        let params_clone = params.clone();
 
-        for (server_name, connection) in &mut self.connections {
-            match connection
-                .request::<_, CallToolResult>(
-                    "tools/call".to_string(),
-                    serde_json::to_value(params.clone())?,
-                    true,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => return Ok(operation),
-                Err(e) => {
-                    warn!("Error from '{}': {:?}", server_name, e);
+        let future = async move {
+            let mut errors = Vec::new();
+
+            for (server_name, mut connection) in connections {
+                match connection
+                    .request::<_, CallToolResult>(
+                        "tools/call".to_string(),
+                        serde_json::to_value(params_clone.clone())?,
+                        client.clone(),
+                    )
+                    .await
+                {
+                    Ok(operation) => match operation.await {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
                 }
             }
-        }
 
-        Err(ClientError::Request("Unable to call tool on any server".into()))
+            Err(anyhow::anyhow!("Unable to call tool on any server: {}", errors.join(", ")))
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     async fn complete(&mut self, params: CompleteRequestParams) -> Result<Operation<CompleteResult>, ClientError> {
@@ -961,55 +980,56 @@ impl<T: ModelContextProtocolClient> Client<T> {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        let connections = self.connections.clone();
         let client = self.client.clone();
+        let params_clone = params.clone();
 
-        for (server_name, connection) in &mut self.connections {
-            let supports_completions = {
-                let server_caps = connection.server_capabilities.read().await;
-                server_caps.as_ref().and_then(|caps| caps.completions.as_ref()).is_some()
-            };
+        let future = async move {
+            let mut errors = Vec::new();
+            let mut no_support_count = 0;
 
-            if !supports_completions {
-                continue;
-            }
+            for (server_name, mut connection) in connections {
+                let supports_completions = {
+                    let server_caps = connection.server_capabilities.read().await;
+                    server_caps.as_ref().and_then(|caps| caps.completions.as_ref()).is_some()
+                };
 
-            match connection
-                .request::<_, CompleteResult>(
-                    "completion/complete".to_string(),
-                    serde_json::to_value(params.clone())?,
-                    false,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => return Ok(operation),
-                Err(e) => {
-                    warn!("Error from '{}': {:?}", server_name, e);
+                if !supports_completions {
+                    no_support_count += 1;
+                    continue;
+                }
+
+                match connection
+                    .request::<_, CompleteResult>(
+                        "completion/complete".to_string(),
+                        serde_json::to_value(params_clone.clone())?,
+                        client.clone(),
+                    )
+                    .await
+                {
+                    Ok(operation) => match operation.await {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
+                        }
+                    },
+                    Err(e) => {
+                        errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    }
                 }
             }
-        }
 
-        if let Some(connection) = self.connections.values_mut().next() {
-            let request_id = {
-                let mut counter = connection.request_counter.write().await;
-                *counter += 1;
-                let id = *counter;
-                let message_id = MessageId::Num(id);
-                (connection.conn_id.clone(), message_id)
-            };
-
-            let transport_sender = connection.transport_sender.clone();
-            let future = async {
-                Ok(CompleteResult {
+            if errors.is_empty() && no_support_count > 0 {
+                return Ok(CompleteResult {
                     meta: None,
                     completion: CompleteResultCompletion { values: vec![], total: None, has_more: None },
-                })
-            };
+                });
+            }
 
-            Ok(Operation::new(request_id, future, transport_sender))
-        } else {
-            Err(ClientError::Request("No server connections available".into()))
-        }
+            Err(anyhow::anyhow!("Unable to complete on any server: {}", errors.join(", ")))
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub async fn complete_prompt(
@@ -1158,31 +1178,10 @@ impl<T: ModelContextProtocolClient> Client<T> {
             self.connections.keys().map(|k| (k.clone(), None)).collect()
         };
 
-        let request_id = {
-            let first_connection = self
-                .connections
-                .values_mut()
-                .next()
-                .ok_or_else(|| ClientError::Request("No connections available".into()))?;
-            let mut counter = first_connection.request_counter.write().await;
-            *counter += 1;
-            let id = *counter;
-            let message_id = MessageId::Num(id);
-            (first_connection.conn_id.clone(), message_id)
-        };
-
         let client_clone = self.client.clone();
         let connections = self.connections.clone();
         let endpoint = endpoint.to_string();
         let params = params.clone();
-
-        let transport_sender = self
-            .connections
-            .values()
-            .next()
-            .ok_or_else(|| ClientError::Request("No connections available".into()))?
-            .transport_sender
-            .clone();
 
         let future = async move {
             let mut all_items = Vec::new();
@@ -1246,7 +1245,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Ok(R::with_items_and_cursor(all_items, next_cursor, None))
         };
 
-        Ok(Operation::new(request_id, future, transport_sender))
+        Ok(Operation::new_multiple(future))
     }
 
     async fn list_all_items<R, P>(
@@ -1325,60 +1324,64 @@ impl<T: ModelContextProtocolClient> Client<T> {
         ItemsIterator::new(self, "resources/templates/list".to_string(), params)
     }
 
-    pub async fn set_log_level(&mut self, level: LoggingLevel) -> Result<(usize, Vec<String>), ClientError> {
+    pub async fn set_log_level(&mut self, level: LoggingLevel) -> Result<Operation<(usize, Vec<String>)>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut success_count = 0;
-        let mut errors = Vec::new();
+        let connections = self.connections.clone();
+        let client = self.client.clone();
+        let level_clone = level.clone();
+        let server_names = self.connections.keys().cloned().collect::<Vec<_>>();
 
-        for server_name in self.connections.keys().cloned().collect::<Vec<_>>() {
-            let connection = self
-                .connections
-                .get_mut(&server_name)
-                .ok_or_else(|| ClientError::Request(format!("Server '{}' not found", server_name).into()))?;
+        let future = async move {
+            let mut success_count = 0;
+            let mut errors = Vec::new();
 
-            let supports_logging = {
-                let server_caps = connection.server_capabilities.read().await;
-                server_caps.as_ref().and_then(|caps| caps.logging.as_ref()).is_some()
-            };
+            for server_name in server_names {
+                if let Some(mut connection) = connections.get(&server_name).cloned() {
+                    let supports_logging = {
+                        let server_caps = connection.server_capabilities.read().await;
+                        server_caps.as_ref().and_then(|caps| caps.logging.as_ref()).is_some()
+                    };
 
-            if !supports_logging {
-                errors.push(format!("Server '{}' does not support logging", server_name));
-                continue;
+                    if !supports_logging {
+                        errors.push(format!("Server '{}' does not support logging", server_name));
+                        continue;
+                    }
+
+                    let params = crate::schema::SetLevelRequestParams { level: level_clone.clone() };
+
+                    match connection
+                        .request::<_, serde_json::Value>(
+                            "logging/setLevel".to_string(),
+                            serde_json::to_value(params)?,
+                            client.clone(),
+                        )
+                        .await
+                    {
+                        Ok(operation) => match operation.await {
+                            Ok(_) => {
+                                info!("Set log level for server '{}' to {:?}", server_name, level_clone);
+                                success_count += 1;
+                            }
+                            Err(e) => {
+                                errors.push(format!("Failed to set log level on '{}': {:?}", server_name, e));
+                            }
+                        },
+                        Err(e) => errors.push(format!("Failed to set log level for '{}': {}", server_name, e)),
+                    }
+                }
             }
 
-            let params = crate::schema::SetLevelRequestParams { level: level.clone() };
-
-            let client = self.client.clone();
-            match connection
-                .request::<_, serde_json::Value>(
-                    "logging/setLevel".to_string(),
-                    serde_json::to_value(params)?,
-                    false,
-                    client.clone(),
-                )
-                .await
-            {
-                Ok(operation) => match operation.await {
-                    Ok(_) => {
-                        info!("Set log level for server '{}' to {:?}", server_name, level);
-                        success_count += 1;
-                    }
-                    Err(e) => {
-                        errors.push(format!("Failed to set log level on '{}': {:?}", server_name, e));
-                    }
-                },
-                Err(e) => errors.push(format!("Failed to set log level for '{}': {}", server_name, e)),
+            if success_count > 0 {
+                Ok((success_count, errors))
+            } else {
+                Err(anyhow::anyhow!("Failed to set log level on any server: {}", errors.join(", ")))
             }
-        }
+        };
 
-        if success_count > 0 {
-            Ok((success_count, errors))
-        } else {
-            Err(ClientError::Request(format!("Failed to set log level on any server: {}", errors.join(", ")).into()))
-        }
+        Ok(Operation::new_multiple(future))
     }
 
     pub async fn cancel(&mut self, request_id: RequestId, reason: Option<String>) -> Result<(), ClientError> {
@@ -1404,7 +1407,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             ));
         }
 
-        if Self::is_initialize_request(&message_id).await {
+        if Self::is_initialize_request(&message_id) {
             return Err(ClientError::Request(format!("Cannot cancel initialize request (ID: {})", message_id).into()));
         }
 
@@ -1430,7 +1433,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    async fn is_initialize_request(message_id: &MessageId) -> bool {
+    fn is_initialize_request(message_id: &MessageId) -> bool {
         match message_id {
             MessageId::Num(n) => *n == 1,
             _ => false,
