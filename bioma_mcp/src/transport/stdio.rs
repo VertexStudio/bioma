@@ -87,6 +87,7 @@ impl StdioTransport {
             .args(&config.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
+            .envs(config.env.iter())
             .spawn()
             .context("Failed to start MCP server process")?;
 
