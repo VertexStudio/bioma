@@ -1,4 +1,5 @@
 use derive_more::Deref;
+use schema::JsonrpcrequestParams;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -60,6 +61,14 @@ impl std::fmt::Display for MessageId {
 }
 
 pub type RequestId = (ConnectionId, MessageId);
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Params {
+    #[serde(flatten)]
+    params: serde_json::Value,
+    #[serde(flatten)]
+    rpc_params: Option<JsonrpcrequestParams>,
+}
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

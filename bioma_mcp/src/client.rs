@@ -5,9 +5,9 @@ use crate::schema::{
     CreateMessageResult, GetPromptRequestParams, GetPromptResult, Implementation, InitializeRequestParams,
     InitializeResult, InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult,
     ListResourceTemplatesRequestParams, ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult,
-    ListToolsRequestParams, ListToolsResult, LoggingLevel, LoggingMessageNotificationParams, Prompt, PromptReference,
-    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceReference, ResourceTemplate, Root,
-    RootsListChangedNotificationParams, ServerCapabilities, Tool,
+    ListToolsRequestParams, ListToolsResult, LoggingLevel, LoggingMessageNotificationParams,
+    ProgressNotificationParams, ProgressToken, Prompt, PromptReference, ReadResourceRequestParams, ReadResourceResult,
+    Resource, ResourceReference, ResourceTemplate, Root, RootsListChangedNotificationParams, ServerCapabilities, Tool,
 };
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
@@ -27,6 +27,7 @@ use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tracing::{debug, error, info, warn};
+use uuid;
 
 #[derive(Clone)]
 pub struct ClientMetadata {
@@ -139,6 +140,8 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
 }
 
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
+type ProgressSender = oneshot::Sender<ProgressNotificationParams>;
+type PendingProgressRequests = Arc<Mutex<HashMap<ProgressToken, ProgressSender>>>;
 type PendingClientRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 type PendingServerRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
@@ -149,6 +152,7 @@ struct ServerConnection {
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     conn_id: ConnectionId,
     pending_requests: PendingClientRequests,
+    pending_progress_requests: PendingProgressRequests,
     request_counter: Arc<RwLock<u64>>,
 }
 
@@ -157,6 +161,7 @@ impl ServerConnection {
         &mut self,
         method: String,
         params: serde_json::Value,
+        progress: bool,
         client: Arc<RwLock<T>>,
     ) -> Result<Operation<R>, ClientError> {
         let mut counter = self.request_counter.write().await;
@@ -169,10 +174,28 @@ impl ServerConnection {
             Err(e) => return Err(ClientError::Request(format!("Invalid request ID: {}", e).into())),
         };
 
+        let mut params_value = params;
+        let mut progress_token = None;
+
+        if progress {
+            let token_value = uuid::Uuid::new_v4().to_string();
+            progress_token = Some(token_value.clone());
+
+            let meta = crate::schema::JsonrpcrequestParamsMeta { progress_token: Some(token_value.into()) };
+
+            let rpc_params = crate::schema::JsonrpcrequestParams { meta: Some(meta) };
+
+            let modified_params = crate::Params { params: params_value, rpc_params: Some(rpc_params) };
+
+            params_value = serde_json::to_value(modified_params).map_err(|e| {
+                ClientError::Request(format!("Failed to serialize params with progress token: {}", e).into())
+            })?;
+        }
+
         let request = jsonrpc_core::MethodCall {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
-            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+            params: Params::Map(params_value.as_object().cloned().unwrap_or_default()),
             id,
         };
 
@@ -183,6 +206,14 @@ impl ServerConnection {
         {
             let mut pending = self.pending_requests.lock().await;
             pending.insert((conn_id.clone(), request_key.clone()), response_tx);
+        }
+
+        if progress {
+            if let Some(token) = progress_token {
+                let (progress_tx, _progress_rx) = oneshot::channel();
+                let mut pending_progress = self.pending_progress_requests.lock().await;
+                pending_progress.insert(token.into(), progress_tx);
+            }
         }
 
         if let Err(e) = self.transport_sender.send(request.into(), conn_id.clone()).await {
@@ -316,6 +347,27 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     }
                     Err(e) => {
                         error!("Failed to parse notifications/message parameters: {}", e);
+                    }
+                }
+            });
+        });
+
+        io_handler.add_notification_with_meta("notifications/progress", move |params: Params, meta: ClientMetadata| {
+            tokio::spawn(async move {
+                match params.parse::<ProgressNotificationParams>() {
+                    Ok(params) => {
+                        let total_info =
+                            params.total.map_or_else(|| String::from("unknown"), |total| format!("{}", total));
+                        info!(
+                            "[{}] Progress: {}/{} - {}",
+                            meta.conn_id,
+                            params.progress,
+                            total_info,
+                            params.message.unwrap_or_else(|| String::from(""))
+                        );
+                    }
+                    Err(e) => {
+                        error!("Failed to parse notifications/progress parameters: {}", e);
                     }
                 }
             });
@@ -560,6 +612,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
             pending_requests,
+            pending_progress_requests: PendingProgressRequests::default(),
             conn_id,
         };
 
@@ -592,7 +645,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
             };
 
             match connection
-                .request::<_, InitializeResult>("initialize".to_string(), serde_json::to_value(params)?, client.clone())
+                .request::<_, InitializeResult>(
+                    "initialize".to_string(),
+                    serde_json::to_value(params)?,
+                    false,
+                    client.clone(),
+                )
                 .await
             {
                 Ok(operation) => match operation.await {
@@ -677,6 +735,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .request::<_, ReadResourceResult>(
                     "resources/read".to_string(),
                     serde_json::to_value(params.clone())?,
+                    false,
                     client.clone(),
                 )
                 .await
@@ -725,7 +784,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             match connection
-                .request::<_, serde_json::Value>("resources/subscribe".to_string(), params.clone(), client.clone())
+                .request::<_, serde_json::Value>(
+                    "resources/subscribe".to_string(),
+                    params.clone(),
+                    false,
+                    client.clone(),
+                )
                 .await
             {
                 Ok(operation) => {
@@ -765,7 +829,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         for (server_name, connection) in &mut self.connections {
             match connection
-                .request::<_, serde_json::Value>("resources/unsubscribe".to_string(), params.clone(), client.clone())
+                .request::<_, serde_json::Value>(
+                    "resources/unsubscribe".to_string(),
+                    params.clone(),
+                    false,
+                    client.clone(),
+                )
                 .await
             {
                 Ok(operation) => {
@@ -824,6 +893,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .request::<_, GetPromptResult>(
                     "prompts/get".to_string(),
                     serde_json::to_value(params.clone())?,
+                    false,
                     client.clone(),
                 )
                 .await
@@ -864,6 +934,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .request::<_, CallToolResult>(
                     "tools/call".to_string(),
                     serde_json::to_value(params.clone())?,
+                    true,
                     client.clone(),
                 )
                 .await
@@ -899,6 +970,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .request::<_, CompleteResult>(
                     "completion/complete".to_string(),
                     serde_json::to_value(params.clone())?,
+                    false,
                     client.clone(),
                 )
                 .await
@@ -1119,7 +1191,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     };
 
                     match connection
-                        .request::<_, R>(endpoint.clone(), serde_json::to_value(req_params)?, client_clone.clone())
+                        .request::<_, R>(
+                            endpoint.clone(),
+                            serde_json::to_value(req_params)?,
+                            false,
+                            client_clone.clone(),
+                        )
                         .await
                     {
                         Ok(operation) => match operation.await {
@@ -1269,7 +1346,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
             let client = self.client.clone();
             match connection
-                .request::<_, serde_json::Value>("logging/setLevel".to_string(), serde_json::to_value(params)?, client)
+                .request::<_, serde_json::Value>(
+                    "logging/setLevel".to_string(),
+                    serde_json::to_value(params)?,
+                    false,
+                    client.clone(),
+                )
                 .await
             {
                 Ok(operation) => match operation.await {
