@@ -109,6 +109,12 @@ impl<T: DeserializeOwned> Future for Operation<T> {
     }
 }
 
+// Originally planned to send cancellation notifications when operations are dropped.
+// However, not all operations need to send notifications when dropped - many might have
+// already completed successfully. This was primarily needed for list_all_items since it
+// contains operations within its future. The current design is that cancel() on Multiple
+// type just cancels the future without sending notifications for operations being polled
+// within the future.
 // impl<T> Drop for Operation<T> {
 //     fn drop(&mut self) {
 //         self.cancel_token.cancel();

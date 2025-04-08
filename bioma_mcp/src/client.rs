@@ -729,7 +729,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .await
             {
                 Ok(operation) => {
-                    // Create a new operation with unit return type
                     let request_id = {
                         let mut counter = connection.request_counter.write().await;
                         *counter += 1;
@@ -770,7 +769,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .await
             {
                 Ok(operation) => {
-                    // Create a new operation with unit return type
                     let request_id = {
                         let mut counter = connection.request_counter.write().await;
                         *counter += 1;
@@ -913,7 +911,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         if let Some(connection) = self.connections.values_mut().next() {
-            // Return empty completion operation if no server supports completions
             let request_id = {
                 let mut counter = connection.request_counter.write().await;
                 *counter += 1;
