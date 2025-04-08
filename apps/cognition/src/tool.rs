@@ -262,6 +262,8 @@ pub enum ModelContextProtocolClientError {
     ClientNotInitialized,
     #[error("Client error: {0}")]
     Client(#[from] ClientError),
+    #[error("Error: {0}")]
+    Custom(#[from] anyhow::Error),
 }
 
 impl ActorError for ModelContextProtocolClientError {}
@@ -360,7 +362,7 @@ impl Message<ListTools> for ModelContextProtocolClientActor {
     ) -> Result<(), ModelContextProtocolClientError> {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
-        let response = client.list_tools(message.0.clone()).await?;
+        let response = client.list_tools(message.0.clone()).await?.await?;
         self.tools = Some(response.clone());
         self.save(ctx).await?;
         ctx.reply(response).await?;
@@ -381,7 +383,7 @@ impl Message<CallTool> for ModelContextProtocolClientActor {
     ) -> Result<(), ModelContextProtocolClientError> {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
-        let response = client.call_tool(message.0.clone()).await?;
+        let response = client.call_tool(message.0.clone()).await?.await?;
         ctx.reply(response).await?;
         Ok(())
     }

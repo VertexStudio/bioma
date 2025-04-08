@@ -1,3 +1,4 @@
+use crate::operation::Operation;
 use crate::schema::{
     CallToolRequestParams, CallToolResult, CancelledNotificationParams, ClientCapabilities, CompleteRequestParams,
     CompleteRequestParamsArgument, CompleteResult, CompleteResultCompletion, CreateMessageRequestParams,
@@ -11,10 +12,11 @@ use crate::schema::{
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, RequestId};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
 use anyhow::Error;
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
@@ -23,7 +25,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tokio::task::{AbortHandle, JoinHandle};
+use tokio::task::AbortHandle;
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
@@ -137,25 +139,110 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
 }
 
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
-type PendingClientRequests = Arc<Mutex<HashMap<(ConnectionId, RequestId), ResponseSender>>>;
-type PendingServerRequests = Arc<Mutex<HashMap<(ConnectionId, RequestId), AbortHandle>>>;
+type PendingClientRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+type PendingServerRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
+#[derive(Clone)]
 struct ServerConnection {
     transport: TransportType,
     transport_sender: TransportSender,
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
-    request_counter: Arc<RwLock<u64>>,
-    start_handle: JoinHandle<Result<(), Error>>,
-    #[allow(unused)]
-    message_handler: JoinHandle<()>,
-    pending_requests: PendingClientRequests,
-    #[allow(unused)]
-    on_error_rx: mpsc::Receiver<Error>,
-    #[allow(unused)]
-    on_close_rx: mpsc::Receiver<()>,
     conn_id: ConnectionId,
+    pending_requests: PendingClientRequests,
+    request_counter: Arc<RwLock<u64>>,
 }
 
+impl ServerConnection {
+    async fn request<T: ModelContextProtocolClient, R: DeserializeOwned>(
+        &mut self,
+        method: String,
+        params: serde_json::Value,
+        client: Arc<RwLock<T>>,
+    ) -> Result<Operation<R>, ClientError> {
+        let mut counter = self.request_counter.write().await;
+        *counter += 1;
+        let id = *counter;
+
+        let id = jsonrpc_core::Id::Num(id);
+        let request_key = match MessageId::try_from(&id) {
+            Ok(key) => key,
+            Err(e) => return Err(ClientError::Request(format!("Invalid request ID: {}", e).into())),
+        };
+
+        let request = jsonrpc_core::MethodCall {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method,
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+            id,
+        };
+
+        let (response_tx, response_rx) = oneshot::channel();
+        let conn_id = self.conn_id.clone();
+        let request_id = (conn_id.clone(), request_key.clone());
+
+        {
+            let mut pending = self.pending_requests.lock().await;
+            pending.insert((conn_id.clone(), request_key.clone()), response_tx);
+        }
+
+        if let Err(e) = self.transport_sender.send(request.into(), conn_id.clone()).await {
+            let mut pending = self.pending_requests.lock().await;
+            pending.remove(&(conn_id, request_key));
+            return Err(ClientError::Transport(format!("Send: {}", e).into()));
+        }
+
+        let timeout = client
+            .read()
+            .await
+            .get_server_configs()
+            .await
+            .iter()
+            .find(|cfg| self.conn_id.contains(&cfg.name))
+            .map(|cfg| cfg.request_timeout)
+            .unwrap_or(5);
+
+        let pending_requests = self.pending_requests.clone();
+        let request_id_clone = request_id.clone();
+        let transport_sender = self.transport_sender.clone();
+
+        let future = async move {
+            match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
+                Ok(response) => match response {
+                    Ok(result) => match result {
+                        Ok(json_value) => serde_json::from_value::<R>(json_value)
+                            .map_err(|e| anyhow::anyhow!("Failed to deserialize response: {}", e)),
+                        Err(e) => Err(anyhow::anyhow!("RPC error: {}", e)),
+                    },
+                    Err(e) => Err(anyhow::anyhow!("Response channel closed: {}", e)),
+                },
+                Err(_) => {
+                    let mut pending = pending_requests.lock().await;
+                    pending.remove(&request_id_clone);
+                    Err(anyhow::anyhow!("Request timed out"))
+                }
+            }
+        };
+
+        Ok(Operation::new(request_id, future, transport_sender))
+    }
+
+    async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
+        let notification = jsonrpc_core::Notification {
+            jsonrpc: Some(jsonrpc_core::Version::V2),
+            method,
+            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+        };
+
+        let conn_id = self.conn_id.clone();
+
+        self.transport_sender
+            .send(notification.into(), conn_id)
+            .await
+            .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
+    }
+}
+
+#[derive(Clone)]
 pub struct Client<T: ModelContextProtocolClient> {
     client: Arc<RwLock<T>>,
     connections: HashMap<String, ServerConnection>,
@@ -234,7 +321,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             });
         });
 
-        let pending_server_requests: Arc<Mutex<HashMap<(ConnectionId, RequestId), AbortHandle>>> =
+        let pending_server_requests: Arc<Mutex<HashMap<(ConnectionId, MessageId), AbortHandle>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let pending_server_requests_clone = pending_server_requests.clone();
 
@@ -258,7 +345,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                                 _ => jsonrpc_core::Id::Null,
                             };
 
-                            match RequestId::try_from(&id) {
+                            match MessageId::try_from(&id) {
                                 Ok(request_key) => {
                                     info!(
                                         "Server requested cancellation of request {}: {}",
@@ -314,8 +401,8 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
     pub async fn add_server(&mut self, name: String, server_config: ServerConfig) -> Result<(), ClientError> {
         let (on_message_tx, mut on_message_rx) = mpsc::channel::<JsonRpcMessage>(1);
-        let (on_error_tx, on_error_rx) = mpsc::channel::<Error>(1);
-        let (on_close_tx, on_close_rx) = mpsc::channel::<()>(1);
+        let (on_error_tx, _on_error_rx) = mpsc::channel::<Error>(1);
+        let (on_close_tx, _on_close_rx) = mpsc::channel::<()>(1);
 
         let mut transport = match &server_config.transport {
             TransportConfig::Stdio(config) => {
@@ -350,14 +437,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
         let transport_sender_clone = transport_sender.clone();
         let io_handler_clone = self.io_handler.clone();
-        let start_handle =
+        let _start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
 
-        let pending_requests = Arc::new(Mutex::new(HashMap::<(ConnectionId, RequestId), ResponseSender>::new()));
+        let pending_requests = Arc::new(Mutex::new(HashMap::<(ConnectionId, MessageId), ResponseSender>::new()));
         let pending_requests_clone = pending_requests.clone();
         let pending_server_requests_clone = self.pending_server_requests.clone();
 
-        let message_handler = tokio::spawn({
+        let _message_handler = tokio::spawn({
             let pending_requests = pending_requests_clone;
             let io_handler_clone = io_handler_clone;
             let transport_sender_clone = transport_sender_clone;
@@ -372,7 +459,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                                 jsonrpc_core::Output::Success(success) => {
                                     if let jsonrpc_core::Id::Num(_) = success.id {
                                         let mut requests = pending_requests.lock().await;
-                                        if let Ok(key) = RequestId::try_from(&success.id) {
+                                        if let Ok(key) = MessageId::try_from(&success.id) {
                                             let conn_id_for_key = conn_id_clone.clone();
                                             if let Some(sender) = requests.remove(&(conn_id_for_key, key)) {
                                                 let _ = sender.send(Ok(success.result.clone()));
@@ -383,7 +470,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                                 jsonrpc_core::Output::Failure(failure) => {
                                     if let jsonrpc_core::Id::Num(_) = failure.id {
                                         let mut requests = pending_requests.lock().await;
-                                        if let Ok(key) = RequestId::try_from(&failure.id) {
+                                        if let Ok(key) = MessageId::try_from(&failure.id) {
                                             let conn_id_for_key = conn_id_clone.clone();
                                             if let Some(sender) = requests.remove(&(conn_id_for_key, key)) {
                                                 let _ = sender.send(Err(ClientError::Request(
@@ -400,7 +487,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                         },
                         JsonRpcMessage::Request(request) => match request {
                             jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(call)) => {
-                                match RequestId::try_from(&call.id) {
+                                match MessageId::try_from(&call.id) {
                                     Ok(request_key) => {
                                         let request_clone = request.clone();
                                         let io_handler_clone_inner = io_handler_clone.clone();
@@ -472,11 +559,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             transport_sender,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
-            start_handle,
-            message_handler,
             pending_requests,
-            on_error_rx,
-            on_close_rx,
             conn_id,
         };
 
@@ -486,86 +569,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
     fn list_servers(&self) -> Vec<String> {
         self.connections.keys().cloned().collect()
-    }
-
-    async fn request(
-        connection: &mut ServerConnection,
-        method: String,
-        params: serde_json::Value,
-        client: Arc<RwLock<T>>,
-    ) -> Result<serde_json::Value, ClientError> {
-        let mut counter = connection.request_counter.write().await;
-        *counter += 1;
-        let id = *counter;
-
-        let id = jsonrpc_core::Id::Num(id);
-        let request_key = match RequestId::try_from(&id) {
-            Ok(key) => key,
-            Err(e) => return Err(ClientError::Request(format!("Invalid request ID: {}", e).into())),
-        };
-
-        let request = jsonrpc_core::MethodCall {
-            jsonrpc: Some(jsonrpc_core::Version::V2),
-            method,
-            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
-            id,
-        };
-
-        let (response_tx, response_rx) = oneshot::channel();
-        let conn_id = connection.conn_id.clone();
-
-        {
-            let mut pending = connection.pending_requests.lock().await;
-            pending.insert((conn_id.clone(), request_key.clone()), response_tx);
-        }
-
-        if let Err(e) = connection.transport_sender.send(request.into(), conn_id.clone()).await {
-            let mut pending = connection.pending_requests.lock().await;
-            pending.remove(&(conn_id, request_key));
-            return Err(ClientError::Transport(format!("Send: {}", e).into()));
-        }
-
-        let timeout = client
-            .read()
-            .await
-            .get_server_configs()
-            .await
-            .iter()
-            .find(|cfg| connection.conn_id.contains(&cfg.name))
-            .map(|cfg| cfg.request_timeout)
-            .unwrap_or(5);
-
-        match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
-            Ok(response) => match response {
-                Ok(result) => result,
-                Err(_) => Err(ClientError::Request("Response channel closed".into())),
-            },
-            Err(_) => {
-                let mut pending = connection.pending_requests.lock().await;
-                pending.remove(&(conn_id, request_key));
-                Err(ClientError::Request("Request timed out".into()))
-            }
-        }
-    }
-
-    async fn notify(
-        connection: &mut ServerConnection,
-        method: String,
-        params: serde_json::Value,
-    ) -> Result<(), ClientError> {
-        let notification = jsonrpc_core::Notification {
-            jsonrpc: Some(jsonrpc_core::Version::V2),
-            method,
-            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
-        };
-
-        let conn_id = connection.conn_id.clone();
-
-        connection
-            .transport_sender
-            .send(notification.into(), conn_id)
-            .await
-            .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
     }
 
     pub async fn initialize(
@@ -588,10 +591,11 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 client_info: client_info.clone(),
             };
 
-            match Self::request(connection, "initialize".to_string(), serde_json::to_value(params)?, client.clone())
+            match connection
+                .request::<_, InitializeResult>("initialize".to_string(), serde_json::to_value(params)?, client.clone())
                 .await
             {
-                Ok(response) => match serde_json::from_value::<InitializeResult>(response) {
+                Ok(operation) => match operation.await {
                     Ok(result) => {
                         {
                             let mut server_capabilities = connection.server_capabilities.write().await;
@@ -604,7 +608,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     }
                 },
                 Err(e) => {
-                    errors.push(format!("Failed to initialize '{}': {:?}", server_name, e));
+                    errors.push(format!("Failed to create initialize request for '{}': {:?}", server_name, e));
                 }
             }
         }
@@ -630,7 +634,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         for (server_name, connection) in &mut self.connections {
             let params = InitializedNotificationParams { meta: None };
             if let Err(e) =
-                Self::notify(connection, "notifications/initialized".to_string(), serde_json::to_value(params)?).await
+                connection.notify("notifications/initialized".to_string(), serde_json::to_value(params)?).await
             {
                 errors.push(format!("Failed to send initialized notification to '{}': {:?}", server_name, e));
             }
@@ -646,21 +650,21 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn list_resources(
         &mut self,
         params: Option<ListResourcesRequestParams>,
-    ) -> Result<ListResourcesResult, ClientError> {
+    ) -> Result<Operation<ListResourcesResult>, ClientError> {
         self.list_items::<ListResourcesResult, ListResourcesRequestParams>("resources/list", params).await
     }
 
     pub async fn list_all_resources(
         &mut self,
         params: Option<ListResourcesRequestParams>,
-    ) -> Result<Vec<Resource>, ClientError> {
+    ) -> Result<Operation<Vec<Resource>>, ClientError> {
         self.list_all_items::<ListResourcesResult, ListResourcesRequestParams>("resources/list", params).await
     }
 
     pub async fn read_resource(
         &mut self,
         params: ReadResourceRequestParams,
-    ) -> Result<ReadResourceResult, ClientError> {
+    ) -> Result<Operation<ReadResourceResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
@@ -669,20 +673,17 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
-            match Self::request(
-                connection,
-                "resources/read".to_string(),
-                serde_json::to_value(params.clone())?,
-                client.clone(),
-            )
-            .await
+            match connection
+                .request::<_, ReadResourceResult>(
+                    "resources/read".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
+                .await
             {
-                Ok(response) => match serde_json::from_value::<ReadResourceResult>(response) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => {
+                    return Ok(operation);
+                }
                 Err(e) => {
                     errors.push(format!("Error from '{}': {:?}", server_name, e));
                 }
@@ -695,7 +696,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn list_resource_templates(
         &mut self,
         params: Option<ListResourceTemplatesRequestParams>,
-    ) -> Result<ListResourceTemplatesResult, ClientError> {
+    ) -> Result<Operation<ListResourceTemplatesResult>, ClientError> {
         self.list_items::<ListResourceTemplatesResult, ListResourceTemplatesRequestParams>(
             "resources/templates/list",
             params,
@@ -706,7 +707,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
     pub async fn list_all_resource_templates(
         &mut self,
         params: Option<ListResourceTemplatesRequestParams>,
-    ) -> Result<Vec<ResourceTemplate>, ClientError> {
+    ) -> Result<Operation<Vec<ResourceTemplate>>, ClientError> {
         self.list_all_items::<ListResourceTemplatesResult, ListResourceTemplatesRequestParams>(
             "resources/templates/list",
             params,
@@ -714,160 +715,174 @@ impl<T: ModelContextProtocolClient> Client<T> {
         .await
     }
 
-    pub async fn subscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
+    pub async fn subscribe_resource(&mut self, uri: String) -> Result<Operation<()>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut successful = 0;
-        let mut errors = Vec::new();
         let client = self.client.clone();
+        let params = serde_json::json!({ "uri": uri.clone() });
 
         for (server_name, connection) in &mut self.connections {
-            let params = serde_json::json!({ "uri": uri.clone() });
-            match Self::request(connection, "resources/subscribe".to_string(), params, client.clone()).await {
-                Ok(_) => {
-                    successful += 1;
+            match connection
+                .request::<_, serde_json::Value>("resources/subscribe".to_string(), params.clone(), client.clone())
+                .await
+            {
+                Ok(operation) => {
+                    let request_id = {
+                        let mut counter = connection.request_counter.write().await;
+                        *counter += 1;
+                        let id = *counter;
+                        let message_id = MessageId::Num(id);
+                        (connection.conn_id.clone(), message_id)
+                    };
+
+                    let operation_clone = operation;
+                    let transport_sender = connection.transport_sender.clone();
+                    let future = async move {
+                        operation_clone.await?;
+                        Ok(())
+                    };
+
+                    return Ok(Operation::new(request_id, future, transport_sender));
                 }
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        if successful > 0 {
-            if !errors.is_empty() {
-                warn!("Some servers failed to subscribe: {}", errors.join(", "));
-            }
-            Ok(())
-        } else {
-            Err(ClientError::Request(format!("Failed to subscribe on all servers: {}", errors.join(", ")).into()))
-        }
+        Err(ClientError::Request("Unable to subscribe resource on any server".into()))
     }
 
-    pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<(), ClientError> {
+    pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<Operation<()>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut successful = 0;
-        let mut errors = Vec::new();
         let client = self.client.clone();
+        let params = serde_json::json!({ "uri": uri.clone() });
 
         for (server_name, connection) in &mut self.connections {
-            let params = serde_json::json!({ "uri": uri.clone() });
-            match Self::request(connection, "resources/unsubscribe".to_string(), params, client.clone()).await {
-                Ok(_) => {
-                    successful += 1;
+            match connection
+                .request::<_, serde_json::Value>("resources/unsubscribe".to_string(), params.clone(), client.clone())
+                .await
+            {
+                Ok(operation) => {
+                    let request_id = {
+                        let mut counter = connection.request_counter.write().await;
+                        *counter += 1;
+                        let id = *counter;
+                        let message_id = MessageId::Num(id);
+                        (connection.conn_id.clone(), message_id)
+                    };
+
+                    let operation_clone = operation;
+                    let transport_sender = connection.transport_sender.clone();
+                    let future = async move {
+                        operation_clone.await?;
+                        Ok(())
+                    };
+
+                    return Ok(Operation::new(request_id, future, transport_sender));
                 }
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        if successful > 0 {
-            if !errors.is_empty() {
-                warn!("Some servers failed to unsubscribe: {}", errors.join(", "));
-            }
-            Ok(())
-        } else {
-            Err(ClientError::Request(format!("Failed to unsubscribe on all servers: {}", errors.join(", ")).into()))
-        }
+        Err(ClientError::Request("Unable to unsubscribe resource on any server".into()))
     }
 
     pub async fn list_prompts(
         &mut self,
         params: Option<ListPromptsRequestParams>,
-    ) -> Result<ListPromptsResult, ClientError> {
+    ) -> Result<Operation<ListPromptsResult>, ClientError> {
         self.list_items::<ListPromptsResult, ListPromptsRequestParams>("prompts/list", params).await
     }
 
     pub async fn list_all_prompts(
         &mut self,
         params: Option<ListPromptsRequestParams>,
-    ) -> Result<Vec<Prompt>, ClientError> {
+    ) -> Result<Operation<Vec<Prompt>>, ClientError> {
         self.list_all_items::<ListPromptsResult, ListPromptsRequestParams>("prompts/list", params).await
     }
 
-    pub async fn get_prompt(&mut self, params: GetPromptRequestParams) -> Result<GetPromptResult, ClientError> {
+    pub async fn get_prompt(
+        &mut self,
+        params: GetPromptRequestParams,
+    ) -> Result<Operation<GetPromptResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
-            match Self::request(
-                connection,
-                "prompts/get".to_string(),
-                serde_json::to_value(params.clone())?,
-                client.clone(),
-            )
-            .await
+            match connection
+                .request::<_, GetPromptResult>(
+                    "prompts/get".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
+                .await
             {
-                Ok(response) => match serde_json::from_value::<GetPromptResult>(response) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => return Ok(operation),
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        Err(ClientError::Request(format!("Unable to get prompt from any server: {}", errors.join(", ")).into()))
+        Err(ClientError::Request("Unable to get prompt from any server".into()))
     }
 
-    pub async fn list_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<ListToolsResult, ClientError> {
+    pub async fn list_tools(
+        &mut self,
+        params: Option<ListToolsRequestParams>,
+    ) -> Result<Operation<ListToolsResult>, ClientError> {
         self.list_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
-    pub async fn list_all_tools(&mut self, params: Option<ListToolsRequestParams>) -> Result<Vec<Tool>, ClientError> {
+    pub async fn list_all_tools(
+        &mut self,
+        params: Option<ListToolsRequestParams>,
+    ) -> Result<Operation<Vec<Tool>>, ClientError> {
         self.list_all_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
-    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<CallToolResult, ClientError> {
+    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<Operation<CallToolResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
-            match Self::request(
-                connection,
-                "tools/call".to_string(),
-                serde_json::to_value(params.clone())?,
-                client.clone(),
-            )
-            .await
+            match connection
+                .request::<_, CallToolResult>(
+                    "tools/call".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
+                .await
             {
-                Ok(response) => match serde_json::from_value::<CallToolResult>(response) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => return Ok(operation),
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        Err(ClientError::Request(format!("Unable to call tool on any server: {}", errors.join(", ")).into()))
+        Err(ClientError::Request("Unable to call tool on any server".into()))
     }
 
-    async fn complete(&mut self, params: CompleteRequestParams) -> Result<CompleteResult, ClientError> {
+    async fn complete(&mut self, params: CompleteRequestParams) -> Result<Operation<CompleteResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
-        let mut errors = Vec::new();
         let client = self.client.clone();
 
         for (server_name, connection) in &mut self.connections {
@@ -880,35 +895,41 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 continue;
             }
 
-            match Self::request(
-                connection,
-                "completion/complete".to_string(),
-                serde_json::to_value(params.clone())?,
-                client.clone(),
-            )
-            .await
+            match connection
+                .request::<_, CompleteResult>(
+                    "completion/complete".to_string(),
+                    serde_json::to_value(params.clone())?,
+                    client.clone(),
+                )
+                .await
             {
-                Ok(response) => match serde_json::from_value::<CompleteResult>(response) {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
-                    }
-                },
+                Ok(operation) => return Ok(operation),
                 Err(e) => {
-                    errors.push(format!("Error from '{}': {:?}", server_name, e));
+                    warn!("Error from '{}': {:?}", server_name, e);
                 }
             }
         }
 
-        if errors.is_empty() {
-            Ok(CompleteResult {
-                meta: None,
-                completion: CompleteResultCompletion { values: vec![], total: None, has_more: None },
-            })
+        if let Some(connection) = self.connections.values_mut().next() {
+            let request_id = {
+                let mut counter = connection.request_counter.write().await;
+                *counter += 1;
+                let id = *counter;
+                let message_id = MessageId::Num(id);
+                (connection.conn_id.clone(), message_id)
+            };
+
+            let transport_sender = connection.transport_sender.clone();
+            let future = async {
+                Ok(CompleteResult {
+                    meta: None,
+                    completion: CompleteResultCompletion { values: vec![], total: None, has_more: None },
+                })
+            };
+
+            Ok(Operation::new(request_id, future, transport_sender))
         } else {
-            Err(ClientError::Request(
-                format!("Unable to get completions from any server: {}", errors.join(", ")).into(),
-            ))
+            Err(ClientError::Request("No server connections available".into()))
         }
     }
 
@@ -917,7 +938,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         prompt_name: String,
         name: String,
         value: String,
-    ) -> Result<CompleteResult, ClientError> {
+    ) -> Result<Operation<CompleteResult>, ClientError> {
         let prompt_ref = PromptReference { type_: "ref/prompt".to_string(), name: prompt_name };
 
         let params = CompleteRequestParams {
@@ -933,7 +954,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         resource_uri: String,
         name: String,
         value: String,
-    ) -> Result<CompleteResult, ClientError> {
+    ) -> Result<Operation<CompleteResult>, ClientError> {
         let resource_ref = ResourceReference { type_: "ref/resource".to_string(), uri: resource_uri };
 
         let params = CompleteRequestParams {
@@ -967,8 +988,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         for (server_name, connection) in &mut self.connections {
             let params = RootsListChangedNotificationParams { meta: meta.clone() };
             if let Err(e) =
-                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
-                    .await
+                connection.notify("notifications/roots/list_changed".to_string(), serde_json::to_value(params)?).await
             {
                 errors.push(format!("Failed to notify root change on '{}': {:?}", server_name, e));
             }
@@ -1004,8 +1024,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
         for (server_name, connection) in &mut self.connections {
             let params = RootsListChangedNotificationParams { meta: meta.clone() };
             if let Err(e) =
-                Self::notify(connection, "notifications/roots/list_changed".to_string(), serde_json::to_value(params)?)
-                    .await
+                connection.notify("notifications/roots/list_changed".to_string(), serde_json::to_value(params)?).await
             {
                 errors.push(format!("Failed to notify root removal on '{}': {:?}", server_name, e));
             }
@@ -1029,7 +1048,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             if let Err(e) = connection.transport.close().await {
                 errors.push(format!("Failed to close '{}': {}", server_name, e));
             }
-            connection.start_handle.abort();
         }
 
         if errors.is_empty() {
@@ -1039,19 +1057,14 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<R, ClientError>
+    async fn list_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Operation<R>, ClientError>
     where
-        R: ListResult,
-        P: ListRequestParams,
+        R: ListResult + DeserializeOwned + Send + 'static,
+        P: ListRequestParams + Send + 'static,
     {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
-
-        let mut all_items = Vec::new();
-        let mut errors = Vec::new();
-        let mut has_more = false;
-        let mut server_cursors = HashMap::new();
 
         let initial_server_cursors: HashMap<String, Option<String>> = if let Some(params) = &params {
             if let Some(cursor) = params.get_cursor() {
@@ -1066,47 +1079,79 @@ impl<T: ModelContextProtocolClient> Client<T> {
             self.connections.keys().map(|k| (k.clone(), None)).collect()
         };
 
-        let client = self.client.clone();
+        let request_id = {
+            let first_connection = self
+                .connections
+                .values_mut()
+                .next()
+                .ok_or_else(|| ClientError::Request("No connections available".into()))?;
+            let mut counter = first_connection.request_counter.write().await;
+            *counter += 1;
+            let id = *counter;
+            let message_id = MessageId::Num(id);
+            (first_connection.conn_id.clone(), message_id)
+        };
 
-        for (server_name, cursor) in initial_server_cursors {
-            if let Some(connection) = self.connections.get_mut(&server_name) {
-                let req_params = match params.clone() {
-                    Some(p) => p.with_cursor(cursor),
-                    None => P::default().with_cursor(cursor),
-                };
+        let client_clone = self.client.clone();
+        let connections = self.connections.clone();
+        let endpoint = endpoint.to_string();
+        let params = params.clone();
 
-                match Self::request(connection, endpoint.to_string(), serde_json::to_value(req_params)?, client.clone())
-                    .await
-                {
-                    Ok(response) => match serde_json::from_value::<R>(response) {
-                        Ok(result) => {
-                            all_items.extend(result.get_items().to_vec());
+        let transport_sender = self
+            .connections
+            .values()
+            .next()
+            .ok_or_else(|| ClientError::Request("No connections available".into()))?
+            .transport_sender
+            .clone();
 
-                            if let Some(next_cursor) = result.get_next_cursor() {
-                                server_cursors.insert(server_name, Some(next_cursor.to_string()));
-                                has_more = true;
+        let future = async move {
+            let mut all_items = Vec::new();
+            let mut errors = Vec::new();
+            let mut has_more = false;
+            let mut server_cursors = HashMap::new();
+
+            for (server_name, cursor) in initial_server_cursors {
+                if let Some(mut connection) = connections.get(&server_name).cloned() {
+                    let req_params = match params.clone() {
+                        Some(p) => p.with_cursor(cursor),
+                        None => P::default().with_cursor(cursor),
+                    };
+
+                    match connection
+                        .request::<_, R>(endpoint.clone(), serde_json::to_value(req_params)?, client_clone.clone())
+                        .await
+                    {
+                        Ok(operation) => match operation.await {
+                            Ok(result) => {
+                                all_items.extend(result.get_items().to_vec());
+
+                                if let Some(next_cursor) = result.get_next_cursor() {
+                                    server_cursors.insert(server_name, Some(next_cursor.to_string()));
+                                    has_more = true;
+                                }
                             }
-                        }
+                            Err(e) => {
+                                errors.push(format!("Failed to list items from '{}': {:?}", server_name, e));
+                            }
+                        },
                         Err(e) => {
-                            errors.push(format!("Error deserializing result from '{}': {:?}", server_name, e));
+                            errors.push(format!("Error from '{}': {:?}", server_name, e));
                         }
-                    },
-                    Err(e) => {
-                        errors.push(format!("Error from '{}': {:?}", server_name, e));
                     }
                 }
             }
-        }
 
-        if all_items.is_empty() && !errors.is_empty() {
-            Err(ClientError::Request(format!("All servers failed: {}", errors.join(", ")).into()))
-        } else {
+            if all_items.is_empty() && !errors.is_empty() {
+                return Err(anyhow::anyhow!("All servers failed: {}", errors.join(", ")));
+            }
+
             let next_cursor = if has_more {
                 let multi_cursor = MultiServerCursor { server_cursors };
                 match multi_cursor.to_string() {
                     Ok(cursor) => Some(cursor),
                     Err(e) => {
-                        warn!("Failed to encode multi-server cursor: {:?}", e);
+                        tracing::warn!("Failed to encode multi-server cursor: {:?}", e);
                         None
                     }
                 }
@@ -1115,33 +1160,57 @@ impl<T: ModelContextProtocolClient> Client<T> {
             };
 
             Ok(R::with_items_and_cursor(all_items, next_cursor, None))
-        }
+        };
+
+        Ok(Operation::new(request_id, future, transport_sender))
     }
 
-    async fn list_all_items<R, P>(&mut self, endpoint: &str, params: Option<P>) -> Result<Vec<R::Item>, ClientError>
+    async fn list_all_items<R, P>(
+        &mut self,
+        endpoint: &str,
+        params: Option<P>,
+    ) -> Result<Operation<Vec<R::Item>>, ClientError>
     where
-        R: ListResult,
-        P: ListRequestParams,
+        R: ListResult + DeserializeOwned + Send + 'static,
+        P: ListRequestParams + Send + 'static,
     {
-        let mut all_items = Vec::new();
-        let mut next_cursor = None;
+        let endpoint = endpoint.to_string();
+        let client = self.client.clone();
+        let connections = self.connections.clone();
+        let params = params.clone();
 
-        loop {
-            let params_with_cursor = match params.clone() {
-                Some(p) => Some(p.with_cursor(next_cursor)),
-                None => Some(P::default().with_cursor(next_cursor)),
+        let future = async move {
+            let mut all_items = Vec::new();
+            let mut next_cursor = None;
+            let mut client_instance = Client {
+                client,
+                connections,
+                io_handler: MetaIoHandler::default(),
+                roots: Arc::new(RwLock::new(HashMap::new())),
+                pending_server_requests: Arc::new(Mutex::new(HashMap::new())),
             };
 
-            let result = self.list_items::<R, P>(endpoint, params_with_cursor).await?;
-            all_items.extend(result.get_items().to_vec());
+            loop {
+                let params_with_cursor = match params.clone() {
+                    Some(p) => Some(p.with_cursor(next_cursor)),
+                    None => Some(P::default().with_cursor(next_cursor)),
+                };
 
-            next_cursor = result.get_next_cursor().map(|s| s.to_string());
-            if next_cursor.is_none() {
-                break;
+                let operation = client_instance.list_items::<R, P>(&endpoint, params_with_cursor).await?;
+                let result = operation.await?;
+
+                all_items.extend(result.get_items().to_vec());
+
+                next_cursor = result.get_next_cursor().map(|s| s.to_string());
+                if next_cursor.is_none() {
+                    break;
+                }
             }
-        }
 
-        Ok(all_items)
+            Ok(all_items)
+        };
+
+        Ok(Operation::new_multiple(future))
     }
 
     pub fn iter_resources<'a>(
@@ -1199,12 +1268,19 @@ impl<T: ModelContextProtocolClient> Client<T> {
             let params = crate::schema::SetLevelRequestParams { level: level.clone() };
 
             let client = self.client.clone();
-            match Self::request(connection, "logging/setLevel".to_string(), serde_json::to_value(params)?, client).await
+            match connection
+                .request::<_, serde_json::Value>("logging/setLevel".to_string(), serde_json::to_value(params)?, client)
+                .await
             {
-                Ok(_) => {
-                    info!("Set log level for server '{}' to {:?}", server_name, level);
-                    success_count += 1;
-                }
+                Ok(operation) => match operation.await {
+                    Ok(_) => {
+                        info!("Set log level for server '{}' to {:?}", server_name, level);
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to set log level on '{}': {:?}", server_name, e));
+                    }
+                },
                 Err(e) => errors.push(format!("Failed to set log level for '{}': {}", server_name, e)),
             }
         }
@@ -1216,16 +1292,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    pub async fn cancel_request(
-        &mut self,
-        connection_id: ConnectionId,
-        request_id: RequestId,
-        reason: Option<String>,
-    ) -> Result<(), ClientError> {
+    pub async fn cancel(&mut self, request_id: RequestId, reason: Option<String>) -> Result<(), ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
 
+        let (connection_id, message_id) = request_id;
         let connection = self
             .connections
             .get_mut(&connection_id.to_string())
@@ -1234,31 +1306,33 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let conn_id = connection.conn_id.clone();
         let request_exists = {
             let pending = connection.pending_requests.lock().await;
-            pending.contains_key(&(conn_id.clone(), request_id.clone()))
+            pending.contains_key(&(conn_id.clone(), message_id.clone()))
         };
 
         if !request_exists {
-            return Err(ClientError::Request(format!("Request {} not found or already completed", request_id).into()));
+            return Err(ClientError::Request(
+                format!("Request {:?} not found or already completed", message_id).into(),
+            ));
         }
 
-        if Self::is_initialize_request(connection, &request_id).await {
-            return Err(ClientError::Request(format!("Cannot cancel initialize request (ID: {})", request_id).into()));
+        if Self::is_initialize_request(&message_id).await {
+            return Err(ClientError::Request(format!("Cannot cancel initialize request (ID: {})", message_id).into()));
         }
 
-        let id_value = match &request_id {
-            RequestId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-            RequestId::Str(s) => serde_json::Value::String(s.clone()),
+        let id_value = match &message_id {
+            MessageId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+            MessageId::Str(s) => serde_json::Value::String(s.clone()),
         };
 
         let params = CancelledNotificationParams { request_id: id_value, reason };
-        let request_id_clone = request_id.clone();
+        let message_id_clone = message_id.clone();
 
-        match Self::notify(connection, "notifications/cancelled".to_string(), serde_json::to_value(params)?).await {
+        match connection.notify("notifications/cancelled".to_string(), serde_json::to_value(params)?).await {
             Ok(_) => {
                 let mut pending = connection.pending_requests.lock().await;
-                pending.remove(&(conn_id.clone(), request_id_clone));
+                pending.remove(&(conn_id.clone(), message_id_clone));
 
-                info!("Cancelled request {} on server '{}'", request_id, connection_id);
+                info!("Cancelled request {} on server '{}'", message_id, connection_id);
                 Ok(())
             }
             Err(e) => {
@@ -1267,9 +1341,9 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
     }
 
-    async fn is_initialize_request(_connection: &ServerConnection, request_key: &RequestId) -> bool {
-        match request_key {
-            RequestId::Num(n) => *n == 1,
+    async fn is_initialize_request(message_id: &MessageId) -> bool {
+        match message_id {
+            MessageId::Num(n) => *n == 1,
             _ => false,
         }
     }
@@ -1296,8 +1370,8 @@ impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
 pub struct ItemsIterator<'a, T, R, P>
 where
     T: ModelContextProtocolClient,
-    R: ListResult,
-    P: ListRequestParams,
+    R: ListResult + DeserializeOwned + Send + 'static,
+    P: ListRequestParams + Send + 'static,
 {
     client: &'a mut Client<T>,
     endpoint: String,
@@ -1310,8 +1384,8 @@ where
 impl<'a, T, R, P> ItemsIterator<'a, T, R, P>
 where
     T: ModelContextProtocolClient,
-    R: ListResult,
-    P: ListRequestParams,
+    R: ListResult + DeserializeOwned + Send + 'static,
+    P: ListRequestParams + Send + 'static,
 {
     pub fn new(client: &'a mut Client<T>, endpoint: String, params: Option<P>) -> Self {
         Self { client, endpoint, params, next_cursor: None, done: false, _phantom: std::marker::PhantomData }
@@ -1327,20 +1401,24 @@ where
             None => Some(P::default().with_cursor(self.next_cursor.clone())),
         };
 
-        let result = self.client.list_items::<R, P>(&self.endpoint, params_with_cursor).await;
+        match self.client.list_items::<R, P>(&self.endpoint, params_with_cursor).await {
+            Ok(operation) => match operation.await {
+                Ok(result) => {
+                    let items = result.get_items().to_vec();
+                    if items.is_empty() {
+                        self.done = true;
+                        return None;
+                    }
 
-        match result {
-            Ok(response) => {
-                let items = response.get_items().to_vec();
-                if items.is_empty() {
-                    self.done = true;
-                    return None;
+                    self.next_cursor = result.get_next_cursor().map(|s| s.to_string());
+                    self.done = self.next_cursor.is_none();
+                    Some(Ok(items))
                 }
-
-                self.next_cursor = response.get_next_cursor().map(|s| s.to_string());
-                self.done = self.next_cursor.is_none();
-                Some(Ok(items))
-            }
+                Err(e) => {
+                    self.done = true;
+                    Some(Err(ClientError::Request(format!("Operation failed: {}", e).into())))
+                }
+            },
             Err(e) => {
                 self.done = true;
                 Some(Err(e))
@@ -1350,7 +1428,7 @@ where
 }
 
 pub trait ListResult: serde::de::DeserializeOwned + Serialize {
-    type Item: Clone;
+    type Item: Clone + Send + 'static;
 
     fn get_items(&self) -> &[Self::Item];
     fn get_next_cursor(&self) -> Option<&str>;

@@ -158,15 +158,15 @@ async fn main() -> Result<()> {
     client.set_log_level(LoggingLevel::Debug).await?;
 
     info!("Listing prompts...");
-    let prompts_result = client.list_all_prompts(None).await;
-    match prompts_result {
+    let prompts_operation = client.list_all_prompts(None).await?;
+    match prompts_operation.await {
         Ok(prompts_result) => {
             info!("Available prompts: {:?}", prompts_result);
 
             if prompts_result.iter().any(|p| p.name == "greet") {
                 info!("Testing completion for 'greet' prompt's 'name' argument...");
 
-                match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await {
+                match client.complete_prompt("greet".to_string(), "name".to_string(), "a".to_string()).await?.await {
                     Ok(result) => {
                         info!("Completions for 'name' starting with 'a': {:?}", result.completion.values);
                     }
@@ -181,9 +181,9 @@ async fn main() -> Result<()> {
 
     info!("Listing resources...");
 
-    let resources_result = client.list_resources(None).await;
+    let resources_operation = client.list_resources(None).await?;
 
-    match resources_result {
+    match resources_operation.await {
         Ok(resources_result) => {
             info!("Available resources: {:?}", resources_result.resources);
 
@@ -191,7 +191,11 @@ async fn main() -> Result<()> {
                 info!("Found filesystem resource: {}", filesystem.uri);
 
                 info!("Testing completion for filesystem resource paths...");
-                match client.complete_resource("file:///".to_string(), "path".to_string(), "/READ".to_string()).await {
+                match client
+                    .complete_resource("file:///".to_string(), "path".to_string(), "/READ".to_string())
+                    .await?
+                    .await
+                {
                     Ok(result) => {
                         info!("Completions for file paths: {:?}", result.completion.values);
                     }
@@ -201,9 +205,9 @@ async fn main() -> Result<()> {
                 let readme_uri = "file:///bioma/README.md";
                 info!("Reading file: {}", readme_uri);
 
-                let readme_result =
-                    client.read_resource(ReadResourceRequestParams { uri: readme_uri.to_string() }).await;
-                match readme_result {
+                let readme_operation =
+                    client.read_resource(ReadResourceRequestParams { uri: readme_uri.to_string() }).await?;
+                match readme_operation.await {
                     Ok(result) => {
                         if let Some(content) = result.contents.first() {
                             if let Some(text) = content.get("text").and_then(|t| t.as_str()) {
@@ -222,8 +226,9 @@ async fn main() -> Result<()> {
                 let dir_uri = "file:///";
                 info!("Reading directory: {}", dir_uri);
 
-                let dir_result = client.read_resource(ReadResourceRequestParams { uri: dir_uri.to_string() }).await;
-                match dir_result {
+                let dir_operation =
+                    client.read_resource(ReadResourceRequestParams { uri: dir_uri.to_string() }).await?;
+                match dir_operation.await {
                     Ok(result) => {
                         info!("Directory contents:");
                         for content in result.contents {
@@ -236,8 +241,8 @@ async fn main() -> Result<()> {
                 }
 
                 info!("Checking for resource templates...");
-                let templates_result = client.list_resource_templates(None).await;
-                match templates_result {
+                let templates_operation = client.list_resource_templates(None).await?;
+                match templates_operation.await {
                     Ok(templates) => {
                         info!("Found {} resource templates", templates.resource_templates.len());
                         for template in templates.resource_templates {
@@ -262,11 +267,11 @@ async fn main() -> Result<()> {
                 info!("Filesystem resource not found, falling back to readme resource");
 
                 if !resources_result.resources.is_empty() {
-                    let read_result = client
+                    let read_operation = client
                         .read_resource(ReadResourceRequestParams { uri: resources_result.resources[0].uri.clone() })
-                        .await;
+                        .await?;
 
-                    match read_result {
+                    match read_operation.await {
                         Ok(result) => info!("Resource content: {:?}", result),
                         Err(e) => error!("Error reading resource: {:?}", e),
                     }
@@ -310,7 +315,12 @@ async fn main() -> Result<()> {
 
     let sampling_result = client.call_tool(sampling_call).await?;
 
-    info!("Sampling response: {:#?}", sampling_result);
+    sampling_result.cancel(Some("test".to_string())).await?;
+
+    match sampling_result.await {
+        Ok(result) => info!("Sampling response: {:#?}", result),
+        Err(e) => error!("Error getting sampling response: {:?}", e),
+    }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
@@ -323,7 +333,7 @@ async fn main() -> Result<()> {
         name: "echo".to_string(),
         arguments: serde_json::from_value(echo_args).map_err(|e| ClientError::JsonError(e))?,
     };
-    let echo_result = client.call_tool(echo_args).await?;
+    let echo_result = client.call_tool(echo_args).await?.await?;
 
     info!("Echo response: {:?}", echo_result);
 
