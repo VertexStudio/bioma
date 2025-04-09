@@ -151,6 +151,8 @@ pub struct Args {
     pub engine_endpoint: Option<String>,
     #[clap(long)] // Optional parameter for engine.namespace
     pub chat_endpoint: Option<String>,
+    #[clap(long)] // Optional parameter for engine.namespace
+    pub chat_model: Option<String>,
     #[clap(long, default_value = "/rag/tools_hub")]
     pub tools_hub_id: String,
 }
@@ -182,6 +184,11 @@ impl Args {
         if let Some(chat_endpoint) = &self.chat_endpoint {
             info!("Overriding chat endpoint: {}", chat_endpoint);
             config.chat_endpoint = Url::parse(chat_endpoint)?;
+        }
+
+        if let Some(chat_model) = &self.chat_model {
+            info!("Overriding chat model: {}", chat_model);
+            config.chat_model = chat_model.clone().into();
         }
 
         info!("├─ Engine Configuration:");
