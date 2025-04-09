@@ -147,26 +147,42 @@ impl Default for ServerConfig {
 #[derive(Parser)]
 pub struct Args {
     pub config: Option<PathBuf>,
-    #[clap(long)] // Optional parameter for whole json config
-    pub config_json: Option<String>,
+    #[clap(long)] // Optional parameter for engine.endpoint
+    pub engine_endpoint: Option<String>,
+    #[clap(long)] // Optional parameter for engine.namespace
+    pub chat_endpoint: Option<String>,
     #[clap(long, default_value = "/rag/tools_hub")]
     pub tools_hub_id: String,
 }
 
 impl Args {
     pub fn load_config(&self) -> Result<ServerConfig> {
-        let config: ServerConfig = if let Some(json_string) = &self.config_json {
-            info!("Loaded config from --config-json parameter");
-            serde_json::from_str::<ServerConfig>(json_string)?
+        let mut config: ServerConfig = if self.engine_endpoint.is_some() && self.chat_endpoint.is_some() {
+            // Caso 1: Si se proporcionan `engine_endpoint` y `chat_endpoint`, usar la configuración predeterminada
+            info!("Using default config with overridden endpoints");
+            ServerConfig::default()
         } else if let Some(path) = &self.config {
-            info!("Loading config from --config parameter {}", path.display());
+            // Caso 2: Si se proporciona un archivo de configuración, cargarlo
             let config = std::fs::read_to_string(path)?;
             info!("Loaded config from file: {}", path.display());
             serde_json::from_str::<ServerConfig>(&config)?
         } else {
+            // Caso 3: Si no se proporciona nada, usar la configuración predeterminada
             info!("Using default config");
             ServerConfig::default()
         };
+
+        // Sobrescribir valores de `engine_endpoint` si se proporciona
+        if let Some(engine_endpoint) = &self.engine_endpoint {
+            info!("Overriding engine endpoint: {}", engine_endpoint);
+            config.engine.endpoint = engine_endpoint.clone().into();
+        }
+
+        // Sobrescribir valores de `chat_endpoint` si se proporciona
+        if let Some(chat_endpoint) = &self.chat_endpoint {
+            info!("Overriding chat endpoint: {}", chat_endpoint);
+            config.chat_endpoint = Url::parse(chat_endpoint)?;
+        }
 
         info!("├─ Engine Configuration:");
         info!("│  ├─ Endpoint: {}", config.engine.endpoint);
