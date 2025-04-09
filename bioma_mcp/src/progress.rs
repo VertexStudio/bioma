@@ -1,9 +1,8 @@
 use anyhow::Error;
 use bon::Builder;
 use jsonrpc_core::{Notification, Params, Version};
-use serde_json::Value;
 
-use crate::schema::ProgressNotificationParams;
+use crate::schema::{ProgressNotificationParams, ProgressToken};
 use crate::transport::TransportSender;
 use crate::ConnectionId;
 
@@ -11,22 +10,15 @@ use crate::ConnectionId;
 pub struct Progress {
     sender: TransportSender,
     conn_id: ConnectionId,
-    token: String,
+    token: ProgressToken,
     progress: f64,
     total: Option<f64>,
     message: Option<String>,
 }
 
 impl Progress {
-    pub fn new(
-        sender: TransportSender,
-        conn_id: ConnectionId,
-        token: String,
-        progress: f64,
-        total: Option<f64>,
-        message: Option<String>,
-    ) -> Self {
-        Self { sender, conn_id, token, progress, total, message }
+    pub fn new(sender: TransportSender, conn_id: ConnectionId, token: ProgressToken) -> Self {
+        Self { sender, conn_id, token, progress: 0.0, total: None, message: None }
     }
 
     pub async fn increase(&mut self, increase: f64, message: Option<String>) -> Result<(), Error> {
@@ -53,7 +45,7 @@ impl Progress {
 
     pub async fn send(&mut self) -> Result<(), Error> {
         let params = ProgressNotificationParams {
-            progress_token: Value::String(self.token.clone()),
+            progress_token: self.token.clone(),
             progress: self.progress,
             total: self.total,
             message: self.message.clone(),

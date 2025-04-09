@@ -1,4 +1,5 @@
 use crate::operation::Operation;
+use crate::progress::Progress;
 use crate::schema::{
     CallToolRequestParams, CallToolResult, CancelledNotificationParams, ClientCapabilities, CompleteRequestParams,
     CompleteRequestParamsArgument, CompleteResult, CompleteResultCompletion, CreateMessageRequestParams,
@@ -12,7 +13,7 @@ use crate::schema::{
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId, RequestParams};
 use anyhow::Error;
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
@@ -32,6 +33,7 @@ use uuid;
 #[derive(Clone)]
 pub struct ClientMetadata {
     pub conn_id: ConnectionId,
+    pub sender: TransportSender,
 }
 
 impl Metadata for ClientMetadata {}
@@ -138,6 +140,7 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
     fn on_create_message(
         &self,
         params: CreateMessageRequestParams,
+        progress: Option<Progress>,
     ) -> impl Future<Output = Result<CreateMessageResult, ClientError>> + Send;
 }
 
@@ -284,17 +287,33 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
 
         io_handler.add_method_with_meta("sampling/createMessage", {
             let client = client.clone();
-            move |params: Params, _meta: ClientMetadata| {
+            move |params: Params, meta: ClientMetadata| {
                 let client = client.clone();
                 async move {
-                    let params: CreateMessageRequestParams = match params.parse() {
+                    let request_params: RequestParams<CreateMessageRequestParams> = match params.parse() {
                         Ok(params) => params,
                         Err(e) => {
                             error!("Failed to parse createMessage parameters: {}", e);
                             return Err(jsonrpc_core::Error::invalid_params(e.to_string()));
                         }
                     };
-                    let result = client.read().await.on_create_message(params).await;
+                    let conn_id = meta.conn_id.clone();
+                    let sender = meta.sender.clone();
+
+                    let params = request_params.params;
+                    let meta = request_params.meta;
+
+                    let progress = if let Some(meta) = meta {
+                        if let Some(token) = meta.progress_token.map(|token| token.into()) {
+                            Some(Progress::new(sender, conn_id.clone(), token))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let result = client.read().await.on_create_message(params, progress).await;
 
                     match result {
                         Ok(result) => {
@@ -578,7 +597,10 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                                 if let Some(response) = io_handler_clone_inner
                                                     .handle_rpc_request(
                                                         request_clone,
-                                                        ClientMetadata { conn_id: conn_id_for_closure.clone() },
+                                                        ClientMetadata {
+                                                            conn_id: conn_id_for_closure.clone(),
+                                                            sender: sender_clone_inner.clone(),
+                                                        },
                                                     )
                                                     .await
                                                 {
@@ -613,7 +635,10 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                         jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(
                                             notification.clone(),
                                         )),
-                                        ClientMetadata { conn_id: conn_id_for_notification },
+                                        ClientMetadata {
+                                            conn_id: conn_id_for_notification,
+                                            sender: sender_clone.clone(),
+                                        },
                                     )
                                     .await
                                 {

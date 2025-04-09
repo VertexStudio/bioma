@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bioma_mcp::{
     client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
+    progress::Progress,
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
         CreateMessageResult, Implementation, LoggingLevel, ReadResourceRequestParams, Role, Root, SamplingMessage,
@@ -52,7 +53,11 @@ impl ModelContextProtocolClient for ExampleMcpClient {
         self.roots.clone()
     }
 
-    async fn on_create_message(&self, params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
+    async fn on_create_message(
+        &self,
+        params: CreateMessageRequestParams,
+        _progress: Option<Progress>,
+    ) -> Result<CreateMessageResult, ClientError> {
         info!("Params: {:#?}", params);
 
         info!("Acceping sampling request..."); // In a real implementation, client should the capability to accept or decline the request
