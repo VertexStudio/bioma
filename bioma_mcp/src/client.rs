@@ -178,9 +178,8 @@ impl Context {
         let mut params_value = params;
 
         if let Some(token_value) = progress_token.as_ref() {
-            let meta = crate::schema::JsonrpcrequestParamsMeta { progress_token: Some(token_value.clone().into()) };
-            let rpc_params = crate::schema::JsonrpcrequestParams { meta: Some(meta) };
-            let modified_params = crate::Params { params: params_value, rpc_params: Some(rpc_params) };
+            let meta = crate::RequestParamsMeta { progress_token: Some(token_value.clone().into()) };
+            let modified_params = crate::RequestParams { meta: Some(meta), params: params_value };
 
             params_value = serde_json::to_value(modified_params).map_err(|e| {
                 ClientError::Request(format!("Failed to serialize params with progress token: {}", e).into())

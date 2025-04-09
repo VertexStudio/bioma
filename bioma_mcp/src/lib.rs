@@ -1,11 +1,12 @@
 use derive_more::Deref;
-use schema::JsonrpcrequestParams;
+use schema::RequestParamsMeta;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod client;
 pub mod logging;
 pub mod operation;
+pub mod progress;
 pub mod prompts;
 pub mod resources;
 pub mod schema;
@@ -62,12 +63,14 @@ impl std::fmt::Display for MessageId {
 
 pub type RequestId = (ConnectionId, MessageId);
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct Params {
+#[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
+pub struct RequestParams<T> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "_meta")]
+    pub meta: Option<RequestParamsMeta>,
+
     #[serde(flatten)]
-    params: serde_json::Value,
-    #[serde(flatten)]
-    rpc_params: Option<JsonrpcrequestParams>,
+    pub params: T,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
