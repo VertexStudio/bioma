@@ -1,15 +1,10 @@
 {
   "servers": [
     {
-      "name": "stdio-server",
-      "transport": "stdio",
-      "command": "target/release/examples/mcp_server",
-      "args": ["stdio"]
-    },
-    {
       "name": "websocket-server",
       "transport": "ws",
-      "endpoint": "ws://127.0.0.1:9090"
+      "endpoint": "ws://127.0.0.1:9090",
+      "request_timeout": 15
     }
   ]
 }

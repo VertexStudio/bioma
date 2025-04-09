@@ -87,6 +87,7 @@ impl StdioTransport {
             .args(&config.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
+            .envs(config.env.iter())
             .spawn()
             .context("Failed to start MCP server process")?;
 
@@ -112,12 +113,18 @@ impl Transport for StdioTransport {
         let handle = tokio::spawn(async move {
             match &*mode {
                 StdioMode::Server { on_message, stdout: _stdout } => {
-                    let conn_id = ConnectionId::new();
+                    let conn_id = ConnectionId::new(None);
                     let stdin = tokio::io::stdin();
                     let mut lines = BufReader::new(stdin).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
                         debug!("Server received [stdio]: {}", line);
-                        let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
+                        let request = match serde_json::from_str::<JsonRpcMessage>(&line) {
+                            Ok(request) => request,
+                            Err(e) => {
+                                error!("Failed to parse message: {}", e);
+                                continue;
+                            }
+                        };
                         let message = Message { message: request, conn_id: conn_id.clone() };
                         if on_message.send(message).await.is_err() {
                             error!("Failed to send request through channel");
@@ -131,7 +138,13 @@ impl Transport for StdioTransport {
                     let mut lines = BufReader::new(&mut *stdout).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
                         debug!("Client received [stdio]: {}", line);
-                        let request = serde_json::from_str::<JsonRpcMessage>(&line)?;
+                        let request = match serde_json::from_str::<JsonRpcMessage>(&line) {
+                            Ok(request) => request,
+                            Err(e) => {
+                                error!("Failed to parse message: {}", e);
+                                continue;
+                            }
+                        };
                         if on_message.send(request).await.is_err() {
                             debug!("Request channel closed - stopping read loop");
                             break;

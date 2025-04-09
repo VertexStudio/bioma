@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod client;
+pub mod logging;
+pub mod operation;
 pub mod prompts;
 pub mod resources;
 pub mod schema;
@@ -11,11 +13,16 @@ pub mod tools;
 pub mod transport;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Deref)]
-pub struct ConnectionId(Uuid);
+pub struct ConnectionId(String);
 
 impl ConnectionId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    pub fn new(prefix: Option<String>) -> Self {
+        let connection_id = match prefix {
+            Some(name) => format!("{}-{}", name, Uuid::new_v4()),
+            None => Uuid::new_v4().to_string(),
+        };
+
+        Self(connection_id)
     }
 }
 
@@ -24,6 +31,35 @@ impl std::fmt::Display for ConnectionId {
         write!(f, "{}", self.0)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MessageId {
+    Num(u64),
+    Str(String),
+}
+
+impl TryFrom<&jsonrpc_core::Id> for MessageId {
+    type Error = anyhow::Error;
+
+    fn try_from(id: &jsonrpc_core::Id) -> Result<Self, Self::Error> {
+        match id {
+            jsonrpc_core::Id::Num(n) => Ok(Self::Num(*n)),
+            jsonrpc_core::Id::Str(s) => Ok(Self::Str(s.clone())),
+            jsonrpc_core::Id::Null => Err(anyhow::anyhow!("Null request IDs are not supported by MCP")),
+        }
+    }
+}
+
+impl std::fmt::Display for MessageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageId::Num(n) => write!(f, "{}", n),
+            MessageId::Str(s) => write!(f, "\"{}\"", s),
+        }
+    }
+}
+
+pub type RequestId = (ConnectionId, MessageId);
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

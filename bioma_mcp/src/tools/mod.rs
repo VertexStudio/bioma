@@ -10,6 +10,7 @@ pub mod echo;
 pub mod fetch;
 pub mod memory;
 pub mod random;
+pub mod sampling;
 pub mod workflow;
 
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +23,9 @@ pub enum ToolError {
 
     #[error("Failed to serialize tool result: {0}")]
     ResultSerialize(serde_json::Error),
+
+    #[error("Server error: {0}")]
+    Server(#[from] crate::server::ServerError),
 
     #[error("Custom error: {0}")]
     Custom(String),
@@ -53,6 +57,7 @@ pub trait ToolDef: Serialize {
             name: Self::NAME.to_string(),
             description: Some(Self::DESCRIPTION.to_string()),
             input_schema: schema,
+            annotations: None,
         }
     }
 
