@@ -7,21 +7,21 @@ use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub enum OperationType {
     Single {
         request_id: RequestId,
         transport_sender: TransportSender,
-        progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
+        progress_rx: Option<mpsc::Receiver<ProgressNotificationParams>>,
     },
     Sub {
         request_id: RequestId,
         transport_sender: TransportSender,
     },
     Multiple {
-        progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
+        progress_rx: Option<mpsc::Receiver<ProgressNotificationParams>>,
     },
 }
 
@@ -36,7 +36,7 @@ impl<T> Operation<T> {
         request_id: RequestId,
         future: F,
         transport_sender: TransportSender,
-        progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
+        progress_rx: Option<mpsc::Receiver<ProgressNotificationParams>>,
     ) -> Self
     where
         F: Future<Output = Result<T, Error>> + Send + 'static,
@@ -85,7 +85,7 @@ impl<T> Operation<T> {
         }
     }
 
-    pub fn new_multiple<F>(future: F, progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>) -> Self
+    pub fn new_multiple<F>(future: F, progress_rx: Option<mpsc::Receiver<ProgressNotificationParams>>) -> Self
     where
         F: Future<Output = Result<T, Error>> + Send + 'static,
     {
@@ -150,9 +150,9 @@ impl<T> Operation<T> {
 
         futures::stream::unfold(progress_rx, |rx| async move {
             match rx {
-                Some(receiver) => match receiver.await {
-                    Ok(notification) => Some((notification, None)),
-                    Err(_) => None,
+                Some(mut receiver) => match receiver.recv().await {
+                    Some(notification) => Some((notification, Some(receiver))),
+                    None => None,
                 },
                 None => None,
             }
