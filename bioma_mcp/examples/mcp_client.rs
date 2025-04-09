@@ -314,7 +314,7 @@ async fn main() -> Result<()> {
         arguments: serde_json::from_value(sampling_args).map_err(|e| ClientError::JsonError(e))?,
     };
 
-    let sampling_result = client.call_tool(sampling_call).await?;
+    let sampling_result = client.call_tool(sampling_call, true).await?;
 
     sampling_result.cancel(Some("test".to_string())).await?;
 
@@ -334,7 +334,7 @@ async fn main() -> Result<()> {
         name: "echo".to_string(),
         arguments: serde_json::from_value(echo_args).map_err(|e| ClientError::JsonError(e))?,
     };
-    let echo_result = client.call_tool(echo_args).await?.await?;
+    let echo_result = client.call_tool(echo_args, false).await?.await?;
 
     info!("Echo response: {:?}", echo_result);
 

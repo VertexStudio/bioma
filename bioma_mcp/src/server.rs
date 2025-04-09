@@ -322,7 +322,7 @@ impl Context {
             }
         };
 
-        Ok(Operation::new(request_id, future, self.sender.clone()))
+        Ok(Operation::new(request_id, future, self.sender.clone(), None))
     }
 
     pub async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ServerError> {

@@ -154,7 +154,6 @@ struct ServerConnection {
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     conn_id: ConnectionId,
     pending_requests: PendingClientRequests,
-    pending_progress_requests: PendingProgressRequests,
     request_counter: Arc<RwLock<u64>>,
 }
 
@@ -163,7 +162,7 @@ impl ServerConnection {
         &mut self,
         method: String,
         params: serde_json::Value,
-        progress: bool,
+        progress_token: Option<String>,
         client: Arc<RwLock<T>>,
     ) -> Result<Operation<R>, ClientError> {
         let mut counter = self.request_counter.write().await;
@@ -177,16 +176,10 @@ impl ServerConnection {
         };
 
         let mut params_value = params;
-        let mut progress_token = None;
 
-        if progress {
-            let token_value = uuid::Uuid::new_v4().to_string();
-            progress_token = Some(token_value.clone());
-
+        if let Some(token_value) = progress_token {
             let meta = crate::schema::JsonrpcrequestParamsMeta { progress_token: Some(token_value.into()) };
-
             let rpc_params = crate::schema::JsonrpcrequestParams { meta: Some(meta) };
-
             let modified_params = crate::Params { params: params_value, rpc_params: Some(rpc_params) };
 
             params_value = serde_json::to_value(modified_params).map_err(|e| {
@@ -230,19 +223,6 @@ impl ServerConnection {
         let request_id_clone = request_id.clone();
         let transport_sender = self.transport_sender.clone();
 
-        let progress_rx = if progress {
-            if let Some(token) = progress_token {
-                let (progress_tx, progress_rx) = oneshot::channel();
-                let mut pending_progress = self.pending_progress_requests.lock().await;
-                pending_progress.insert(token.into(), progress_tx);
-                Some(progress_rx)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         let future = async move {
             match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
                 Ok(response) => match response {
@@ -261,7 +241,7 @@ impl ServerConnection {
             }
         };
 
-        Ok(Operation::new(request_id, future, transport_sender, progress_rx))
+        Ok(Operation::new_sub(request_id, future, transport_sender))
     }
 
     async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
@@ -281,15 +261,16 @@ impl ServerConnection {
 }
 
 #[derive(Clone)]
-pub struct Client<T: ModelContextProtocolClient> {
+pub struct Client<T: ModelContextProtocolClient + Clone> {
     client: Arc<RwLock<T>>,
     connections: HashMap<String, ServerConnection>,
     io_handler: MetaIoHandler<ClientMetadata>,
     roots: Arc<RwLock<HashMap<String, Root>>>,
     pending_server_requests: PendingServerRequests,
+    pending_progress_requests: PendingProgressRequests,
 }
 
-impl<T: ModelContextProtocolClient> Client<T> {
+impl<T: ModelContextProtocolClient + Clone> Client<T> {
     pub async fn new(client: T) -> Result<Self, ClientError> {
         let client = Arc::new(RwLock::new(client));
         let server_configs = client.read().await.get_server_configs().await;
@@ -359,26 +340,29 @@ impl<T: ModelContextProtocolClient> Client<T> {
             });
         });
 
-        io_handler.add_notification_with_meta("notifications/progress", move |params: Params, meta: ClientMetadata| {
-            tokio::spawn(async move {
-                match params.parse::<ProgressNotificationParams>() {
-                    Ok(params) => {
-                        let total_info =
-                            params.total.map_or_else(|| String::from("unknown"), |total| format!("{}", total));
-                        info!(
-                            "[{}] Progress: {}/{} - {}",
-                            meta.conn_id,
-                            params.progress,
-                            total_info,
-                            params.message.unwrap_or_else(|| String::from(""))
-                        );
+        let pending_progress_requests = PendingProgressRequests::default();
+        let pending_progress_requests_clone = pending_progress_requests.clone();
+
+        io_handler.add_notification_with_meta(
+            "notifications/progress",
+            move |params: Params, _meta: ClientMetadata| {
+                let pending_progress_requests = pending_progress_requests_clone.clone();
+
+                tokio::spawn(async move {
+                    if let Ok(progress_params) = params.parse::<ProgressNotificationParams>() {
+                        let token = progress_params.progress_token.clone();
+
+                        let mut pending = pending_progress_requests.lock().await;
+                        // TODO: do not remove
+                        if let Some(sender) = pending.remove(&token) {
+                            let _ = sender.send(progress_params);
+                        }
+                    } else {
+                        error!("Failed to parse notifications/progress parameters");
                     }
-                    Err(e) => {
-                        error!("Failed to parse notifications/progress parameters: {}", e);
-                    }
-                }
-            });
-        });
+                });
+            },
+        );
 
         let pending_server_requests: Arc<Mutex<HashMap<(ConnectionId, MessageId), AbortHandle>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -448,6 +432,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             io_handler,
             roots: Arc::new(RwLock::new(HashMap::new())),
             pending_server_requests,
+            pending_progress_requests,
         };
 
         for config in server_configs {
@@ -456,6 +441,23 @@ impl<T: ModelContextProtocolClient> Client<T> {
         }
 
         Ok(client)
+    }
+
+    pub async fn register_progress_token(
+        &mut self,
+        track: bool,
+    ) -> Option<(String, oneshot::Receiver<ProgressNotificationParams>)> {
+        if track {
+            let token_value = uuid::Uuid::new_v4().to_string();
+            let (tx, rx) = oneshot::channel();
+
+            let mut pending_progress = self.pending_progress_requests.lock().await;
+            pending_progress.insert(token_value.clone().into(), tx);
+
+            Some((token_value, rx))
+        } else {
+            None
+        }
     }
 
     pub async fn add_server(&mut self, name: String, server_config: ServerConfig) -> Result<(), ClientError> {
@@ -619,7 +621,6 @@ impl<T: ModelContextProtocolClient> Client<T> {
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
             pending_requests,
-            pending_progress_requests: PendingProgressRequests::default(),
             conn_id,
         };
 
@@ -655,7 +656,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                 .request::<_, InitializeResult>(
                     "initialize".to_string(),
                     serde_json::to_value(params)?,
-                    false,
+                    None,
                     client.clone(),
                 )
                 .await
@@ -746,6 +747,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     .request::<_, ReadResourceResult>(
                         "resources/read".to_string(),
                         serde_json::to_value(params_clone.clone())?,
+                        None,
                         client.clone(),
                     )
                     .await
@@ -765,7 +767,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(anyhow::anyhow!("Unable to read resource from any server: {}", errors.join(", ")))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub async fn list_resource_templates(
@@ -805,7 +807,12 @@ impl<T: ModelContextProtocolClient> Client<T> {
 
             for (server_name, mut connection) in connections {
                 match connection
-                    .request::<_, serde_json::Value>("resources/subscribe".to_string(), params.clone(), client.clone())
+                    .request::<_, serde_json::Value>(
+                        "resources/subscribe".to_string(),
+                        params.clone(),
+                        None,
+                        client.clone(),
+                    )
                     .await
                 {
                     Ok(operation) => match operation.await {
@@ -823,7 +830,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(anyhow::anyhow!("Unable to subscribe resource {} on any server: {}", uri_clone, errors.join(", ")))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub async fn unsubscribe_resource(&mut self, uri: String) -> Result<Operation<()>, ClientError> {
@@ -844,6 +851,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     .request::<_, serde_json::Value>(
                         "resources/unsubscribe".to_string(),
                         params.clone(),
+                        None,
                         client.clone(),
                     )
                     .await
@@ -863,7 +871,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(anyhow::anyhow!("Unable to unsubscribe resource {} on any server: {}", uri_clone, errors.join(", ")))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub async fn list_prompts(
@@ -900,6 +908,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     .request::<_, GetPromptResult>(
                         "prompts/get".to_string(),
                         serde_json::to_value(params_clone.clone())?,
+                        None,
                         client.clone(),
                     )
                     .await
@@ -919,7 +928,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(anyhow::anyhow!("Unable to get prompt from any server: {}", errors.join(", ")))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub async fn list_tools(
@@ -936,7 +945,11 @@ impl<T: ModelContextProtocolClient> Client<T> {
         self.list_all_items::<ListToolsResult, ListToolsRequestParams>("tools/list", params).await
     }
 
-    pub async fn call_tool(&mut self, params: CallToolRequestParams) -> Result<Operation<CallToolResult>, ClientError> {
+    pub async fn call_tool(
+        &mut self,
+        params: CallToolRequestParams,
+        track: bool,
+    ) -> Result<Operation<CallToolResult>, ClientError> {
         if self.connections.is_empty() {
             return Err(ClientError::Request("No server connections available".into()));
         }
@@ -945,14 +958,21 @@ impl<T: ModelContextProtocolClient> Client<T> {
         let client = self.client.clone();
         let params_clone = params.clone();
 
+        let (progress_token, progress_rx) = match self.register_progress_token(track).await {
+            Some((token, rx)) => (Some(token), Some(rx)),
+            None => (None, None),
+        };
+
         let future = async move {
             let mut errors = Vec::new();
 
             for (server_name, mut connection) in connections {
+                let progress_token = progress_token.clone();
                 match connection
                     .request::<_, CallToolResult>(
                         "tools/call".to_string(),
                         serde_json::to_value(params_clone.clone())?,
+                        progress_token,
                         client.clone(),
                     )
                     .await
@@ -972,7 +992,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(anyhow::anyhow!("Unable to call tool on any server: {}", errors.join(", ")))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, progress_rx))
     }
 
     async fn complete(&mut self, params: CompleteRequestParams) -> Result<Operation<CompleteResult>, ClientError> {
@@ -1003,6 +1023,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     .request::<_, CompleteResult>(
                         "completion/complete".to_string(),
                         serde_json::to_value(params_clone.clone())?,
+                        None,
                         client.clone(),
                     )
                     .await
@@ -1029,7 +1050,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Err(anyhow::anyhow!("Unable to complete on any server: {}", errors.join(", ")))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub async fn complete_prompt(
@@ -1200,7 +1221,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                         .request::<_, R>(
                             endpoint.clone(),
                             serde_json::to_value(req_params)?,
-                            false,
+                            None,
                             client_clone.clone(),
                         )
                         .await
@@ -1245,7 +1266,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Ok(R::with_items_and_cursor(all_items, next_cursor, None))
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     async fn list_all_items<R, P>(
@@ -1258,20 +1279,13 @@ impl<T: ModelContextProtocolClient> Client<T> {
         P: ListRequestParams + Send + 'static,
     {
         let endpoint = endpoint.to_string();
-        let client = self.client.clone();
-        let connections = self.connections.clone();
         let params = params.clone();
+        let client = self.clone();
 
         let future = async move {
             let mut all_items = Vec::new();
             let mut next_cursor = None;
-            let mut client_instance = Client {
-                client,
-                connections,
-                io_handler: MetaIoHandler::default(),
-                roots: Arc::new(RwLock::new(HashMap::new())),
-                pending_server_requests: Arc::new(Mutex::new(HashMap::new())),
-            };
+            let mut client = client;
 
             loop {
                 let params_with_cursor = match params.clone() {
@@ -1279,7 +1293,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                     None => Some(P::default().with_cursor(next_cursor)),
                 };
 
-                let operation = client_instance.list_items::<R, P>(&endpoint, params_with_cursor).await?;
+                let operation = client.list_items::<R, P>(&endpoint, params_with_cursor).await?;
                 let result = operation.await?;
 
                 all_items.extend(result.get_items().to_vec());
@@ -1293,7 +1307,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             Ok(all_items)
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub fn iter_resources<'a>(
@@ -1356,6 +1370,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
                         .request::<_, serde_json::Value>(
                             "logging/setLevel".to_string(),
                             serde_json::to_value(params)?,
+                            None,
                             client.clone(),
                         )
                         .await
@@ -1381,7 +1396,7 @@ impl<T: ModelContextProtocolClient> Client<T> {
             }
         };
 
-        Ok(Operation::new_multiple(future))
+        Ok(Operation::new_multiple(future, None))
     }
 
     pub async fn cancel(&mut self, request_id: RequestId, reason: Option<String>) -> Result<(), ClientError> {
@@ -1453,7 +1468,7 @@ pub enum ClientError {
     SamplingRequestRejected,
 }
 
-impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
+impl<T: ModelContextProtocolClient + Clone> std::fmt::Debug for Client<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client").field("servers", &self.list_servers()).finish()
     }
@@ -1461,7 +1476,7 @@ impl<T: ModelContextProtocolClient> std::fmt::Debug for Client<T> {
 
 pub struct ItemsIterator<'a, T, R, P>
 where
-    T: ModelContextProtocolClient,
+    T: ModelContextProtocolClient + Clone,
     R: ListResult + DeserializeOwned + Send + 'static,
     P: ListRequestParams + Send + 'static,
 {
@@ -1475,7 +1490,7 @@ where
 
 impl<'a, T, R, P> ItemsIterator<'a, T, R, P>
 where
-    T: ModelContextProtocolClient,
+    T: ModelContextProtocolClient + Clone,
     R: ListResult + DeserializeOwned + Send + 'static,
     P: ListRequestParams + Send + 'static,
 {

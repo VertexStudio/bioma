@@ -10,17 +10,25 @@ use std::task::{Context, Poll};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone)]
 pub enum OperationType {
-    Single(RequestId, TransportSender),
-    Multiple,
+    Single {
+        request_id: RequestId,
+        transport_sender: TransportSender,
+        progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
+    },
+    Sub {
+        request_id: RequestId,
+        transport_sender: TransportSender,
+    },
+    Multiple {
+        progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
+    },
 }
 
 pub struct Operation<T> {
     operation_type: OperationType,
     future: Pin<Box<dyn Future<Output = Result<T, Error>> + Send>>,
     cancel_token: CancellationToken,
-    progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>,
 }
 
 impl<T> Operation<T> {
@@ -47,14 +55,13 @@ impl<T> Operation<T> {
         };
 
         Self {
-            operation_type: OperationType::Single(request_id, transport_sender),
+            operation_type: OperationType::Single { request_id, transport_sender, progress_rx },
             future: Box::pin(wrapped_future),
             cancel_token,
-            progress_rx,
         }
     }
 
-    pub fn new_multiple<F>(future: F) -> Self
+    pub fn new_sub<F>(request_id: RequestId, future: F, transport_sender: TransportSender) -> Self
     where
         F: Future<Output = Result<T, Error>> + Send + 'static,
     {
@@ -72,19 +79,39 @@ impl<T> Operation<T> {
         };
 
         Self {
-            operation_type: OperationType::Multiple,
+            operation_type: OperationType::Sub { request_id, transport_sender },
             future: Box::pin(wrapped_future),
             cancel_token,
-            progress_rx: None,
         }
+    }
+
+    pub fn new_multiple<F>(future: F, progress_rx: Option<oneshot::Receiver<ProgressNotificationParams>>) -> Self
+    where
+        F: Future<Output = Result<T, Error>> + Send + 'static,
+    {
+        let cancel_token = CancellationToken::new();
+
+        let token_clone = cancel_token.clone();
+
+        let wrapped_future = async move {
+            tokio::select! {
+                result = future => result,
+                _ = token_clone.cancelled() => {
+                    Err(anyhow::anyhow!("Operation cancelled"))
+                }
+            }
+        };
+
+        Self { operation_type: OperationType::Multiple { progress_rx }, future: Box::pin(wrapped_future), cancel_token }
     }
 
     pub async fn cancel(&self, reason: Option<String>) -> Result<(), Error> {
         self.cancel_token.cancel();
 
         match &self.operation_type {
-            OperationType::Multiple => Ok(()),
-            OperationType::Single(request_id, transport_sender) => {
+            OperationType::Multiple { .. } => Ok(()),
+            OperationType::Single { request_id, transport_sender, .. }
+            | OperationType::Sub { request_id, transport_sender } => {
                 let (conn_id, message_id) = request_id;
                 let id_value = match message_id {
                     MessageId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
@@ -115,7 +142,11 @@ impl<T> Operation<T> {
     }
 
     pub fn recv(&mut self) -> impl Stream<Item = ProgressNotificationParams> {
-        let progress_rx = self.progress_rx.take();
+        let progress_rx = match &mut self.operation_type {
+            OperationType::Single { progress_rx, .. } => progress_rx.take(),
+            OperationType::Multiple { progress_rx } => progress_rx.take(),
+            OperationType::Sub { .. } => None,
+        };
 
         futures::stream::unfold(progress_rx, |rx| async move {
             match rx {
