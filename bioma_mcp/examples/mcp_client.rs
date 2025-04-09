@@ -56,7 +56,7 @@ impl ModelContextProtocolClient for ExampleMcpClient {
     async fn on_create_message(
         &self,
         params: CreateMessageRequestParams,
-        _progress: Option<Progress>,
+        mut _progress: Progress,
     ) -> Result<CreateMessageResult, ClientError> {
         info!("Params: {:#?}", params);
 

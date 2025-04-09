@@ -140,7 +140,7 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
     fn on_create_message(
         &self,
         params: CreateMessageRequestParams,
-        progress: Option<Progress>,
+        progress: Progress,
     ) -> impl Future<Output = Result<CreateMessageResult, ClientError>> + Send;
 }
 
@@ -315,12 +315,12 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
 
                     let progress = if let Some(meta) = meta {
                         if let Some(token) = meta.progress_token.map(|token| token.into()) {
-                            Some(Progress::new(sender, conn_id.clone(), token))
+                            Progress::new(sender, conn_id.clone(), Some(token))
                         } else {
-                            None
+                            Progress::new(sender, conn_id.clone(), None)
                         }
                     } else {
-                        None
+                        Progress::new(sender, conn_id.clone(), None)
                     };
 
                     let result = client.read().await.on_create_message(params, progress).await;
@@ -1514,6 +1514,8 @@ pub enum ClientError {
     Request(Cow<'static, str>),
     #[error("Client rejected sampling request")]
     SamplingRequestRejected,
+    #[error(transparent)]
+    Anyhow(#[from] anyhow::Error),
 }
 
 impl<T: ModelContextProtocolClient + Clone> std::fmt::Debug for Client<T> {

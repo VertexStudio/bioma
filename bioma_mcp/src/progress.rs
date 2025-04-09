@@ -1,6 +1,7 @@
 use anyhow::Error;
 use bon::Builder;
 use jsonrpc_core::{Notification, Params, Version};
+use tracing::warn;
 
 use crate::schema::{ProgressNotificationParams, ProgressToken};
 use crate::transport::TransportSender;
@@ -10,14 +11,14 @@ use crate::ConnectionId;
 pub struct Progress {
     sender: TransportSender,
     conn_id: ConnectionId,
-    token: ProgressToken,
+    token: Option<ProgressToken>,
     progress: f64,
     total: Option<f64>,
     message: Option<String>,
 }
 
 impl Progress {
-    pub fn new(sender: TransportSender, conn_id: ConnectionId, token: ProgressToken) -> Self {
+    pub fn new(sender: TransportSender, conn_id: ConnectionId, token: Option<ProgressToken>) -> Self {
         Self { sender, conn_id, token, progress: 0.0, total: None, message: None }
     }
 
@@ -44,8 +45,16 @@ impl Progress {
     }
 
     pub async fn send(&mut self) -> Result<(), Error> {
+        let progress_token = match &self.token {
+            None => {
+                warn!("Progress token is not set, skipping notification");
+                return Ok(());
+            }
+            Some(token) => token.clone(),
+        };
+
         let params = ProgressNotificationParams {
-            progress_token: self.token.clone(),
+            progress_token,
             progress: self.progress,
             total: self.total,
             message: self.message.clone(),
