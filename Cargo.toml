@@ -113,7 +113,7 @@ regex = "1.11"
 #     "function-calling",
 #     "stream",
 # ] }
-ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "047bea58f3a6ee009c3948e676ec2321dcfa24a8", features = [
+ollama-rs = { git = "https://github.com/VertexStudio/ollama-rs.git", rev = "96c917c36f284ab074143a9c04cb6418baf7ed7f", features = [
     "stream",
     "utoipa",
 ] }
