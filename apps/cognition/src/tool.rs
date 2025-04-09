@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
 use bioma_mcp::client::{Client, ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
+use bioma_mcp::progress::Progress;
 use bioma_mcp::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequestParams, CreateMessageResult,
     Implementation, ListToolsRequestParams, ListToolsResult, Root,
@@ -300,7 +301,11 @@ impl ModelContextProtocolClient for McpBasicClient {
         vec![]
     }
 
-    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
+    async fn on_create_message(
+        &self,
+        _params: CreateMessageRequestParams,
+        _progress: Progress,
+    ) -> Result<CreateMessageResult, ClientError> {
         todo!()
     }
 }

@@ -1,5 +1,6 @@
 use crate::logging::McpLoggingLayer;
 use crate::operation::Operation;
+use crate::progress::Progress;
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -7,14 +8,14 @@ use crate::schema::{
     CreateMessageResult, GetPromptRequestParams, Implementation, InitializeRequestParams, InitializeResult,
     InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
     ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
-    ListToolsResult, PingRequestParams, ReadResourceRequestParams, ResourceUpdatedNotificationParams,
+    ListToolsResult, PingRequestParams, ProgressToken, ReadResourceRequestParams, ResourceUpdatedNotificationParams,
     ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId, RequestParams};
 
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
@@ -339,6 +340,15 @@ impl Context {
             .await
             .map_err(|e| ServerError::Transport(format!("Send: {}", e).into()))
     }
+
+    pub fn track(&self, request_context: RequestContext) -> Progress {
+        Progress::new(self.sender.clone(), self.conn_id.clone(), request_context.progress_token)
+    }
+}
+
+#[derive(Default)]
+pub struct RequestContext {
+    progress_token: Option<ProgressToken>,
 }
 
 pub struct Server<T: ModelContextProtocolServer> {
@@ -950,10 +960,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
                 debug!("Handling tools/call request");
 
                 async move {
-                    let params: CallToolRequestParams = params.parse().map_err(|e| {
+                    let params: RequestParams<CallToolRequestParams> = params.parse().map_err(|e| {
                         error!("Failed to parse tool call parameters: {}", e);
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?;
+
+                    let params_meta = params.meta;
+                    let params = params.params;
+                    let progress_token = params_meta.and_then(|meta| meta.progress_token);
+
+                    let request_context = RequestContext { progress_token };
 
                     let tool_reference = {
                         let sessions = sessions.read().await;
@@ -967,7 +983,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     match tool_reference {
                         Some(tool) => {
-                            let result = tool.call_boxed(params.arguments).await.map_err(|e| {
+                            let result = tool.call_boxed(params.arguments, request_context).await.map_err(|e| {
                                 error!("Tool execution failed: {}", e);
                                 jsonrpc_core::Error::internal_error()
                             })?;

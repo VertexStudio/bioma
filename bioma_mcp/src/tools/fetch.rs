@@ -1,4 +1,5 @@
 use crate::schema::{CallToolResult, TextContent};
+use crate::server::RequestContext;
 use crate::tools::{ToolDef, ToolError};
 use readability::ExtractOptions;
 use reqwest::header::CONTENT_TYPE;
@@ -40,7 +41,7 @@ impl ToolDef for Fetch {
     const DESCRIPTION: &'static str = "Fetches a URL from the internet and extracts its contents as markdown";
     type Args = FetchArgs;
 
-    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let url = Url::parse(&args.url);
         let url = match url {
             Ok(url) => url,
@@ -202,13 +203,13 @@ mod tests {
 
         let props = FetchArgs { url: format!("{}/test", server.url()), max_length: None, start_index: None, raw: None };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.is_error, Some(false));
 
         let props =
             FetchArgs { url: format!("{}/private/test", server.url()), max_length: None, start_index: None, raw: None };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.is_error, Some(true));
 
         robots_mock.remove_async().await;
@@ -231,7 +232,7 @@ mod tests {
         let props =
             FetchArgs { url: format!("{}/raw", server.url()), max_length: None, start_index: None, raw: Some(true) };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.is_error, Some(false));
         assert!(result.content[0].get("text").unwrap().as_str().unwrap().contains("<html><body>"));
 
@@ -259,7 +260,7 @@ mod tests {
             raw: Some(true),
         };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.content[0].get("text").unwrap().as_str().unwrap(), "12345");
 
         let props = FetchArgs {
@@ -269,7 +270,7 @@ mod tests {
             raw: Some(true),
         };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.content[0].get("text").unwrap().as_str().unwrap(), "67890");
 
         html_mock.remove_async().await;
@@ -285,12 +286,12 @@ mod tests {
         let props =
             FetchArgs { url: format!("{}/not-found", server.url()), max_length: None, start_index: None, raw: None };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.is_error, Some(true));
 
         let props = FetchArgs { url: "not-a-url".to_string(), max_length: None, start_index: None, raw: None };
 
-        let result = tool.call(props).await.unwrap();
+        let result = tool.call(props, RequestContext::default()).await.unwrap();
         assert_eq!(result.is_error, Some(true));
 
         not_found_mock.remove_async().await;
