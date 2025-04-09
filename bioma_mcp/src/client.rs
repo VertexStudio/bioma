@@ -148,16 +148,16 @@ type PendingClientRequests = Arc<Mutex<HashMap<RequestId, (ResponseSender, Optio
 type PendingServerRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
 #[derive(Clone)]
-struct ServerConnection {
-    transport: TransportType,
-    transport_sender: TransportSender,
+struct Context {
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
+    transport: TransportType,
     conn_id: ConnectionId,
+    sender: TransportSender,
     pending_requests: PendingClientRequests,
     request_counter: Arc<RwLock<u64>>,
 }
 
-impl ServerConnection {
+impl Context {
     async fn request<T: ModelContextProtocolClient, R: DeserializeOwned>(
         &mut self,
         method: String,
@@ -203,7 +203,7 @@ impl ServerConnection {
             pending.insert(request_id.clone(), (response_tx, progress_token));
         }
 
-        if let Err(e) = self.transport_sender.send(request.into(), conn_id.clone()).await {
+        if let Err(e) = self.sender.send(request.into(), conn_id.clone()).await {
             let mut pending = self.pending_requests.lock().await;
             pending.remove(&(conn_id, request_key));
             return Err(ClientError::Transport(format!("Send: {}", e).into()));
@@ -221,7 +221,7 @@ impl ServerConnection {
 
         let pending_requests = self.pending_requests.clone();
         let request_id_clone = request_id.clone();
-        let transport_sender = self.transport_sender.clone();
+        let sender = self.sender.clone();
 
         let future = async move {
             match tokio::time::timeout(std::time::Duration::from_secs(timeout), response_rx).await {
@@ -236,12 +236,13 @@ impl ServerConnection {
                 Err(_) => {
                     let mut pending = pending_requests.lock().await;
                     pending.remove(&request_id_clone);
+                    // TODO: Remove from pending_progress_requests; wanna see first if we can create a RequestManager struct to unify pending requests.
                     Err(anyhow::anyhow!("Request timed out"))
                 }
             }
         };
 
-        Ok(Operation::new_sub(request_id, future, transport_sender))
+        Ok(Operation::new_sub(request_id, future, sender))
     }
 
     async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {
@@ -253,7 +254,7 @@ impl ServerConnection {
 
         let conn_id = self.conn_id.clone();
 
-        self.transport_sender
+        self.sender
             .send(notification.into(), conn_id)
             .await
             .map_err(|e| ClientError::Transport(format!("Send: {}", e).into()))
@@ -263,11 +264,11 @@ impl ServerConnection {
 #[derive(Clone)]
 pub struct Client<T: ModelContextProtocolClient + Clone> {
     client: Arc<RwLock<T>>,
-    connections: HashMap<String, ServerConnection>,
+    connections: HashMap<String, Context>,
     io_handler: MetaIoHandler<ClientMetadata>,
     roots: Arc<RwLock<HashMap<String, Root>>>,
     pending_server_requests: PendingServerRequests,
-    // TODO: Might be better to have this in ServerConnection; for multi-progress tracking. Start thinking about a RequestManager struct to unify pending requests.
+    // TODO: Might be better to have this in Context; for multi-progress tracking. Start thinking about a RequestManager struct to unify pending requests.
     pending_progress_requests: PendingProgressRequests,
 }
 
@@ -494,10 +495,10 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
         };
 
         let conn_id = ConnectionId::new(Some(server_config.name.clone()));
-        let transport_sender = transport.sender();
+        let sender = transport.sender();
         let conn_id_clone = conn_id.clone();
 
-        let transport_sender_clone = transport_sender.clone();
+        let sender_clone = sender.clone();
         let io_handler_clone = self.io_handler.clone();
         let _start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
@@ -510,7 +511,7 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
         let _message_handler = tokio::spawn({
             let pending_requests = pending_requests_clone;
             let io_handler_clone = io_handler_clone;
-            let transport_sender_clone = transport_sender_clone;
+            let sender_clone = sender_clone;
             let conn_id_clone = conn_id_clone.clone();
             let pending_server_requests = pending_server_requests_clone;
             let pending_progress_requests = self.pending_progress_requests.clone();
@@ -566,7 +567,7 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                     Ok(request_key) => {
                                         let request_clone = request.clone();
                                         let io_handler_clone_inner = io_handler_clone.clone();
-                                        let transport_sender_clone_inner = transport_sender_clone.clone();
+                                        let sender_clone_inner = sender_clone.clone();
                                         let active_reqs = pending_server_requests.clone();
 
                                         let request_key_clone = request_key.clone();
@@ -582,7 +583,7 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                                     )
                                                     .await
                                                 {
-                                                    if let Err(e) = transport_sender_clone_inner
+                                                    if let Err(e) = sender_clone_inner
                                                         .send(response.into(), conn_id_for_closure.clone())
                                                         .await
                                                     {
@@ -629,9 +630,9 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
             }
         });
 
-        let server_connection = ServerConnection {
+        let server_connection = Context {
             transport,
-            transport_sender,
+            sender,
             server_capabilities: Arc::new(RwLock::new(None)),
             request_counter: Arc::new(RwLock::new(0)),
             pending_requests,
