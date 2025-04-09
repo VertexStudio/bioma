@@ -177,6 +177,14 @@ impl Args {
         // Sobrescribir valores de `engine_endpoint` si se proporciona
         if let Some(engine_endpoint) = &self.engine_endpoint {
             info!("Overriding engine endpoint: {}", engine_endpoint);
+            // If the endpoint starts with http or https, replace it for ws or wss
+            let engine_endpoint = if engine_endpoint.starts_with("http://") {
+                engine_endpoint.replace("http://", "ws://")
+            } else if engine_endpoint.starts_with("https://") {
+                engine_endpoint.replace("https://", "wss://")
+            } else {
+                engine_endpoint.clone()
+            };
             config.engine.endpoint = engine_endpoint.clone().into();
         }
 
