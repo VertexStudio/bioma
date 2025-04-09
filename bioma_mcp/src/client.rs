@@ -144,7 +144,7 @@ pub trait ModelContextProtocolClient: Send + Sync + 'static {
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ClientError>>;
 type ProgressSender = oneshot::Sender<ProgressNotificationParams>;
 type PendingProgressRequests = Arc<Mutex<HashMap<ProgressToken, ProgressSender>>>;
-type PendingClientRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+type PendingClientRequests = Arc<Mutex<HashMap<RequestId, (ResponseSender, Option<ProgressToken>)>>>;
 type PendingServerRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
 #[derive(Clone)]
@@ -162,7 +162,7 @@ impl ServerConnection {
         &mut self,
         method: String,
         params: serde_json::Value,
-        progress_token: Option<String>,
+        progress_token: Option<ProgressToken>,
         client: Arc<RwLock<T>>,
     ) -> Result<Operation<R>, ClientError> {
         let mut counter = self.request_counter.write().await;
@@ -177,8 +177,8 @@ impl ServerConnection {
 
         let mut params_value = params;
 
-        if let Some(token_value) = progress_token {
-            let meta = crate::schema::JsonrpcrequestParamsMeta { progress_token: Some(token_value.into()) };
+        if let Some(token_value) = progress_token.as_ref() {
+            let meta = crate::schema::JsonrpcrequestParamsMeta { progress_token: Some(token_value.clone().into()) };
             let rpc_params = crate::schema::JsonrpcrequestParams { meta: Some(meta) };
             let modified_params = crate::Params { params: params_value, rpc_params: Some(rpc_params) };
 
@@ -200,7 +200,7 @@ impl ServerConnection {
 
         {
             let mut pending = self.pending_requests.lock().await;
-            pending.insert((conn_id.clone(), request_key.clone()), response_tx);
+            pending.insert(request_id.clone(), (response_tx, progress_token));
         }
 
         if let Err(e) = self.transport_sender.send(request.into(), conn_id.clone()).await {
@@ -267,6 +267,7 @@ pub struct Client<T: ModelContextProtocolClient + Clone> {
     io_handler: MetaIoHandler<ClientMetadata>,
     roots: Arc<RwLock<HashMap<String, Root>>>,
     pending_server_requests: PendingServerRequests,
+    // TODO: Might be better to have this in ServerConnection; for multi-progress tracking. Start thinking about a RequestManager struct to unify pending requests.
     pending_progress_requests: PendingProgressRequests,
 }
 
@@ -446,9 +447,9 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
     pub async fn register_progress_token(
         &mut self,
         track: bool,
-    ) -> Option<(String, oneshot::Receiver<ProgressNotificationParams>)> {
+    ) -> Option<(ProgressToken, oneshot::Receiver<ProgressNotificationParams>)> {
         if track {
-            let token_value = uuid::Uuid::new_v4().to_string();
+            let token_value = ProgressToken::from(uuid::Uuid::new_v4().to_string());
             let (tx, rx) = oneshot::channel();
 
             let mut pending_progress = self.pending_progress_requests.lock().await;
@@ -501,7 +502,8 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
         let _start_handle =
             transport.start().await.map_err(|e| ClientError::Transport(format!("Start: {}", e).into()))?;
 
-        let pending_requests = Arc::new(Mutex::new(HashMap::<(ConnectionId, MessageId), ResponseSender>::new()));
+        let pending_requests =
+            Arc::new(Mutex::new(HashMap::<(ConnectionId, MessageId), (ResponseSender, Option<ProgressToken>)>::new()));
         let pending_requests_clone = pending_requests.clone();
         let pending_server_requests_clone = self.pending_server_requests.clone();
 
@@ -511,7 +513,7 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
             let transport_sender_clone = transport_sender_clone;
             let conn_id_clone = conn_id_clone.clone();
             let pending_server_requests = pending_server_requests_clone;
-
+            let pending_progress_requests = self.pending_progress_requests.clone();
             async move {
                 while let Some(message) = on_message_rx.recv().await {
                     match &message {
@@ -522,8 +524,14 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                         let mut requests = pending_requests.lock().await;
                                         if let Ok(key) = MessageId::try_from(&success.id) {
                                             let conn_id_for_key = conn_id_clone.clone();
-                                            if let Some(sender) = requests.remove(&(conn_id_for_key, key)) {
+                                            if let Some((sender, progress_token)) =
+                                                requests.remove(&(conn_id_for_key, key))
+                                            {
                                                 let _ = sender.send(Ok(success.result.clone()));
+                                                if let Some(progress_token) = progress_token {
+                                                    let _ =
+                                                        pending_progress_requests.lock().await.remove(&progress_token);
+                                                }
                                             }
                                         }
                                     }
@@ -533,10 +541,16 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                         let mut requests = pending_requests.lock().await;
                                         if let Ok(key) = MessageId::try_from(&failure.id) {
                                             let conn_id_for_key = conn_id_clone.clone();
-                                            if let Some(sender) = requests.remove(&(conn_id_for_key, key)) {
+                                            if let Some((sender, progress_token)) =
+                                                requests.remove(&(conn_id_for_key, key))
+                                            {
                                                 let _ = sender.send(Err(ClientError::Request(
                                                     format!("RPC error: {:?}", failure.error).into(),
                                                 )));
+                                                if let Some(progress_token) = progress_token {
+                                                    let _ =
+                                                        pending_progress_requests.lock().await.remove(&progress_token);
+                                                }
                                             }
                                         }
                                     }

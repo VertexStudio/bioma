@@ -282,6 +282,7 @@ impl ModelContextProtocolClientActor {
     }
 }
 
+#[derive(Clone)]
 pub struct McpBasicClient {
     servers: Vec<ServerConfig>,
 }
@@ -383,7 +384,7 @@ impl Message<CallTool> for ModelContextProtocolClientActor {
     ) -> Result<(), ModelContextProtocolClientError> {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
-        let response = client.call_tool(message.0.clone()).await?.await?;
+        let response = client.call_tool(message.0.clone(), false).await?.await?;
         ctx.reply(response).await?;
         Ok(())
     }
