@@ -16,19 +16,6 @@
       "transport": "stdio",
       "command": "target/release/examples/mcp_server",
       "args": ["--log-file", ".output/mcp_server-bioma.log", "stdio"]
-    },
-    {
-      "name": "mysql-server",
-      "transport": "stdio",
-      "command": "mcp-server-mysql",
-      "args": [],
-      "env": {
-        "MYSQL_HOST": "127.0.0.1",
-        "MYSQL_PORT": "3306",
-        "MYSQL_USER": "root",
-        "MYSQL_PASSWORD": "root",
-        "MYSQL_DB": "your_database"
-      }
     }
   ]
 }
