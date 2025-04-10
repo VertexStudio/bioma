@@ -161,13 +161,7 @@ impl Context {
         progress: Option<(ProgressToken, mpsc::Sender<ProgressNotificationParams>)>,
         client: Arc<RwLock<T>>,
     ) -> Result<Operation<R>, ClientError> {
-        let track_progress = progress.is_some();
-        let (request_id, jsonrpc_id, response_rx, progress_rx) = match &progress {
-            Some((token, sender)) => {
-                self.request_manager.create_request_with_token(token.clone(), sender.clone()).await
-            }
-            None => self.request_manager.create_request(track_progress).await,
-        };
+        let (request_id, jsonrpc_id, response_rx) = self.request_manager.create_subrequest(progress.clone()).await;
 
         let progress_token = progress.as_ref().map(|(token, _)| token.clone());
         let params_with_token = self
@@ -214,7 +208,7 @@ impl Context {
             }
         };
 
-        Ok(Operation::new(request_id, future, self.sender.clone(), progress_rx))
+        Ok(Operation::new_sub(request_id, future, self.sender.clone()))
     }
 
     async fn notify(&mut self, method: String, params: serde_json::Value) -> Result<(), ClientError> {

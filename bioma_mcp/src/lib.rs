@@ -104,9 +104,50 @@ where
         }
     }
 
-    async fn create_request_internal(
+    pub async fn create_request(
         &self,
-        progress_token: Option<ProgressToken>,
+        track_progress: bool,
+    ) -> (
+        RequestId,
+        jsonrpc_core::Id,
+        oneshot::Receiver<Result<serde_json::Value, E>>,
+        Option<mpsc::Receiver<ProgressNotificationParams>>,
+    ) {
+        let id = {
+            let mut counter = self.counter.write().await;
+            *counter += 1;
+            *counter
+        };
+
+        let jsonrpc_id = jsonrpc_core::Id::Num(id);
+        let message_id = MessageId::Num(id);
+        let request_id = (self.conn_id.clone(), message_id);
+
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let (progress_token, progress_receiver) = if track_progress {
+            let token = ProgressToken::from(uuid::Uuid::new_v4().to_string());
+            let (tx, rx) = mpsc::channel::<ProgressNotificationParams>(32);
+
+            let mut progress_trackers = self.progress_trackers.lock().await;
+            progress_trackers.insert(token.clone(), tx);
+
+            (Some(token), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        let pending_request = PendingRequest { response_sender: response_tx, progress_token };
+
+        let mut pending_requests = self.pending_requests.lock().await;
+        pending_requests.insert(request_id.clone(), pending_request);
+
+        (request_id, jsonrpc_id, response_rx, progress_receiver)
+    }
+
+    pub async fn create_subrequest(
+        &self,
+        progress: Option<(ProgressToken, mpsc::Sender<ProgressNotificationParams>)>,
     ) -> (RequestId, jsonrpc_core::Id, oneshot::Receiver<Result<serde_json::Value, E>>) {
         let id = {
             let mut counter = self.counter.write().await;
@@ -120,58 +161,20 @@ where
 
         let (response_tx, response_rx) = oneshot::channel();
 
+        let progress_token = if let Some((token, sender)) = progress {
+            let mut progress_trackers = self.progress_trackers.lock().await;
+            progress_trackers.insert(token.clone(), sender);
+            Some(token)
+        } else {
+            None
+        };
+
         let pending_request = PendingRequest { response_sender: response_tx, progress_token };
 
         let mut pending_requests = self.pending_requests.lock().await;
         pending_requests.insert(request_id.clone(), pending_request);
 
         (request_id, jsonrpc_id, response_rx)
-    }
-
-    pub async fn create_request(
-        &self,
-        track_progress: bool,
-    ) -> (
-        RequestId,
-        jsonrpc_core::Id,
-        oneshot::Receiver<Result<serde_json::Value, E>>,
-        Option<mpsc::Receiver<ProgressNotificationParams>>,
-    ) {
-        let (progress_token, progress_receiver) = if track_progress {
-            let token = ProgressToken::from(uuid::Uuid::new_v4().to_string());
-            let (tx, rx) = mpsc::channel::<ProgressNotificationParams>(32);
-
-            let mut progress_trackers = self.progress_trackers.lock().await;
-            progress_trackers.insert(token.clone(), tx);
-
-            (Some(token), Some(rx))
-        } else {
-            (None, None)
-        };
-
-        let (request_id, jsonrpc_id, response_rx) = self.create_request_internal(progress_token).await;
-
-        (request_id, jsonrpc_id, response_rx, progress_receiver)
-    }
-
-    pub async fn create_request_with_token(
-        &self,
-        token: ProgressToken,
-        sender: mpsc::Sender<ProgressNotificationParams>,
-    ) -> (
-        RequestId,
-        jsonrpc_core::Id,
-        oneshot::Receiver<Result<serde_json::Value, E>>,
-        Option<mpsc::Receiver<ProgressNotificationParams>>,
-    ) {
-        {
-            let mut progress_trackers = self.progress_trackers.lock().await;
-            progress_trackers.insert(token.clone(), sender);
-        }
-
-        let (request_id, jsonrpc_id, response_rx) = self.create_request_internal(Some(token)).await;
-
-        (request_id, jsonrpc_id, response_rx, None)
     }
 
     pub async fn complete_request(&self, request_id: &RequestId, result: Result<serde_json::Value, E>) -> bool {
