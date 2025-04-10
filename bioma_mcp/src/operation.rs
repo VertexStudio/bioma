@@ -112,7 +112,7 @@ impl<T> Operation<T> {
             | OperationType::Sub { request_id, transport_sender, .. } => {
                 let (conn_id, message_id) = request_id;
                 let id_value = match message_id {
-                    MessageId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n as u64)),
+                    MessageId::Num(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
                     MessageId::Str(s) => serde_json::Value::String(s.clone()),
                 };
 
