@@ -199,7 +199,7 @@ where
         let progress_trackers = self.progress_trackers.lock().await;
 
         if let Some(sender) = progress_trackers.get(&token) {
-            let send_result = sender.send(params).await;
+            let _ = sender.send(params).await;
         } else {
         }
     }
