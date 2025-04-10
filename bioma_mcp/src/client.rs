@@ -414,11 +414,11 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
 
     pub async fn register_progress_token(
         &mut self,
-    ) -> (ProgressToken, mpsc::Sender<ProgressNotificationParams>, mpsc::Receiver<ProgressNotificationParams>) {
+    ) -> ((ProgressToken, mpsc::Sender<ProgressNotificationParams>), mpsc::Receiver<ProgressNotificationParams>) {
         let token_value = ProgressToken::from(uuid::Uuid::new_v4().to_string());
         let (tx, rx) = mpsc::channel::<ProgressNotificationParams>(128);
 
-        (token_value, tx, rx)
+        ((token_value, tx), rx)
     }
 
     pub async fn add_server(&mut self, name: String, server_config: ServerConfig) -> Result<(), ClientError> {
@@ -916,27 +916,22 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
         let client = self.client.clone();
         let params_clone = params.clone();
 
-        let (progress_token, progress_rx, progress_sender) = if track {
-            let (token, tx, rx) = self.register_progress_token().await;
-            (Some(token), Some(rx), Some(tx))
+        let (progress_pair, progress_rx) = if track {
+            let (pair, rx) = self.register_progress_token().await;
+            (Some(pair), Some(rx))
         } else {
-            (None, None, None)
+            (None, None)
         };
 
         let future = async move {
             let mut errors = Vec::new();
 
             for (server_name, mut connection) in connections {
-                let progress_pair = match (&progress_token, &progress_sender) {
-                    (Some(token), Some(sender)) => Some((token.clone(), sender.clone())),
-                    _ => None,
-                };
-
                 match connection
                     .request::<_, CallToolResult>(
                         "tools/call".to_string(),
                         serde_json::to_value(params_clone.clone())?,
-                        progress_pair,
+                        progress_pair.clone(),
                         client.clone(),
                     )
                     .await
