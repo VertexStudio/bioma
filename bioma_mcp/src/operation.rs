@@ -141,14 +141,14 @@ impl<T> Operation<T> {
         self.cancel_token.is_cancelled()
     }
 
-    pub fn recv(&mut self) -> impl Stream<Item = ProgressNotificationParams> {
+    pub fn recv(&mut self) -> Pin<Box<dyn Stream<Item = ProgressNotificationParams> + Send>> {
         let progress_rx = match &mut self.operation_type {
             OperationType::Single { progress_rx, .. } => progress_rx.take(),
             OperationType::Multiple { progress_rx } => progress_rx.take(),
             OperationType::Sub { .. } => None,
         };
 
-        futures::stream::unfold(progress_rx, |rx| async move {
+        Box::pin(futures::stream::unfold(progress_rx, |rx| async move {
             match rx {
                 Some(mut receiver) => match receiver.recv().await {
                     Some(notification) => Some((notification, Some(receiver))),
@@ -156,7 +156,7 @@ impl<T> Operation<T> {
                 },
                 None => None,
             }
-        })
+        }))
     }
 }
 

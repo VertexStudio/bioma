@@ -8,6 +8,7 @@ use bioma_mcp::{
     },
 };
 use clap::Parser;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{error, info};
@@ -56,11 +57,13 @@ impl ModelContextProtocolClient for ExampleMcpClient {
     async fn on_create_message(
         &self,
         params: CreateMessageRequestParams,
-        mut _progress: Progress,
+        mut progress: Progress,
     ) -> Result<CreateMessageResult, ClientError> {
         info!("Params: {:#?}", params);
 
         info!("Acceping sampling request..."); // In a real implementation, client should the capability to accept or decline the request
+
+        progress.update_to(0.1, Some("Starting sampling actor...".to_string())).await?;
 
         info!("Starting sampling actor...");
 
@@ -82,6 +85,8 @@ impl ModelContextProtocolClient for ExampleMcpClient {
 
         let body = OllamaRequest { model: "llama3.2".to_string(), messages: params.messages, stream: false };
 
+        progress.update_to(0.5, Some("Sending request to LLM...".to_string())).await?;
+
         let client = reqwest::Client::new();
         let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
 
@@ -89,6 +94,8 @@ impl ModelContextProtocolClient for ExampleMcpClient {
             Ok(res) => res.text().await.unwrap(),
             Err(_) => "Error while sending request".to_string(),
         };
+
+        progress.update_to(1.0, Some("Sampling completed".to_string())).await?;
 
         Ok(CreateMessageResult {
             meta: None,
@@ -319,11 +326,21 @@ async fn main() -> Result<()> {
         arguments: serde_json::from_value(sampling_args).map_err(|e| ClientError::JsonError(e))?,
     };
 
-    let sampling_result = client.call_tool(sampling_call, true).await?;
+    let mut sampling_operation = client.call_tool(sampling_call, true).await?;
 
-    sampling_result.cancel(Some("test".to_string())).await?;
+    let mut sampling_operation_progress = sampling_operation.recv();
 
-    match sampling_result.await {
+    tokio::spawn(async move {
+        while let Some(progress) = sampling_operation_progress.next().await {
+            info!("Progress: {:#?}", progress);
+        }
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    sampling_operation.cancel(Some("test".to_string())).await?;
+
+    match sampling_operation.await {
         Ok(result) => info!("Sampling response: {:#?}", result),
         Err(e) => error!("Error getting sampling response: {:?}", e),
     }

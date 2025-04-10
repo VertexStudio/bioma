@@ -3,6 +3,7 @@ use crate::{
     server::{Context, RequestContext},
     tools::{ToolDef, ToolError},
 };
+use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -73,17 +74,25 @@ impl ToolDef for Sampling {
 
         progress.update_to(0.6, Some("Sending request to LLM...".to_string())).await?;
 
-        let operation = self.context.create_message(params).await?;
+        let mut operation = self.context.create_message(params, true).await?;
+
+        let mut operation_progress = operation.recv();
+
+        tokio::spawn(async move {
+            while let Some(progress) = operation_progress.next().await {
+                tracing::info!("Progress: {:#?}", progress);
+            }
+        });
 
         progress.update_to(0.8, Some("Waiting for response from LLM...".to_string())).await?;
 
         match operation.await {
             Ok(message_result) => {
-                progress.update_to(1.0, Some(format!("Sampling result: {:#?}", message_result.clone()))).await?;
+                progress.update_to(1.0, Some("Sampling completed".to_string())).await?;
                 Ok(Self::success(format!("Sampling result: {:#?}", message_result)))
             }
             Err(e) => {
-                progress.update_to(1.0, Some(format!("Failed to sample: {}", e))).await?;
+                progress.update_to(1.0, Some("Sampling failed".to_string())).await?;
                 Ok(Self::error(format!("Failed to sample: {}", e)))
             }
         }

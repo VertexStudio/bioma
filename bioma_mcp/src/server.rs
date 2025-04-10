@@ -8,8 +8,8 @@ use crate::schema::{
     CreateMessageResult, GetPromptRequestParams, Implementation, InitializeRequestParams, InitializeResult,
     InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
     ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
-    ListToolsResult, PingRequestParams, ProgressToken, ReadResourceRequestParams, ResourceUpdatedNotificationParams,
-    ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
+    ListToolsResult, PingRequestParams, ProgressNotificationParams, ProgressToken, ReadResourceRequestParams,
+    ResourceUpdatedNotificationParams, ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
@@ -30,6 +30,7 @@ use tokio::task::AbortHandle;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{Layer, Registry};
+use uuid;
 
 #[derive(Clone)]
 pub struct ServerMetadata {
@@ -222,8 +223,10 @@ impl Session {
 
 type ResponseSender = oneshot::Sender<Result<serde_json::Value, ServerError>>;
 type RequestCounter = Arc<RwLock<u64>>;
-type PendingServerRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
+type PendingServerRequests = Arc<Mutex<HashMap<RequestId, (ResponseSender, Option<ProgressToken>)>>>;
 type PendingClientRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
+type ProgressSender = mpsc::Sender<ProgressNotificationParams>;
+type PendingProgressRequests = Arc<Mutex<HashMap<ProgressToken, ProgressSender>>>;
 
 #[derive(Clone)]
 pub struct Context {
@@ -232,6 +235,7 @@ pub struct Context {
     conn_id: ConnectionId,
     sender: TransportSender,
     pending_requests: PendingServerRequests,
+    pending_progress_requests: PendingProgressRequests,
     request_counter: RequestCounter,
     pagination: Option<Pagination>,
 }
@@ -244,6 +248,7 @@ impl Context {
             conn_id: ConnectionId::new(None),
             sender: TransportSender::new_nop(),
             pending_requests: PendingServerRequests::default(),
+            pending_progress_requests: PendingProgressRequests::default(),
             request_counter: RequestCounter::default(),
             pagination: None,
         }
@@ -252,9 +257,10 @@ impl Context {
     pub async fn create_message(
         &self,
         params: CreateMessageRequestParams,
+        track: bool,
     ) -> Result<Operation<CreateMessageResult>, ServerError> {
         let params = serde_json::to_value(params).unwrap_or_default();
-        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(10)).await
+        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(20), track).await
     }
 
     pub async fn resource_updated(&self, params: ResourceUpdatedNotificationParams) -> Result<(), ServerError> {
@@ -268,18 +274,44 @@ impl Context {
         method: String,
         params: serde_json::Value,
         timeout: std::time::Duration,
+        track: bool,
     ) -> Result<Operation<T>, ServerError>
     where
         T: DeserializeOwned + Send + 'static,
     {
-        let mut counter = self.request_counter.write().await;
-        *counter += 1;
-        let id = *counter;
+        let id = {
+            let mut counter = self.request_counter.write().await;
+            *counter += 1;
+            *counter
+        };
+
+        let mut token: Option<serde_json::Value> = None;
+        let mut progress_rx: Option<mpsc::Receiver<ProgressNotificationParams>> = None;
+
+        if track {
+            let uuid_token = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
+            let (p_tx, p_rx) = mpsc::channel::<ProgressNotificationParams>(32);
+
+            token = Some(uuid_token.clone());
+            progress_rx = Some(p_rx);
+
+            let mut pending_progress = self.pending_progress_requests.lock().await;
+            pending_progress.insert(uuid_token, p_tx);
+        }
+
+        let params_with_token = if let Some(ref token_value) = token {
+            let meta = crate::RequestParamsMeta { progress_token: Some(token_value.clone()) };
+            let modified_params = crate::RequestParams { meta: Some(meta), params: params.clone() };
+
+            serde_json::to_value(modified_params).unwrap_or_else(|_| params.clone())
+        } else {
+            params
+        };
 
         let request = jsonrpc_core::MethodCall {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
-            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
+            params: jsonrpc_core::Params::Map(params_with_token.as_object().cloned().unwrap_or_default()),
             id: jsonrpc_core::Id::Num(id),
         };
 
@@ -290,40 +322,52 @@ impl Context {
         let request_id = (self.conn_id.clone(), request_key.clone());
 
         let (response_tx, response_rx) = oneshot::channel();
+
         {
             let mut pending = self.pending_requests.lock().await;
-            pending.insert(request_id.clone(), response_tx);
+            pending.insert(request_id.clone(), (response_tx, token.clone()));
         }
 
-        let conn_id = self.conn_id.clone();
-        if let Err(e) = self.sender.send(request.into(), conn_id.clone()).await {
+        if let Err(e) = self.sender.send(request.into(), self.conn_id.clone()).await {
             let mut pending = self.pending_requests.lock().await;
-            pending.remove(&(conn_id, request_key));
-            return Err(ServerError::Transport(format!("Send: {}", e).into()));
+            pending.remove(&request_id);
+
+            if let Some(ref t) = token {
+                let mut pending_progress = self.pending_progress_requests.lock().await;
+                pending_progress.remove(t);
+            }
+            return Err(ServerError::Transport(format!("Send: {}", e)));
         }
 
-        let pending_requests = self.pending_requests.clone();
+        let pending_requests_clone = self.pending_requests.clone();
+        let pending_progress_requests_clone = self.pending_progress_requests.clone();
         let request_id_clone = request_id.clone();
+        let token_clone = token.clone();
 
         let future = async move {
             match tokio::time::timeout(timeout, response_rx).await {
-                Ok(response) => match response {
-                    Ok(result) => match result {
-                        Ok(json_value) => serde_json::from_value(json_value)
-                            .map_err(|e| anyhow::anyhow!("JSON deserialization error: {}", e)),
-                        Err(server_error) => Err(anyhow::anyhow!("Server error: {}", server_error)),
-                    },
-                    Err(_) => Err(anyhow::anyhow!("Response channel closed")),
-                },
                 Err(_) => {
-                    let mut pending = pending_requests.lock().await;
+                    let mut pending = pending_requests_clone.lock().await;
                     pending.remove(&request_id_clone);
+
+                    if let Some(ref t) = token_clone {
+                        let mut pending_progress = pending_progress_requests_clone.lock().await;
+                        pending_progress.remove(t);
+                    }
                     Err(anyhow::anyhow!("Request timed out"))
                 }
+                Ok(response_result) => match response_result {
+                    Err(_) => Err(anyhow::anyhow!("Response channel closed")),
+                    Ok(result) => match result {
+                        Err(server_error) => Err(anyhow::anyhow!("Server error: {}", server_error)),
+                        Ok(json_value) => serde_json::from_value(json_value)
+                            .map_err(|e| anyhow::anyhow!("JSON deserialization error: {}", e)),
+                    },
+                },
             }
         };
 
-        Ok(Operation::new(request_id, future, self.sender.clone(), None))
+        Ok(Operation::new(request_id, future, self.sender.clone(), progress_rx))
     }
 
     pub async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ServerError> {
@@ -425,17 +469,21 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
         self.setup_tracing(logging_enabled, logging_layer.clone()).await;
 
+        let pending_progress_requests = Arc::new(Mutex::new(HashMap::<ProgressToken, ProgressSender>::new()));
+
         io_handler.add_method_with_meta("initialize", {
             let server = self.server.clone();
             let sessions = self.sessions.clone();
             let transport_sender = transport_sender.clone();
             let pending_requests = self.pending_requests.clone();
+            let pending_progress_requests = pending_progress_requests.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let server = server.clone();
                 let sessions = sessions.clone();
                 let transport_sender = transport_sender.clone();
                 let pending_requests = pending_requests.clone();
+                let pending_progress_requests = pending_progress_requests.clone();
 
                 debug!("Handling initialize request");
 
@@ -467,6 +515,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         client_capabilities: init_params.capabilities.clone(),
                         server_capabilities: capabilities.clone(),
                         pending_requests: pending_requests.clone(),
+                        pending_progress_requests: pending_progress_requests,
                         request_counter: RequestCounter::default(),
                         pagination,
                     };
@@ -593,6 +642,41 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         error!("Failed to parse cancellation params (sync): {}", e);
                     }
                 }
+            }
+        });
+
+        io_handler.add_notification_with_meta("notifications/progress", {
+            let pending_progress_requests = pending_progress_requests.clone();
+
+            move |params: Params, _meta: ServerMetadata| {
+                let pending_progress = pending_progress_requests.clone();
+
+                tokio::spawn(async move {
+                    match params.parse::<ProgressNotificationParams>() {
+                        Ok(progress_params) => {
+                            debug!(
+                                "Received progress notification: progress: {}, total: {:?}",
+                                progress_params.progress, progress_params.total
+                            );
+
+                            let token = progress_params.progress_token.clone();
+                            let pending = pending_progress.lock().await;
+
+                            if let Some(sender) = pending.get(&token) {
+                                if let Err(e) = sender.send(progress_params.clone()).await {
+                                    error!("Failed to forward progress notification: {:?}", e);
+                                } else {
+                                    debug!("Successfully forwarded progress notification");
+                                }
+                            } else {
+                                debug!("No pending request found for progress token");
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to parse progress notification params: {:?}", e);
+                        }
+                    }
+                });
             }
         });
 
@@ -1136,12 +1220,14 @@ impl<T: ModelContextProtocolServer> Server<T> {
         }
 
         let pending_requests = self.pending_requests.clone();
+        let pending_progress_requests = Arc::new(Mutex::new(HashMap::<ProgressToken, ProgressSender>::new()));
 
         while let Some(message) = on_client_rx.recv().await {
             let io_handler_clone = io_handler.clone();
             let transport_sender_clone = transport_sender.clone();
-            let pending_requests = pending_requests.clone();
+            let pending_requests_clone = pending_requests.clone();
             let pending_client_requests_clone = self.pending_client_requests.clone();
+            let pending_progress_requests_clone = pending_progress_requests.clone();
 
             tokio::spawn(async move {
                 match &message.message {
@@ -1211,10 +1297,15 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                         return;
                                     }
                                 };
-                                let mut requests = pending_requests.lock().await;
+                                let mut requests = pending_requests_clone.lock().await;
                                 let request_id = (message.conn_id.clone(), request_key);
-                                if let Some(sender) = requests.remove(&request_id) {
+                                if let Some((sender, progress_token)) = requests.remove(&request_id) {
                                     let _ = sender.send(Ok(success.result.clone()));
+
+                                    if let Some(token) = progress_token {
+                                        let mut pending_progress = pending_progress_requests_clone.lock().await;
+                                        pending_progress.remove(&token);
+                                    }
                                 }
                             }
                             jsonrpc_core::Output::Failure(failure) => {
@@ -1225,11 +1316,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                         return;
                                     }
                                 };
-                                let mut requests = pending_requests.lock().await;
+                                let mut requests = pending_requests_clone.lock().await;
                                 let request_id = (message.conn_id.clone(), request_key);
-                                if let Some(sender) = requests.remove(&request_id) {
+                                if let Some((sender, progress_token)) = requests.remove(&request_id) {
                                     let _ = sender
                                         .send(Err(ServerError::Request(format!("RPC error: {:?}", failure.error))));
+
+                                    if let Some(token) = progress_token {
+                                        let mut pending_progress = pending_progress_requests_clone.lock().await;
+                                        pending_progress.remove(&token);
+                                    }
                                 }
                             }
                         },
