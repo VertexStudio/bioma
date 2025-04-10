@@ -1263,8 +1263,53 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                 }
                             }
                         },
-                        jsonrpc_core::Response::Batch(_) => {
-                            warn!("Unsupported batch response");
+                        jsonrpc_core::Response::Batch(outputs) => {
+                            debug!("Processing batch response with {} outputs", outputs.len());
+                            for output in outputs {
+                                match output {
+                                    jsonrpc_core::Output::Success(success) => {
+                                        let request_key = match MessageId::try_from(&success.id) {
+                                            Ok(key) => key,
+                                            Err(e) => {
+                                                error!("Invalid request ID: {}", e);
+                                                continue;
+                                            }
+                                        };
+
+                                        let request_id = (message.conn_id.clone(), request_key);
+
+                                        let sessions = sessions_clone.read().await;
+                                        if let Some(session) = sessions.get(&message.conn_id) {
+                                            session
+                                                .context
+                                                .request_manager
+                                                .complete_request(&request_id, Ok(success.result.clone()))
+                                                .await;
+                                        }
+                                    }
+                                    jsonrpc_core::Output::Failure(failure) => {
+                                        let request_key = match MessageId::try_from(&failure.id) {
+                                            Ok(key) => key,
+                                            Err(e) => {
+                                                error!("Invalid request ID: {}", e);
+                                                continue;
+                                            }
+                                        };
+
+                                        let request_id = (message.conn_id.clone(), request_key);
+
+                                        let sessions = sessions_clone.read().await;
+                                        if let Some(session) = sessions.get(&message.conn_id) {
+                                            let err = ServerError::Request(format!("RPC error: {:?}", failure.error));
+                                            session
+                                                .context
+                                                .request_manager
+                                                .complete_request(&request_id, Err(err))
+                                                .await;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     },
                 }

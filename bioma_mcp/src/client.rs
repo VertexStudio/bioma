@@ -510,8 +510,35 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                                     }
                                 }
                             },
-                            jsonrpc_core::Response::Batch(_) => {
-                                warn!("Unsupported batch response");
+                            jsonrpc_core::Response::Batch(outputs) => {
+                                debug!("Processing batch response with {} outputs", outputs.len());
+                                for output in outputs {
+                                    match output {
+                                        jsonrpc_core::Output::Success(success) => {
+                                            if let Ok(key) = MessageId::try_from(&success.id) {
+                                                let request_id = (conn_id.clone(), key);
+                                                let _ = context
+                                                    .request_manager
+                                                    .complete_request(&request_id, Ok(success.result.clone()))
+                                                    .await;
+                                            }
+                                        }
+                                        jsonrpc_core::Output::Failure(failure) => {
+                                            if let Ok(key) = MessageId::try_from(&failure.id) {
+                                                let request_id = (conn_id.clone(), key);
+                                                let _ = context
+                                                    .request_manager
+                                                    .complete_request(
+                                                        &request_id,
+                                                        Err(ClientError::Request(
+                                                            format!("RPC error: {:?}", failure.error).into(),
+                                                        )),
+                                                    )
+                                                    .await;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         },
                         JsonRpcMessage::Request(request) => match request {
