@@ -79,7 +79,7 @@ pub struct RequestParams<T> {
 }
 
 #[derive(Clone)]
-pub struct OutgoingRequestManager<E> {
+pub struct OutgoingRequest<E> {
     counter: Arc<RwLock<u64>>,
     conn_id: ConnectionId,
     pending_requests: Arc<Mutex<HashMap<RequestId, PendingRequest<E>>>>,
@@ -91,7 +91,7 @@ struct PendingRequest<E> {
     progress_token: Option<ProgressToken>,
 }
 
-impl<E> OutgoingRequestManager<E>
+impl<E> OutgoingRequest<E>
 where
     E: Send + 'static,
 {
@@ -104,15 +104,10 @@ where
         }
     }
 
-    pub async fn create_request(
+    async fn create_request_internal(
         &self,
-        track_progress: bool,
-    ) -> (
-        RequestId,
-        jsonrpc_core::Id,
-        oneshot::Receiver<Result<serde_json::Value, E>>,
-        Option<mpsc::Receiver<ProgressNotificationParams>>,
-    ) {
+        progress_token: Option<ProgressToken>,
+    ) -> (RequestId, jsonrpc_core::Id, oneshot::Receiver<Result<serde_json::Value, E>>) {
         let id = {
             let mut counter = self.counter.write().await;
             *counter += 1;
@@ -125,6 +120,23 @@ where
 
         let (response_tx, response_rx) = oneshot::channel();
 
+        let pending_request = PendingRequest { response_sender: response_tx, progress_token };
+
+        let mut pending_requests = self.pending_requests.lock().await;
+        pending_requests.insert(request_id.clone(), pending_request);
+
+        (request_id, jsonrpc_id, response_rx)
+    }
+
+    pub async fn create_request(
+        &self,
+        track_progress: bool,
+    ) -> (
+        RequestId,
+        jsonrpc_core::Id,
+        oneshot::Receiver<Result<serde_json::Value, E>>,
+        Option<mpsc::Receiver<ProgressNotificationParams>>,
+    ) {
         let (progress_token, progress_receiver) = if track_progress {
             let token = ProgressToken::from(uuid::Uuid::new_v4().to_string());
             let (tx, rx) = mpsc::channel::<ProgressNotificationParams>(32);
@@ -137,10 +149,7 @@ where
             (None, None)
         };
 
-        let pending_request = PendingRequest { response_sender: response_tx, progress_token };
-
-        let mut pending_requests = self.pending_requests.lock().await;
-        pending_requests.insert(request_id.clone(), pending_request);
+        let (request_id, jsonrpc_id, response_rx) = self.create_request_internal(progress_token).await;
 
         (request_id, jsonrpc_id, response_rx, progress_receiver)
     }
@@ -155,27 +164,12 @@ where
         oneshot::Receiver<Result<serde_json::Value, E>>,
         Option<mpsc::Receiver<ProgressNotificationParams>>,
     ) {
-        let id = {
-            let mut counter = self.counter.write().await;
-            *counter += 1;
-            *counter
-        };
-
-        let jsonrpc_id = jsonrpc_core::Id::Num(id);
-        let message_id = MessageId::Num(id);
-        let request_id = (self.conn_id.clone(), message_id);
-
-        let (response_tx, response_rx) = oneshot::channel();
-
         {
             let mut progress_trackers = self.progress_trackers.lock().await;
             progress_trackers.insert(token.clone(), sender);
         }
 
-        let pending_request = PendingRequest { response_sender: response_tx, progress_token: Some(token) };
-
-        let mut pending_requests = self.pending_requests.lock().await;
-        pending_requests.insert(request_id.clone(), pending_request);
+        let (request_id, jsonrpc_id, response_rx) = self.create_request_internal(Some(token)).await;
 
         (request_id, jsonrpc_id, response_rx, None)
     }

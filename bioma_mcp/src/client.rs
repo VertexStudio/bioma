@@ -13,7 +13,7 @@ use crate::schema::{
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequestManager, RequestId, RequestParams};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
 use anyhow::Error;
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
@@ -150,7 +150,7 @@ pub struct Context {
     transport: TransportType,
     conn_id: ConnectionId,
     sender: TransportSender,
-    request_manager: Arc<OutgoingRequestManager<ClientError>>,
+    request_manager: Arc<OutgoingRequest<ClientError>>,
 }
 
 impl Context {
@@ -473,7 +473,7 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
             transport,
             conn_id: conn_id.clone(),
             sender: sender.clone(),
-            request_manager: Arc::new(OutgoingRequestManager::new(conn_id.clone())),
+            request_manager: Arc::new(OutgoingRequest::new(conn_id.clone())),
         };
 
         let _message_handler = tokio::spawn({

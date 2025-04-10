@@ -15,7 +15,7 @@ use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequestManager, RequestId, RequestParams};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
 
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
@@ -228,7 +228,7 @@ pub struct Context {
     pub server_capabilities: ServerCapabilities,
     conn_id: ConnectionId,
     sender: TransportSender,
-    request_manager: Arc<OutgoingRequestManager<ServerError>>,
+    request_manager: Arc<OutgoingRequest<ServerError>>,
     pagination: Option<Pagination>,
 }
 
@@ -239,7 +239,7 @@ impl Context {
             server_capabilities: ServerCapabilities::default(),
             conn_id: ConnectionId::new(None),
             sender: TransportSender::new_nop(),
-            request_manager: Arc::new(OutgoingRequestManager::new(ConnectionId::new(None))),
+            request_manager: Arc::new(OutgoingRequest::new(ConnectionId::new(None))),
             pagination: None,
         }
     }
@@ -463,7 +463,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         sender: transport_sender.clone(),
                         client_capabilities: init_params.capabilities.clone(),
                         server_capabilities: capabilities.clone(),
-                        request_manager: Arc::new(crate::OutgoingRequestManager::new(conn_id.clone())),
+                        request_manager: Arc::new(crate::OutgoingRequest::new(conn_id.clone())),
                         pagination,
                     };
 
