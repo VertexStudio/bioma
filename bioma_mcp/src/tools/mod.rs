@@ -1,4 +1,5 @@
 use crate::schema::{self, CallToolResult};
+use crate::server::RequestContext;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
@@ -27,6 +28,9 @@ pub enum ToolError {
     #[error("Server error: {0}")]
     Server(#[from] crate::server::ServerError),
 
+    #[error(transparent)]
+    Transparent(#[from] anyhow::Error),
+
     #[error("Custom error: {0}")]
     Custom(String),
 }
@@ -35,6 +39,7 @@ pub trait ToolCallHandler: Send + Sync {
     fn call_boxed<'a>(
         &'a self,
         args: Option<BTreeMap<String, Value>>,
+        request_context: RequestContext,
     ) -> Pin<Box<dyn Future<Output = Result<CallToolResult, ToolError>> + Send + 'a>>;
 
     fn def(&self) -> schema::Tool;
@@ -61,13 +66,18 @@ pub trait ToolDef: Serialize {
         }
     }
 
-    fn call<'a>(&'a self, args: Self::Args) -> impl Future<Output = Result<CallToolResult, ToolError>> + Send + 'a;
+    fn call<'a>(
+        &'a self,
+        args: Self::Args,
+        request_context: RequestContext,
+    ) -> impl Future<Output = Result<CallToolResult, ToolError>> + Send + 'a;
 }
 
 impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
     fn call_boxed<'a>(
         &'a self,
         args: Option<BTreeMap<String, Value>>,
+        request_context: RequestContext,
     ) -> Pin<Box<dyn Future<Output = Result<CallToolResult, ToolError>> + Send + 'a>> {
         Box::pin(async move {
             let value = match args {
@@ -75,7 +85,7 @@ impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
                 None => Value::Null,
             };
             let args: T::Args = serde_json::from_value(value).map_err(ToolError::ArgumentParse)?;
-            self.call(args).await
+            self.call(args, request_context).await
         })
     }
 

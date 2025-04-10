@@ -1,4 +1,5 @@
 use crate::schema::{CallToolResult, TextContent};
+use crate::server::RequestContext;
 use crate::tools::{ToolDef, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,11 @@ impl ToolDef for Echo {
     const DESCRIPTION: &'static str = "Echoes back the input message";
     type Args = EchoArgs;
 
-    async fn call(&self, properties: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(
+        &self,
+        properties: Self::Args,
+        _request_context: RequestContext,
+    ) -> Result<CallToolResult, ToolError> {
         Ok(CallToolResult {
             content: vec![serde_json::to_value(TextContent {
                 type_: "text".to_string(),
@@ -41,7 +46,7 @@ mod tests {
         let tool = Echo;
         let props = EchoArgs { message: "hello".to_string() };
 
-        let result = ToolDef::call(&tool, props).await.unwrap();
+        let result = ToolDef::call(&tool, props, RequestContext::default()).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "hello");
         assert_eq!(result.is_error, Some(false));
     }

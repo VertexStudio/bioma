@@ -1,8 +1,9 @@
 use crate::{
     schema::{CallToolResult, CreateMessageRequestParams, ModelHint, ModelPreferences, SamplingMessage, TextContent},
-    server::Context,
+    server::{Context, RequestContext},
     tools::{ToolDef, ToolError},
 };
+use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -49,13 +50,17 @@ impl ToolDef for Sampling {
     const DESCRIPTION: &'static str = "Query to ask to the LLM.";
     type Args = SamplingArgs;
 
-    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+        let mut progress = self.context.track(request_context);
+        progress.update_to(0.1, Some("Preparing to sample...".to_string())).await?;
         let hints = match args.models_suggestions {
             Some(models_suggestions) => {
                 Some(models_suggestions.iter().map(|name| ModelHint { name: Some(name.clone()) }).collect())
             }
             None => None,
         };
+
+        progress.update_to(0.4, Some("Setting up model preferences...".to_string())).await?;
 
         let model_preferences = ModelPreferences { hints, ..ModelPreferences::default() };
 
@@ -67,11 +72,29 @@ impl ToolDef for Sampling {
             ..CreateMessageRequestParams::default()
         };
 
-        let operation = self.context.create_message(params).await?;
+        progress.update_to(0.6, Some("Sending request to LLM...".to_string())).await?;
+
+        let mut operation = self.context.create_message(params, true).await?;
+
+        let mut operation_progress = operation.recv();
+
+        tokio::spawn(async move {
+            while let Some(progress) = operation_progress.next().await {
+                tracing::info!("Progress: {:#?}", progress);
+            }
+        });
+
+        progress.update_to(0.8, Some("Waiting for response from LLM...".to_string())).await?;
 
         match operation.await {
-            Ok(message_result) => Ok(Self::success(format!("Sampling result: {:#?}", message_result))),
-            Err(e) => Ok(Self::error(format!("Failed to sample: {}", e))),
+            Ok(message_result) => {
+                progress.update_to(1.0, Some("Sampling completed".to_string())).await?;
+                Ok(Self::success(format!("Sampling result: {:#?}", message_result)))
+            }
+            Err(e) => {
+                progress.update_to(1.0, Some("Sampling failed".to_string())).await?;
+                Ok(Self::error(format!("Failed to sample: {}", e)))
+            }
         }
     }
 }
