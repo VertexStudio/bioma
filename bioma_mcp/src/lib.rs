@@ -1,6 +1,11 @@
 use derive_more::Deref;
+use schema::ProgressNotificationParams;
+use schema::ProgressToken;
 use schema::RequestParamsMeta;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
 pub mod client;
@@ -71,6 +76,167 @@ pub struct RequestParams<T> {
 
     #[serde(flatten)]
     pub params: T,
+}
+
+#[derive(Clone)]
+pub struct OutgoingRequestManager<E> {
+    counter: Arc<RwLock<u64>>,
+    conn_id: ConnectionId,
+    pending_requests: Arc<Mutex<HashMap<RequestId, PendingRequest<E>>>>,
+    progress_trackers: Arc<Mutex<HashMap<ProgressToken, mpsc::Sender<ProgressNotificationParams>>>>,
+}
+
+struct PendingRequest<E> {
+    response_sender: oneshot::Sender<Result<serde_json::Value, E>>,
+    progress_token: Option<ProgressToken>,
+}
+
+impl<E> OutgoingRequestManager<E>
+where
+    E: Send + 'static,
+{
+    pub fn new(conn_id: ConnectionId) -> Self {
+        Self {
+            counter: Arc::new(RwLock::new(0)),
+            conn_id,
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            progress_trackers: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn create_request(
+        &self,
+        track_progress: bool,
+    ) -> (
+        RequestId,
+        jsonrpc_core::Id,
+        oneshot::Receiver<Result<serde_json::Value, E>>,
+        Option<mpsc::Receiver<ProgressNotificationParams>>,
+    ) {
+        let id = {
+            let mut counter = self.counter.write().await;
+            *counter += 1;
+            *counter
+        };
+
+        let jsonrpc_id = jsonrpc_core::Id::Num(id);
+        let message_id = MessageId::Num(id);
+        let request_id = (self.conn_id.clone(), message_id);
+
+        let (response_tx, response_rx) = oneshot::channel();
+
+        let (progress_token, progress_receiver) = if track_progress {
+            let token = ProgressToken::from(uuid::Uuid::new_v4().to_string());
+            let (tx, rx) = mpsc::channel::<ProgressNotificationParams>(32);
+
+            let mut progress_trackers = self.progress_trackers.lock().await;
+            progress_trackers.insert(token.clone(), tx);
+
+            (Some(token), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        let pending_request = PendingRequest { response_sender: response_tx, progress_token };
+
+        let mut pending_requests = self.pending_requests.lock().await;
+        pending_requests.insert(request_id.clone(), pending_request);
+
+        (request_id, jsonrpc_id, response_rx, progress_receiver)
+    }
+
+    pub async fn create_request_with_token(
+        &self,
+        token: ProgressToken,
+        sender: mpsc::Sender<ProgressNotificationParams>,
+    ) -> (
+        RequestId,
+        jsonrpc_core::Id,
+        oneshot::Receiver<Result<serde_json::Value, E>>,
+        Option<mpsc::Receiver<ProgressNotificationParams>>,
+    ) {
+        let id = {
+            let mut counter = self.counter.write().await;
+            *counter += 1;
+            *counter
+        };
+
+        let jsonrpc_id = jsonrpc_core::Id::Num(id);
+        let message_id = MessageId::Num(id);
+        let request_id = (self.conn_id.clone(), message_id);
+
+        let (response_tx, response_rx) = oneshot::channel();
+
+        {
+            let mut progress_trackers = self.progress_trackers.lock().await;
+            progress_trackers.insert(token.clone(), sender);
+        }
+
+        let pending_request = PendingRequest { response_sender: response_tx, progress_token: Some(token) };
+
+        let mut pending_requests = self.pending_requests.lock().await;
+        pending_requests.insert(request_id.clone(), pending_request);
+
+        (request_id, jsonrpc_id, response_rx, None)
+    }
+
+    pub async fn complete_request(&self, request_id: &RequestId, result: Result<serde_json::Value, E>) -> bool {
+        let request = {
+            let mut pending_requests = self.pending_requests.lock().await;
+            pending_requests.remove(request_id)
+        };
+
+        if let Some(request) = request {
+            let _ = request.response_sender.send(result);
+
+            if let Some(token) = request.progress_token {
+                let mut progress_trackers = self.progress_trackers.lock().await;
+                progress_trackers.remove(&token);
+            }
+
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn handle_progress(&self, params: ProgressNotificationParams) {
+        println!("handle_progress called with token: {:?}", params.progress_token);
+
+        let token = params.progress_token.clone();
+        let progress_trackers = self.progress_trackers.lock().await;
+
+        if let Some(sender) = progress_trackers.get(&token) {
+            println!("Found sender for token: {:?}", token);
+            let send_result = sender.send(params).await;
+            println!("Send result: {:?}", send_result);
+        } else {
+            println!("No sender found for token: {:?}", token);
+        }
+    }
+
+    pub async fn request_exists(&self, request_id: &RequestId) -> bool {
+        let pending_requests = self.pending_requests.lock().await;
+        pending_requests.contains_key(request_id)
+    }
+
+    pub fn connection_id(&self) -> &ConnectionId {
+        &self.conn_id
+    }
+
+    pub async fn prepare_params_with_token(
+        &self,
+        params: serde_json::Value,
+        progress_token: Option<ProgressToken>,
+    ) -> Result<serde_json::Value, serde_json::Error> {
+        if let Some(token) = progress_token {
+            let meta = crate::RequestParamsMeta { progress_token: Some(token) };
+            let modified_params = crate::RequestParams { meta: Some(meta), params };
+            serde_json::to_value(modified_params)
+        } else {
+            Ok(params)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
