@@ -195,17 +195,12 @@ where
     }
 
     pub async fn handle_progress(&self, params: ProgressNotificationParams) {
-        println!("handle_progress called with token: {:?}", params.progress_token);
-
         let token = params.progress_token.clone();
         let progress_trackers = self.progress_trackers.lock().await;
 
         if let Some(sender) = progress_trackers.get(&token) {
-            println!("Found sender for token: {:?}", token);
             let send_result = sender.send(params).await;
-            println!("Send result: {:?}", send_result);
         } else {
-            println!("No sender found for token: {:?}", token);
         }
     }
 
