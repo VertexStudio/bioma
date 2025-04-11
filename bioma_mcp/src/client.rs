@@ -11,6 +11,7 @@ use crate::schema::{
     Resource, ResourceReference, ResourceTemplate, Root, RootsListChangedNotificationParams, ServerCapabilities, Tool,
 };
 use crate::transport::sse::SseTransport;
+use crate::transport::streamable;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
@@ -109,6 +110,25 @@ pub enum TransportConfig {
     Sse(SseConfig),
     #[serde(rename = "ws")]
     Ws(WsConfig),
+    #[serde(rename = "streamable")]
+    Streamable(StreamableConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct StreamableConfig {
+    #[serde(default = "default_streamable_server_url")]
+    #[builder(default = default_streamable_server_url())]
+    pub endpoint: String,
+}
+
+fn default_streamable_server_url() -> String {
+    "http://127.0.0.1:9091".to_string()
+}
+
+impl Default for StreamableConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
@@ -450,6 +470,15 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                     Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
                 };
                 TransportType::Ws(transport)
+            }
+            TransportConfig::Streamable(config) => {
+                let transport = streamable::StreamableTransport::new_client(
+                    config.endpoint.clone(),
+                    on_message_tx,
+                    on_error_tx,
+                    on_close_tx,
+                );
+                TransportType::Streamable(transport)
             }
         };
 

@@ -13,6 +13,7 @@ use crate::schema::{
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
+use crate::transport::streamable::StreamableTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
@@ -109,6 +110,25 @@ pub enum TransportConfig {
     Stdio(StdioConfig),
     Sse(SseConfig),
     Ws(WsConfig),
+    Streamable(StreamableConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct StreamableConfig {
+    #[builder(default = default_streamable_server_url())]
+    pub endpoint: String,
+    #[builder(default = default_channel_capacity())]
+    pub channel_capacity: usize,
+}
+
+fn default_streamable_server_url() -> String {
+    "http://127.0.0.1:9091".to_string()
+}
+
+impl Default for StreamableConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -405,6 +425,20 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     on_close_tx.clone(),
                 );
                 (TransportType::Ws(transport), on_message_rx, on_error_rx, on_close_rx)
+            }
+            TransportConfig::Streamable(config) => {
+                let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(config.channel_capacity);
+                let (on_error_tx, on_error_rx) = mpsc::channel(32);
+                let (on_close_tx, on_close_rx) = mpsc::channel(32);
+
+                let addr = config
+                    .endpoint
+                    .parse()
+                    .map_err(|e| ServerError::Transport(format!("Failed to parse streamable endpoint: {}", e)))?;
+
+                let transport = StreamableTransport::new_server(addr, on_message_tx, on_error_tx, on_close_tx);
+
+                (TransportType::Streamable(transport), on_message_rx, on_error_rx, on_close_rx)
             }
         };
 

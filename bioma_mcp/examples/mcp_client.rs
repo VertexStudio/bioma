@@ -1,6 +1,9 @@
 use anyhow::Result;
 use bioma_mcp::{
-    client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
+    client::{
+        Client, ClientError, ModelContextProtocolClient, ServerConfig, SseConfig, StdioConfig, StreamableConfig,
+        TransportConfig, WsConfig,
+    },
     progress::Progress,
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
@@ -20,6 +23,9 @@ const DEFAULT_MODEL: &str = "llama3.2";
 struct Args {
     #[arg(long, short)]
     pub config: Option<PathBuf>,
+
+    #[arg(long, default_value = "stdio")]
+    pub transport: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,16 +132,45 @@ async fn main() -> Result<()> {
 
         client_config.servers
     } else {
-        info!("No configuration file provided. Using default stdio server configuration.");
-        vec![ServerConfig::builder()
-            .name("bioma-tool".to_string())
-            .transport(TransportConfig::Stdio(StdioConfig {
-                command: "target/release/examples/mcp_server".to_string(),
-                args: vec!["stdio".to_string()],
-                env: std::collections::HashMap::new(),
-            }))
-            .request_timeout(60)
-            .build()]
+        info!("No configuration file provided. Using {} server configuration.", args.transport);
+        match args.transport.as_str() {
+            "stdio" => vec![ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Stdio(StdioConfig {
+                    command: "target/release/examples/mcp_server".to_string(),
+                    args: vec!["stdio".to_string()],
+                    env: std::collections::HashMap::new(),
+                }))
+                .request_timeout(60)
+                .build()],
+            "sse" => vec![ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Sse(SseConfig::default()))
+                .request_timeout(60)
+                .build()],
+            "ws" => vec![ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Ws(WsConfig::default()))
+                .request_timeout(60)
+                .build()],
+            "streamable" => vec![ServerConfig::builder()
+                .name("bioma-tool".to_string())
+                .transport(TransportConfig::Streamable(StreamableConfig::default()))
+                .request_timeout(60)
+                .build()],
+            _ => {
+                info!("Unknown transport: {}. Using stdio instead.", args.transport);
+                vec![ServerConfig::builder()
+                    .name("bioma-tool".to_string())
+                    .transport(TransportConfig::Stdio(StdioConfig {
+                        command: "target/release/examples/mcp_server".to_string(),
+                        args: vec!["stdio".to_string()],
+                        env: std::collections::HashMap::new(),
+                    }))
+                    .request_timeout(60)
+                    .build()]
+            }
+        }
     };
 
     info!("Loaded {} server configurations", server_configs.len());
