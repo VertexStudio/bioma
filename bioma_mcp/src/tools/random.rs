@@ -1,5 +1,6 @@
 use crate::{
     schema::{CallToolResult, TextContent},
+    server::RequestContext,
     tools::{ToolDef, ToolError},
 };
 use rand::Rng;
@@ -26,7 +27,7 @@ impl ToolDef for RandomNumber {
     const DESCRIPTION: &'static str = "Generate a random number";
     type Args = RandomNumberArgs;
 
-    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let start = args.start;
         let end = args.end;
 
@@ -88,7 +89,7 @@ mod tests {
     async fn test_random_number_tool() {
         let tool = RandomNumber;
         let args = RandomNumberArgs { start: 1, end: 10 };
-        let result = tool.call(args).await.unwrap();
+        let result = tool.call(args, RequestContext::default()).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Generated number:"));
     }
 }

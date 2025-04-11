@@ -1,4 +1,5 @@
 use crate::schema::{CallToolResult, TextContent};
+use crate::server::RequestContext;
 use crate::tools::{ToolDef, ToolError};
 use lazy_static::lazy_static;
 use schemars::JsonSchema;
@@ -44,7 +45,7 @@ impl ToolDef for Memory {
     const DESCRIPTION: &'static str = "Store and retrieve JSON memories using string keys";
     type Args = MemoryArgs;
 
-    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let store_result = MEMORY_STORE.lock();
         let mut store = match store_result {
             Ok(store) => store,
@@ -138,7 +139,7 @@ mod tests {
     async fn clear_memory() {
         let tool = Memory;
         let clear_props = MemoryArgs { action: MemoryAction::Clear, key: None, value: None };
-        tool.call(clear_props).await.unwrap();
+        tool.call(clear_props, RequestContext::default()).await.unwrap();
     }
 
     #[test]
@@ -159,20 +160,20 @@ mod tests {
             key: Some("test_key".to_string()),
             value: Some(json!({"test": "value"})),
         };
-        let result = tool.call(store_props).await.unwrap();
+        let result = tool.call(store_props, RequestContext::default()).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully stored"));
 
         let retrieve_props =
             MemoryArgs { action: MemoryAction::Retrieve, key: Some("test_key".to_string()), value: None };
-        let result = tool.call(retrieve_props).await.unwrap();
+        let result = tool.call(retrieve_props, RequestContext::default()).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test"));
 
         let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
-        let result = tool.call(list_props).await.unwrap();
+        let result = tool.call(list_props, RequestContext::default()).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("test_key"));
 
         let delete_props = MemoryArgs { action: MemoryAction::Delete, key: Some("test_key".to_string()), value: None };
-        let result = tool.call(delete_props).await.unwrap();
+        let result = tool.call(delete_props, RequestContext::default()).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully deleted"));
 
         let store_props = MemoryArgs {
@@ -180,14 +181,14 @@ mod tests {
             key: Some("test_key2".to_string()),
             value: Some(json!({"test": "value"})),
         };
-        tool.call(store_props).await.unwrap();
+        tool.call(store_props, RequestContext::default()).await.unwrap();
 
         let clear_props = MemoryArgs { action: MemoryAction::Clear, key: None, value: None };
-        let result = tool.call(clear_props).await.unwrap();
+        let result = tool.call(clear_props, RequestContext::default()).await.unwrap();
         assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully cleared"));
 
         let list_props = MemoryArgs { action: MemoryAction::List, key: None, value: None };
-        let result = tool.call(list_props).await.unwrap();
+        let result = tool.call(list_props, RequestContext::default()).await.unwrap();
         assert_eq!(result.content[0]["text"].as_str().unwrap(), "[]");
     }
 
@@ -208,11 +209,11 @@ mod tests {
         for (key, value) in test_cases {
             let store_props =
                 MemoryArgs { action: MemoryAction::Store, key: Some(key.to_string()), value: Some(value.clone()) };
-            let result = tool.call(store_props).await.unwrap();
+            let result = tool.call(store_props, RequestContext::default()).await.unwrap();
             assert!(result.content[0]["text"].as_str().unwrap().contains("Successfully stored"));
 
             let retrieve_props = MemoryArgs { action: MemoryAction::Retrieve, key: Some(key.to_string()), value: None };
-            let result = tool.call(retrieve_props).await.unwrap();
+            let result = tool.call(retrieve_props, RequestContext::default()).await.unwrap();
             let retrieved_value: Value = serde_json::from_str(result.content[0]["text"].as_str().unwrap()).unwrap();
             assert_eq!(retrieved_value, value);
         }

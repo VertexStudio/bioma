@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bioma_actor::prelude::*;
 use bioma_mcp::client::{Client, ClientConfig, ClientError, ModelContextProtocolClient, ServerConfig};
+use bioma_mcp::progress::Progress;
 use bioma_mcp::schema::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, CreateMessageRequestParams, CreateMessageResult,
     Implementation, ListToolsRequestParams, ListToolsResult, Root,
@@ -282,6 +283,7 @@ impl ModelContextProtocolClientActor {
     }
 }
 
+#[derive(Clone)]
 pub struct McpBasicClient {
     servers: Vec<ServerConfig>,
 }
@@ -299,7 +301,11 @@ impl ModelContextProtocolClient for McpBasicClient {
         vec![]
     }
 
-    async fn on_create_message(&self, _params: CreateMessageRequestParams) -> Result<CreateMessageResult, ClientError> {
+    async fn on_create_message(
+        &self,
+        _params: CreateMessageRequestParams,
+        _progress: Progress,
+    ) -> Result<CreateMessageResult, ClientError> {
         todo!()
     }
 }
@@ -383,7 +389,7 @@ impl Message<CallTool> for ModelContextProtocolClientActor {
     ) -> Result<(), ModelContextProtocolClientError> {
         let Some(client) = &self.client else { return Err(ModelContextProtocolClientError::ClientNotInitialized) };
         let mut client = client.lock().await;
-        let response = client.call_tool(message.0.clone()).await?.await?;
+        let response = client.call_tool(message.0.clone(), false).await?.await?;
         ctx.reply(response).await?;
         Ok(())
     }

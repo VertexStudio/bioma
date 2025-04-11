@@ -1,5 +1,6 @@
 use crate::logging::McpLoggingLayer;
 use crate::operation::Operation;
+use crate::progress::Progress;
 use crate::prompts::PromptGetHandler;
 use crate::resources::ResourceReadHandler;
 use crate::schema::{
@@ -7,14 +8,14 @@ use crate::schema::{
     CreateMessageResult, GetPromptRequestParams, Implementation, InitializeRequestParams, InitializeResult,
     InitializedNotificationParams, ListPromptsRequestParams, ListPromptsResult, ListResourceTemplatesRequestParams,
     ListResourceTemplatesResult, ListResourcesRequestParams, ListResourcesResult, ListToolsRequestParams,
-    ListToolsResult, PingRequestParams, ReadResourceRequestParams, ResourceUpdatedNotificationParams,
-    ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
+    ListToolsResult, PingRequestParams, ProgressNotificationParams, ProgressToken, ReadResourceRequestParams,
+    ResourceUpdatedNotificationParams, ServerCapabilities, SubscribeRequestParams, UnsubscribeRequestParams,
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
-use crate::{ConnectionId, JsonRpcMessage, MessageId, RequestId};
+use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
 
 use base64;
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
@@ -24,7 +25,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::AbortHandle;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::prelude::*;
@@ -219,9 +220,6 @@ impl Session {
     }
 }
 
-type ResponseSender = oneshot::Sender<Result<serde_json::Value, ServerError>>;
-type RequestCounter = Arc<RwLock<u64>>;
-type PendingServerRequests = Arc<Mutex<HashMap<RequestId, ResponseSender>>>;
 type PendingClientRequests = Arc<Mutex<HashMap<RequestId, AbortHandle>>>;
 
 #[derive(Clone)]
@@ -230,8 +228,7 @@ pub struct Context {
     pub server_capabilities: ServerCapabilities,
     conn_id: ConnectionId,
     sender: TransportSender,
-    pending_requests: PendingServerRequests,
-    request_counter: RequestCounter,
+    request_manager: Arc<OutgoingRequest<ServerError>>,
     pagination: Option<Pagination>,
 }
 
@@ -242,8 +239,7 @@ impl Context {
             server_capabilities: ServerCapabilities::default(),
             conn_id: ConnectionId::new(None),
             sender: TransportSender::new_nop(),
-            pending_requests: PendingServerRequests::default(),
-            request_counter: RequestCounter::default(),
+            request_manager: Arc::new(OutgoingRequest::new(ConnectionId::new(None))),
             pagination: None,
         }
     }
@@ -251,9 +247,10 @@ impl Context {
     pub async fn create_message(
         &self,
         params: CreateMessageRequestParams,
+        track: bool,
     ) -> Result<Operation<CreateMessageResult>, ServerError> {
         let params = serde_json::to_value(params).unwrap_or_default();
-        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(10)).await
+        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(20), track).await
     }
 
     pub async fn resource_updated(&self, params: ResourceUpdatedNotificationParams) -> Result<(), ServerError> {
@@ -267,62 +264,67 @@ impl Context {
         method: String,
         params: serde_json::Value,
         timeout: std::time::Duration,
+        track: bool,
     ) -> Result<Operation<T>, ServerError>
     where
         T: DeserializeOwned + Send + 'static,
     {
-        let mut counter = self.request_counter.write().await;
-        *counter += 1;
-        let id = *counter;
+        let (request_id, jsonrpc_id, response_rx, progress_rx) = self.request_manager.create_request(track).await;
+
+        let progress_token: Option<ProgressToken> = if track {
+            let pending_requests = self.request_manager.pending_requests.lock().await;
+
+            pending_requests.get(&request_id).and_then(|req| req.progress_token.clone())
+        } else {
+            None
+        };
+
+        let params_with_token = if let Some(ref token) = progress_token {
+            match self.request_manager.prepare_params_with_token(params, Some(token.clone())).await {
+                Ok(prepared) => prepared,
+                Err(e) => return Err(ServerError::ParseResponse(e.to_string())),
+            }
+        } else {
+            params
+        };
 
         let request = jsonrpc_core::MethodCall {
             jsonrpc: Some(jsonrpc_core::Version::V2),
             method,
-            params: Params::Map(params.as_object().cloned().unwrap_or_default()),
-            id: jsonrpc_core::Id::Num(id),
+            params: jsonrpc_core::Params::Map(params_with_token.as_object().cloned().unwrap_or_default()),
+            id: jsonrpc_id,
         };
 
-        let request_key = match MessageId::try_from(&request.id) {
-            Ok(key) => key,
-            Err(e) => return Err(ServerError::Request(format!("Invalid request ID: {}", e))),
-        };
-        let request_id = (self.conn_id.clone(), request_key.clone());
-
-        let (response_tx, response_rx) = oneshot::channel();
-        {
-            let mut pending = self.pending_requests.lock().await;
-            pending.insert(request_id.clone(), response_tx);
+        if let Err(e) = self.sender.send(request.into(), self.conn_id.clone()).await {
+            self.request_manager
+                .complete_request(&request_id, Err(ServerError::Transport(format!("Send: {}", e))))
+                .await;
+            return Err(ServerError::Transport(format!("Send: {}", e)));
         }
 
-        let conn_id = self.conn_id.clone();
-        if let Err(e) = self.sender.send(request.into(), conn_id.clone()).await {
-            let mut pending = self.pending_requests.lock().await;
-            pending.remove(&(conn_id, request_key));
-            return Err(ServerError::Transport(format!("Send: {}", e).into()));
-        }
-
-        let pending_requests = self.pending_requests.clone();
+        let request_manager = self.request_manager.clone();
         let request_id_clone = request_id.clone();
 
         let future = async move {
             match tokio::time::timeout(timeout, response_rx).await {
-                Ok(response) => match response {
+                Ok(response_result) => match response_result {
+                    Err(_) => Err(anyhow::anyhow!("Response channel closed")),
                     Ok(result) => match result {
+                        Err(server_error) => Err(anyhow::anyhow!("Server error: {}", server_error)),
                         Ok(json_value) => serde_json::from_value(json_value)
                             .map_err(|e| anyhow::anyhow!("JSON deserialization error: {}", e)),
-                        Err(server_error) => Err(anyhow::anyhow!("Server error: {}", server_error)),
                     },
-                    Err(_) => Err(anyhow::anyhow!("Response channel closed")),
                 },
                 Err(_) => {
-                    let mut pending = pending_requests.lock().await;
-                    pending.remove(&request_id_clone);
+                    request_manager
+                        .complete_request(&request_id_clone, Err(ServerError::Request("Request timed out".to_string())))
+                        .await;
                     Err(anyhow::anyhow!("Request timed out"))
                 }
             }
         };
 
-        Ok(Operation::new(request_id, future, self.sender.clone()))
+        Ok(Operation::new(request_id, future, self.sender.clone(), progress_rx))
     }
 
     pub async fn notify(&self, method: String, params: serde_json::Value) -> Result<(), ServerError> {
@@ -339,12 +341,20 @@ impl Context {
             .await
             .map_err(|e| ServerError::Transport(format!("Send: {}", e).into()))
     }
+
+    pub fn track(&self, request_context: RequestContext) -> Progress {
+        Progress::new(self.sender.clone(), self.conn_id.clone(), request_context.progress_token)
+    }
+}
+
+#[derive(Default)]
+pub struct RequestContext {
+    progress_token: Option<ProgressToken>,
 }
 
 pub struct Server<T: ModelContextProtocolServer> {
     server: Arc<RwLock<T>>,
     sessions: Arc<RwLock<HashMap<ConnectionId, Session>>>,
-    pending_requests: PendingServerRequests,
     pending_client_requests: PendingClientRequests,
 }
 
@@ -353,7 +363,6 @@ impl<T: ModelContextProtocolServer> Server<T> {
         Server {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             server: Arc::new(RwLock::new(server)),
-            pending_requests: Arc::new(Mutex::new(HashMap::new())),
             pending_client_requests: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -419,13 +428,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
             let server = self.server.clone();
             let sessions = self.sessions.clone();
             let transport_sender = transport_sender.clone();
-            let pending_requests = self.pending_requests.clone();
 
             move |params: Params, meta: ServerMetadata| {
                 let server = server.clone();
                 let sessions = sessions.clone();
                 let transport_sender = transport_sender.clone();
-                let pending_requests = pending_requests.clone();
 
                 debug!("Handling initialize request");
 
@@ -456,8 +463,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         sender: transport_sender.clone(),
                         client_capabilities: init_params.capabilities.clone(),
                         server_capabilities: capabilities.clone(),
-                        pending_requests: pending_requests.clone(),
-                        request_counter: RequestCounter::default(),
+                        request_manager: Arc::new(crate::OutgoingRequest::new(conn_id.clone())),
                         pagination,
                     };
 
@@ -583,6 +589,34 @@ impl<T: ModelContextProtocolServer> Server<T> {
                         error!("Failed to parse cancellation params (sync): {}", e);
                     }
                 }
+            }
+        });
+
+        io_handler.add_notification_with_meta("notifications/progress", {
+            let sessions = self.sessions.clone();
+
+            move |params: Params, meta: ServerMetadata| {
+                let sessions_clone = sessions.clone();
+                let conn_id = meta.conn_id.clone();
+
+                tokio::spawn(async move {
+                    match params.parse::<ProgressNotificationParams>() {
+                        Ok(progress_params) => {
+                            debug!(
+                                "Received progress notification: progress: {}, total: {:?}",
+                                progress_params.progress, progress_params.total
+                            );
+
+                            let sessions = sessions_clone.read().await;
+                            if let Some(session) = sessions.get(&conn_id) {
+                                session.context.request_manager.handle_progress(progress_params).await;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to parse progress notification params: {:?}", e);
+                        }
+                    }
+                });
             }
         });
 
@@ -950,10 +984,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
                 debug!("Handling tools/call request");
 
                 async move {
-                    let params: CallToolRequestParams = params.parse().map_err(|e| {
+                    let params: RequestParams<CallToolRequestParams> = params.parse().map_err(|e| {
                         error!("Failed to parse tool call parameters: {}", e);
                         jsonrpc_core::Error::invalid_params(e.to_string())
                     })?;
+
+                    let params_meta = params.meta;
+                    let params = params.params;
+                    let progress_token = params_meta.and_then(|meta| meta.progress_token);
+
+                    let request_context = RequestContext { progress_token };
 
                     let tool_reference = {
                         let sessions = sessions.read().await;
@@ -967,7 +1007,7 @@ impl<T: ModelContextProtocolServer> Server<T> {
 
                     match tool_reference {
                         Some(tool) => {
-                            let result = tool.call_boxed(params.arguments).await.map_err(|e| {
+                            let result = tool.call_boxed(params.arguments, request_context).await.map_err(|e| {
                                 error!("Tool execution failed: {}", e);
                                 jsonrpc_core::Error::internal_error()
                             })?;
@@ -1119,13 +1159,11 @@ impl<T: ModelContextProtocolServer> Server<T> {
             }
         }
 
-        let pending_requests = self.pending_requests.clone();
-
         while let Some(message) = on_client_rx.recv().await {
             let io_handler_clone = io_handler.clone();
             let transport_sender_clone = transport_sender.clone();
-            let pending_requests = pending_requests.clone();
             let pending_client_requests_clone = self.pending_client_requests.clone();
+            let sessions_clone = self.sessions.clone();
 
             tokio::spawn(async move {
                 match &message.message {
@@ -1195,10 +1233,16 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                         return;
                                     }
                                 };
-                                let mut requests = pending_requests.lock().await;
+
                                 let request_id = (message.conn_id.clone(), request_key);
-                                if let Some(sender) = requests.remove(&request_id) {
-                                    let _ = sender.send(Ok(success.result.clone()));
+
+                                let sessions = sessions_clone.read().await;
+                                if let Some(session) = sessions.get(&message.conn_id) {
+                                    session
+                                        .context
+                                        .request_manager
+                                        .complete_request(&request_id, Ok(success.result.clone()))
+                                        .await;
                                 }
                             }
                             jsonrpc_core::Output::Failure(failure) => {
@@ -1209,16 +1253,63 @@ impl<T: ModelContextProtocolServer> Server<T> {
                                         return;
                                     }
                                 };
-                                let mut requests = pending_requests.lock().await;
+
                                 let request_id = (message.conn_id.clone(), request_key);
-                                if let Some(sender) = requests.remove(&request_id) {
-                                    let _ = sender
-                                        .send(Err(ServerError::Request(format!("RPC error: {:?}", failure.error))));
+
+                                let sessions = sessions_clone.read().await;
+                                if let Some(session) = sessions.get(&message.conn_id) {
+                                    let err = ServerError::Request(format!("RPC error: {:?}", failure.error));
+                                    session.context.request_manager.complete_request(&request_id, Err(err)).await;
                                 }
                             }
                         },
-                        jsonrpc_core::Response::Batch(_) => {
-                            warn!("Unsupported batch response");
+                        jsonrpc_core::Response::Batch(outputs) => {
+                            debug!("Processing batch response with {} outputs", outputs.len());
+                            for output in outputs {
+                                match output {
+                                    jsonrpc_core::Output::Success(success) => {
+                                        let request_key = match MessageId::try_from(&success.id) {
+                                            Ok(key) => key,
+                                            Err(e) => {
+                                                error!("Invalid request ID: {}", e);
+                                                continue;
+                                            }
+                                        };
+
+                                        let request_id = (message.conn_id.clone(), request_key);
+
+                                        let sessions = sessions_clone.read().await;
+                                        if let Some(session) = sessions.get(&message.conn_id) {
+                                            session
+                                                .context
+                                                .request_manager
+                                                .complete_request(&request_id, Ok(success.result.clone()))
+                                                .await;
+                                        }
+                                    }
+                                    jsonrpc_core::Output::Failure(failure) => {
+                                        let request_key = match MessageId::try_from(&failure.id) {
+                                            Ok(key) => key,
+                                            Err(e) => {
+                                                error!("Invalid request ID: {}", e);
+                                                continue;
+                                            }
+                                        };
+
+                                        let request_id = (message.conn_id.clone(), request_key);
+
+                                        let sessions = sessions_clone.read().await;
+                                        if let Some(session) = sessions.get(&message.conn_id) {
+                                            let err = ServerError::Request(format!("RPC error: {:?}", failure.error));
+                                            session
+                                                .context
+                                                .request_manager
+                                                .complete_request(&request_id, Err(err))
+                                                .await;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     },
                 }

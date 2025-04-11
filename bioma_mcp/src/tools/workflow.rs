@@ -1,4 +1,5 @@
 use crate::schema::{CallToolResult, TextContent};
+use crate::server::RequestContext;
 use crate::tools::{ToolDef, ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -125,7 +126,7 @@ impl ToolDef for Workflow {
     "#;
     type Args = WorkflowStep;
 
-    async fn call(&self, args: Self::Args) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         if let Some(max) = self.max_steps {
             if args.step_number > max {
                 return Ok(Self::error(format!(
@@ -326,7 +327,7 @@ mod tests {
             needs_more_steps: None,
         };
 
-        let result = ToolDef::call(&tool, step).await.unwrap();
+        let result = ToolDef::call(&tool, step, RequestContext::default()).await.unwrap();
         let content = result.content[0]["text"].as_str().unwrap();
         let response: WorkflowStatus = serde_json::from_str(content).unwrap();
 
@@ -352,7 +353,7 @@ mod tests {
             branch_id: None,
             needs_more_steps: None,
         };
-        let _ = ToolDef::call(&tool, step1).await.unwrap();
+        let _ = ToolDef::call(&tool, step1, RequestContext::default()).await.unwrap();
 
         let branch_step = WorkflowStep {
             step_description: "Branch step".to_string(),
@@ -366,7 +367,7 @@ mod tests {
             needs_more_steps: None,
         };
 
-        let result = ToolDef::call(&tool, branch_step).await.unwrap();
+        let result = ToolDef::call(&tool, branch_step, RequestContext::default()).await.unwrap();
         let content = result.content[0]["text"].as_str().unwrap();
         let response: WorkflowStatus = serde_json::from_str(content).unwrap();
 
@@ -391,7 +392,7 @@ mod tests {
                 branch_id: None,
                 needs_more_steps: None,
             };
-            let _ = ToolDef::call(&tool, step).await.unwrap();
+            let _ = ToolDef::call(&tool, step, RequestContext::default()).await.unwrap();
         }
 
         let query = StepQuery { step_number: Some(3), branch_id: None, return_last_n: None };
