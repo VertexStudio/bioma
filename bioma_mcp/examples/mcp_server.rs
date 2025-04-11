@@ -8,7 +8,8 @@ use bioma_mcp::{
         ServerCapabilitiesPromptsResourcesTools,
     },
     server::{
-        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, TransportConfig, WsConfig,
+        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, StreamableConfig,
+        TransportConfig, WsConfig,
     },
     tools::{self, ToolCallHandler},
 };
@@ -47,6 +48,11 @@ enum Transport {
 
     Ws {
         #[arg(long, short, default_value = "127.0.0.1:9090")]
+        endpoint: String,
+    },
+
+    Streamable {
+        #[arg(long, short, default_value = "127.0.0.1:9091")]
         endpoint: String,
     },
 }
@@ -165,6 +171,9 @@ async fn main() -> Result<()> {
         Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
         Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
         Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
+        Transport::Streamable { endpoint } => {
+            TransportConfig::Streamable(StreamableConfig::builder().endpoint(endpoint.clone()).build())
+        }
     };
 
     let capabilities = ServerCapabilities {
