@@ -13,6 +13,7 @@ use crate::schema::{
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
+use crate::transport::streamable::StreamableTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
@@ -104,11 +105,35 @@ impl Default for WsConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct StreamableConfig {
+    // TODO: Should only bind to localhost (127.0.0.1) rather than all interfaces (0.0.0.0)
+    #[builder(default = default_streamable_endpoint())]
+    pub endpoint: String,
+    #[builder(default = default_streamable_sse())]
+    pub sse: bool,
+    #[builder(default = default_streamable_allowed_origins())]
+    pub allowed_origins: Vec<String>,
+}
+
+fn default_streamable_endpoint() -> String {
+    "http://127.0.0.1:8090".to_string()
+}
+
+fn default_streamable_sse() -> bool {
+    true
+}
+
+fn default_streamable_allowed_origins() -> Vec<String> {
+    vec!["*".to_string()]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransportConfig {
     Stdio(StdioConfig),
     Sse(SseConfig),
     Ws(WsConfig),
+    Streamable(StreamableConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -405,6 +430,19 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     on_close_tx.clone(),
                 );
                 (TransportType::Ws(transport), on_message_rx, on_error_rx, on_close_rx)
+            }
+            TransportConfig::Streamable(config) => {
+                let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(32);
+                let (on_error_tx, on_error_rx) = mpsc::channel(32);
+                let (on_close_tx, on_close_rx) = mpsc::channel(32);
+
+                let transport = StreamableTransport::new_server(
+                    config.clone(),
+                    on_message_tx.clone(),
+                    on_error_tx.clone(),
+                    on_close_tx.clone(),
+                );
+                (TransportType::Streamable(transport), on_message_rx, on_error_rx, on_close_rx)
             }
         };
 
