@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 tokio-tungstenite = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
@@ -15,7 +15,7 @@ jsonrpc-core = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 lazy_static = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 html2md = { workspace = true }
 readability-rs = { workspace = true }
 rand = { workspace = true }
@@ -36,6 +36,9 @@ http-body-util = "0.1.0"
 bytes = "1.5.0"
 dashmap = "6.1.0"
 tokio-util = "0.7.1"
+actix-web = "4.9"
+actix-cors = "0.7"
+eventsource-client = "0.15.0"
 
 [dev-dependencies]
 mockito = { workspace = true }

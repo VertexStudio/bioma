@@ -1,5 +1,6 @@
 pub mod sse;
 pub mod stdio;
+pub mod streamable;
 pub mod ws;
 
 use crate::ConnectionId;
@@ -34,6 +35,7 @@ pub enum TransportSenderType {
     Stdio(stdio::StdioTransportSender),
     Sse(sse::SseTransportSender),
     Ws(ws::WsTransportSender),
+    Streamable(streamable::StreamableTransportSender),
     Nop,
 }
 
@@ -43,6 +45,7 @@ impl TransportSenderType {
             Self::Stdio(sender) => sender.send(message, conn_id).await,
             Self::Sse(sender) => sender.send(message, conn_id).await,
             Self::Ws(sender) => sender.send(message, conn_id).await,
+            Self::Streamable(sender) => sender.send(message, conn_id).await,
             Self::Nop => Ok(()),
         }
     }
@@ -66,6 +69,10 @@ impl TransportSender {
         Self { inner: TransportSenderType::Ws(sender) }
     }
 
+    pub fn new_streamable(sender: streamable::StreamableTransportSender) -> Self {
+        Self { inner: TransportSenderType::Streamable(sender) }
+    }
+
     pub fn new_nop() -> Self {
         Self { inner: TransportSenderType::Nop }
     }
@@ -80,6 +87,7 @@ pub enum TransportType {
     Stdio(stdio::StdioTransport),
     Sse(sse::SseTransport),
     Ws(ws::WsTransport),
+    Streamable(streamable::StreamableTransport),
 }
 
 impl Transport for TransportType {
@@ -88,6 +96,7 @@ impl Transport for TransportType {
             TransportType::Stdio(t) => t.start().await,
             TransportType::Sse(t) => t.start().await,
             TransportType::Ws(t) => t.start().await,
+            TransportType::Streamable(t) => t.start().await,
         }
     }
 
@@ -96,6 +105,7 @@ impl Transport for TransportType {
             TransportType::Stdio(t) => t.send(message, conn_id).await,
             TransportType::Sse(t) => t.send(message, conn_id).await,
             TransportType::Ws(t) => t.send(message, conn_id).await,
+            TransportType::Streamable(t) => t.send(message, conn_id).await,
         }
     }
 
@@ -104,6 +114,7 @@ impl Transport for TransportType {
             TransportType::Stdio(t) => t.close().await,
             TransportType::Sse(t) => t.close().await,
             TransportType::Ws(t) => t.close().await,
+            TransportType::Streamable(t) => t.close().await,
         }
     }
 
@@ -112,6 +123,7 @@ impl Transport for TransportType {
             TransportType::Stdio(t) => t.sender(),
             TransportType::Sse(t) => t.sender(),
             TransportType::Ws(t) => t.sender(),
+            TransportType::Streamable(t) => t.sender(),
         }
     }
 }
