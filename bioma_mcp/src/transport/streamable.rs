@@ -14,11 +14,10 @@ use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
-// Explicitly use the StreamableError for better error handling throughout the code
 #[derive(Debug, thiserror::Error)]
 enum StreamableError {
     #[error("HTTP error: {0}")]
@@ -43,14 +42,12 @@ enum StreamableError {
     Other(String),
 }
 
-// Implement conversion from anyhow::Error to make integration easier
 impl From<anyhow::Error> for StreamableError {
     fn from(err: anyhow::Error) -> Self {
         StreamableError::Other(err.to_string())
     }
 }
 
-// Implement conversion from reqwest::Error
 impl From<reqwest::Error> for StreamableError {
     fn from(err: reqwest::Error) -> Self {
         if let Some(status) = err.status() {
@@ -66,7 +63,8 @@ enum StreamableMode {
         endpoint: String,
         on_message: mpsc::Sender<Message>,
         origins: Vec<String>,
-        clients: Arc<Mutex<HashMap<ConnectionId, ClientConnection>>>,
+        sse_streams: Arc<Mutex<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
+        pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
     },
 
     Client {
@@ -94,13 +92,14 @@ impl StreamableTransport {
         on_error: mpsc::Sender<Error>,
         on_close: mpsc::Sender<()>,
     ) -> Self {
-        let clients = Arc::new(Mutex::new(HashMap::new()));
-
+        let sse_streams = Arc::new(Mutex::new(HashMap::new()));
+        let pending_requests = Arc::new(Mutex::new(HashMap::new()));
         let mode = Arc::new(StreamableMode::Server {
             endpoint: config.endpoint.clone(),
             on_message,
             origins: config.allowed_origins.clone(),
-            clients,
+            sse_streams,
+            pending_requests,
         });
 
         Self { mode, on_error, on_close }
@@ -112,7 +111,6 @@ impl StreamableTransport {
         on_error: mpsc::Sender<Error>,
         on_close: mpsc::Sender<()>,
     ) -> Result<Self> {
-        // Create channel for handling responses
         let (tx, rx) = mpsc::channel::<JsonRpcMessage>(32);
 
         let mode = Arc::new(StreamableMode::Client {
@@ -130,11 +128,16 @@ impl StreamableTransport {
 impl Transport for StreamableTransport {
     async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
         match &*self.mode {
-            StreamableMode::Server { endpoint, on_message, origins, clients } => {
+            StreamableMode::Server { endpoint, on_message, origins, sse_streams, pending_requests } => {
                 let on_message = on_message.clone();
-                let shared_clients = clients.clone();
+                let shared_sse_streams = sse_streams.clone();
+                let shared_pending_requests = pending_requests.clone();
 
-                let app_data = web::Data::new(AppState { on_message, clients: shared_clients });
+                let app_data = web::Data::new(AppState {
+                    on_message,
+                    sse_streams: shared_sse_streams,
+                    pending_requests: shared_pending_requests,
+                });
                 let origins_list = origins.clone();
 
                 let socket_addr = endpoint
@@ -183,11 +186,10 @@ impl Transport for StreamableTransport {
                         let sse_endpoint = endpoint_clone.clone();
                         let sse_on_message = on_message_clone.clone();
 
-                        // Use a dedicated SSE client library instead of manual parsing
+                        // TODO: This task does not get killed when parent task dies.
                         tokio::spawn(async move {
                             debug!("Initiating SSE connection to {}", sse_endpoint);
 
-                            // Using eventsource-client for SSE handling
                             match setup_sse_client(&sse_endpoint, sse_on_message).await {
                                 Ok(_) => debug!("SSE client completed successfully"),
                                 Err(e) => error!("SSE client error: {}", e),
@@ -212,10 +214,10 @@ impl Transport for StreamableTransport {
 
     async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
-            StreamableMode::Server { clients, .. } => {
-                let clients_guard = clients.lock().await;
-                if let Some(client) = clients_guard.get(&conn_id) {
-                    client.sender.send(message).await.map_err(|e| {
+            StreamableMode::Server { sse_streams, .. } => {
+                let sse_streams_guard = sse_streams.lock().await;
+                if let Some(client) = sse_streams_guard.get(&conn_id) {
+                    client.send(message).await.map_err(|e| {
                         StreamableError::ChannelError(format!("Failed to send message to client {}: {}", conn_id, e))
                     })?;
                     Ok(())
@@ -224,7 +226,7 @@ impl Transport for StreamableTransport {
                 }
             }
             StreamableMode::Client { endpoint, tx, .. } => {
-                let json = serde_json::to_string(&message).map_err(StreamableError::SerializationError)?;
+                let json = serde_json::to_string(&message)?;
 
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
@@ -283,7 +285,6 @@ impl Transport for StreamableTransport {
     }
 }
 
-// New function to setup SSE client using eventsource-client crate
 async fn setup_sse_client(endpoint: &str, on_message: mpsc::Sender<JsonRpcMessage>) -> Result<(), StreamableError> {
     let client = ClientBuilder::for_url(endpoint)?.header("Accept", "text/event-stream")?.build();
 
@@ -318,13 +319,10 @@ async fn setup_sse_client(endpoint: &str, on_message: mpsc::Sender<JsonRpcMessag
     Ok(())
 }
 
-struct ClientConnection {
-    sender: mpsc::Sender<JsonRpcMessage>,
-}
-
 struct AppState {
     on_message: mpsc::Sender<Message>,
-    clients: Arc<Mutex<HashMap<ConnectionId, ClientConnection>>>,
+    sse_streams: Arc<Mutex<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
+    pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
 }
 
 struct SseStream {
@@ -358,9 +356,7 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
 
         let conn_id = ConnectionId::new(Some(uuid::Uuid::new_v4().to_string()));
 
-        let client = ClientConnection { sender: tx.clone() };
-
-        app_state.clients.lock().await.insert(conn_id.clone(), client);
+        app_state.sse_streams.lock().await.insert(conn_id.clone(), tx);
 
         let sse_stream = SseStream { rx };
 
@@ -375,13 +371,59 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
 }
 
 async fn post_handler(payload: web::Json<JsonRpcMessage>, app_state: web::Data<AppState>) -> impl Responder {
-    let message = Message { conn_id: ConnectionId::new(None), message: payload.into_inner() };
+    let message_content = payload.into_inner();
+    let conn_id = ConnectionId::new(None);
 
-    match app_state.on_message.send(message).await {
-        Ok(_) => HttpResponse::Accepted().finish(),
-        Err(e) => {
-            error!("Failed to forward message: {}", e);
-            HttpResponse::InternalServerError().body("Failed to process message")
+    match &message_content {
+        JsonRpcMessage::Response(_) => {
+            match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
+                Ok(_) => HttpResponse::Accepted().finish(),
+                Err(e) => {
+                    error!("Failed to forward response message: {}", e);
+                    HttpResponse::InternalServerError().body("Failed to process message")
+                }
+            }
+        }
+        JsonRpcMessage::Request(request) => {
+            let is_notification = match request {
+                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_)) => true,
+                jsonrpc_core::Request::Batch(calls)
+                    if calls.iter().all(|c| matches!(c, jsonrpc_core::Call::Notification(_))) =>
+                {
+                    true
+                }
+                _ => false,
+            };
+
+            if is_notification {
+                match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
+                    Ok(_) => {
+                        return HttpResponse::Accepted().finish();
+                    }
+                    Err(e) => {
+                        error!("Failed to forward notification message: {}", e);
+                        return HttpResponse::InternalServerError().body("Failed to process message");
+                    }
+                }
+            }
+
+            let (tx, rx) = oneshot::channel();
+
+            app_state.pending_requests.lock().await.insert(conn_id.clone(), tx);
+
+            match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
+                Ok(_) => match rx.await {
+                    Ok(response) => HttpResponse::Ok().json(response),
+                    Err(e) => {
+                        error!("Failed to receive response: {}", e);
+                        HttpResponse::InternalServerError().body("Failed to receive response")
+                    }
+                },
+                Err(e) => {
+                    error!("Failed to forward message: {}", e);
+                    HttpResponse::InternalServerError().body("Failed to process message")
+                }
+            }
         }
     }
 }
@@ -394,10 +436,10 @@ pub struct StreamableTransportSender {
 impl SendMessage for StreamableTransportSender {
     async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
-            StreamableMode::Server { clients, .. } => {
-                let clients_guard = clients.lock().await;
-                if let Some(client) = clients_guard.get(&conn_id) {
-                    client.sender.send(message).await.map_err(|e| {
+            StreamableMode::Server { sse_streams, pending_requests, .. } => {
+                let sse_streams_guard = sse_streams.lock().await;
+                if let Some(client) = sse_streams_guard.get(&conn_id) {
+                    client.send(message).await.map_err(|e| {
                         StreamableError::ChannelError(format!("Failed to send message to client {}: {}", conn_id, e))
                     })?;
                     Ok(())
@@ -406,7 +448,7 @@ impl SendMessage for StreamableTransportSender {
                 }
             }
             StreamableMode::Client { endpoint, tx, .. } => {
-                let json = serde_json::to_string(&message).map_err(StreamableError::SerializationError)?;
+                let json = serde_json::to_string(&message)?;
 
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
