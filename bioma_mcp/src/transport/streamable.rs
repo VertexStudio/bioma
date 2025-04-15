@@ -64,7 +64,7 @@ enum StreamableMode {
         endpoint: String,
         on_message: mpsc::Sender<Message>,
         origins: Vec<String>,
-        sse_streams: Arc<Mutex<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
+        sse_streams: Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
         pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
     },
 
@@ -93,7 +93,7 @@ impl StreamableTransport {
         on_error: mpsc::Sender<Error>,
         on_close: mpsc::Sender<()>,
     ) -> Self {
-        let sse_streams = Arc::new(Mutex::new(HashMap::new()));
+        let sse_streams = Arc::new(RwLock::new(HashMap::new()));
         let pending_requests = Arc::new(Mutex::new(HashMap::new()));
         let mode = Arc::new(StreamableMode::Server {
             endpoint: config.endpoint.clone(),
@@ -199,7 +199,7 @@ impl Transport for StreamableTransport {
     async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             StreamableMode::Server { sse_streams, .. } => {
-                let sse_streams_guard = sse_streams.lock().await;
+                let sse_streams_guard = sse_streams.read().await;
                 if let Some(client) = sse_streams_guard.get(&conn_id) {
                     client.send(message).await.map_err(|e| {
                         StreamableError::ChannelError(format!("Failed to send message to client {}: {}", conn_id, e))
@@ -341,7 +341,7 @@ impl Transport for StreamableTransport {
 
 struct AppState {
     on_message: mpsc::Sender<Message>,
-    sse_streams: Arc<Mutex<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
+    sse_streams: Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
     pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
 }
 
@@ -383,7 +383,7 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
     let conn_id = ConnectionId(session_id);
     let (tx, rx) = mpsc::channel::<JsonRpcMessage>(32);
 
-    app_state.sse_streams.lock().await.insert(conn_id, tx);
+    app_state.sse_streams.write().await.insert(conn_id, tx);
     let sse_stream = SseStream { rx };
 
     HttpResponse::Ok()
@@ -393,9 +393,32 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
         .streaming(sse_stream)
 }
 
-async fn post_handler(payload: web::Json<JsonRpcMessage>, app_state: web::Data<AppState>) -> impl Responder {
+async fn post_handler(
+    req: HttpRequest,
+    payload: web::Json<JsonRpcMessage>,
+    app_state: web::Data<AppState>,
+) -> impl Responder {
     let message_content = payload.into_inner();
-    let conn_id = ConnectionId::new(None);
+
+    let is_initialize = match &message_content {
+        JsonRpcMessage::Request(request) => match request {
+            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(method_call)) => {
+                method_call.method == "initialize"
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+
+    let conn_id = if is_initialize {
+        ConnectionId::new(None)
+    } else {
+        if let Some(session_id) = req.headers().get("Mcp-Session-Id").and_then(|value| value.to_str().ok()) {
+            ConnectionId(session_id.to_string())
+        } else {
+            return HttpResponse::BadRequest().body("Missing or invalid Mcp-Session-Id header");
+        }
+    };
 
     match &message_content {
         JsonRpcMessage::Response(_) => {
@@ -436,7 +459,13 @@ async fn post_handler(payload: web::Json<JsonRpcMessage>, app_state: web::Data<A
 
             match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
                 Ok(_) => match rx.await {
-                    Ok(response) => HttpResponse::Ok().json(response),
+                    Ok(response) => {
+                        if is_initialize {
+                            HttpResponse::Ok().append_header(("Mcp-Session-Id", conn_id.0)).json(response)
+                        } else {
+                            HttpResponse::Ok().json(response)
+                        }
+                    }
                     Err(e) => {
                         error!("Failed to receive response: {}", e);
                         HttpResponse::InternalServerError().body("Failed to receive response")
@@ -460,7 +489,7 @@ impl SendMessage for StreamableTransportSender {
     async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             StreamableMode::Server { sse_streams, pending_requests, .. } => {
-                let sse_streams_guard = sse_streams.lock().await;
+                let sse_streams_guard = sse_streams.read().await;
                 if let Some(client) = sse_streams_guard.get(&conn_id) {
                     client.send(message).await.map_err(|e| {
                         StreamableError::ChannelError(format!("Failed to send message to client {}: {}", conn_id, e))
