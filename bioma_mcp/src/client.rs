@@ -105,13 +105,10 @@ impl Default for WsConfig {
 pub struct StreamableConfig {
     #[builder(default = default_streamable_endpoint())]
     pub endpoint: String,
-    #[builder(default)]
-    #[serde(default)]
-    pub sse_stream: bool,
 }
 
 fn default_streamable_endpoint() -> String {
-    "http://127.0.0.1:8090".to_string()
+    "http://127.0.0.1:7090".to_string()
 }
 
 impl Default for StreamableConfig {

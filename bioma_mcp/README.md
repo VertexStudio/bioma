@@ -79,6 +79,19 @@ With JSON configuration:
 cargo run --release -p bioma_mcp --example mcp_client --config assets/configs/mcp_client_config.json
 ```
 
+With command-line options:
+
+```
+# Stdio transport with custom timeout
+cargo run --release -p bioma_mcp --example mcp_client stdio --request-timeout 30
+
+# SSE transport
+cargo run --release -p bioma_mcp --example mcp_client sse --endpoint http://127.0.0.1:8090 --request-timeout 45
+
+# WebSocket transport
+cargo run --release -p bioma_mcp --example mcp_client ws --endpoint ws://127.0.0.1:9090
+```
+
 Example configuration file (`assets/configs/mcp_client_config.json`):
 
 ```json
@@ -88,7 +101,8 @@ Example configuration file (`assets/configs/mcp_client_config.json`):
       "name": "stdio-server",
       "transport": "stdio",
       "command": "target/release/examples/mcp_server",
-      "args": ["stdio"]
+      "args": ["stdio"],
+      "request_timeout": 20
     },
     {
       "name": "sse-server",
@@ -98,7 +112,8 @@ Example configuration file (`assets/configs/mcp_client_config.json`):
     {
       "name": "websocket-server",
       "transport": "ws",
-      "endpoint": "ws://127.0.0.1:9090"
+      "endpoint": "ws://127.0.0.1:9090",
+      "request_timeout": 45
     }
   ]
 }

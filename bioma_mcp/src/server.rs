@@ -69,13 +69,13 @@ pub struct StdioConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
-    #[builder(default = default_server_url())]
+    #[builder(default = default_sse_endpoint())]
     pub endpoint: String,
     #[builder(default = default_channel_capacity())]
     pub channel_capacity: usize,
 }
 
-fn default_server_url() -> String {
+fn default_sse_endpoint() -> String {
     "127.0.0.1:8090".to_string()
 }
 
@@ -124,7 +124,7 @@ pub enum ResponseType {
 }
 
 fn default_streamable_endpoint() -> String {
-    "http://127.0.0.1:8090".to_string()
+    "127.0.0.1:7090".to_string()
 }
 
 fn default_streamable_sse() -> bool {

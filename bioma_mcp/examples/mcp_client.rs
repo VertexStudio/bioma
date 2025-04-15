@@ -7,7 +7,7 @@ use bioma_mcp::{
         CreateMessageResult, Implementation, LoggingLevel, ReadResourceRequestParams, Role, Root, SamplingMessage,
     },
 };
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -18,8 +18,60 @@ const DEFAULT_MODEL: &str = "llama3.2";
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, short)]
-    pub config: Option<PathBuf>,
+    #[command(subcommand)]
+    transport: TransportArg,
+}
+
+#[derive(Subcommand)]
+enum TransportArg {
+    Config {
+        #[arg(required = true)]
+        path: PathBuf,
+    },
+
+    Stdio {
+        #[arg(long, short, default_value = "target/release/examples/mcp_server")]
+        command: String,
+
+        #[arg(long, short, default_value = "bioma-tool")]
+        name: String,
+
+        #[arg(long, short, default_value = "20")]
+        request_timeout: u64,
+    },
+
+    Sse {
+        #[arg(long, short, default_value = "http://127.0.0.1:8090")]
+        endpoint: String,
+
+        #[arg(long, short, default_value = "bioma-tool")]
+        name: String,
+
+        #[arg(long, short, default_value = "20")]
+        request_timeout: u64,
+    },
+
+    Ws {
+        #[arg(long, short, default_value = "ws://127.0.0.1:9090")]
+        endpoint: String,
+
+        #[arg(long, short, default_value = "bioma-tool")]
+        name: String,
+
+        #[arg(long, short, default_value = "20")]
+        request_timeout: u64,
+    },
+
+    Streamable {
+        #[arg(long, short, default_value = "http://127.0.0.1:7090")]
+        endpoint: String,
+
+        #[arg(long, short, default_value = "bioma-tool")]
+        name: String,
+
+        #[arg(long, short, default_value = "20")]
+        request_timeout: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,26 +168,59 @@ async fn main() -> Result<()> {
     info!("Starting MCP client...");
     let args = Args::parse();
 
-    let server_configs: Vec<ServerConfig> = if let Some(config_path) = &args.config {
-        info!("Loading server configurations from: {}", config_path.display());
-        let config_content =
-            std::fs::read_to_string(config_path).map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
+    let server_configs: Vec<ServerConfig> = match &args.transport {
+        TransportArg::Config { path } => {
+            info!("Loading server configurations from: {}", path.display());
+            let config_content =
+                std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("Failed to read config file: {}", e))?;
 
-        let client_config: ClientConfig =
-            serde_json::from_str(&config_content).map_err(|e| anyhow::anyhow!("Failed to parse config file: {}", e))?;
+            let client_config: ClientConfig = serde_json::from_str(&config_content)
+                .map_err(|e| anyhow::anyhow!("Failed to parse config file: {}", e))?;
 
-        client_config.servers
-    } else {
-        info!("No configuration file provided. Using default stdio server configuration.");
-        vec![ServerConfig::builder()
-            .name("bioma-tool".to_string())
-            .transport(TransportConfig::Stdio(StdioConfig {
-                command: "target/release/examples/mcp_server".to_string(),
-                args: vec!["stdio".to_string()],
-                env: std::collections::HashMap::new(),
-            }))
-            .request_timeout(60)
-            .build()]
+            client_config.servers
+        }
+        TransportArg::Stdio { command, name, request_timeout } => {
+            info!("Using stdio transport");
+            vec![ServerConfig::builder()
+                .name(name.clone())
+                .transport(TransportConfig::Stdio(StdioConfig {
+                    command: command.clone(),
+                    args: vec!["stdio".to_string()],
+                    env: std::collections::HashMap::new(),
+                }))
+                .request_timeout(*request_timeout)
+                .build()]
+        }
+        TransportArg::Sse { endpoint, name, request_timeout } => {
+            info!("Using SSE transport with endpoint: {}", endpoint);
+            vec![ServerConfig::builder()
+                .name(name.clone())
+                .transport(TransportConfig::Sse(
+                    bioma_mcp::client::SseConfig::builder().endpoint(endpoint.clone()).build(),
+                ))
+                .request_timeout(*request_timeout)
+                .build()]
+        }
+        TransportArg::Ws { endpoint, name, request_timeout } => {
+            info!("Using WebSocket transport with endpoint: {}", endpoint);
+            vec![ServerConfig::builder()
+                .name(name.clone())
+                .transport(TransportConfig::Ws(
+                    bioma_mcp::client::WsConfig::builder().endpoint(endpoint.clone()).build(),
+                ))
+                .request_timeout(*request_timeout)
+                .build()]
+        }
+        TransportArg::Streamable { endpoint, name, request_timeout } => {
+            info!("Using Streamable transport with endpoint: {}", endpoint);
+            vec![ServerConfig::builder()
+                .name(name.clone())
+                .transport(TransportConfig::Streamable(
+                    bioma_mcp::client::StreamableConfig::builder().endpoint(endpoint.clone()).build(),
+                ))
+                .request_timeout(*request_timeout)
+                .build()]
+        }
     };
 
     info!("Loaded {} server configurations", server_configs.len());
