@@ -236,43 +236,47 @@ impl Transport for StreamableTransport {
 
                 if response.status().is_success() {
                     if is_initialize_request {
+                        let mut session_id_value = None;
                         if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
                             if let Ok(id) = header_value.to_str() {
                                 *session_id.write().await = Some(id.to_string());
+                                session_id_value = Some(id.to_string());
                                 debug!("Saved MCP session ID: {}", id);
-
-                                let sse_endpoint = endpoint.clone();
-                                let tx_clone = tx.clone();
-                                let session_id_value = id.to_string();
-                                let client = reqwest::Client::new();
-
-                                tokio::spawn(async move {
-                                    let sse_request = client
-                                        .get(sse_endpoint)
-                                        .header("Accept", "text/event-stream")
-                                        .header("Mcp-Session-Id", session_id_value);
-
-                                    match sse_request.send().await {
-                                        Ok(sse_response) => {
-                                            if sse_response.status().is_success() {
-                                                debug!("SSE stream established successfully");
-
-                                                if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
-                                                    error!("Error setting up SSE client: {}", e);
-                                                }
-                                            } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
-                                                debug!("Server does not support SSE (405 Method Not Allowed), continuing normally");
-                                            } else {
-                                                error!("Failed to establish SSE stream: {}", sse_response.status());
-                                            }
-                                        }
-                                        Err(e) => {
-                                            error!("Error sending SSE request: {}", e);
-                                        }
-                                    }
-                                });
                             }
                         }
+
+                        let sse_endpoint = endpoint.clone();
+                        let tx_clone = tx.clone();
+                        let client = reqwest::Client::new();
+
+                        tokio::spawn(async move {
+                            let mut sse_request = client.get(sse_endpoint).header("Accept", "text/event-stream");
+
+                            if let Some(id) = session_id_value {
+                                sse_request = sse_request.header("Mcp-Session-Id", id);
+                            }
+
+                            match sse_request.send().await {
+                                Ok(sse_response) => {
+                                    if sse_response.status().is_success() {
+                                        debug!("SSE stream established successfully");
+
+                                        if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
+                                            error!("Error setting up SSE client: {}", e);
+                                        }
+                                    } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+                                        debug!(
+                                            "Server does not support SSE (405 Method Not Allowed), continuing normally"
+                                        );
+                                    } else {
+                                        error!("Failed to establish SSE stream: {}", sse_response.status());
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Error sending SSE request: {}", e);
+                                }
+                            }
+                        });
                     }
 
                     if let Ok(response_body) = response.text().await {
@@ -460,43 +464,47 @@ impl SendMessage for StreamableTransportSender {
 
                 if response.status().is_success() {
                     if is_initialize_request {
+                        let mut session_id_value = None;
                         if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
                             if let Ok(id) = header_value.to_str() {
                                 *session_id.write().await = Some(id.to_string());
+                                session_id_value = Some(id.to_string());
                                 debug!("Saved MCP session ID: {}", id);
-
-                                let sse_endpoint = endpoint.clone();
-                                let tx_clone = tx.clone();
-                                let session_id_value = id.to_string();
-                                let client = reqwest::Client::new();
-
-                                tokio::spawn(async move {
-                                    let sse_request = client
-                                        .get(sse_endpoint)
-                                        .header("Accept", "text/event-stream")
-                                        .header("Mcp-Session-Id", session_id_value);
-
-                                    match sse_request.send().await {
-                                        Ok(sse_response) => {
-                                            if sse_response.status().is_success() {
-                                                debug!("SSE stream established successfully");
-
-                                                if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
-                                                    error!("Error setting up SSE client: {}", e);
-                                                }
-                                            } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
-                                                debug!("Server does not support SSE (405 Method Not Allowed), continuing normally");
-                                            } else {
-                                                error!("Failed to establish SSE stream: {}", sse_response.status());
-                                            }
-                                        }
-                                        Err(e) => {
-                                            error!("Error sending SSE request: {}", e);
-                                        }
-                                    }
-                                });
                             }
                         }
+
+                        let sse_endpoint = endpoint.clone();
+                        let tx_clone = tx.clone();
+                        let client = reqwest::Client::new();
+
+                        tokio::spawn(async move {
+                            let mut sse_request = client.get(sse_endpoint).header("Accept", "text/event-stream");
+
+                            if let Some(id) = session_id_value {
+                                sse_request = sse_request.header("Mcp-Session-Id", id);
+                            }
+
+                            match sse_request.send().await {
+                                Ok(sse_response) => {
+                                    if sse_response.status().is_success() {
+                                        debug!("SSE stream established successfully");
+
+                                        if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
+                                            error!("Error setting up SSE client: {}", e);
+                                        }
+                                    } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+                                        debug!(
+                                            "Server does not support SSE (405 Method Not Allowed), continuing normally"
+                                        );
+                                    } else {
+                                        error!("Failed to establish SSE stream: {}", sse_response.status());
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Error sending SSE request: {}", e);
+                                }
+                            }
+                        });
                     }
 
                     if let Ok(response_body) = response.text().await {
