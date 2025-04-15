@@ -371,23 +371,26 @@ impl Stream for SseStream {
 }
 
 async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
-    if req.headers().get("Accept").map_or(false, |h| h.to_str().unwrap_or("").contains("text/event-stream")) {
-        let (tx, rx) = mpsc::channel::<JsonRpcMessage>(32);
-
-        let conn_id = ConnectionId::new(Some(uuid::Uuid::new_v4().to_string()));
-
-        app_state.sse_streams.lock().await.insert(conn_id.clone(), tx);
-
-        let sse_stream = SseStream { rx };
-
-        HttpResponse::Ok()
-            .content_type("text/event-stream")
-            .append_header(("Cache-Control", "no-cache"))
-            .append_header(("Connection", "keep-alive"))
-            .streaming(sse_stream)
-    } else {
-        HttpResponse::BadRequest().body("Invalid request")
+    if !req.headers().get("Accept").map_or(false, |h| h.to_str().unwrap_or("").contains("text/event-stream")) {
+        return HttpResponse::BadRequest().body("Invalid request");
     }
+
+    let session_id = match req.headers().get("Mcp-Session-Id").and_then(|value| value.to_str().ok()).map(String::from) {
+        Some(id) => id,
+        None => return HttpResponse::BadRequest().body("Missing or invalid Mcp-Session-Id header"),
+    };
+
+    let conn_id = ConnectionId(session_id);
+    let (tx, rx) = mpsc::channel::<JsonRpcMessage>(32);
+
+    app_state.sse_streams.lock().await.insert(conn_id, tx);
+    let sse_stream = SseStream { rx };
+
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .append_header(("Cache-Control", "no-cache"))
+        .append_header(("Connection", "keep-alive"))
+        .streaming(sse_stream)
 }
 
 async fn post_handler(payload: web::Json<JsonRpcMessage>, app_state: web::Data<AppState>) -> impl Responder {
