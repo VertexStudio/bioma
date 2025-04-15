@@ -7,14 +7,15 @@ use crate::{ConnectionId, JsonRpcMessage};
 use actix_cors::Cors;
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use anyhow::{Error, Result};
-use eventsource_client::{Client, ClientBuilder, SSE};
-use futures::{Stream, StreamExt};
+use futures::Stream;
+use futures::StreamExt;
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
@@ -70,9 +71,9 @@ enum StreamableMode {
     Client {
         endpoint: String,
         on_message: mpsc::Sender<JsonRpcMessage>,
-        sse_stream: bool,
         tx: mpsc::Sender<JsonRpcMessage>,
         rx: Arc<Mutex<mpsc::Receiver<JsonRpcMessage>>>,
+        session_id: Arc<RwLock<Option<String>>>,
     },
 }
 
@@ -116,9 +117,9 @@ impl StreamableTransport {
         let mode = Arc::new(StreamableMode::Client {
             endpoint: config.endpoint.clone(),
             on_message,
-            sse_stream: config.sse_stream,
             tx,
             rx: Arc::new(Mutex::new(rx)),
+            session_id: Arc::new(RwLock::new(None)),
         });
 
         Ok(Self { mode, on_error, on_close })
@@ -174,29 +175,12 @@ impl Transport for StreamableTransport {
 
                 Ok(handle)
             }
-            StreamableMode::Client { endpoint, on_message, sse_stream, rx, .. } => {
-                let endpoint_clone = endpoint.clone();
+            StreamableMode::Client { on_message, rx, .. } => {
                 let on_message_clone = on_message.clone();
-                let sse_stream_flag = *sse_stream;
 
                 let rx_arc = rx.clone();
 
                 let handle = tokio::spawn(async move {
-                    if sse_stream_flag {
-                        let sse_endpoint = endpoint_clone.clone();
-                        let sse_on_message = on_message_clone.clone();
-
-                        // TODO: This task does not get killed when parent task dies.
-                        tokio::spawn(async move {
-                            debug!("Initiating SSE connection to {}", sse_endpoint);
-
-                            match setup_sse_client(&sse_endpoint, sse_on_message).await {
-                                Ok(_) => debug!("SSE client completed successfully"),
-                                Err(e) => error!("SSE client error: {}", e),
-                            }
-                        });
-                    }
-
                     let mut rx_guard = rx_arc.lock().await;
                     while let Some(message) = rx_guard.recv().await {
                         if let Err(e) = on_message_clone.send(message).await {
@@ -225,53 +209,89 @@ impl Transport for StreamableTransport {
                     Err(StreamableError::ClientNotFound(conn_id).into())
                 }
             }
-            StreamableMode::Client { endpoint, tx, .. } => {
+            StreamableMode::Client { endpoint, tx, session_id, .. } => {
                 let json = serde_json::to_string(&message)?;
-
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
                 let client = reqwest::Client::new();
 
-                tokio::spawn(async move {
-                    match client
-                        .post(endpoint)
-                        .header("Accept", "application/json, text/event-stream")
-                        .body(json)
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.status().is_success() {
-                                match response.text().await {
-                                    Ok(text) => {
-                                        if !text.is_empty() {
-                                            match serde_json::from_str::<JsonRpcMessage>(&text) {
-                                                Ok(message) => {
-                                                    if let Err(e) = tx.send(message).await {
-                                                        error!("Failed to forward message: {}", e);
-                                                    }
+                let is_initialize_request = match &message {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(method_call)) => {
+                            method_call.method == "initialize"
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                };
+
+                let mut request =
+                    client.post(endpoint.clone()).header("Accept", "application/json, text/event-stream").body(json);
+
+                if let Some(id) = session_id.read().await.as_ref() {
+                    request = request.header("Mcp-Session-Id", id);
+                }
+
+                let response = request.send().await.map_err(StreamableError::from)?;
+
+                if response.status().is_success() {
+                    if is_initialize_request {
+                        if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
+                            if let Ok(id) = header_value.to_str() {
+                                *session_id.write().await = Some(id.to_string());
+                                debug!("Saved MCP session ID: {}", id);
+
+                                let sse_endpoint = endpoint.clone();
+                                let tx_clone = tx.clone();
+                                let session_id_value = id.to_string();
+                                let client = reqwest::Client::new();
+
+                                tokio::spawn(async move {
+                                    let sse_request = client
+                                        .get(sse_endpoint)
+                                        .header("Accept", "text/event-stream")
+                                        .header("Mcp-Session-Id", session_id_value);
+
+                                    match sse_request.send().await {
+                                        Ok(sse_response) => {
+                                            if sse_response.status().is_success() {
+                                                debug!("SSE stream established successfully");
+
+                                                if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
+                                                    error!("Error setting up SSE client: {}", e);
                                                 }
-                                                Err(e) => {
-                                                    error!("Failed to parse JSON-RPC message: {}", e);
-                                                }
+                                            } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+                                                debug!("Server does not support SSE (405 Method Not Allowed), continuing normally");
+                                            } else {
+                                                error!("Failed to establish SSE stream: {}", sse_response.status());
                                             }
                                         }
+                                        Err(e) => {
+                                            error!("Error sending SSE request: {}", e);
+                                        }
                                     }
-                                    Err(e) => {
-                                        error!("Failed to get response text: {}", e);
-                                    }
-                                }
-                            } else {
-                                error!("Request failed with status: {}", response.status());
+                                });
                             }
                         }
-                        Err(e) => {
-                            error!("Request error: {}", e);
+                    }
+
+                    if let Ok(response_body) = response.text().await {
+                        if !response_body.is_empty() {
+                            if let Ok(response_message) = serde_json::from_str::<JsonRpcMessage>(&response_body) {
+                                if let Err(e) = tx.send(response_message).await {
+                                    return Err(StreamableError::ChannelError(format!(
+                                        "Failed to send response through channel: {}",
+                                        e
+                                    ))
+                                    .into());
+                                }
+                            }
                         }
                     }
-                });
-
-                Ok(())
+                    Ok(())
+                } else {
+                    Err(StreamableError::HttpError(response.status()).into())
+                }
             }
         }
     }
@@ -283,40 +303,6 @@ impl Transport for StreamableTransport {
     fn sender(&self) -> TransportSender {
         TransportSender::new_streamable(StreamableTransportSender { mode: self.mode.clone() })
     }
-}
-
-async fn setup_sse_client(endpoint: &str, on_message: mpsc::Sender<JsonRpcMessage>) -> Result<(), StreamableError> {
-    let client = ClientBuilder::for_url(endpoint)?.header("Accept", "text/event-stream")?.build();
-
-    let mut event_stream = client.stream();
-
-    tokio::spawn(async move {
-        while let Some(event_result) = event_stream.next().await {
-            match event_result {
-                Ok(SSE::Event(event)) => {
-                    if let Ok(json_message) = serde_json::from_str::<JsonRpcMessage>(&event.data) {
-                        if let Err(e) = on_message.send(json_message).await {
-                            error!("Failed to forward SSE message: {}", e);
-                            break;
-                        }
-                    } else {
-                        error!("Failed to parse SSE message data as JsonRpcMessage");
-                    }
-                }
-                Ok(SSE::Connected(_)) => {
-                    debug!("SSE connection opened");
-                }
-                Err(e) => {
-                    error!("SSE stream error: {}", e);
-                    break;
-                }
-                _ => {}
-            }
-        }
-        debug!("SSE stream ended");
-    });
-
-    Ok(())
 }
 
 struct AppState {
@@ -447,22 +433,73 @@ impl SendMessage for StreamableTransportSender {
                     Err(StreamableError::ClientNotFound(conn_id).into())
                 }
             }
-            StreamableMode::Client { endpoint, tx, .. } => {
+            StreamableMode::Client { endpoint, tx, session_id, .. } => {
                 let json = serde_json::to_string(&message)?;
-
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
+                let client = reqwest::Client::new();
 
-                let res = reqwest::Client::new()
-                    .post(endpoint)
-                    .header("Accept", "application/json, text/event-stream")
-                    .body(json)
-                    .send()
-                    .await
-                    .map_err(StreamableError::from)?;
+                let is_initialize_request = match &message {
+                    JsonRpcMessage::Request(request) => match request {
+                        jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(method_call)) => {
+                            method_call.method == "initialize"
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                };
 
-                if res.status().is_success() {
-                    if let Ok(response_body) = res.text().await {
+                let mut request_builder =
+                    client.post(endpoint.clone()).header("Accept", "application/json, text/event-stream").body(json);
+
+                if let Some(id) = session_id.read().await.as_ref() {
+                    request_builder = request_builder.header("Mcp-Session-Id", id);
+                }
+
+                let response = request_builder.send().await.map_err(StreamableError::from)?;
+
+                if response.status().is_success() {
+                    if is_initialize_request {
+                        if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
+                            if let Ok(id) = header_value.to_str() {
+                                *session_id.write().await = Some(id.to_string());
+                                debug!("Saved MCP session ID: {}", id);
+
+                                let sse_endpoint = endpoint.clone();
+                                let tx_clone = tx.clone();
+                                let session_id_value = id.to_string();
+                                let client = reqwest::Client::new();
+
+                                tokio::spawn(async move {
+                                    let sse_request = client
+                                        .get(sse_endpoint)
+                                        .header("Accept", "text/event-stream")
+                                        .header("Mcp-Session-Id", session_id_value);
+
+                                    match sse_request.send().await {
+                                        Ok(sse_response) => {
+                                            if sse_response.status().is_success() {
+                                                debug!("SSE stream established successfully");
+
+                                                if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
+                                                    error!("Error setting up SSE client: {}", e);
+                                                }
+                                            } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+                                                debug!("Server does not support SSE (405 Method Not Allowed), continuing normally");
+                                            } else {
+                                                error!("Failed to establish SSE stream: {}", sse_response.status());
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Error sending SSE request: {}", e);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+
+                    if let Ok(response_body) = response.text().await {
                         if !response_body.is_empty() {
                             if let Ok(response_message) = serde_json::from_str::<JsonRpcMessage>(&response_body) {
                                 if let Err(e) = tx.send(response_message).await {
@@ -477,9 +514,43 @@ impl SendMessage for StreamableTransportSender {
                     }
                     Ok(())
                 } else {
-                    Err(StreamableError::HttpError(res.status()).into())
+                    Err(StreamableError::HttpError(response.status()).into())
                 }
             }
         }
     }
+}
+
+async fn setup_sse_client(
+    response: reqwest::Response,
+    on_message: mpsc::Sender<JsonRpcMessage>,
+) -> Result<(), StreamableError> {
+    let stream = response.bytes_stream();
+
+    tokio::spawn(async move {
+        let reader = tokio_util::io::StreamReader::new(
+            stream.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))),
+        );
+
+        let mut lines = BufReader::new(reader).lines();
+
+        while let Ok(Some(line)) = lines.next_line().await {
+            if line.starts_with("data: ") {
+                let data = line.trim_start_matches("data: ");
+
+                if let Ok(json_message) = serde_json::from_str::<JsonRpcMessage>(data) {
+                    if let Err(e) = on_message.send(json_message).await {
+                        error!("Failed to forward SSE message: {}", e);
+                        break;
+                    }
+                } else {
+                    error!("Failed to parse SSE message data as JsonRpcMessage");
+                }
+            }
+        }
+
+        debug!("SSE stream ended");
+    });
+
+    Ok(())
 }
