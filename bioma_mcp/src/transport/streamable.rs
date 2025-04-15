@@ -239,6 +239,13 @@ impl Transport for StreamableTransport {
                     match request.send().await {
                         Ok(response) => {
                             if response.status().is_success() {
+                                let is_event_stream = response
+                                    .headers()
+                                    .get(reqwest::header::CONTENT_TYPE)
+                                    .and_then(|v| v.to_str().ok())
+                                    .map(|s| s.contains("text/event-stream"))
+                                    .unwrap_or(false);
+
                                 if is_initialize_request {
                                     let mut session_id_value = None;
                                     if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
@@ -286,13 +293,24 @@ impl Transport for StreamableTransport {
                                     });
                                 }
 
-                                if let Ok(response_body) = response.text().await {
-                                    if !response_body.is_empty() {
-                                        if let Ok(response_message) =
-                                            serde_json::from_str::<JsonRpcMessage>(&response_body)
-                                        {
-                                            if let Err(e) = tx.send(response_message).await {
-                                                error!("Failed to send response through channel: {}", e);
+                                if is_event_stream {
+                                    debug!("Received text/event-stream response for request");
+                                    let tx_clone = tx.clone();
+
+                                    tokio::spawn(async move {
+                                        if let Err(e) = setup_sse_client(response, tx_clone).await {
+                                            error!("Error processing text/event-stream response: {}", e);
+                                        }
+                                    });
+                                } else {
+                                    if let Ok(response_body) = response.text().await {
+                                        if !response_body.is_empty() {
+                                            if let Ok(response_message) =
+                                                serde_json::from_str::<JsonRpcMessage>(&response_body)
+                                            {
+                                                if let Err(e) = tx.send(response_message).await {
+                                                    error!("Failed to send response through channel: {}", e);
+                                                }
                                             }
                                         }
                                     }
@@ -467,18 +485,25 @@ impl SendMessage for StreamableTransportSender {
 
                 tokio::spawn(async move {
                     let client = reqwest::Client::new();
-                    let mut request_builder = client
+                    let mut request = client
                         .post(endpoint.clone())
                         .header("Accept", "application/json, text/event-stream")
                         .body(json);
 
                     if let Some(id) = session_id.read().await.as_ref() {
-                        request_builder = request_builder.header("Mcp-Session-Id", id);
+                        request = request.header("Mcp-Session-Id", id);
                     }
 
-                    match request_builder.send().await {
+                    match request.send().await {
                         Ok(response) => {
                             if response.status().is_success() {
+                                let is_event_stream = response
+                                    .headers()
+                                    .get(reqwest::header::CONTENT_TYPE)
+                                    .and_then(|v| v.to_str().ok())
+                                    .map(|s| s.contains("text/event-stream"))
+                                    .unwrap_or(false);
+
                                 if is_initialize_request {
                                     let mut session_id_value = None;
                                     if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
@@ -526,13 +551,24 @@ impl SendMessage for StreamableTransportSender {
                                     });
                                 }
 
-                                if let Ok(response_body) = response.text().await {
-                                    if !response_body.is_empty() {
-                                        if let Ok(response_message) =
-                                            serde_json::from_str::<JsonRpcMessage>(&response_body)
-                                        {
-                                            if let Err(e) = tx.send(response_message).await {
-                                                error!("Failed to send response through channel: {}", e);
+                                if is_event_stream {
+                                    debug!("Received text/event-stream response for request");
+                                    let tx_clone = tx.clone();
+
+                                    tokio::spawn(async move {
+                                        if let Err(e) = setup_sse_client(response, tx_clone).await {
+                                            error!("Error processing text/event-stream response: {}", e);
+                                        }
+                                    });
+                                } else {
+                                    if let Ok(response_body) = response.text().await {
+                                        if !response_body.is_empty() {
+                                            if let Ok(response_message) =
+                                                serde_json::from_str::<JsonRpcMessage>(&response_body)
+                                            {
+                                                if let Err(e) = tx.send(response_message).await {
+                                                    error!("Failed to send response through channel: {}", e);
+                                                }
                                             }
                                         }
                                     }
