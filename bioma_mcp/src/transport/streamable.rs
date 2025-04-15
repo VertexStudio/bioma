@@ -213,7 +213,7 @@ impl Transport for StreamableTransport {
                 let json = serde_json::to_string(&message)?;
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
-                let client = reqwest::Client::new();
+                let session_id = session_id.clone();
 
                 let is_initialize_request = match &message {
                     JsonRpcMessage::Request(request) => match request {
@@ -225,77 +225,89 @@ impl Transport for StreamableTransport {
                     _ => false,
                 };
 
-                let mut request =
-                    client.post(endpoint.clone()).header("Accept", "application/json, text/event-stream").body(json);
+                tokio::spawn(async move {
+                    let client = reqwest::Client::new();
+                    let mut request = client
+                        .post(endpoint.clone())
+                        .header("Accept", "application/json, text/event-stream")
+                        .body(json);
 
-                if let Some(id) = session_id.read().await.as_ref() {
-                    request = request.header("Mcp-Session-Id", id);
-                }
+                    if let Some(id) = session_id.read().await.as_ref() {
+                        request = request.header("Mcp-Session-Id", id);
+                    }
 
-                let response = request.send().await.map_err(StreamableError::from)?;
-
-                if response.status().is_success() {
-                    if is_initialize_request {
-                        let mut session_id_value = None;
-                        if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
-                            if let Ok(id) = header_value.to_str() {
-                                *session_id.write().await = Some(id.to_string());
-                                session_id_value = Some(id.to_string());
-                                debug!("Saved MCP session ID: {}", id);
-                            }
-                        }
-
-                        let sse_endpoint = endpoint.clone();
-                        let tx_clone = tx.clone();
-                        let client = reqwest::Client::new();
-
-                        tokio::spawn(async move {
-                            let mut sse_request = client.get(sse_endpoint).header("Accept", "text/event-stream");
-
-                            if let Some(id) = session_id_value {
-                                sse_request = sse_request.header("Mcp-Session-Id", id);
-                            }
-
-                            match sse_request.send().await {
-                                Ok(sse_response) => {
-                                    if sse_response.status().is_success() {
-                                        debug!("SSE stream established successfully");
-
-                                        if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
-                                            error!("Error setting up SSE client: {}", e);
+                    match request.send().await {
+                        Ok(response) => {
+                            if response.status().is_success() {
+                                if is_initialize_request {
+                                    let mut session_id_value = None;
+                                    if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
+                                        if let Ok(id) = header_value.to_str() {
+                                            *session_id.write().await = Some(id.to_string());
+                                            session_id_value = Some(id.to_string());
+                                            debug!("Saved MCP session ID: {}", id);
                                         }
-                                    } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
-                                        debug!(
-                                            "Server does not support SSE (405 Method Not Allowed), continuing normally"
-                                        );
-                                    } else {
-                                        error!("Failed to establish SSE stream: {}", sse_response.status());
+                                    }
+
+                                    let sse_endpoint = endpoint.clone();
+                                    let tx_clone = tx.clone();
+                                    let client = reqwest::Client::new();
+
+                                    tokio::spawn(async move {
+                                        let mut sse_request =
+                                            client.get(sse_endpoint).header("Accept", "text/event-stream");
+
+                                        if let Some(id) = session_id_value {
+                                            sse_request = sse_request.header("Mcp-Session-Id", id);
+                                        }
+
+                                        match sse_request.send().await {
+                                            Ok(sse_response) => {
+                                                if sse_response.status().is_success() {
+                                                    debug!("SSE stream established successfully");
+
+                                                    if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
+                                                        error!("Error setting up SSE client: {}", e);
+                                                    }
+                                                } else if sse_response.status()
+                                                    == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                                                {
+                                                    debug!(
+                                                        "Server does not support SSE (405 Method Not Allowed), continuing normally"
+                                                    );
+                                                } else {
+                                                    error!("Failed to establish SSE stream: {}", sse_response.status());
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Error sending SSE request: {}", e);
+                                            }
+                                        }
+                                    });
+                                }
+
+                                if let Ok(response_body) = response.text().await {
+                                    if !response_body.is_empty() {
+                                        if let Ok(response_message) =
+                                            serde_json::from_str::<JsonRpcMessage>(&response_body)
+                                        {
+                                            if let Err(e) = tx.send(response_message).await {
+                                                error!("Failed to send response through channel: {}", e);
+                                            }
+                                        }
                                     }
                                 }
-                                Err(e) => {
-                                    error!("Error sending SSE request: {}", e);
-                                }
-                            }
-                        });
-                    }
-
-                    if let Ok(response_body) = response.text().await {
-                        if !response_body.is_empty() {
-                            if let Ok(response_message) = serde_json::from_str::<JsonRpcMessage>(&response_body) {
-                                if let Err(e) = tx.send(response_message).await {
-                                    return Err(StreamableError::ChannelError(format!(
-                                        "Failed to send response through channel: {}",
-                                        e
-                                    ))
-                                    .into());
-                                }
+                            } else {
+                                error!("HTTP error: {}", response.status());
                             }
                         }
+                        Err(e) => {
+                            error!("Request error: {}", e);
+                        }
                     }
-                    Ok(())
-                } else {
-                    Err(StreamableError::HttpError(response.status()).into())
-                }
+                });
+
+                Ok(())
             }
         }
     }
@@ -441,7 +453,7 @@ impl SendMessage for StreamableTransportSender {
                 let json = serde_json::to_string(&message)?;
                 let endpoint = endpoint.clone();
                 let tx = tx.clone();
-                let client = reqwest::Client::new();
+                let session_id = session_id.clone();
 
                 let is_initialize_request = match &message {
                     JsonRpcMessage::Request(request) => match request {
@@ -453,77 +465,89 @@ impl SendMessage for StreamableTransportSender {
                     _ => false,
                 };
 
-                let mut request_builder =
-                    client.post(endpoint.clone()).header("Accept", "application/json, text/event-stream").body(json);
+                tokio::spawn(async move {
+                    let client = reqwest::Client::new();
+                    let mut request_builder = client
+                        .post(endpoint.clone())
+                        .header("Accept", "application/json, text/event-stream")
+                        .body(json);
 
-                if let Some(id) = session_id.read().await.as_ref() {
-                    request_builder = request_builder.header("Mcp-Session-Id", id);
-                }
+                    if let Some(id) = session_id.read().await.as_ref() {
+                        request_builder = request_builder.header("Mcp-Session-Id", id);
+                    }
 
-                let response = request_builder.send().await.map_err(StreamableError::from)?;
-
-                if response.status().is_success() {
-                    if is_initialize_request {
-                        let mut session_id_value = None;
-                        if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
-                            if let Ok(id) = header_value.to_str() {
-                                *session_id.write().await = Some(id.to_string());
-                                session_id_value = Some(id.to_string());
-                                debug!("Saved MCP session ID: {}", id);
-                            }
-                        }
-
-                        let sse_endpoint = endpoint.clone();
-                        let tx_clone = tx.clone();
-                        let client = reqwest::Client::new();
-
-                        tokio::spawn(async move {
-                            let mut sse_request = client.get(sse_endpoint).header("Accept", "text/event-stream");
-
-                            if let Some(id) = session_id_value {
-                                sse_request = sse_request.header("Mcp-Session-Id", id);
-                            }
-
-                            match sse_request.send().await {
-                                Ok(sse_response) => {
-                                    if sse_response.status().is_success() {
-                                        debug!("SSE stream established successfully");
-
-                                        if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
-                                            error!("Error setting up SSE client: {}", e);
+                    match request_builder.send().await {
+                        Ok(response) => {
+                            if response.status().is_success() {
+                                if is_initialize_request {
+                                    let mut session_id_value = None;
+                                    if let Some(header_value) = response.headers().get("Mcp-Session-Id") {
+                                        if let Ok(id) = header_value.to_str() {
+                                            *session_id.write().await = Some(id.to_string());
+                                            session_id_value = Some(id.to_string());
+                                            debug!("Saved MCP session ID: {}", id);
                                         }
-                                    } else if sse_response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
-                                        debug!(
-                                            "Server does not support SSE (405 Method Not Allowed), continuing normally"
-                                        );
-                                    } else {
-                                        error!("Failed to establish SSE stream: {}", sse_response.status());
+                                    }
+
+                                    let sse_endpoint = endpoint.clone();
+                                    let tx_clone = tx.clone();
+                                    let client = reqwest::Client::new();
+
+                                    tokio::spawn(async move {
+                                        let mut sse_request =
+                                            client.get(sse_endpoint).header("Accept", "text/event-stream");
+
+                                        if let Some(id) = session_id_value {
+                                            sse_request = sse_request.header("Mcp-Session-Id", id);
+                                        }
+
+                                        match sse_request.send().await {
+                                            Ok(sse_response) => {
+                                                if sse_response.status().is_success() {
+                                                    debug!("SSE stream established successfully");
+
+                                                    if let Err(e) = setup_sse_client(sse_response, tx_clone).await {
+                                                        error!("Error setting up SSE client: {}", e);
+                                                    }
+                                                } else if sse_response.status()
+                                                    == reqwest::StatusCode::METHOD_NOT_ALLOWED
+                                                {
+                                                    debug!(
+                                                        "Server does not support SSE (405 Method Not Allowed), continuing normally"
+                                                    );
+                                                } else {
+                                                    error!("Failed to establish SSE stream: {}", sse_response.status());
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Error sending SSE request: {}", e);
+                                            }
+                                        }
+                                    });
+                                }
+
+                                if let Ok(response_body) = response.text().await {
+                                    if !response_body.is_empty() {
+                                        if let Ok(response_message) =
+                                            serde_json::from_str::<JsonRpcMessage>(&response_body)
+                                        {
+                                            if let Err(e) = tx.send(response_message).await {
+                                                error!("Failed to send response through channel: {}", e);
+                                            }
+                                        }
                                     }
                                 }
-                                Err(e) => {
-                                    error!("Error sending SSE request: {}", e);
-                                }
-                            }
-                        });
-                    }
-
-                    if let Ok(response_body) = response.text().await {
-                        if !response_body.is_empty() {
-                            if let Ok(response_message) = serde_json::from_str::<JsonRpcMessage>(&response_body) {
-                                if let Err(e) = tx.send(response_message).await {
-                                    return Err(StreamableError::ChannelError(format!(
-                                        "Failed to send response through channel: {}",
-                                        e
-                                    ))
-                                    .into());
-                                }
+                            } else {
+                                error!("HTTP error: {}", response.status());
                             }
                         }
+                        Err(e) => {
+                            error!("Request error: {}", e);
+                        }
                     }
-                    Ok(())
-                } else {
-                    Err(StreamableError::HttpError(response.status()).into())
-                }
+                });
+
+                Ok(())
             }
         }
     }
