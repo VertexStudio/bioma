@@ -8,7 +8,8 @@ use bioma_mcp::{
         ServerCapabilitiesPromptsResourcesTools,
     },
     server::{
-        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, TransportConfig, WsConfig,
+        Context, ModelContextProtocolServer, Pagination, ResponseType, Server, SseConfig, StdioConfig,
+        StreamableConfig, TransportConfig, WsConfig,
     },
     tools::{self, ToolCallHandler},
 };
@@ -48,6 +49,17 @@ enum Transport {
     Ws {
         #[arg(long, short, default_value = "127.0.0.1:9090")]
         endpoint: String,
+    },
+
+    Streamable {
+        #[arg(long, short, default_value = "127.0.0.1:7090")]
+        endpoint: String,
+
+        #[arg(long, default_value = "json")]
+        response_type: String,
+
+        #[arg(long, default_value = "0.0.0.0", value_delimiter = ',')]
+        allowed_origins: Vec<String>,
     },
 }
 
@@ -165,6 +177,20 @@ async fn main() -> Result<()> {
         Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
         Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
         Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
+        Transport::Streamable { endpoint, response_type, allowed_origins } => {
+            let response_type = match response_type.as_str() {
+                "sse" => ResponseType::SSE,
+                _ => ResponseType::Json,
+            };
+
+            TransportConfig::Streamable(
+                StreamableConfig::builder()
+                    .endpoint(endpoint.clone())
+                    .response_type(response_type)
+                    .allowed_origins(allowed_origins.clone())
+                    .build(),
+            )
+        }
     };
 
     let capabilities = ServerCapabilities {

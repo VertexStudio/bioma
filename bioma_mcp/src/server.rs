@@ -109,8 +109,6 @@ impl Default for WsConfig {
 pub struct StreamableConfig {
     #[builder(default = default_streamable_endpoint())]
     pub endpoint: String,
-    #[builder(default = default_streamable_sse())]
-    pub sse: bool,
     #[builder(default = default_streamable_allowed_origins())]
     pub allowed_origins: Vec<String>,
     #[builder(default = default_streamable_response_type())]
@@ -127,12 +125,8 @@ fn default_streamable_endpoint() -> String {
     "127.0.0.1:7090".to_string()
 }
 
-fn default_streamable_sse() -> bool {
-    true
-}
-
 fn default_streamable_allowed_origins() -> Vec<String> {
-    vec!["*".to_string()]
+    vec!["0.0.0.0".to_string()]
 }
 
 fn default_streamable_response_type() -> ResponseType {
