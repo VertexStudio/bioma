@@ -107,13 +107,20 @@ impl Default for WsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct StreamableConfig {
-    // TODO: Should only bind to localhost (127.0.0.1) rather than all interfaces (0.0.0.0)
     #[builder(default = default_streamable_endpoint())]
     pub endpoint: String,
     #[builder(default = default_streamable_sse())]
     pub sse: bool,
     #[builder(default = default_streamable_allowed_origins())]
     pub allowed_origins: Vec<String>,
+    #[builder(default = default_streamable_response_type())]
+    pub response_type: ResponseType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ResponseType {
+    Json,
+    SSE,
 }
 
 fn default_streamable_endpoint() -> String {
@@ -126,6 +133,10 @@ fn default_streamable_sse() -> bool {
 
 fn default_streamable_allowed_origins() -> Vec<String> {
     vec!["*".to_string()]
+}
+
+fn default_streamable_response_type() -> ResponseType {
+    ResponseType::Json
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

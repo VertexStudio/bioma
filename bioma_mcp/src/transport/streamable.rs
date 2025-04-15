@@ -1,6 +1,6 @@
 use super::{SendMessage, Transport, TransportSender};
 use crate::client::StreamableConfig as StreamableClientConfig;
-use crate::server::StreamableConfig as StreamableServerConfig;
+use crate::server::{ResponseType, StreamableConfig as StreamableServerConfig};
 use crate::transport::Message;
 use crate::{ConnectionId, JsonRpcMessage};
 
@@ -10,6 +10,7 @@ use anyhow::{Error, Result};
 use futures::Stream;
 use futures::StreamExt;
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -66,6 +67,7 @@ enum StreamableMode {
         origins: Vec<String>,
         sse_streams: Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
         pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
+        response_type: ResponseType,
     },
 
     Client {
@@ -101,6 +103,7 @@ impl StreamableTransport {
             origins: config.allowed_origins.clone(),
             sse_streams,
             pending_requests,
+            response_type: config.response_type.clone(),
         });
 
         Self { mode, on_error, on_close }
@@ -129,7 +132,7 @@ impl StreamableTransport {
 impl Transport for StreamableTransport {
     async fn start(&mut self) -> Result<JoinHandle<Result<()>>> {
         match &*self.mode {
-            StreamableMode::Server { endpoint, on_message, origins, sse_streams, pending_requests } => {
+            StreamableMode::Server { endpoint, on_message, origins, sse_streams, pending_requests, response_type } => {
                 let on_message = on_message.clone();
                 let shared_sse_streams = sse_streams.clone();
                 let shared_pending_requests = pending_requests.clone();
@@ -138,6 +141,7 @@ impl Transport for StreamableTransport {
                     on_message,
                     sse_streams: shared_sse_streams,
                     pending_requests: shared_pending_requests,
+                    response_type: response_type.clone(),
                 });
                 let origins_list = origins.clone();
 
@@ -359,17 +363,45 @@ struct AppState {
     on_message: mpsc::Sender<Message>,
     sse_streams: Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
     pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
+    response_type: ResponseType,
+}
+
+enum SseReceiver {
+    Mpsc(mpsc::Receiver<JsonRpcMessage>),
+    Oneshot(oneshot::Receiver<JsonRpcMessage>),
 }
 
 struct SseStream {
-    rx: mpsc::Receiver<JsonRpcMessage>,
+    rx: SseReceiver,
+}
+
+impl SseStream {
+    fn from_mpsc(rx: mpsc::Receiver<JsonRpcMessage>) -> Self {
+        Self { rx: SseReceiver::Mpsc(rx) }
+    }
+
+    fn from_oneshot(rx: oneshot::Receiver<JsonRpcMessage>) -> Self {
+        Self { rx: SseReceiver::Oneshot(rx) }
+    }
 }
 
 impl Stream for SseStream {
     type Item = Result<web::Bytes, actix_web::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
+        let poll_result = match &mut self.rx {
+            SseReceiver::Mpsc(rx) => rx.poll_recv(cx),
+            SseReceiver::Oneshot(rx) => {
+                let pinned = Pin::new(rx);
+                match Future::poll(pinned, cx) {
+                    Poll::Ready(Ok(msg)) => Poll::Ready(Some(msg)),
+                    Poll::Ready(Err(_)) => Poll::Ready(None),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        };
+
+        match poll_result {
             Poll::Ready(Some(msg)) => match serde_json::to_string(&msg) {
                 Ok(json) => {
                     let event = format!("data: {}\n\n", json);
@@ -400,7 +432,7 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
     let (tx, rx) = mpsc::channel::<JsonRpcMessage>(32);
 
     app_state.sse_streams.write().await.insert(conn_id, tx);
-    let sse_stream = SseStream { rx };
+    let sse_stream = SseStream::from_mpsc(rx);
 
     HttpResponse::Ok()
         .content_type("text/event-stream")
@@ -474,18 +506,38 @@ async fn post_handler(
             app_state.pending_requests.lock().await.insert(conn_id.clone(), tx);
 
             match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
-                Ok(_) => match rx.await {
-                    Ok(response) => {
+                Ok(_) => match app_state.response_type {
+                    ResponseType::SSE => {
+                        let sse_stream = SseStream::from_oneshot(rx);
+
                         if is_initialize {
-                            HttpResponse::Ok().append_header(("Mcp-Session-Id", conn_id.0)).json(response)
+                            HttpResponse::Ok()
+                                .content_type("text/event-stream")
+                                .append_header(("Cache-Control", "no-cache"))
+                                .append_header(("Connection", "keep-alive"))
+                                .append_header(("Mcp-Session-Id", conn_id.0))
+                                .streaming(sse_stream)
                         } else {
-                            HttpResponse::Ok().json(response)
+                            HttpResponse::Ok()
+                                .content_type("text/event-stream")
+                                .append_header(("Cache-Control", "no-cache"))
+                                .append_header(("Connection", "keep-alive"))
+                                .streaming(sse_stream)
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to receive response: {}", e);
-                        HttpResponse::InternalServerError().body("Failed to receive response")
-                    }
+                    ResponseType::Json => match rx.await {
+                        Ok(response) => {
+                            if is_initialize {
+                                HttpResponse::Ok().append_header(("Mcp-Session-Id", conn_id.0)).json(response)
+                            } else {
+                                HttpResponse::Ok().json(response)
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to receive response: {}", e);
+                            HttpResponse::InternalServerError().body("Failed to receive response")
+                        }
+                    },
                 },
                 Err(e) => {
                     error!("Failed to forward message: {}", e);
