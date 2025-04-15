@@ -198,17 +198,33 @@ impl Transport for StreamableTransport {
 
     async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
-            StreamableMode::Server { sse_streams, .. } => {
-                let sse_streams_guard = sse_streams.read().await;
-                if let Some(client) = sse_streams_guard.get(&conn_id) {
-                    client.send(message).await.map_err(|e| {
-                        StreamableError::ChannelError(format!("Failed to send message to client {}: {}", conn_id, e))
-                    })?;
-                    Ok(())
-                } else {
-                    Err(StreamableError::ClientNotFound(conn_id).into())
+            StreamableMode::Server { sse_streams, pending_requests, .. } => match &message {
+                JsonRpcMessage::Response(_) => {
+                    let mut pending = pending_requests.lock().await;
+                    if let Some(sender) = pending.remove(&conn_id) {
+                        sender.send(message).map_err(|_| {
+                            StreamableError::ChannelError(format!("Failed to send response to client {}", conn_id))
+                        })?;
+                        Ok(())
+                    } else {
+                        Err(StreamableError::ClientNotFound(conn_id).into())
+                    }
                 }
-            }
+                JsonRpcMessage::Request(_) => {
+                    let sse_streams_guard = sse_streams.read().await;
+                    if let Some(client) = sse_streams_guard.get(&conn_id) {
+                        client.send(message).await.map_err(|e| {
+                            StreamableError::ChannelError(format!(
+                                "Failed to send message to client {}: {}",
+                                conn_id, e
+                            ))
+                        })?;
+                        Ok(())
+                    } else {
+                        Err(StreamableError::ClientNotFound(conn_id).into())
+                    }
+                }
+            },
             StreamableMode::Client { endpoint, tx, session_id, .. } => {
                 let json = serde_json::to_string(&message)?;
                 let endpoint = endpoint.clone();
@@ -488,17 +504,33 @@ pub struct StreamableTransportSender {
 impl SendMessage for StreamableTransportSender {
     async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
-            StreamableMode::Server { sse_streams, pending_requests, .. } => {
-                let sse_streams_guard = sse_streams.read().await;
-                if let Some(client) = sse_streams_guard.get(&conn_id) {
-                    client.send(message).await.map_err(|e| {
-                        StreamableError::ChannelError(format!("Failed to send message to client {}: {}", conn_id, e))
-                    })?;
-                    Ok(())
-                } else {
-                    Err(StreamableError::ClientNotFound(conn_id).into())
+            StreamableMode::Server { sse_streams, pending_requests, .. } => match &message {
+                JsonRpcMessage::Response(_) => {
+                    let mut pending = pending_requests.lock().await;
+                    if let Some(sender) = pending.remove(&conn_id) {
+                        sender.send(message).map_err(|_| {
+                            StreamableError::ChannelError(format!("Failed to send response to client {}", conn_id))
+                        })?;
+                        Ok(())
+                    } else {
+                        Err(StreamableError::ClientNotFound(conn_id).into())
+                    }
                 }
-            }
+                JsonRpcMessage::Request(_) => {
+                    let sse_streams_guard = sse_streams.read().await;
+                    if let Some(client) = sse_streams_guard.get(&conn_id) {
+                        client.send(message).await.map_err(|e| {
+                            StreamableError::ChannelError(format!(
+                                "Failed to send message to client {}: {}",
+                                conn_id, e
+                            ))
+                        })?;
+                        Ok(())
+                    } else {
+                        Err(StreamableError::ClientNotFound(conn_id).into())
+                    }
+                }
+            },
             StreamableMode::Client { endpoint, tx, session_id, .. } => {
                 let json = serde_json::to_string(&message)?;
                 let endpoint = endpoint.clone();
