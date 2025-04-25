@@ -180,6 +180,8 @@ impl Transport for StreamableTransport {
                 Ok(handle)
             }
             StreamableMode::Client { on_message, rx, .. } => {
+                // TODO: Techinically, this is not needed but did it to follow other transports pattern.
+                // We could just use on_message in send()
                 let on_message_clone = on_message.clone();
 
                 let rx_arc = rx.clone();
