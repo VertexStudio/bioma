@@ -179,8 +179,9 @@ async fn main() -> Result<()> {
         Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
         Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
         Transport::Streamable { endpoint, response_type, allowed_origins } => {
-            let response_type = match response_type.as_str() {
+            let response_type = match response_type.to_lowercase().as_str() {
                 "sse" => ResponseType::SSE,
+                "json" => ResponseType::Json,
                 _ => ResponseType::Json,
             };
 

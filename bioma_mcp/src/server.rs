@@ -116,6 +116,7 @@ pub struct StreamableConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ResponseType {
     Json,
     SSE,
