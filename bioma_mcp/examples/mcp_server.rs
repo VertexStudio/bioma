@@ -16,7 +16,8 @@ use bioma_mcp::{
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::error;
+use tokio::signal;
+use tracing::{error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
@@ -212,7 +213,20 @@ async fn main() -> Result<()> {
 
     let mcp_server = Server::new(server);
 
-    let _ = mcp_server.start().await;
+    // Create a task for processing SIGINT
+    let signal_task = tokio::spawn(async {
+        signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
+        info!("Received shutdown signal, exiting...");
+        std::process::exit(0); // Force exit the process
+    });
+
+    let server_task = tokio::spawn(async move { mcp_server.start().await });
+
+    // Wait for either task to complete
+    tokio::select! {
+        _ = signal_task => {},
+        _ = server_task => {},
+    }
 
     Ok(())
 }
