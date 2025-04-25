@@ -351,9 +351,58 @@ impl Transport for StreamableTransport {
     }
 
     fn close(&mut self) -> impl std::future::Future<Output = Result<()>> {
-        async move { todo!() }
-    }
+        let mode = self.mode.clone();
+        let on_close = self.on_close.clone();
 
+        async move {
+            match &*mode {
+                StreamableMode::Server { sse_streams, pending_requests, .. } => {
+                    {
+                        let mut streams = sse_streams.write().await;
+                        streams.clear();
+                        info!("Cleared all SSE streams");
+                    }
+
+                    {
+                        let mut pending = pending_requests.lock().await;
+                        for (conn_id, sender) in pending.drain() {
+                            let _ = sender.send(JsonRpcMessage::Response(jsonrpc_core::Response::Single(
+                                jsonrpc_core::Output::Failure(jsonrpc_core::Failure {
+                                    jsonrpc: Some(jsonrpc_core::Version::V2),
+                                    id: jsonrpc_core::Id::Null,
+                                    error: jsonrpc_core::Error {
+                                        code: jsonrpc_core::ErrorCode::ServerError(-32000),
+                                        message: "Server shutting down".to_string(),
+                                        data: None,
+                                    },
+                                }),
+                            )));
+                            debug!("Completed pending request for connection {} with shutdown error", conn_id);
+                        }
+                        info!("Completed all pending requests");
+                    }
+
+                    let _ = on_close.send(()).await;
+
+                    info!("Streamable transport server mode closed");
+                    Ok(())
+                }
+
+                StreamableMode::Client { rx, .. } => {
+                    {
+                        let mut rx_guard = rx.lock().await;
+                        while rx_guard.try_recv().is_ok() {}
+                        info!("Drained receiver channel");
+                    }
+
+                    let _ = on_close.send(()).await;
+
+                    info!("Streamable transport client mode closed");
+                    Ok(())
+                }
+            }
+        }
+    }
     fn sender(&self) -> TransportSender {
         TransportSender::new_streamable(StreamableTransportSender { mode: self.mode.clone() })
     }
@@ -441,12 +490,14 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
         .streaming(sse_stream)
 }
 
-async fn post_handler(
-    req: HttpRequest,
-    payload: web::Json<JsonRpcMessage>,
-    app_state: web::Data<AppState>,
-) -> impl Responder {
-    let message_content = payload.into_inner();
+async fn post_handler(req: HttpRequest, payload: web::Bytes, app_state: web::Data<AppState>) -> impl Responder {
+    let message_content = match serde_json::from_slice::<JsonRpcMessage>(&payload) {
+        Ok(msg) => msg,
+        Err(e) => {
+            error!("Failed to parse JSON-RPC message: {}", e);
+            return HttpResponse::BadRequest().body("Invalid JSON-RPC message format");
+        }
+    };
 
     let is_initialize = match &message_content {
         JsonRpcMessage::Request(request) => match request {
