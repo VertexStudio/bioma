@@ -387,14 +387,7 @@ impl Transport for StreamableTransport {
                     info!("Streamable transport server mode closed");
                     Ok(())
                 }
-
-                StreamableMode::Client { rx, .. } => {
-                    {
-                        let mut rx_guard = rx.lock().await;
-                        while rx_guard.try_recv().is_ok() {}
-                        info!("Drained receiver channel");
-                    }
-
+                StreamableMode::Client { .. } => {
                     let _ = on_close.send(()).await;
 
                     info!("Streamable transport client mode closed");
