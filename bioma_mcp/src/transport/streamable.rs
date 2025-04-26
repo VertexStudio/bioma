@@ -354,7 +354,6 @@ impl Transport for StreamableTransport {
 
     fn close(&mut self) -> impl std::future::Future<Output = Result<()>> {
         let mode = self.mode.clone();
-        let on_close = self.on_close.clone();
 
         async move {
             match &*mode {
@@ -384,14 +383,10 @@ impl Transport for StreamableTransport {
                         info!("Completed all pending requests");
                     }
 
-                    let _ = on_close.send(()).await;
-
                     info!("Streamable transport server mode closed");
                     Ok(())
                 }
                 StreamableMode::Client { .. } => {
-                    let _ = on_close.send(()).await;
-
                     info!("Streamable transport client mode closed");
                     Ok(())
                 }
