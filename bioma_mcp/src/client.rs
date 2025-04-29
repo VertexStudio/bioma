@@ -16,7 +16,7 @@ use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
 use anyhow::Error;
-use base64;
+use base64::{engine::general_purpose, Engine};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -44,14 +44,12 @@ struct MultiServerCursor {
 
 impl MultiServerCursor {
     fn to_string(&self) -> Result<String, ClientError> {
-        use base64::{engine::general_purpose, Engine};
         let encoded = serde_json::to_string(self)
             .map_err(|e| ClientError::Request(format!("Failed to encode cursor: {}", e).into()))?;
         Ok(general_purpose::STANDARD.encode(encoded))
     }
 
     fn from_string(s: &str) -> Result<Self, ClientError> {
-        use base64::{engine::general_purpose, Engine};
         let decoded = general_purpose::STANDARD
             .decode(s)
             .map_err(|e| ClientError::Request(format!("Failed to decode cursor: {}", e).into()))?;

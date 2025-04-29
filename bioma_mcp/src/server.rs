@@ -18,7 +18,7 @@ use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
 
-use base64;
+use base64::{engine::general_purpose, Engine};
 use jsonrpc_core::{MetaIoHandler, Metadata, Params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -188,12 +188,10 @@ impl Pagination {
     }
 
     pub fn encode_cursor(&self, offset: usize) -> String {
-        use base64::{engine::general_purpose, Engine};
         general_purpose::STANDARD.encode(offset.to_string())
     }
 
     pub fn decode_cursor(&self, cursor: &str) -> Result<usize, ServerError> {
-        use base64::{engine::general_purpose, Engine};
         let decoded = general_purpose::STANDARD
             .decode(cursor)
             .map_err(|e| ServerError::Request(format!("Invalid cursor format: {}", e)))?;
