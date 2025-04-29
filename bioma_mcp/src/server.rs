@@ -188,12 +188,15 @@ impl Pagination {
     }
 
     pub fn encode_cursor(&self, offset: usize) -> String {
-        base64::encode(offset.to_string())
+        use base64::{engine::general_purpose, Engine};
+        general_purpose::STANDARD.encode(offset.to_string())
     }
 
     pub fn decode_cursor(&self, cursor: &str) -> Result<usize, ServerError> {
-        let decoded =
-            base64::decode(cursor).map_err(|e| ServerError::Request(format!("Invalid cursor format: {}", e)))?;
+        use base64::{engine::general_purpose, Engine};
+        let decoded = general_purpose::STANDARD
+            .decode(cursor)
+            .map_err(|e| ServerError::Request(format!("Invalid cursor format: {}", e)))?;
 
         let cursor_str =
             String::from_utf8(decoded).map_err(|e| ServerError::Request(format!("Invalid cursor encoding: {}", e)))?;

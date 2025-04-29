@@ -997,7 +997,7 @@ dependencies = [
  "actix-cors",
  "actix-web",
  "anyhow",
- "base64 0.13.1",
+ "base64 0.22.1",
  "bon",
  "bytes",
  "clap",

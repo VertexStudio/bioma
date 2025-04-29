@@ -1,6 +1,7 @@
 use crate::resources::{ResourceCompletionHandler, ResourceDef, ResourceError};
 use crate::schema::{ReadResourceResult, ResourceTemplate, ResourceUpdatedNotificationParams};
 use crate::server::Context;
+use base64::{engine::general_purpose, Engine};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::any::Any;
@@ -320,7 +321,7 @@ impl ResourceDef for FileSystem {
                     .await
                     .map_err(|e| ResourceError::Reading(format!("Failed to read file: {}", e)))?;
 
-                let base64_data = base64::encode(&buffer);
+                let base64_data = general_purpose::STANDARD.encode(&buffer);
 
                 Ok(ReadResourceResult {
                     contents: vec![serde_json::json!({
