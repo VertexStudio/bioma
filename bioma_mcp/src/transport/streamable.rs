@@ -20,6 +20,24 @@ use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RequestId {
+    conn_id: ConnectionId,
+    jsonrpc_id: jsonrpc_core::Id,
+}
+
+impl RequestId {
+    fn new(conn_id: ConnectionId, jsonrpc_id: jsonrpc_core::Id) -> Self {
+        Self { conn_id, jsonrpc_id }
+    }
+}
+
+impl std::fmt::Display for RequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{:?}", self.conn_id, self.jsonrpc_id)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum StreamableError {
     #[error("HTTP error: {0}")]
@@ -66,7 +84,7 @@ enum StreamableMode {
         on_message: mpsc::Sender<Message>,
         origins: Vec<String>,
         sse_streams: Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
-        pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
+        pending_requests: Arc<Mutex<HashMap<RequestId, oneshot::Sender<JsonRpcMessage>>>>,
         response_type: ResponseType,
     },
 
@@ -180,8 +198,6 @@ impl Transport for StreamableTransport {
                 Ok(handle)
             }
             StreamableMode::Client { on_message, rx, .. } => {
-                // TODO: Techinically, this is not needed but did it to follow other transports pattern.
-                // We could just use on_message in send()
                 let on_message_clone = on_message.clone();
 
                 let rx_arc = rx.clone();
@@ -205,13 +221,40 @@ impl Transport for StreamableTransport {
     async fn send(&mut self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             StreamableMode::Server { sse_streams, pending_requests, .. } => match &message {
-                JsonRpcMessage::Response(_) => {
+                JsonRpcMessage::Response(response) => {
                     let mut pending = pending_requests.lock().await;
-                    if let Some(sender) = pending.remove(&conn_id) {
-                        sender.send(message).map_err(|_| {
-                            StreamableError::ChannelError(format!("Failed to send response to client {}", conn_id))
-                        })?;
-                        Ok(())
+
+                    let response_id = match response {
+                        jsonrpc_core::Response::Single(output) => match output {
+                            jsonrpc_core::Output::Success(success) => success.id.clone(),
+                            jsonrpc_core::Output::Failure(failure) => failure.id.clone(),
+                        },
+                        jsonrpc_core::Response::Batch(outputs) => {
+                            if let Some(first_output) = outputs.first() {
+                                match first_output {
+                                    jsonrpc_core::Output::Success(success) => success.id.clone(),
+                                    jsonrpc_core::Output::Failure(failure) => failure.id.clone(),
+                                }
+                            } else {
+                                jsonrpc_core::Id::Null
+                            }
+                        }
+                    };
+
+                    let request_id_to_remove = pending
+                        .keys()
+                        .find(|req_id| req_id.conn_id == conn_id && req_id.jsonrpc_id == response_id)
+                        .cloned();
+
+                    if let Some(request_id) = request_id_to_remove {
+                        if let Some(sender) = pending.remove(&request_id) {
+                            sender.send(message).map_err(|_| {
+                                StreamableError::ChannelError(format!("Failed to send response to client {}", conn_id))
+                            })?;
+                            Ok(())
+                        } else {
+                            Err(StreamableError::ClientNotFound(conn_id).into())
+                        }
                     } else {
                         Err(StreamableError::ClientNotFound(conn_id).into())
                     }
@@ -401,7 +444,7 @@ impl Transport for StreamableTransport {
 struct AppState {
     on_message: mpsc::Sender<Message>,
     sse_streams: Arc<RwLock<HashMap<ConnectionId, mpsc::Sender<JsonRpcMessage>>>>,
-    pending_requests: Arc<Mutex<HashMap<ConnectionId, oneshot::Sender<JsonRpcMessage>>>>,
+    pending_requests: Arc<Mutex<HashMap<RequestId, oneshot::Sender<JsonRpcMessage>>>>,
     response_type: ResponseType,
 }
 
@@ -457,6 +500,79 @@ impl Stream for SseStream {
     }
 }
 
+#[derive(Debug)]
+pub struct Incoming {
+    pub conn_id: ConnectionId,
+
+    pub kind: Payload,
+}
+
+#[derive(Debug)]
+pub enum Payload {
+    Notification(JsonRpcMessage),
+
+    Request { id: jsonrpc_core::Id, is_initialize: bool, msg: JsonRpcMessage },
+
+    Response(JsonRpcMessage),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum IncomingError {
+    #[error("Invalid JSON-RPC payload: {0}")]
+    BadJson(#[from] serde_json::Error),
+
+    #[error("Missing or invalid Mcp-Session-Id header")]
+    NoSessionId,
+}
+
+impl TryFrom<(HttpRequest, web::Bytes)> for Incoming {
+    type Error = IncomingError;
+
+    fn try_from((req, body): (HttpRequest, web::Bytes)) -> Result<Self, Self::Error> {
+        use jsonrpc_core::{Call, Request as Rq};
+
+        let msg: JsonRpcMessage = serde_json::from_slice(&body)?;
+
+        let (kind, needs_id) = match &msg {
+            JsonRpcMessage::Request(r) => match r {
+                Rq::Single(Call::MethodCall(c)) => (
+                    Payload::Request { id: c.id.clone(), is_initialize: c.method == "initialize", msg: msg.clone() },
+                    c.method != "initialize",
+                ),
+                Rq::Single(Call::Notification(_)) => (Payload::Notification(msg.clone()), true),
+                Rq::Batch(c) if c.iter().all(|x| matches!(x, Call::Notification(_))) => {
+                    (Payload::Notification(msg.clone()), true)
+                }
+                Rq::Batch(calls) => {
+                    let id = calls
+                        .iter()
+                        .find_map(|c| match c {
+                            Call::MethodCall(m) => Some(m.id.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or(jsonrpc_core::Id::Null);
+
+                    (Payload::Request { id, is_initialize: false, msg: msg.clone() }, true)
+                }
+                Rq::Single(Call::Invalid { .. }) => (Payload::Notification(msg.clone()), true),
+            },
+            JsonRpcMessage::Response(_) => (Payload::Response(msg.clone()), true),
+        };
+
+        let conn_id = if let Payload::Request { is_initialize: true, .. } = &kind {
+            ConnectionId::new(None)
+        } else {
+            match req.headers().get("Mcp-Session-Id").and_then(|h| h.to_str().ok()) {
+                Some(id) => ConnectionId(id.to_owned()),
+                None if needs_id => return Err(IncomingError::NoSessionId),
+                None => unreachable!("classifier said we needed session id but header missing"),
+            }
+        };
+
+        Ok(Self { conn_id, kind })
+    }
+}
+
 async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
     if !req.headers().get("Accept").map_or(false, |h| h.to_str().unwrap_or("").contains("text/event-stream")) {
         return HttpResponse::BadRequest().body("Invalid request");
@@ -480,110 +596,64 @@ async fn get_handler(req: HttpRequest, app_state: web::Data<AppState>) -> impl R
         .streaming(sse_stream)
 }
 
-async fn post_handler(req: HttpRequest, payload: web::Bytes, app_state: web::Data<AppState>) -> impl Responder {
-    let message_content = match serde_json::from_slice::<JsonRpcMessage>(&payload) {
-        Ok(msg) => msg,
-        Err(e) => {
-            error!("Failed to parse JSON-RPC message: {}", e);
-            return HttpResponse::BadRequest().body("Invalid JSON-RPC message format");
-        }
+async fn post_handler(req: HttpRequest, body: web::Bytes, st: web::Data<AppState>) -> impl Responder {
+    let incoming = match Incoming::try_from((req, body)) {
+        Ok(i) => i,
+        Err(e) => return HttpResponse::BadRequest().body(e.to_string()),
     };
 
-    let is_initialize = match &message_content {
-        JsonRpcMessage::Request(request) => match request {
-            jsonrpc_core::Request::Single(jsonrpc_core::Call::MethodCall(method_call)) => {
-                method_call.method == "initialize"
-            }
-            _ => false,
-        },
-        _ => false,
-    };
-
-    let conn_id = if is_initialize {
-        ConnectionId::new(None)
-    } else {
-        if let Some(session_id) = req.headers().get("Mcp-Session-Id").and_then(|value| value.to_str().ok()) {
-            ConnectionId(session_id.to_string())
-        } else {
-            return HttpResponse::BadRequest().body("Missing or invalid Mcp-Session-Id header");
-        }
-    };
-
-    match &message_content {
-        JsonRpcMessage::Response(_) => {
-            match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
+    match incoming.kind {
+        Payload::Notification(msg) | Payload::Response(msg) => {
+            match st.on_message.send(Message { conn_id: incoming.conn_id, message: msg }).await {
                 Ok(_) => HttpResponse::Accepted().finish(),
-                Err(e) => {
-                    error!("Failed to forward response message: {}", e);
-                    HttpResponse::InternalServerError().body("Failed to process message")
-                }
-            }
-        }
-        JsonRpcMessage::Request(request) => {
-            let is_notification = match request {
-                jsonrpc_core::Request::Single(jsonrpc_core::Call::Notification(_)) => true,
-                jsonrpc_core::Request::Batch(calls)
-                    if calls.iter().all(|c| matches!(c, jsonrpc_core::Call::Notification(_))) =>
-                {
-                    true
-                }
-                _ => false,
-            };
-
-            if is_notification {
-                match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
-                    Ok(_) => {
-                        return HttpResponse::Accepted().finish();
-                    }
-                    Err(e) => {
-                        error!("Failed to forward notification message: {}", e);
-                        return HttpResponse::InternalServerError().body("Failed to process message");
-                    }
-                }
-            }
-
-            let (tx, rx) = oneshot::channel();
-
-            app_state.pending_requests.lock().await.insert(conn_id.clone(), tx);
-
-            match app_state.on_message.send(Message { conn_id: conn_id.clone(), message: message_content }).await {
-                Ok(_) => match app_state.response_type {
-                    ResponseType::SSE => {
-                        let sse_stream = SseStream::from_oneshot(rx);
-
-                        if is_initialize {
-                            HttpResponse::Ok()
-                                .content_type("text/event-stream")
-                                .append_header(("Cache-Control", "no-cache"))
-                                .append_header(("Connection", "keep-alive"))
-                                .append_header(("Mcp-Session-Id", conn_id.0))
-                                .streaming(sse_stream)
-                        } else {
-                            HttpResponse::Ok()
-                                .content_type("text/event-stream")
-                                .append_header(("Cache-Control", "no-cache"))
-                                .append_header(("Connection", "keep-alive"))
-                                .streaming(sse_stream)
-                        }
-                    }
-                    ResponseType::Json => match rx.await {
-                        Ok(response) => {
-                            if is_initialize {
-                                HttpResponse::Ok().append_header(("Mcp-Session-Id", conn_id.0)).json(response)
-                            } else {
-                                HttpResponse::Ok().json(response)
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to receive response: {}", e);
-                            HttpResponse::InternalServerError().body("Failed to receive response")
-                        }
-                    },
-                },
                 Err(e) => {
                     error!("Failed to forward message: {}", e);
                     HttpResponse::InternalServerError().body("Failed to process message")
                 }
+            }
+        }
+
+        Payload::Request { id, is_initialize, msg } => {
+            let (tx, rx) = oneshot::channel();
+            st.pending_requests.lock().await.insert(RequestId::new(incoming.conn_id.clone(), id), tx);
+
+            if let Err(e) = st.on_message.send(Message { conn_id: incoming.conn_id.clone(), message: msg }).await {
+                error!("forward error: {e}");
+                return HttpResponse::InternalServerError().finish();
+            }
+
+            match st.response_type {
+                ResponseType::SSE => {
+                    let sse_stream = SseStream::from_oneshot(rx);
+
+                    if is_initialize {
+                        HttpResponse::Ok()
+                            .content_type("text/event-stream")
+                            .append_header(("Cache-Control", "no-cache"))
+                            .append_header(("Connection", "keep-alive"))
+                            .append_header(("Mcp-Session-Id", incoming.conn_id.0))
+                            .streaming(sse_stream)
+                    } else {
+                        HttpResponse::Ok()
+                            .content_type("text/event-stream")
+                            .append_header(("Cache-Control", "no-cache"))
+                            .append_header(("Connection", "keep-alive"))
+                            .streaming(sse_stream)
+                    }
+                }
+                ResponseType::Json => match rx.await {
+                    Ok(response) => {
+                        if is_initialize {
+                            HttpResponse::Ok().append_header(("Mcp-Session-Id", incoming.conn_id.0)).json(response)
+                        } else {
+                            HttpResponse::Ok().json(response)
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to receive response: {}", e);
+                        HttpResponse::InternalServerError().body("Failed to receive response")
+                    }
+                },
             }
         }
     }
@@ -598,13 +668,40 @@ impl SendMessage for StreamableTransportSender {
     async fn send(&self, message: JsonRpcMessage, conn_id: ConnectionId) -> Result<()> {
         match &*self.mode {
             StreamableMode::Server { sse_streams, pending_requests, .. } => match &message {
-                JsonRpcMessage::Response(_) => {
+                JsonRpcMessage::Response(response) => {
                     let mut pending = pending_requests.lock().await;
-                    if let Some(sender) = pending.remove(&conn_id) {
-                        sender.send(message).map_err(|_| {
-                            StreamableError::ChannelError(format!("Failed to send response to client {}", conn_id))
-                        })?;
-                        Ok(())
+
+                    let response_id = match response {
+                        jsonrpc_core::Response::Single(output) => match output {
+                            jsonrpc_core::Output::Success(success) => success.id.clone(),
+                            jsonrpc_core::Output::Failure(failure) => failure.id.clone(),
+                        },
+                        jsonrpc_core::Response::Batch(outputs) => {
+                            if let Some(first_output) = outputs.first() {
+                                match first_output {
+                                    jsonrpc_core::Output::Success(success) => success.id.clone(),
+                                    jsonrpc_core::Output::Failure(failure) => failure.id.clone(),
+                                }
+                            } else {
+                                jsonrpc_core::Id::Null
+                            }
+                        }
+                    };
+
+                    let request_id_to_remove = pending
+                        .keys()
+                        .find(|req_id| req_id.conn_id == conn_id && req_id.jsonrpc_id == response_id)
+                        .cloned();
+
+                    if let Some(request_id) = request_id_to_remove {
+                        if let Some(sender) = pending.remove(&request_id) {
+                            sender.send(message).map_err(|_| {
+                                StreamableError::ChannelError(format!("Failed to send response to client {}", conn_id))
+                            })?;
+                            Ok(())
+                        } else {
+                            Err(StreamableError::ClientNotFound(conn_id).into())
+                        }
                     } else {
                         Err(StreamableError::ClientNotFound(conn_id).into())
                     }
