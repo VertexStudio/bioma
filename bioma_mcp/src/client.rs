@@ -11,6 +11,7 @@ use crate::schema::{
     Resource, ResourceReference, ResourceTemplate, Root, RootsListChangedNotificationParams, ServerCapabilities, Tool,
 };
 use crate::transport::sse::SseTransport;
+use crate::transport::streamable::StreamableTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
@@ -43,14 +44,17 @@ struct MultiServerCursor {
 
 impl MultiServerCursor {
     fn to_string(&self) -> Result<String, ClientError> {
+        use base64::{engine::general_purpose, Engine};
         let encoded = serde_json::to_string(self)
             .map_err(|e| ClientError::Request(format!("Failed to encode cursor: {}", e).into()))?;
-        Ok(base64::encode(encoded))
+        Ok(general_purpose::STANDARD.encode(encoded))
     }
 
     fn from_string(s: &str) -> Result<Self, ClientError> {
-        let decoded =
-            base64::decode(s).map_err(|e| ClientError::Request(format!("Failed to decode cursor: {}", e).into()))?;
+        use base64::{engine::general_purpose, Engine};
+        let decoded = general_purpose::STANDARD
+            .decode(s)
+            .map_err(|e| ClientError::Request(format!("Failed to decode cursor: {}", e).into()))?;
         let cursor_str = String::from_utf8(decoded)
             .map_err(|e| ClientError::Request(format!("Invalid cursor encoding: {}", e).into()))?;
         let cursor = serde_json::from_str(&cursor_str)
@@ -100,6 +104,21 @@ impl Default for WsConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct StreamableConfig {
+    #[builder(default = default_streamable_endpoint())]
+    pub endpoint: String,
+}
+
+fn default_streamable_endpoint() -> String {
+    "http://127.0.0.1:7090".to_string()
+}
+
+impl Default for StreamableConfig {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "transport")]
 pub enum TransportConfig {
@@ -109,6 +128,8 @@ pub enum TransportConfig {
     Sse(SseConfig),
     #[serde(rename = "ws")]
     Ws(WsConfig),
+    #[serde(rename = "streamable")]
+    Streamable(StreamableConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
@@ -450,6 +471,14 @@ impl<T: ModelContextProtocolClient + Clone> Client<T> {
                     Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
                 };
                 TransportType::Ws(transport)
+            }
+            TransportConfig::Streamable(config) => {
+                let transport = StreamableTransport::new_client(config, on_message_tx, on_error_tx, on_close_tx);
+                let transport = match transport {
+                    Ok(transport) => transport,
+                    Err(e) => return Err(ClientError::Transport(format!("Client new: {}", e).into())),
+                };
+                TransportType::Streamable(transport)
             }
         };
 

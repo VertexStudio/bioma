@@ -13,6 +13,7 @@ use crate::schema::{
 };
 use crate::tools::ToolCallHandler;
 use crate::transport::sse::SseTransport;
+use crate::transport::streamable::StreamableTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::{stdio::StdioTransport, Message, Transport, TransportSender, TransportType};
 use crate::{ConnectionId, JsonRpcMessage, MessageId, OutgoingRequest, RequestId, RequestParams};
@@ -68,13 +69,13 @@ pub struct StdioConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
 pub struct SseConfig {
-    #[builder(default = default_server_url())]
+    #[builder(default = default_sse_endpoint())]
     pub endpoint: String,
     #[builder(default = default_channel_capacity())]
     pub channel_capacity: usize,
 }
 
-fn default_server_url() -> String {
+fn default_sse_endpoint() -> String {
     "127.0.0.1:8090".to_string()
 }
 
@@ -104,11 +105,41 @@ impl Default for WsConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, bon::Builder)]
+pub struct StreamableConfig {
+    #[builder(default = default_streamable_endpoint())]
+    pub endpoint: String,
+    #[builder(default = default_streamable_allowed_origins())]
+    pub allowed_origins: Vec<String>,
+    #[builder(default = default_streamable_response_type())]
+    pub response_type: ResponseType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponseType {
+    Json,
+    SSE,
+}
+
+fn default_streamable_endpoint() -> String {
+    "127.0.0.1:7090".to_string()
+}
+
+fn default_streamable_allowed_origins() -> Vec<String> {
+    vec!["0.0.0.0".to_string()]
+}
+
+fn default_streamable_response_type() -> ResponseType {
+    ResponseType::Json
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransportConfig {
     Stdio(StdioConfig),
     Sse(SseConfig),
     Ws(WsConfig),
+    Streamable(StreamableConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -157,12 +188,15 @@ impl Pagination {
     }
 
     pub fn encode_cursor(&self, offset: usize) -> String {
-        base64::encode(offset.to_string())
+        use base64::{engine::general_purpose, Engine};
+        general_purpose::STANDARD.encode(offset.to_string())
     }
 
     pub fn decode_cursor(&self, cursor: &str) -> Result<usize, ServerError> {
-        let decoded =
-            base64::decode(cursor).map_err(|e| ServerError::Request(format!("Invalid cursor format: {}", e)))?;
+        use base64::{engine::general_purpose, Engine};
+        let decoded = general_purpose::STANDARD
+            .decode(cursor)
+            .map_err(|e| ServerError::Request(format!("Invalid cursor format: {}", e)))?;
 
         let cursor_str =
             String::from_utf8(decoded).map_err(|e| ServerError::Request(format!("Invalid cursor encoding: {}", e)))?;
@@ -405,6 +439,19 @@ impl<T: ModelContextProtocolServer> Server<T> {
                     on_close_tx.clone(),
                 );
                 (TransportType::Ws(transport), on_message_rx, on_error_rx, on_close_rx)
+            }
+            TransportConfig::Streamable(config) => {
+                let (on_message_tx, on_message_rx) = mpsc::channel::<Message>(32);
+                let (on_error_tx, on_error_rx) = mpsc::channel(32);
+                let (on_close_tx, on_close_rx) = mpsc::channel(32);
+
+                let transport = StreamableTransport::new_server(
+                    config.clone(),
+                    on_message_tx.clone(),
+                    on_error_tx.clone(),
+                    on_close_tx.clone(),
+                );
+                (TransportType::Streamable(transport), on_message_rx, on_error_rx, on_close_rx)
             }
         };
 

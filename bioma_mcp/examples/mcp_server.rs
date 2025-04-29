@@ -8,14 +8,16 @@ use bioma_mcp::{
         ServerCapabilitiesPromptsResourcesTools,
     },
     server::{
-        Context, ModelContextProtocolServer, Pagination, Server, SseConfig, StdioConfig, TransportConfig, WsConfig,
+        Context, ModelContextProtocolServer, Pagination, ResponseType, Server, SseConfig, StdioConfig,
+        StreamableConfig, TransportConfig, WsConfig,
     },
     tools::{self, ToolCallHandler},
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::error;
+use tokio::signal;
+use tracing::{error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
@@ -48,6 +50,17 @@ enum Transport {
     Ws {
         #[arg(long, short, default_value = "127.0.0.1:9090")]
         endpoint: String,
+    },
+
+    Streamable {
+        #[arg(long, short, default_value = "127.0.0.1:7090")]
+        endpoint: String,
+
+        #[arg(long, default_value = "json")]
+        response_type: String,
+
+        #[arg(long, default_value = "0.0.0.0", value_delimiter = ',')]
+        allowed_origins: Vec<String>,
     },
 }
 
@@ -165,6 +178,21 @@ async fn main() -> Result<()> {
         Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
         Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
         Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
+        Transport::Streamable { endpoint, response_type, allowed_origins } => {
+            let response_type = match response_type.to_lowercase().as_str() {
+                "sse" => ResponseType::SSE,
+                "json" => ResponseType::Json,
+                _ => ResponseType::Json,
+            };
+
+            TransportConfig::Streamable(
+                StreamableConfig::builder()
+                    .endpoint(endpoint.clone())
+                    .response_type(response_type)
+                    .allowed_origins(allowed_origins.clone())
+                    .build(),
+            )
+        }
     };
 
     let capabilities = ServerCapabilities {
@@ -186,7 +214,20 @@ async fn main() -> Result<()> {
 
     let mcp_server = Server::new(server);
 
-    let _ = mcp_server.start().await;
+    // Create a task for processing SIGINT
+    let signal_task = tokio::spawn(async {
+        signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
+        info!("Received shutdown signal, exiting...");
+        std::process::exit(0); // Force exit the process
+    });
+
+    let server_task = tokio::spawn(async move { mcp_server.start().await });
+
+    // Wait for either task to complete
+    tokio::select! {
+        _ = signal_task => {},
+        _ = server_task => {},
+    }
 
     Ok(())
 }
