@@ -1,103 +1,87 @@
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{
-    schema::{CallToolResult, TextContent},
-    server::{Context, RequestContext},
+    schema::CallToolResult,
+    server::RequestContext,
     tools::{ToolDef, ToolError},
+};
+use bioma_rag::{
+    indexer::ContentSource,
+    prelude::{ListSources, Retriever},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::borrow::Cow;
+use std::time::Duration;
+use tracing::error;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ListSourcesArgs {
     #[schemars(description = "Filter sources by name pattern")]
     name_filter: Option<String>,
-
-    #[schemars(description = "Sort by field (created, name, size)")]
-    sort_by: Option<String>,
-
-    #[schemars(description = "Sort direction (asc, desc)")]
-    sort_direction: Option<String>,
-
-    #[schemars(description = "Maximum number of sources to return")]
-    limit: Option<usize>,
 }
 
-#[derive(Clone)]
-pub struct ListSources {
-    context: Context,
+#[derive(Serialize)]
+pub struct SourcesTool {
+    #[serde(skip_serializing)]
+    id: ActorId,
+    #[serde(skip_serializing)]
+    engine: Engine,
 }
 
-impl ListSources {
-    pub fn new(context: Context) -> Self {
-        Self { context }
+impl SourcesTool {
+    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+        let id = ActorId::of::<Retriever>("/rag/retriever");
+
+        let (mut retriever_ctx, mut retriever_actor) =
+            Actor::spawn(engine.clone(), id.clone(), Retriever::default(), SpawnOptions::default()).await.map_err(
+                |e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn retriever actor: {}", e))),
+            )?;
+
+        tokio::spawn(async move {
+            if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+                error!("Retriever actor error: {}", e);
+            }
+        });
+
+        Ok(Self { id, engine: engine.clone() })
     }
 }
 
-impl ToolDef for ListSources {
+impl ToolDef for SourcesTool {
     const NAME: &'static str = "list_sources";
     const DESCRIPTION: &'static str = "List indexed sources available for retrieval";
     type Args = ListSourcesArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
-        // In a real implementation, this would query the database for sources
-        // For now, we'll just return mock sources
+        let relay_id = ActorId::of::<Relay>("/rag/retriever/relay");
 
-        let limit = args.limit.unwrap_or(10);
-        let sort_by = args.sort_by.unwrap_or_else(|| "name".to_string());
-        let sort_direction = args.sort_direction.unwrap_or_else(|| "asc".to_string());
+        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
 
-        // Mock sources
-        let mock_sources = vec![
-            serde_json::json!({
-                "id": "source-1",
-                "name": "Documentation",
-                "created_at": "2023-10-15T14:30:00Z",
-                "chunks": 45,
-                "size": 125_000,
-            }),
-            serde_json::json!({
-                "id": "source-2",
-                "name": "Research Papers",
-                "created_at": "2023-11-20T09:15:00Z",
-                "chunks": 78,
-                "size": 320_000,
-            }),
-            serde_json::json!({
-                "id": "source-3",
-                "name": "User Guides",
-                "created_at": "2023-12-05T16:45:00Z",
-                "chunks": 32,
-                "size": 95_000,
-            }),
-        ];
+        let response = relay_ctx
+            .send_and_wait_reply::<Retriever, ListSources>(ListSources, &self.id, SendOptions::default())
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to list sources: {}", e)))?;
 
-        // Filter by name if specified
-        let filtered_sources = if let Some(filter) = args.name_filter {
-            mock_sources.into_iter().filter(|s| s["name"].as_str().unwrap_or("").contains(&filter)).collect::<Vec<_>>()
-        } else {
-            mock_sources
+        // Filter results by name_filter if provided
+        // This would be better done at the database level, but we do it here for simplicity
+        let filtered_response = match &args.name_filter {
+            Some(filter) => {
+                let filtered_sources: Vec<ContentSource> = response
+                    .sources
+                    .into_iter()
+                    .filter(|source| source.source.contains(filter) || source.uri.contains(filter))
+                    .collect();
+
+                serde_json::json!({
+                    "sources": filtered_sources
+                })
+            }
+            None => serde_json::to_value(response)
+                .map_err(|e| ToolError::Execution(format!("Failed to serialize response: {}", e)))?,
         };
 
-        // Take only up to the limit
-        let sources = filtered_sources.into_iter().take(limit).collect::<Vec<_>>();
-
-        let result = serde_json::json!({
-            "sources": sources,
-            "total": sources.len(),
-            "sort_by": sort_by,
-            "sort_direction": sort_direction,
-        });
-
-        let response =
-            serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("Error serializing sources list"));
-
-        Ok(CallToolResult {
-            content: vec![
-                serde_json::to_value(TextContent { type_: "text".to_string(), text: response, annotations: None })
-                    .map_err(ToolError::ResultSerialize)?,
-            ],
-            is_error: Some(false),
-            meta: None,
-        })
+        Ok(CallToolResult { meta: None, content: vec![filtered_response], is_error: None })
     }
 }

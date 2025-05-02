@@ -12,7 +12,8 @@ use tracing::error;
 
 #[derive(Serialize)]
 pub struct Index {
-    id: String,
+    #[serde(skip_serializing)]
+    id: ActorId,
     #[serde(skip_serializing)]
     engine: Engine,
 }
@@ -36,7 +37,7 @@ impl Index {
             }
         });
 
-        Ok(Self { id: id.to_string(), engine: engine.clone() })
+        Ok(Self { id, engine: engine.clone() })
     }
 }
 
@@ -47,7 +48,6 @@ impl ToolDef for Index {
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let relay_id = ActorId::of::<Relay>("/rag/indexer/relay");
-        let indexer_id = ActorId::of::<Indexer>("/rag/indexer");
 
         let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
             .await
@@ -56,20 +56,15 @@ impl ToolDef for Index {
         let response = relay_ctx
             .send_and_wait_reply::<Indexer, IndexArgs>(
                 args,
-                &indexer_id,
+                &self.id,
                 SendOptions::builder().timeout(Duration::from_secs(600)).build(),
             )
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to index content: {}", e)))?;
 
-        let result = format!("Indexed {} files, cached {} files", response.indexed, response.cached);
+        let response_value = serde_json::to_value(response)
+            .map_err(|e| ToolError::Execution(format!("Failed to serialize response: {}", e)))?;
 
-        let content = vec![serde_json::json!({
-            "message": result,
-            "indexed": response.indexed,
-            "cached": response.cached
-        })];
-
-        Ok(CallToolResult { meta: None, content, is_error: None })
+        Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }

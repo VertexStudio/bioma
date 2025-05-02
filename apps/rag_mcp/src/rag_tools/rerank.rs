@@ -1,11 +1,15 @@
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{
-    schema::{CallToolResult, TextContent},
-    server::{Context, RequestContext},
+    schema::CallToolResult,
+    server::RequestContext,
     tools::{ToolDef, ToolError},
 };
+use bioma_rag::prelude::{RankTexts, Rerank};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::borrow::Cow;
+use std::time::Duration;
+use tracing::error;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct TextToRank {
@@ -31,68 +35,62 @@ pub struct RerankArgs {
     top_n: Option<usize>,
 }
 
-#[derive(Clone)]
-pub struct Rerank {
-    context: Context,
+#[derive(Serialize)]
+pub struct RerankTool {
+    #[serde(skip_serializing)]
+    id: ActorId,
+    #[serde(skip_serializing)]
+    engine: Engine,
 }
 
-impl Rerank {
-    pub fn new(context: Context) -> Self {
-        Self { context }
+impl RerankTool {
+    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+        let id = ActorId::of::<Rerank>("/rag/rerank");
+
+        let (mut rerank_ctx, mut rerank_actor) =
+            Actor::spawn(engine.clone(), id.clone(), Rerank::default(), SpawnOptions::default()).await.map_err(
+                |e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn rerank actor: {}", e))),
+            )?;
+
+        tokio::spawn(async move {
+            if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
+                error!("Rerank actor error: {}", e);
+            }
+        });
+
+        Ok(Self { id, engine: engine.clone() })
     }
 }
 
-impl ToolDef for Rerank {
+impl ToolDef for RerankTool {
     const NAME: &'static str = "rerank";
-    const DESCRIPTION: &'static str = "Rerank a list of texts by relevance to a query";
+    const DESCRIPTION: &'static str = "Reranks a list of texts based on their relevance to a query";
     type Args = RerankArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
-        // In a real implementation, this would connect to the reranking actor
-        // For now, we'll just return mock reranked results
+        let relay_id = ActorId::of::<Relay>("/rag/rerank/relay");
 
-        let model = args.model.unwrap_or_else(|| "default-reranking-model".to_string());
-        let top_n = args.top_n.unwrap_or(args.texts.len());
+        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
 
-        // Create mock ranked results with random scores
-        let mut ranked_results = args
-            .texts
-            .iter()
-            .enumerate()
-            .map(|(i, text)| {
-                let id = text.id.clone().unwrap_or_else(|| format!("text-{}", i));
-                let score = 1.0 - (i as f32 * 0.1); // Make the first items have higher scores
+        // Convert RerankArgs to RankTexts
+        let texts = args.texts.into_iter().map(|t| t.text).collect();
 
-                serde_json::json!({
-                    "id": id,
-                    "text": text.text,
-                    "score": score,
-                    "rank": i + 1,
-                })
-            })
-            .collect::<Vec<_>>();
+        let rank_texts = RankTexts::builder().query(args.query).texts(texts).raw_scores(true).return_text(true).build();
 
-        // Take only top_n
-        ranked_results.truncate(top_n);
+        let response = relay_ctx
+            .send_and_wait_reply::<Rerank, RankTexts>(
+                rank_texts,
+                &self.id,
+                SendOptions::builder().timeout(Duration::from_secs(200)).build(),
+            )
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to rerank texts: {}", e)))?;
 
-        let result_json = serde_json::json!({
-            "query": args.query,
-            "model": model,
-            "total_candidates": args.texts.len(),
-            "returned_candidates": ranked_results.len(),
-            "results": ranked_results,
-        });
+        let response_value = serde_json::to_value(response)
+            .map_err(|e| ToolError::Execution(format!("Failed to serialize response: {}", e)))?;
 
-        let response = serde_json::to_string_pretty(&result_json)
-            .unwrap_or_else(|_| format!("Error serializing reranked results"));
-
-        Ok(CallToolResult {
-            content: vec![
-                serde_json::to_value(TextContent { type_: "text".to_string(), text: response, annotations: None })
-                    .map_err(ToolError::ResultSerialize)?,
-            ],
-            is_error: Some(false),
-            meta: None,
-        })
+        Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }
