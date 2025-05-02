@@ -62,7 +62,7 @@ pub enum IndexerError {
 
 impl ActorError for IndexerError {}
 
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Index {
     /// The content to index - can be globs, texts, or images
     #[serde(flatten)]
@@ -85,7 +85,7 @@ pub struct ChunkCapacity {
     pub end: usize,
 }
 
-#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextChunkConfig {
     /// Configuration for text chunk size limits
     #[builder(default = default_chunk_capacity())]
@@ -110,7 +110,7 @@ impl Default for TextChunkConfig {
     }
 }
 
-#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct GlobsContent {
     /// List of glob patterns
     pub globs: Vec<String>,
@@ -122,7 +122,7 @@ pub struct GlobsContent {
     pub config: TextChunkConfig,
 }
 
-#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct TextsContent {
     /// The texts to index
     pub texts: Vec<String>,
@@ -143,7 +143,7 @@ fn default_text_mime_type() -> String {
     "text/plain".to_string()
 }
 
-#[derive(utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, utoipa::ToSchema, bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct ImagesContent {
     /// The base64 encoded images
     pub images: Vec<String>,
@@ -153,7 +153,7 @@ pub struct ImagesContent {
     pub mime_type: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IndexContent {
     /// List of glob patterns to match files for indexing

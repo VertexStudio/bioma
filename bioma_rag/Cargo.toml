@@ -22,6 +22,7 @@ walkdir = { workspace = true }
 zip = { workspace = true }
 tempfile = { workspace = true }
 utoipa = { workspace = true }
+schemars = { workspace = true }
 
 pathdiff = "0.2"
 fastembed = "4.3"
