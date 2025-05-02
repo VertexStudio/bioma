@@ -1,22 +1,42 @@
-use bioma_actor::{ActorId, Engine, Relay, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{
-    schema::{CallToolResult, TextContent},
+    schema::CallToolResult,
     server::RequestContext,
     tools::{ToolDef, ToolError},
 };
-use bioma_rag::prelude::Index as IndexArgs;
-use serde::{Deserialize, Serialize};
+use bioma_rag::prelude::{Index as IndexArgs, Indexer};
+use serde::Serialize;
+use std::borrow::Cow;
+use std::time::Duration;
+use tracing::error;
 
-#[derive(Clone, Serialize)]
+#[derive(Serialize)]
 pub struct Index {
-    handle: JoinHandle<()>,
-    id: ActorId,
-    relay: Relay,
+    id: String,
+    #[serde(skip_serializing)]
+    engine: Engine,
 }
 
 impl Index {
-    pub fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        todo!()
+    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+        let id = ActorId::of::<Indexer>("/rag/indexer");
+
+        let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
+            engine.clone(),
+            id.clone(),
+            Indexer::default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await
+        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn indexer: {}", e))))?;
+
+        tokio::spawn(async move {
+            if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
+                error!("Indexer actor error: {}", e);
+            }
+        });
+
+        Ok(Self { id: id.to_string(), engine: engine.clone() })
     }
 }
 
@@ -26,6 +46,30 @@ impl ToolDef for Index {
     type Args = IndexArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
-        todo!()
+        let relay_id = ActorId::of::<Relay>("/rag/indexer/relay");
+        let indexer_id = ActorId::of::<Indexer>("/rag/indexer");
+
+        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
+
+        let response = relay_ctx
+            .send_and_wait_reply::<Indexer, IndexArgs>(
+                args,
+                &indexer_id,
+                SendOptions::builder().timeout(Duration::from_secs(600)).build(),
+            )
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to index content: {}", e)))?;
+
+        let result = format!("Indexed {} files, cached {} files", response.indexed, response.cached);
+
+        let content = vec![serde_json::json!({
+            "message": result,
+            "indexed": response.indexed,
+            "cached": response.cached
+        })];
+
+        Ok(CallToolResult { meta: None, content, is_error: None })
     }
 }
