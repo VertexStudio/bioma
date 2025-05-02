@@ -4,21 +4,11 @@ use bioma_mcp::{
     server::RequestContext,
     tools::{ToolDef, ToolError},
 };
-use bioma_rag::prelude::{DeleteSource, Indexer};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use bioma_rag::prelude::{DeleteSource as DeleteSourceArgs, Indexer};
+use serde::Serialize;
 use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DeleteSourceArgs {
-    #[schemars(description = "Source paths to delete")]
-    sources: Vec<String>,
-
-    #[schemars(description = "Whether to delete files from disk")]
-    delete_from_disk: Option<bool>,
-}
 
 #[derive(Serialize)]
 pub struct DeleteSourceTool {
@@ -59,12 +49,10 @@ impl ToolDef for DeleteSourceTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
 
-        // Create delete source request
-        let delete_source =
-            DeleteSource { sources: args.sources, delete_from_disk: args.delete_from_disk.unwrap_or(false) };
+        let delete_source = DeleteSourceArgs { sources: args.sources, delete_from_disk: args.delete_from_disk };
 
         let response = relay_ctx
-            .send_and_wait_reply::<Indexer, DeleteSource>(
+            .send_and_wait_reply::<Indexer, DeleteSourceArgs>(
                 delete_source,
                 &self.id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),

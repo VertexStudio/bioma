@@ -4,36 +4,10 @@ use bioma_mcp::{
     server::RequestContext,
     tools::{ToolDef, ToolError},
 };
-use bioma_rag::prelude::{RankTexts, Rerank};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::time::Duration;
+use bioma_rag::prelude::{RankTexts as RankTextsArgs, Rerank};
+use serde::Serialize;
+use std::{borrow::Cow, time::Duration};
 use tracing::error;
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct TextToRank {
-    #[schemars(description = "Text to be ranked")]
-    text: String,
-
-    #[schemars(description = "Optional ID to identify this text")]
-    id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct RerankArgs {
-    #[schemars(description = "Query text to compare against")]
-    query: String,
-
-    #[schemars(description = "Array of texts to rank by relevance to the query")]
-    texts: Vec<TextToRank>,
-
-    #[schemars(description = "Model to use for reranking")]
-    model: Option<String>,
-
-    #[schemars(description = "Return only top N results")]
-    top_n: Option<usize>,
-}
 
 #[derive(Serialize)]
 pub struct RerankTool {
@@ -65,7 +39,7 @@ impl RerankTool {
 impl ToolDef for RerankTool {
     const NAME: &'static str = "rerank";
     const DESCRIPTION: &'static str = "Reranks a list of texts based on their relevance to a query";
-    type Args = RerankArgs;
+    type Args = RankTextsArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let relay_id = ActorId::of::<Relay>("/rag/rerank/relay");
@@ -74,14 +48,9 @@ impl ToolDef for RerankTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
 
-        // Convert RerankArgs to RankTexts
-        let texts = args.texts.into_iter().map(|t| t.text).collect();
-
-        let rank_texts = RankTexts::builder().query(args.query).texts(texts).raw_scores(true).return_text(true).build();
-
         let response = relay_ctx
-            .send_and_wait_reply::<Rerank, RankTexts>(
-                rank_texts,
+            .send_and_wait_reply::<Rerank, RankTextsArgs>(
+                args,
                 &self.id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),
             )

@@ -4,30 +4,11 @@ use bioma_mcp::{
     server::RequestContext,
     tools::{ToolDef, ToolError},
 };
-use bioma_rag::prelude::{RetrieveContext, RetrieveQuery, Retriever};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use bioma_rag::prelude::{RetrieveContext as RetrieveContextArgs, Retriever};
+use serde::Serialize;
 use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct RetrieveArgs {
-    #[schemars(description = "Query text to retrieve relevant context for")]
-    query: String,
-
-    #[schemars(description = "Maximum number of results to return")]
-    limit: Option<usize>,
-
-    #[schemars(description = "Filter results by source paths")]
-    sources: Option<Vec<String>>,
-
-    #[schemars(description = "Similarity threshold (0.0-1.0)")]
-    threshold: Option<f32>,
-
-    #[schemars(description = "Output format (markdown or json)")]
-    format: Option<String>,
-}
 
 #[derive(Serialize)]
 pub struct RetrieveTool {
@@ -59,7 +40,7 @@ impl RetrieveTool {
 impl ToolDef for RetrieveTool {
     const NAME: &'static str = "retrieve";
     const DESCRIPTION: &'static str = "Retrieves context from indexed sources based on semantic similarity";
-    type Args = RetrieveArgs;
+    type Args = RetrieveContextArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let relay_id = ActorId::of::<Relay>("/rag/retriever/relay");
@@ -68,30 +49,21 @@ impl ToolDef for RetrieveTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
 
-        // Convert RetrieveArgs to RetrieveContext
-        let retrieve_context = RetrieveContext::builder()
-            .query(RetrieveQuery::Text(args.query))
-            .limit(args.limit.unwrap_or(10))
-            .threshold(args.threshold.unwrap_or(0.0))
-            .sources(args.sources.unwrap_or_else(|| vec!["/global".to_string()]))
-            .build();
-
         let response = relay_ctx
-            .send_and_wait_reply::<Retriever, RetrieveContext>(
-                retrieve_context,
+            .send_and_wait_reply::<Retriever, RetrieveContextArgs>(
+                args,
                 &self.id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),
             )
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to retrieve context: {}", e)))?;
 
-        // Format the response according to the requested format
-        let result = match args.format.as_deref() {
-            Some("json") => response.to_json(),
-            _ => response.to_markdown(),
+        // Convert the response to the appropriate output format based on request
+        let response_value = match response.to_json() {
+            json => serde_json::from_str(&json)
+                .map_err(|e| ToolError::Execution(format!("Failed to parse response: {}", e)))?,
         };
 
-        let response_value = serde_json::Value::String(result);
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }

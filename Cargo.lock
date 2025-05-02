@@ -5253,7 +5253,9 @@ name = "rag_mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bioma_actor",
+ "bioma_llm",
  "bioma_mcp",
  "bioma_rag",
  "clap",
@@ -5264,6 +5266,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

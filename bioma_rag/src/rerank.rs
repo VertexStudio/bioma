@@ -30,7 +30,7 @@ pub enum RerankError {
 
 impl ActorError for RerankError {}
 
-#[derive(utoipa::ToSchema, Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToSchema, schemars::JsonSchema, Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct RankTexts {
     /// The query text to compare against the corpus of texts
     ///
@@ -71,7 +71,7 @@ pub struct RankTexts {
     pub truncation_direction: TruncationDirection,
 }
 
-#[derive(utoipa::ToResponse, utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
+#[derive(utoipa::ToResponse, schemars::JsonSchema, utoipa::ToSchema, Debug, Clone, Serialize, Deserialize)]
 pub enum TruncationDirection {
     Left,
     Right,

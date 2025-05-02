@@ -1,26 +1,29 @@
 use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
-use bioma_mcp::{
-    schema::CallToolResult,
-    server::RequestContext,
-    tools::{ToolDef, ToolError},
-};
-use bioma_rag::prelude::{EmbeddingContent, Embeddings, GenerateEmbeddings};
-use schemars::JsonSchema;
+use bioma_mcp::schema::CallToolResult;
+use bioma_mcp::server::RequestContext;
+use bioma_mcp::tools::{ToolDef, ToolError};
+use bioma_rag::prelude::{EmbeddingContent, Embeddings, GenerateEmbeddings, ImageData};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct EmbedArgs {
-    #[schemars(description = "Text to embed")]
-    text: String,
+/// Request schema for generating embeddings
+#[derive(schemars::JsonSchema, Serialize, Deserialize)]
+pub struct EmbeddingsQueryArgs {
+    /// The embedding model to use
+    pub model: ModelEmbed,
 
-    #[schemars(description = "Model to use for embeddings")]
-    model: Option<String>,
+    /// The input data to generate embeddings for (text or base64-encoded image)
+    pub input: serde_json::Value,
+}
 
-    #[schemars(description = "Whether to normalize the embeddings")]
-    normalize: Option<bool>,
+#[derive(schemars::JsonSchema, Serialize, Deserialize)]
+pub enum ModelEmbed {
+    #[serde(rename = "nomic-embed-text")]
+    NomicEmbedTextV15,
+    #[serde(rename = "nomic-embed-vision")]
+    NomicEmbedVisionV15,
 }
 
 #[derive(Serialize)]
@@ -52,8 +55,8 @@ impl EmbedTool {
 
 impl ToolDef for EmbedTool {
     const NAME: &'static str = "embed";
-    const DESCRIPTION: &'static str = "Generate embeddings for text";
-    type Args = EmbedArgs;
+    const DESCRIPTION: &'static str = "Generate embeddings for text or images";
+    type Args = EmbeddingsQueryArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let relay_id = ActorId::of::<Relay>("/rag/embeddings/relay");
@@ -62,12 +65,38 @@ impl ToolDef for EmbedTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
 
-        // Create embedding request
-        let generate_embeddings = GenerateEmbeddings { content: EmbeddingContent::Text(vec![args.text]) };
+        let embedding_content = match args.model {
+            ModelEmbed::NomicEmbedTextV15 => {
+                let texts = match args.input.as_str() {
+                    Some(s) => vec![s.to_string()],
+                    None => match args.input.as_array() {
+                        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+                        None => {
+                            return Err(ToolError::Execution("Input must be string or array of strings".to_string()));
+                        }
+                    },
+                };
+                EmbeddingContent::Text(texts)
+            }
+            ModelEmbed::NomicEmbedVisionV15 => {
+                let base64_images = match args.input.as_str() {
+                    Some(s) => vec![s.to_string()],
+                    None => match args.input.as_array() {
+                        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+                        None => {
+                            return Err(ToolError::Execution("Input must be string or array of strings".to_string()));
+                        }
+                    },
+                };
+
+                let images = base64_images.into_iter().map(ImageData::Base64).collect();
+                EmbeddingContent::Image(images)
+            }
+        };
 
         let response = relay_ctx
             .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
-                generate_embeddings,
+                GenerateEmbeddings { content: embedding_content },
                 &self.id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),
             )

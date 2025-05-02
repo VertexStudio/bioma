@@ -2,10 +2,10 @@ use actix_cors::Cors;
 use actix_files::{Files, NamedFile};
 use actix_multipart::form::MultipartForm;
 use actix_web::{
-    App, HttpResponse, HttpServer, Responder,
     http::Method,
     middleware::Logger,
     web::{self, Json},
+    App, HttpResponse, HttpServer, Responder,
 };
 use api_schema::{
     AskQuery, ChatQuery, EmbeddingsQuery, IndexRequest, ModelEmbed, RetrieveContextRequest, RetrieveOutputFormat,
@@ -17,12 +17,12 @@ use bioma_llm::prelude::*;
 use bioma_rag::prelude::*;
 use clap::Parser;
 use cognition::{
-    ChatResponse, ToolHubMap, ToolsHub, UserActor,
     health_check::{
-        Responses, Service, check_embeddings, check_markitdown, check_minio, check_ollama, check_pdf_analyzer,
-        check_surrealdb,
+        check_embeddings, check_markitdown, check_minio, check_ollama, check_pdf_analyzer, check_surrealdb, Responses,
+        Service,
     },
     tool::ListTools,
+    ChatResponse, ToolHubMap, ToolsHub, UserActor,
 };
 use embeddings::EmbeddingContent;
 use futures_util::StreamExt;
@@ -34,7 +34,7 @@ use server_config::{Args, ServerConfig};
 use std::{collections::HashMap, error::Error as StdError, time::Duration};
 use tracing::{debug, error, info};
 use url::Url;
-use utoipa::{OpenApi, openapi::ServerBuilder};
+use utoipa::{openapi::ServerBuilder, OpenApi};
 
 mod api_schema;
 mod server_config;
