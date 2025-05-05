@@ -1,4 +1,5 @@
 use anyhow::{Error, Result};
+use bioma_actor::{Engine, EngineOptions};
 use bioma_mcp::{
     resources::ResourceReadHandler,
     schema::{
@@ -20,7 +21,7 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 
-mod rag_tools;
+mod tools;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -33,6 +34,9 @@ struct Args {
 
     #[arg(long, short, default_value = "20")]
     page_size: usize,
+
+    #[arg(long, default_value = "memory")]
+    db_endpoint: String,
 
     #[command(subcommand)]
     transport: Transport,
@@ -71,6 +75,7 @@ pub struct RagMcpServer {
     base_dir: PathBuf,
     pagination: Pagination,
     log_path: PathBuf,
+    engine: Arc<Engine>,
 }
 
 impl ModelContextProtocolServer for RagMcpServer {
@@ -120,19 +125,38 @@ impl ModelContextProtocolServer for RagMcpServer {
         vec![]
     }
 
-    async fn new_tools(&self, context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
-        vec![
-            Arc::new(rag_tools::index::Index::new(context.clone())),
-            Arc::new(rag_tools::retrieve::Retrieve::new(context.clone())),
-            Arc::new(rag_tools::chat::Chat::new(context.clone())),
-            Arc::new(rag_tools::ask::Ask::new(context.clone())),
-            Arc::new(rag_tools::embed::Embed::new(context.clone())),
-            Arc::new(rag_tools::rerank::Rerank::new(context.clone())),
-            Arc::new(rag_tools::upload::Upload::new(context.clone(), self.base_dir.clone())),
-            Arc::new(rag_tools::sources::ListSources::new(context.clone())),
-            Arc::new(rag_tools::delete_source::DeleteSource::new(context.clone())),
-            Arc::new(rag_tools::health::Health::new()),
-        ]
+    async fn new_tools(&self, _context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
+        let engine = &self.engine;
+        let mut tools: Vec<Arc<dyn ToolCallHandler>> = Vec::new();
+
+        if let Ok(index_tool) = tools::index::IndexTool::new(engine).await {
+            tools.push(Arc::new(index_tool));
+        }
+
+        if let Ok(retrieve_tool) = tools::retrieve::RetrieveTool::new(engine).await {
+            tools.push(Arc::new(retrieve_tool));
+        }
+
+        if let Ok(embed_tool) = tools::embed::EmbedTool::new(engine).await {
+            tools.push(Arc::new(embed_tool));
+        }
+
+        if let Ok(rerank_tool) = tools::rerank::RerankTool::new(engine).await {
+            tools.push(Arc::new(rerank_tool));
+        }
+
+        let upload_tool = tools::upload::UploadTool::new(engine.clone());
+        tools.push(Arc::new(upload_tool));
+
+        if let Ok(sources_tool) = tools::sources::SourcesTool::new(engine).await {
+            tools.push(Arc::new(sources_tool));
+        }
+
+        if let Ok(delete_tool) = tools::delete::DeleteTool::new(engine).await {
+            tools.push(Arc::new(delete_tool));
+        }
+
+        tools
     }
 
     async fn on_error(&self, error: Error) {
@@ -174,26 +198,29 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
+    let engine_options = EngineOptions::builder().endpoint(args.db_endpoint.into()).build();
+
+    let engine = Arc::new(Engine::connect(engine_options).await?);
+
     let server = RagMcpServer {
         transport_config,
         capabilities,
         base_dir: args.base_dir,
         pagination: Pagination::new(args.page_size),
         log_path: args.log_file,
+        engine,
     };
 
     let mcp_server = Server::new(server);
 
-    // Create a task for processing SIGINT
     let signal_task = tokio::spawn(async {
         signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
         info!("Received shutdown signal, exiting...");
-        std::process::exit(0); // Force exit the process
+        std::process::exit(0);
     });
 
     let server_task = tokio::spawn(async move { mcp_server.start().await });
 
-    // Wait for either task to complete
     tokio::select! {
         _ = signal_task => {},
         _ = server_task => {},

@@ -16,6 +16,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 base64 = { workspace = true }
+actix-web = { workspace = true }
 
 bioma_mcp = { path = "../../bioma_mcp" }
 bioma_rag = { path = "../../bioma_rag" }

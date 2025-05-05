@@ -1,8 +1,5 @@
-pub mod ask;
-pub mod chat;
-pub mod delete_source;
+pub mod delete;
 pub mod embed;
-pub mod health;
 pub mod index;
 pub mod rerank;
 pub mod retrieve;
