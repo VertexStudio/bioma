@@ -18,6 +18,7 @@ uuid = { workspace = true }
 url = { workspace = true }
 zip = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+futures-util = { workspace = true }
 
 bioma_mcp = { path = "../../bioma_mcp" }
 bioma_rag = { path = "../../bioma_rag" }

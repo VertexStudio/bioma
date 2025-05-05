@@ -5275,6 +5275,7 @@ dependencies = [
  "bioma_mcp",
  "bioma_rag",
  "clap",
+ "futures-util",
  "reqwest 0.12.15",
  "schemars",
  "serde",
