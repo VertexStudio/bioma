@@ -1,9 +1,6 @@
+use anyhow::{Error, anyhow};
 use bioma_actor::Engine;
-use bioma_mcp::{
-    schema::CallToolResult,
-    server::RequestContext,
-    tools::{ToolDef, ToolError},
-};
+use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,10 +42,10 @@ impl ToolDef for IngestTool {
     const DESCRIPTION: &'static str = "Upload files for indexing and retrieval by downloading from a URL";
     type Args = IngestArgs;
 
-    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let client = Client::new();
 
-        let url = Url::parse(&args.url).map_err(|e| ToolError::Execution(format!("Invalid URL: {}", e)))?;
+        let url = Url::parse(&args.url)?;
 
         let output_dir = self.engine.local_store_dir().clone();
 
@@ -59,30 +56,21 @@ impl ToolDef for IngestTool {
         let dest_path = output_dir.join(&target_folder);
 
         if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| ToolError::Execution(format!("Failed to create target directory: {}", e)))?;
+            fs::create_dir_all(parent).await?;
         }
 
         let temp_path = std::env::temp_dir().join(format!("upload_{}", Uuid::new_v4()));
 
         info!("Downloading file from {}", url);
-        let response = client
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to download file: {}", e)))?;
+        let response = client.get(url.clone()).send().await?;
 
         if !response.status().is_success() {
-            return Err(ToolError::Execution(format!("Failed to download file, status code: {}", response.status())));
+            return Err(anyhow!("Failed to download file, status code: {}", response.status()));
         }
 
-        let bytes =
-            response.bytes().await.map_err(|e| ToolError::Execution(format!("Failed to read response body: {}", e)))?;
+        let bytes = response.bytes().await?;
 
-        fs::write(&temp_path, bytes.clone())
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to save downloaded file: {}", e)))?;
+        fs::write(&temp_path, bytes.clone()).await?;
 
         let is_zip = url.path().ends_with(".zip") || (bytes.len() > 4 && &bytes[0..4] == b"PK\x03\x04");
 
@@ -164,17 +152,15 @@ impl ToolDef for IngestTool {
                 },
                 Ok(Err(e)) => {
                     error!("Error extracting zip file: {:?}", e);
-                    return Err(ToolError::Execution(format!("Failed to extract zip archive: {}", e)));
+                    return Err(anyhow!("Failed to extract zip archive: {}", e));
                 }
                 Err(e) => {
                     error!("Task error: {:?}", e);
-                    return Err(ToolError::Execution(format!("Internal error during extraction: {}", e)));
+                    return Err(anyhow!("Internal error during extraction: {}", e));
                 }
             }
         } else {
-            fs::copy(&temp_path, &dest_path)
-                .await
-                .map_err(|e| ToolError::Execution(format!("Failed to save file: {}", e)))?;
+            fs::copy(&temp_path, &dest_path).await?;
 
             let _ = fs::remove_file(&temp_path).await;
 
@@ -186,7 +172,7 @@ impl ToolDef for IngestTool {
             }
         };
 
-        let response_value = serde_json::to_value(result).unwrap();
+        let response_value = serde_json::to_value(result)?;
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }

@@ -1,7 +1,8 @@
+use anyhow::{Error, anyhow};
 use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::schema::CallToolResult;
 use bioma_mcp::server::RequestContext;
-use bioma_mcp::tools::{ToolDef, ToolError};
+use bioma_mcp::tools::ToolDef;
 use bioma_rag::prelude::{EmbeddingContent, Embeddings, GenerateEmbeddings, ImageData};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -54,12 +55,10 @@ impl ToolDef for EmbedTool {
     const DESCRIPTION: &'static str = "Generate embeddings for text or images";
     type Args = EmbeddingsQueryArgs;
 
-    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let relay_id = ActorId::of::<Relay>("/rag/embeddings/relay");
 
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {}", e)))?;
+        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
 
         let embedding_content = match args.model {
             ModelEmbed::NomicEmbedTextV15 => {
@@ -68,7 +67,7 @@ impl ToolDef for EmbedTool {
                     None => match args.input.as_array() {
                         Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
                         None => {
-                            return Err(ToolError::Execution("Input must be string or array of strings".to_string()));
+                            return Err(anyhow!("Input must be string or array of strings"));
                         }
                     },
                 };
@@ -80,7 +79,7 @@ impl ToolDef for EmbedTool {
                     None => match args.input.as_array() {
                         Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
                         None => {
-                            return Err(ToolError::Execution("Input must be string or array of strings".to_string()));
+                            return Err(anyhow!("Input must be string or array of strings"));
                         }
                     },
                 };
@@ -96,11 +95,9 @@ impl ToolDef for EmbedTool {
                 &self.id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),
             )
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to generate embeddings: {}", e)))?;
+            .await?;
 
-        let response_value = serde_json::to_value(response)
-            .map_err(|e| ToolError::Execution(format!("Failed to serialize response: {}", e)))?;
+        let response_value = serde_json::to_value(response)?;
 
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }

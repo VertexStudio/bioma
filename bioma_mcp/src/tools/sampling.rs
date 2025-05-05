@@ -1,8 +1,9 @@
 use crate::{
     schema::{CallToolResult, CreateMessageRequestParams, ModelHint, ModelPreferences, SamplingMessage, TextContent},
     server::{Context, RequestContext},
-    tools::{ToolDef, ToolError},
+    tools::ToolDef,
 };
+use anyhow::Error;
 use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -50,7 +51,7 @@ impl ToolDef for Sampling {
     const DESCRIPTION: &'static str = "Query to ask to the LLM.";
     type Args = SamplingArgs;
 
-    async fn call(&self, args: Self::Args, request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, request_context: RequestContext) -> Result<CallToolResult, Error> {
         let mut progress = self.context.track(request_context);
         progress.update_to(0.1, Some("Preparing to sample...".to_string())).await?;
         let hints = match args.models_suggestions {

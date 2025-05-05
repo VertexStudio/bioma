@@ -1,6 +1,7 @@
 use crate::schema::{CallToolResult, TextContent};
 use crate::server::RequestContext;
-use crate::tools::{ToolDef, ToolError};
+use crate::tools::ToolDef;
+use anyhow::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -126,7 +127,7 @@ impl ToolDef for Workflow {
     "#;
     type Args = WorkflowStep;
 
-    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         if let Some(max) = self.max_steps {
             if args.step_number > max {
                 return Ok(Self::error(format!(
@@ -220,7 +221,7 @@ impl Workflow {
         result
     }
 
-    pub async fn get_steps(&self, query: StepQuery) -> Result<Vec<WorkflowStep>, ToolError> {
+    pub async fn get_steps(&self, query: StepQuery) -> Result<Vec<WorkflowStep>, Error> {
         let state = self.state.lock().await;
 
         if let Some(step_num) = query.step_number {

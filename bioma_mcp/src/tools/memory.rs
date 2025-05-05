@@ -1,6 +1,7 @@
 use crate::schema::{CallToolResult, TextContent};
 use crate::server::RequestContext;
-use crate::tools::{ToolDef, ToolError};
+use crate::tools::ToolDef;
+use anyhow::{anyhow, Error};
 use lazy_static::lazy_static;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,7 +46,7 @@ impl ToolDef for Memory {
     const DESCRIPTION: &'static str = "Store and retrieve JSON memories using string keys";
     type Args = MemoryArgs;
 
-    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let store_result = MEMORY_STORE.lock();
         let mut store = match store_result {
             Ok(store) => store,
@@ -71,7 +72,9 @@ impl ToolDef for Memory {
                     None => return Ok(Self::error("Key is required for retrieve action")),
                 };
                 match store.get(&key) {
-                    Some(value) => serde_json::to_string_pretty(value).map_err(ToolError::ResultSerialize)?,
+                    Some(value) => {
+                        serde_json::to_string_pretty(value).map_err(|e| anyhow!("Failed to serialize result: {}", e))?
+                    }
                     None => format!("No memory found for key: {}", key),
                 }
             }
