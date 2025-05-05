@@ -5252,14 +5252,12 @@ dependencies = [
 name = "rag_mcp"
 version = "0.1.0"
 dependencies = [
- "actix-web",
  "anyhow",
- "base64 0.22.1",
  "bioma_actor",
- "bioma_llm",
  "bioma_mcp",
  "bioma_rag",
  "clap",
+ "reqwest 0.12.15",
  "schemars",
  "serde",
  "serde_json",
@@ -5267,7 +5265,9 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "uuid",
+ "zip",
 ]
 
 [[package]]

@@ -15,10 +15,10 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
-base64 = { workspace = true }
-actix-web = { workspace = true }
+url = { workspace = true }
+zip = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 
 bioma_mcp = { path = "../../bioma_mcp" }
 bioma_rag = { path = "../../bioma_rag" }
 bioma_actor = { path = "../../bioma_actor" }
-bioma_llm = { path = "../../bioma_llm" }
