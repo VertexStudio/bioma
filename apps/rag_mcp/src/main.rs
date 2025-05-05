@@ -39,7 +39,7 @@ struct Args {
     db_endpoint: String,
 
     #[command(subcommand)]
-    transport: Transport,
+    transport: Option<Transport>,
 }
 
 #[derive(Subcommand)]
@@ -168,24 +168,29 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let transport_config = match &args.transport {
-        Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
-        Transport::Sse { endpoint } => TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build()),
-        Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
-        Transport::Streamable { endpoint, response_type, allowed_origins } => {
-            let response_type = match response_type.to_lowercase().as_str() {
-                "sse" => ResponseType::SSE,
-                "json" => ResponseType::Json,
-                _ => ResponseType::Json,
-            };
+        Some(transport) => match transport {
+            Transport::Stdio => TransportConfig::Stdio(StdioConfig {}),
+            Transport::Sse { endpoint } => {
+                TransportConfig::Sse(SseConfig::builder().endpoint(endpoint.clone()).build())
+            }
+            Transport::Ws { endpoint } => TransportConfig::Ws(WsConfig::builder().endpoint(endpoint.clone()).build()),
+            Transport::Streamable { endpoint, response_type, allowed_origins } => {
+                let response_type = match response_type.to_lowercase().as_str() {
+                    "sse" => ResponseType::SSE,
+                    "json" => ResponseType::Json,
+                    _ => ResponseType::Json,
+                };
 
-            TransportConfig::Streamable(
-                StreamableConfig::builder()
-                    .endpoint(endpoint.clone())
-                    .response_type(response_type)
-                    .allowed_origins(allowed_origins.clone())
-                    .build(),
-            )
-        }
+                TransportConfig::Streamable(
+                    StreamableConfig::builder()
+                        .endpoint(endpoint.clone())
+                        .response_type(response_type)
+                        .allowed_origins(allowed_origins.clone())
+                        .build(),
+                )
+            }
+        },
+        None => TransportConfig::Stdio(StdioConfig {}),
     };
 
     let capabilities = ServerCapabilities {
