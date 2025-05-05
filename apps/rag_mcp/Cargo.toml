@@ -22,3 +22,6 @@ reqwest = { workspace = true, features = ["json"] }
 bioma_mcp = { path = "../../bioma_mcp" }
 bioma_rag = { path = "../../bioma_rag" }
 bioma_actor = { path = "../../bioma_actor" }
+
+[dev-dependencies]
+wiremock = "0.6"

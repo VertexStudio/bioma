@@ -68,3 +68,73 @@ impl ToolDef for IndexTool {
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::ingest::{self, IngestTool};
+    use bioma_rag::{
+        indexer::{IndexStatus, Indexed, TextsContent},
+        prelude::{GlobsContent, Index as IndexArgs, IndexContent, TextChunkConfig},
+    };
+    use std::sync::Arc;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    #[tokio::test]
+    async fn index_plain_text() {
+        let engine = Engine::test().await.unwrap();
+        let index_tool = IndexTool::new(&engine).await.unwrap();
+
+        let args = IndexArgs {
+            content: IndexContent::Texts(TextsContent {
+                texts: vec!["Hello world!".to_owned()],
+                mime_type: "text/plain".into(),
+                config: TextChunkConfig::default(),
+            }),
+            source: "unit-test".into(),
+            summarize: false,
+        };
+        let res = index_tool.call(args, RequestContext::default()).await.expect("indexing succeeds");
+
+        let indexed: Indexed = serde_json::from_value(res.content[0].clone()).expect("valid Indexed result");
+        assert!(indexed.indexed >= 1, "Expected at least one indexed item");
+        assert!(!indexed.sources.is_empty(), "Expected sources to be non-empty");
+    }
+
+    #[tokio::test]
+    async fn upload_then_index_file() {
+        let server = MockServer::start().await;
+        let file_body = b"File to be indexed";
+        Mock::given(method("GET"))
+            .and(path("/docs/file.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(file_body))
+            .mount(&server)
+            .await;
+
+        let engine = Engine::test().await.unwrap();
+
+        let ingest_tool = IngestTool::new(Arc::new(engine.clone()));
+        let ingest_args =
+            ingest::IngestArgs { url: format!("{}/docs/file.txt", server.uri()), path: "docs/file.txt".into() };
+        ingest_tool.call(ingest_args, RequestContext::default()).await.expect("upload works");
+
+        let index_tool = IndexTool::new(&engine).await.unwrap();
+        let idx_args = IndexArgs {
+            content: IndexContent::Globs(GlobsContent {
+                globs: vec!["docs/*.txt".into()],
+                config: TextChunkConfig::default(),
+            }),
+            source: "unit-test-glob".into(),
+            summarize: false,
+        };
+        let res = index_tool.call(idx_args, RequestContext::default()).await.expect("indexing works");
+
+        let indexed: Indexed = serde_json::from_value(res.content[0].clone()).expect("valid Indexed result");
+        assert_eq!(indexed.indexed, 1, "Expected one indexed file");
+        assert_eq!(indexed.sources.len(), 1, "Expected one source");
+        assert!(matches!(indexed.sources[0].status, IndexStatus::Indexed), "Expected status to be Indexed");
+    }
+}

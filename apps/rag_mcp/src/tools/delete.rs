@@ -20,7 +20,7 @@ pub struct DeleteTool {
 
 impl DeleteTool {
     pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        let id = ActorId::of::<Indexer>("/rag/indexer");
+        let id = ActorId::of::<Indexer>("/rag/delete");
 
         let (mut indexer_ctx, mut indexer_actor) =
             Actor::spawn(engine.clone(), id.clone(), Indexer::default(), SpawnOptions::default()).await.map_err(
@@ -43,7 +43,7 @@ impl ToolDef for DeleteTool {
     type Args = DeleteSourceArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
-        let relay_id = ActorId::of::<Relay>("/rag/indexer/relay");
+        let relay_id = ActorId::of::<Relay>("/rag/delete/relay");
 
         let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
             .await
@@ -64,5 +64,56 @@ impl ToolDef for DeleteTool {
             .map_err(|e| ToolError::Execution(format!("Failed to serialize response: {}", e)))?;
 
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::index::IndexTool;
+    use bioma_mcp::server::RequestContext;
+    use bioma_rag::{
+        indexer::{Index as IndexArgs, IndexContent, TextChunkConfig, TextsContent},
+        prelude::{DeleteSource as DeleteSourceArgs, DeletedSource},
+    };
+
+    #[tokio::test]
+    async fn index_then_delete_source() {
+        let engine = Engine::test().await.unwrap();
+
+        let source_name = "/unit-test-delete";
+        let index_tool = IndexTool::new(&engine).await.unwrap();
+        index_tool
+            .call(
+                IndexArgs {
+                    content: IndexContent::Texts(TextsContent {
+                        texts: vec!["This text will be deleted.".to_owned()],
+                        mime_type: "text/plain".into(),
+                        config: TextChunkConfig::default(),
+                    }),
+                    source: source_name.into(),
+                    summarize: false,
+                },
+                RequestContext::default(),
+            )
+            .await
+            .expect("indexing must succeed");
+
+        let delete_tool = DeleteTool::new(&engine).await.unwrap();
+        let raw = delete_tool
+            .call(
+                DeleteSourceArgs { sources: vec![source_name.into()], delete_from_disk: false },
+                RequestContext::default(),
+            )
+            .await
+            .expect("deletion must succeed");
+
+        let deleted: DeletedSource = serde_json::from_value(raw.content[0].clone()).unwrap();
+
+        assert!(deleted.deleted_embeddings >= 1, "at least one embedding should be removed");
+        assert!(
+            deleted.deleted_sources.iter().any(|cs| cs.source == source_name),
+            "returned list should include the deleted source label"
+        );
     }
 }

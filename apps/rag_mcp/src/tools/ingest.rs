@@ -16,13 +16,13 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 #[derive(JsonSchema, Debug, Serialize, Deserialize)]
-pub struct UploadArgs {
+pub struct IngestArgs {
     pub url: String,
     pub path: String,
 }
 
 #[derive(Serialize)]
-pub struct UploadTool {
+pub struct IngestTool {
     #[serde(skip_serializing)]
     engine: Arc<Engine>,
 }
@@ -34,16 +34,16 @@ struct Uploaded {
     size: usize,
 }
 
-impl UploadTool {
+impl IngestTool {
     pub fn new(engine: Arc<Engine>) -> Self {
         Self { engine }
     }
 }
 
-impl ToolDef for UploadTool {
+impl ToolDef for IngestTool {
     const NAME: &'static str = "upload";
     const DESCRIPTION: &'static str = "Upload files for indexing and retrieval by downloading from a URL";
-    type Args = UploadArgs;
+    type Args = IngestArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
         let client = Client::new();
@@ -188,5 +188,86 @@ impl ToolDef for UploadTool {
 
         let response_value = serde_json::to_value(result).unwrap();
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::Arc;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+    use zip::write::FileOptions;
+
+    #[tokio::test]
+    async fn download_plain_file() {
+        let server = MockServer::start().await;
+        let body = b"Hello world!";
+        Mock::given(method("GET"))
+            .and(path("/file.txt"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+
+        let engine = Engine::test().await.unwrap();
+        let tool = IngestTool::new(Arc::new(engine.clone()));
+
+        let args = IngestArgs { url: format!("{}/file.txt", server.uri()), path: "greetings/file.txt".into() };
+        let result = tool.call(args, RequestContext::default()).await.unwrap();
+
+        let uploaded: Uploaded = serde_json::from_value(result.content[0].clone()).unwrap();
+        assert_eq!(uploaded.paths[0], PathBuf::from("greetings/file.txt"));
+
+        let abs_path = engine.local_store_dir().join(&uploaded.paths[0]);
+        let bytes_on_disk = tokio::fs::read(&abs_path).await.unwrap();
+        assert_eq!(bytes_on_disk.as_slice(), body);
+        assert_eq!(uploaded.size, body.len());
+
+        let _ = tokio::fs::remove_file(abs_path).await;
+    }
+
+    #[tokio::test]
+    async fn download_and_extract_zip() {
+        let zip_bytes = {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            {
+                let mut zw = zip::ZipWriter::new(&mut buf);
+                let opts: FileOptions<'_, ()> = FileOptions::default();
+                for &(name, bytes) in &[("folder/a.txt", b"A" as &[u8]), ("folder/b/b.txt", b"B" as &[u8])] {
+                    zw.start_file(name, opts).unwrap();
+                    zw.write_all(bytes).unwrap();
+                }
+                zw.finish().unwrap();
+            }
+            buf.into_inner()
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/archive.zip"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(zip_bytes))
+            .mount(&server)
+            .await;
+
+        let engine = Engine::test().await.unwrap();
+        let tool = IngestTool::new(Arc::new(engine.clone()));
+
+        let args = IngestArgs { url: format!("{}/archive.zip", server.uri()), path: "archive.zip".into() };
+        let result = tool.call(args, RequestContext::default()).await.unwrap();
+
+        let uploaded: Uploaded = serde_json::from_value(result.content[0].clone()).unwrap();
+        assert_eq!(uploaded.paths.len(), 2, "two files extracted");
+
+        assert!(uploaded.paths.contains(&PathBuf::from("archive/a.txt")));
+        assert!(uploaded.paths.contains(&PathBuf::from("archive/b/b.txt")));
+
+        let abs_a = engine.local_store_dir().join("archive/a.txt");
+        let data_a = tokio::fs::read(&abs_a).await.unwrap();
+        assert_eq!(data_a.as_slice(), b"A");
+
+        let _ = tokio::fs::remove_dir_all(engine.local_store_dir().join("archive")).await;
     }
 }

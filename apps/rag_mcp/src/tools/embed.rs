@@ -109,3 +109,51 @@ impl ToolDef for EmbedTool {
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }
+
+mod tests {
+    use crate::tools::embed::{EmbedTool, EmbeddingsQueryArgs, ModelEmbed};
+    use bioma_actor::Engine;
+    use bioma_mcp::{server::RequestContext, tools::ToolDef};
+    use bioma_rag::prelude::GeneratedEmbeddings;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn generate_text_embeddings() {
+        // ── engine + tool ───────────────────────────────────────────────────
+        let engine = Engine::test().await.unwrap();
+        let embed_tool = EmbedTool::new(&engine).await.unwrap();
+
+        // ── call ────────────────────────────────────────────────────────────
+        let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!(["Hello from Sergio!"]) };
+
+        let raw =
+            embed_tool.call(args, RequestContext::default()).await.unwrap_or_else(|e| panic!("tool failed: {e:?}"));
+
+        // ── strongly-typed result ───────────────────────────────────────────
+        let out: GeneratedEmbeddings = serde_json::from_value(raw.content[0].clone()).unwrap();
+
+        // ── assertions (compile-time checked) ───────────────────────────────
+        assert_eq!(out.embeddings.len(), 1, "exactly one embedding returned for one input string");
+        assert!(!out.embeddings[0].is_empty(), "each embedding vector should be non-empty");
+    }
+
+    #[tokio::test]
+    async fn generate_image_embeddings() {
+        // one-pixel transparent PNG (base64)
+        const IMAGE: &str =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+        let engine = Engine::test().await.unwrap();
+        let embed_tool = EmbedTool::new(&engine).await.unwrap();
+
+        let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedVisionV15, input: json!(IMAGE) };
+
+        let raw =
+            embed_tool.call(args, RequestContext::default()).await.unwrap_or_else(|e| panic!("tool failed: {e:?}"));
+
+        let out: GeneratedEmbeddings = serde_json::from_value(raw.content[0].clone()).unwrap();
+
+        assert_eq!(out.embeddings.len(), 1, "one image ⇒ one embedding");
+        assert!(!out.embeddings[0].is_empty(), "vision embedding vector should be non-empty");
+    }
+}

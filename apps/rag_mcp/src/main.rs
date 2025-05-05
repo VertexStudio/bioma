@@ -36,7 +36,19 @@ struct Args {
     page_size: usize,
 
     #[arg(long, default_value = "memory")]
-    db_endpoint: String,
+    endpoint: String,
+
+    #[arg(long, default_value = "dev")]
+    namespace: String,
+
+    #[arg(long, default_value = "bioma")]
+    database: String,
+
+    #[arg(long, default_value = "root")]
+    username: String,
+
+    #[arg(long, default_value = "root")]
+    password: String,
 
     #[command(subcommand)]
     transport: Option<Transport>,
@@ -144,8 +156,8 @@ impl ModelContextProtocolServer for RagMcpServer {
             tools.push(Arc::new(rerank_tool));
         }
 
-        let upload_tool = tools::upload::UploadTool::new(engine.clone());
-        tools.push(Arc::new(upload_tool));
+        let ingest_tool = tools::ingest::IngestTool::new(engine.clone());
+        tools.push(Arc::new(ingest_tool));
 
         if let Ok(sources_tool) = tools::sources::SourcesTool::new(engine).await {
             tools.push(Arc::new(sources_tool));
@@ -202,7 +214,13 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let engine_options = EngineOptions::builder().endpoint(args.db_endpoint.into()).build();
+    let engine_options = EngineOptions::builder()
+        .endpoint(args.endpoint.into())
+        .namespace(args.namespace.into())
+        .database(args.database.into())
+        .username(args.username.into())
+        .password(args.password.into())
+        .build();
 
     let engine = Arc::new(Engine::connect(engine_options).await?);
 

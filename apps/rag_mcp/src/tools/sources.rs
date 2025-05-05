@@ -68,3 +68,49 @@ impl ToolDef for SourcesTool {
         Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::index::IndexTool;
+    use bioma_mcp::server::RequestContext;
+    use bioma_rag::{
+        indexer::{Index as IndexArgs, IndexContent, TextChunkConfig, TextsContent},
+        prelude::ListedSources,
+    };
+
+    #[tokio::test]
+    async fn list_sources_after_indexing() {
+        let engine = Engine::test().await.unwrap();
+
+        let source_name = "unit-test-source";
+        let index_tool = IndexTool::new(&engine).await.unwrap();
+        index_tool
+            .call(
+                IndexArgs {
+                    content: IndexContent::Texts(TextsContent {
+                        texts: vec!["Sergio loves type-driven dev.".to_owned()],
+                        mime_type: "text/plain".into(),
+                        config: TextChunkConfig::default(),
+                    }),
+                    source: source_name.into(),
+                    summarize: false,
+                },
+                RequestContext::default(),
+            )
+            .await
+            .expect("indexing must succeed");
+
+        let list_tool = SourcesTool::new(&engine).await.unwrap();
+        let raw = list_tool.call(ListSourcesArgs {}, RequestContext::default()).await.expect("listing must succeed");
+
+        let listed: ListedSources = serde_json::from_value(raw.content[0].clone()).unwrap();
+
+        assert!(
+            listed.sources.iter().any(|s| s.source == source_name),
+            "returned list should include the source we just indexed"
+        );
+
+        assert!(listed.sources.iter().all(|s| !s.uri.is_empty()));
+    }
+}
