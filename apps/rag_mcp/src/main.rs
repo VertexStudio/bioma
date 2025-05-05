@@ -72,7 +72,6 @@ enum Transport {
 pub struct RagMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
-    base_dir: PathBuf,
     pagination: Pagination,
     log_path: PathBuf,
     engine: Arc<Engine>,
@@ -205,7 +204,6 @@ async fn main() -> Result<()> {
     let server = RagMcpServer {
         transport_config,
         capabilities,
-        base_dir: args.base_dir,
         pagination: Pagination::new(args.page_size),
         log_path: args.log_file,
         engine,
