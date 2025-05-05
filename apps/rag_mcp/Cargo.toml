@@ -26,3 +26,6 @@ bioma_actor = { path = "../../bioma_actor" }
 
 [dev-dependencies]
 wiremock = "0.6"
+
+[lib]
+path = "src/lib.rs"

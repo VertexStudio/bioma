@@ -13,18 +13,14 @@ use bioma_rag::{
 };
 use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
+use rag_mcp::{
+    embed::{EmbeddingsQueryArgs, ModelEmbed},
+    ingest::IngestArgs,
+    sources::ListSourcesArgs,
+};
 use serde_json::json;
 use std::collections::HashMap;
 use tracing::{error, info};
-
-// Import tool argument types
-use crate::tools::embed::{EmbeddingsQueryArgs, ModelEmbed};
-use crate::tools::ingest::IngestArgs;
-use crate::tools::sources::ListSourcesArgs;
-
-// Add tools module path pointing to the same location as in server.rs
-#[path = "../src/tools/mod.rs"]
-mod tools;
 
 #[derive(Parser)]
 #[command(author, version, about = "RAG MCP Client Example", long_about = None)]

@@ -1,15 +1,14 @@
 // apps/rag_mcp/src/tools/generate.rs
 // -----------------------------------------------------------------------------
-// Generate Tool – "chat + retrieval" but delegates text generation to the
-// existing `Sampling` tool (server‑side). This is conceptually the same flow as
-// the /chat HTTP handler, trimmed down for non‑streaming, no progress‑tracking
-// use inside the MCP tool ecosystem.
+// Generate Tool – combines retrieval with direct LLM sampling via
+// `Context::create_message`. Mirrors the /chat handler but wrapped as an MCP
+// tool. No custom progress tracking; we rely on the LLM operation’s own stream.
 // -----------------------------------------------------------------------------
 // Author: Sergio & ChatGPT – May 2025
 
 use bioma_actor::{Actor, ActorId, Relay, SendOptions, SpawnOptions};
 use bioma_mcp::{
-    schema::CallToolResult,
+    schema::{CallToolResult, TextContent},
     server::RequestContext,
     tools::{ToolDef, ToolError},
 };
@@ -21,49 +20,12 @@ use serde::Serialize;
 use std::time::Duration;
 use tracing::error;
 
-// Bring the chat structs into scope so we can reuse ChatQuery & friends.
-use crate::chat::{ChatMessage, MessageRole};
-// Bring the Sampling tool definitions.
-use crate::tools::sampling::{Sampling, SamplingArgs, SamplingMessage};
-// Bring server‑side Context required by Sampling.
-use crate::server::Context;
-
-#[derive(utoipa::ToSchema, Serialize, Deserialize, Clone, Debug)]
-pub struct ChatQuery {
-    /// The conversation history as a list of messages
-    pub messages: Vec<ChatMessage>,
-
-    /// List of sources to search for relevant context
-    #[schema(default = default_retriever_sources)]
-    #[serde(default = "default_retriever_sources")]
-    pub sources: Vec<String>,
-
-    /// Optional schema for structured output format
-    pub format: Option<chat::Schema>,
-
-    /// List of available tools for the chat
-    #[serde(default)]
-    pub tools: Vec<ToolInfo>,
-
-    /// List of tool actor identifiers
-    #[serde(default)]
-    pub tools_actors: Vec<String>,
-
-    /// Whether to stream the response
-    #[serde(default = "default_chat_stream")]
-    pub stream: bool,
-
-    /// Generation options
-    pub options: Option<ModelOptions>,
-}
-
-fn default_retriever_sources() -> Vec<String> {
-    vec!["/global".to_string()]
-}
-
-fn default_chat_stream() -> bool {
-    false
-}
+// Re‑use chat types so the tool takes exactly the same payload as /chat
+use crate::chat::{ChatMessage, ChatQuery, MessageRole};
+// Bring Context + params for direct LLM invocation
+use crate::server::{Context, CreateMessageRequestParams};
+// SamplingMessage schema is used when building the LLM request
+use crate::tools::sampling::SamplingMessage;
 
 // -----------------------------------------------------------------------------
 #[derive(Serialize)]
@@ -75,45 +37,56 @@ pub struct GenerateTool {
 }
 
 impl GenerateTool {
-    /// Create a new GenerateTool. The caller (typically the tools hub actor)
-    /// must pass the global Engine and a fresh Context instance.
     pub fn new(engine: &bioma_actor::Engine, context: Context) -> Self {
         Self { engine: engine.clone(), context }
     }
 
-    /// Concatenate all *user* messages (ignoring system/assistant) to build the
-    /// retriever search query – mirrors logic in the /chat handler.
     fn user_query(messages: &[ChatMessage]) -> String {
-        let mut buf = String::new();
-        for (i, m) in messages.iter().filter(|m| m.role == MessageRole::User).enumerate() {
-            if i > 0 {
-                buf.push('\n');
-            }
-            buf.push_str(&m.content);
-        }
-        buf
+        messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
-    /// Convert ChatMessage → SamplingMessage (Sampling expects JSON‑encoded
-    /// content so we wrap the raw text).
     fn to_sampling(msg: ChatMessage) -> SamplingMessage {
         SamplingMessage {
             role: msg.role.to_string().to_lowercase(),
             content: serde_json::json!({ "text": msg.content }),
         }
     }
+
+    fn success(message: impl Into<String>) -> CallToolResult {
+        CallToolResult {
+            content: vec![
+                serde_json::to_value(TextContent { type_: "text".into(), text: message.into(), annotations: None })
+                    .unwrap_or_default(),
+            ],
+            is_error: Some(false),
+            meta: None,
+        }
+    }
+
+    fn error(msg: impl Into<String>) -> CallToolResult {
+        CallToolResult {
+            content: vec![
+                serde_json::to_value(TextContent { type_: "text".into(), text: msg.into(), annotations: None })
+                    .unwrap_or_default(),
+            ],
+            is_error: Some(true),
+            meta: None,
+        }
+    }
 }
 
 impl ToolDef for GenerateTool {
     const NAME: &'static str = "generate";
-    const DESCRIPTION: &'static str =
-        "Generates a reply using retrieval‑augmented context and delegates LLM sampling to the `sampling` tool.";
+    const DESCRIPTION: &'static str = "Generates a reply using retrieval‑augmented context via direct LLM sampling.";
     type Args = ChatQuery;
 
-    async fn call(&self, args: Self::Args, _rcx: RequestContext) -> Result<CallToolResult, ToolError> {
-        // ------------------------------------------------------------------
-        // 1. Retrieve relevant context from RAG index.
-        // ------------------------------------------------------------------
+    async fn call(&self, args: Self::Args, request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+        // 1. Retrieve context -------------------------------------------------
         let query_text = Self::user_query(&args.messages);
         let retrieve_ctx = RetrieveContext {
             query: RetrieveQuery::Text(query_text.clone()),
@@ -122,7 +95,6 @@ impl ToolDef for GenerateTool {
             sources: args.sources.clone(),
         };
 
-        // Spawn a relay so we can await the retriever reply without blocking.
         let relay_id = ActorId::of::<Relay>("/rag/generate/relay");
         let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
             .await
@@ -138,63 +110,58 @@ impl ToolDef for GenerateTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Retrieval failed: {e}")))?;
 
-        // Reverse so newer / more relevant chunks appear near the bottom (same
-        // trick the chat handler uses).
         let mut chunks = retrieval.context;
         chunks.reverse();
         let context_md = retrieval.to_markdown();
 
-        // ------------------------------------------------------------------
-        // 2. Stitch together the conversation with context‑embedded system msg.
-        // ------------------------------------------------------------------
-        let (mut system_prompt_opt, mut convo): (Option<ChatMessage>, Vec<ChatMessage>) = (None, Vec::new());
+        // 2. Construct conversation with system prompt ----------------------
+        let (mut sys_opt, mut convo): (Option<ChatMessage>, Vec<ChatMessage>) = (None, Vec::new());
         for m in &args.messages {
             if m.role == MessageRole::System {
-                system_prompt_opt = Some(m.clone());
+                sys_opt = Some(m.clone());
             } else {
                 convo.push(m.clone());
             }
         }
 
-        // Our synthesized system message comes first.
-        let sys_text = match system_prompt_opt {
+        let sys_text = match sys_opt {
             Some(sys) => format!("{}\n\n{}", context_md, sys.content),
             None => format!("Use the following context to answer the user's query:\n{}", context_md),
         };
         let system_msg = ChatMessage::system(sys_text);
 
-        // Final conversation vector in the order expected by the LLM.
         let mut full_convo = Vec::with_capacity(convo.len() + 1);
         full_convo.push(system_msg);
         full_convo.extend(convo);
 
-        // ------------------------------------------------------------------
-        // 3. Prepare SamplingArgs and invoke the Sampling tool *directly*.
-        // ------------------------------------------------------------------
-        let sampling_args = SamplingArgs {
-            messages: full_convo.into_iter().map(Self::to_sampling).collect(),
-            models_suggestions: None,
-            context: None,
+        // 3. Send to LLM via Context::create_message -------------------------
+        let sampling_messages: Vec<SamplingMessage> = full_convo.into_iter().map(Self::to_sampling).collect();
+
+        let params = CreateMessageRequestParams {
+            include_context: None,
             max_tokens: args.options.as_ref().and_then(|o| o.max_tokens).unwrap_or(1024),
+            messages: sampling_messages,
+            ..CreateMessageRequestParams::default()
         };
 
-        let sampling_tool = Sampling::new(self.context.clone());
-        let sampling_res = sampling_tool
-            .call(sampling_args, _rcx.clone())
+        let mut operation = self
+            .context
+            .create_message(params, true) // <- stream enabled per Sampling example
             .await
-            .map_err(|e| ToolError::Execution(format!("Sampling failed: {e}")))?;
+            .map_err(|e| ToolError::Execution(format!("LLM request failed: {e}")))?;
 
-        Ok(sampling_res)
+        match operation.await {
+            Ok(msg) => Ok(Self::success(format!("{:#?}", msg))),
+            Err(e) => Ok(Self::error(format!("LLM generation failed: {e}"))),
+        }
     }
 }
 
 // -----------------------------------------------------------------------------
-// Tests – quick smoke to ensure we go through the motions without panics.
-// -----------------------------------------------------------------------------
+// Tests ------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::{ChatMessage, MessageRole};
     use bioma_actor::Engine;
 
     #[tokio::test]
@@ -204,7 +171,7 @@ mod tests {
         let tool = GenerateTool::new(&engine, ctx);
 
         let query = ChatQuery {
-            messages: vec![ChatMessage::user("What is Rust?".to_owned())],
+            messages: vec![ChatMessage::user("Explain Rust ownership".into())],
             sources: vec![],
             format: None,
             tools: vec![],
@@ -213,8 +180,6 @@ mod tests {
             options: None,
         };
 
-        // We only assert that the call returns Ok – we can't check LLM output
-        // in a unit test without hitting an external model.
-        let _ = tool.call(query, RequestContext::default()).await.unwrap();
+        let _ = tool.call(query, RequestContext::default()).await;
     }
 }

@@ -20,10 +20,6 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 
-// Import tools module from the parent crate
-#[path = "../src/tools/mod.rs"]
-mod tools;
-
 #[derive(Parser)]
 #[command(author, version, about = "RAG MCP Server Example", long_about = None)]
 struct Args {
@@ -128,30 +124,30 @@ impl ModelContextProtocolServer for RagExampleServer {
         let engine = &self.engine;
         let mut tools: Vec<Arc<dyn ToolCallHandler>> = Vec::new();
 
-        if let Ok(index_tool) = tools::index::IndexTool::new(engine).await {
+        if let Ok(index_tool) = rag_mcp::index::IndexTool::new(engine).await {
             tools.push(Arc::new(index_tool));
         }
 
-        if let Ok(retrieve_tool) = tools::retrieve::RetrieveTool::new(engine).await {
+        if let Ok(retrieve_tool) = rag_mcp::retrieve::RetrieveTool::new(engine).await {
             tools.push(Arc::new(retrieve_tool));
         }
 
-        if let Ok(embed_tool) = tools::embed::EmbedTool::new(engine).await {
+        if let Ok(embed_tool) = rag_mcp::embed::EmbedTool::new(engine).await {
             tools.push(Arc::new(embed_tool));
         }
 
-        if let Ok(rerank_tool) = tools::rerank::RerankTool::new(engine).await {
+        if let Ok(rerank_tool) = rag_mcp::rerank::RerankTool::new(engine).await {
             tools.push(Arc::new(rerank_tool));
         }
 
-        let ingest_tool = tools::ingest::IngestTool::new(engine.clone());
+        let ingest_tool = rag_mcp::ingest::IngestTool::new(engine.clone());
         tools.push(Arc::new(ingest_tool));
 
-        if let Ok(sources_tool) = tools::sources::SourcesTool::new(engine).await {
+        if let Ok(sources_tool) = rag_mcp::sources::SourcesTool::new(engine).await {
             tools.push(Arc::new(sources_tool));
         }
 
-        if let Ok(delete_tool) = tools::delete::DeleteTool::new(engine).await {
+        if let Ok(delete_tool) = rag_mcp::delete::DeleteTool::new(engine).await {
             tools.push(Arc::new(delete_tool));
         }
 

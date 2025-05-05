@@ -8,13 +8,9 @@ use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
-/// Request schema for generating embeddings
 #[derive(schemars::JsonSchema, Serialize, Deserialize)]
 pub struct EmbeddingsQueryArgs {
-    /// The embedding model to use
     pub model: ModelEmbed,
-
-    /// The input data to generate embeddings for (text or base64-encoded image)
     pub input: serde_json::Value,
 }
 
@@ -111,35 +107,24 @@ impl ToolDef for EmbedTool {
 }
 
 mod tests {
-    use crate::tools::embed::{EmbedTool, EmbeddingsQueryArgs, ModelEmbed};
-    use bioma_actor::Engine;
-    use bioma_mcp::{server::RequestContext, tools::ToolDef};
-    use bioma_rag::prelude::GeneratedEmbeddings;
-    use serde_json::json;
-
     #[tokio::test]
     async fn generate_text_embeddings() {
-        // ── engine + tool ───────────────────────────────────────────────────
         let engine = Engine::test().await.unwrap();
         let embed_tool = EmbedTool::new(&engine).await.unwrap();
 
-        // ── call ────────────────────────────────────────────────────────────
         let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!(["Hello from Sergio!"]) };
 
         let raw =
             embed_tool.call(args, RequestContext::default()).await.unwrap_or_else(|e| panic!("tool failed: {e:?}"));
 
-        // ── strongly-typed result ───────────────────────────────────────────
         let out: GeneratedEmbeddings = serde_json::from_value(raw.content[0].clone()).unwrap();
 
-        // ── assertions (compile-time checked) ───────────────────────────────
         assert_eq!(out.embeddings.len(), 1, "exactly one embedding returned for one input string");
         assert!(!out.embeddings[0].is_empty(), "each embedding vector should be non-empty");
     }
 
     #[tokio::test]
     async fn generate_image_embeddings() {
-        // one-pixel transparent PNG (base64)
         const IMAGE: &str =
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
