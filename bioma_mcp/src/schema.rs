@@ -176,6 +176,7 @@ pub struct CompleteResult {
     pub meta: Option<::std::collections::BTreeMap<String, serde_json::Value>>,
     pub completion: CompleteResultCompletion,
 }
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
 pub struct CreateMessageRequestParams {
     #[doc = " A request to include context from one or more MCP servers (including the caller), to be "]
@@ -642,6 +643,7 @@ pub struct LoggingMessageNotification {
 #[doc = " Keys not declared here are currently left unspecified by the spec and are up"]
 #[doc = " to the client to interpret."]
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ModelHint {
     #[doc = " A hint for a model name."]
     #[doc = " "]
@@ -668,6 +670,7 @@ pub struct ModelHint {
 #[doc = " up to the client to decide how to interpret these preferences and how to"]
 #[doc = " balance them against other considerations."]
 #[derive(Clone, PartialEq, Debug, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ModelPreferences {
     #[doc = " How much to prioritize cost when selecting a model. A value of 0 means cost"]
     #[doc = " is not important, while a value of 1 means cost is the most important"]
@@ -997,6 +1000,7 @@ pub struct Result {
 }
 #[doc = " The sender or recipient of messages and data in a conversation."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Role {
     #[serde(rename = "assistant")]
     Assistant,
@@ -1035,6 +1039,7 @@ pub struct RootsListChangedNotification {
 }
 #[doc = " Describes a message issued to or received from an LLM API."]
 #[derive(Clone, PartialEq, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct SamplingMessage {
     pub content: serde_json::Value,
     pub role: Role,
