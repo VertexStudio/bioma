@@ -17,7 +17,7 @@ pub struct IndexTool {
 
 impl IndexTool {
     pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        let id = ActorId::of::<Indexer>("/rag/indexer");
+        let id = ActorId::of::<Indexer>("/rag_mcp/indexer");
 
         let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
             engine.clone(),
@@ -44,7 +44,7 @@ impl ToolDef for IndexTool {
     type Args = IndexArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag/indexer/relay");
+        let relay_id = ActorId::of::<Relay>("/rag_mcp/indexer/relay");
 
         let (relay_ctx, _) = Actor::spawn(
             self.engine.clone(),

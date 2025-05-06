@@ -421,10 +421,6 @@ async fn main() -> Result<()> {
         }
     });
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-    sampling_operation.cancel(Some("test".to_string())).await?;
-
     match sampling_operation.await {
         Ok(result) => info!("Sampling response: {:#?}", result),
         Err(e) => error!("Error getting sampling response: {:?}", e),

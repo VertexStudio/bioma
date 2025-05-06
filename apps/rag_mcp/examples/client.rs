@@ -115,9 +115,9 @@ impl ModelContextProtocolClient for RagMcpClient {
 
         info!("Accepting sampling request..."); // In a real implementation, client should the capability to accept or decline the request
 
-        progress.update_to(0.1, Some("Starting sampling actor...".to_string())).await?;
+        progress.update_to(0.1, Some("Starting sampling...".to_string())).await?;
 
-        info!("Starting sampling actor...");
+        info!("Starting sampling...");
 
         let model = match params.model_preferences {
             Some(model_preferences) => match model_preferences.hints {
@@ -140,6 +140,7 @@ impl ModelContextProtocolClient for RagMcpClient {
         progress.update_to(0.5, Some("Sending request to LLM...".to_string())).await?;
 
         let client = reqwest::Client::new();
+
         let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
 
         let llm_response = match res {
@@ -235,7 +236,19 @@ async fn retrieval(client: &mut Client<RagMcpClient>) -> Result<(), ClientError>
 
     info!("Generating embedding...");
     let embed_result = client.call_tool(embed_call, false).await?.await?;
-    info!("Embedding response: {:?}", embed_result);
+    info!(
+        "Embedding response: {}",
+        match serde_json::to_string(&embed_result) {
+            Ok(json_str) => {
+                if json_str.len() > 100 {
+                    format!("{} ... [truncated {} bytes]", &json_str[..100], json_str.len() - 100)
+                } else {
+                    json_str
+                }
+            }
+            Err(_) => format!("[embedding data too large to display]"),
+        }
+    );
 
     Ok(())
 }

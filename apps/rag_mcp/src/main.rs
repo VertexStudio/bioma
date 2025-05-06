@@ -141,35 +141,42 @@ impl ModelContextProtocolServer for RagMcpServer {
         let engine = &self.engine;
         let mut tools: Vec<Arc<dyn ToolCallHandler>> = Vec::new();
 
-        if let Ok(index_tool) = tools::index::IndexTool::new(engine).await {
-            tools.push(Arc::new(index_tool));
+        match tools::index::IndexTool::new(engine).await {
+            Ok(index_tool) => tools.push(Arc::new(index_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
-        if let Ok(retrieve_tool) = tools::retrieve::RetrieveTool::new(engine).await {
-            tools.push(Arc::new(retrieve_tool));
+        match tools::retrieve::RetrieveTool::new(engine).await {
+            Ok(retrieve_tool) => tools.push(Arc::new(retrieve_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
-        if let Ok(embed_tool) = tools::embed::EmbedTool::new(engine).await {
-            tools.push(Arc::new(embed_tool));
+        match tools::embed::EmbedTool::new(engine).await {
+            Ok(embed_tool) => tools.push(Arc::new(embed_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
-        if let Ok(rerank_tool) = tools::rerank::RerankTool::new(engine).await {
-            tools.push(Arc::new(rerank_tool));
+        match tools::rerank::RerankTool::new(engine).await {
+            Ok(rerank_tool) => tools.push(Arc::new(rerank_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
         let ingest_tool = tools::ingest::IngestTool::new(engine.clone());
         tools.push(Arc::new(ingest_tool));
 
-        if let Ok(sources_tool) = tools::sources::SourcesTool::new(engine).await {
-            tools.push(Arc::new(sources_tool));
+        match tools::sources::SourcesTool::new(engine).await {
+            Ok(sources_tool) => tools.push(Arc::new(sources_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
-        if let Ok(delete_tool) = tools::delete::DeleteTool::new(engine).await {
-            tools.push(Arc::new(delete_tool));
+        match tools::delete::DeleteTool::new(engine).await {
+            Ok(delete_tool) => tools.push(Arc::new(delete_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
-        if let Ok(generate_tool) = tools::generate::GenerateTool::new(engine, context).await {
-            tools.push(Arc::new(generate_tool));
+        match tools::generate::GenerateTool::new(engine, context).await {
+            Ok(generate_tool) => tools.push(Arc::new(generate_tool)),
+            Err(e) => error!("Error: {}", e),
         }
 
         tools

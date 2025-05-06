@@ -33,12 +33,16 @@ pub struct EmbedTool {
 
 impl EmbedTool {
     pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        let id = ActorId::of::<Embeddings>("/rag/embeddings");
+        let id = ActorId::of::<Embeddings>("/rag_mcp/embeddings");
 
-        let (mut embeddings_ctx, mut embeddings_actor) =
-            Actor::spawn(engine.clone(), id.clone(), Embeddings::default(), SpawnOptions::default()).await.map_err(
-                |e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn embeddings actor: {}", e))),
-            )?;
+        let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
+            engine.clone(),
+            id.clone(),
+            Embeddings::default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await
+        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn embeddings actor: {}", e))))?;
 
         tokio::spawn(async move {
             if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {
@@ -56,7 +60,7 @@ impl ToolDef for EmbedTool {
     type Args = EmbeddingsQueryArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag/embeddings/relay");
+        let relay_id = ActorId::of::<Relay>("/rag_mcp/embeddings/relay");
 
         let (relay_ctx, _) = Actor::spawn(
             self.engine.clone(),

@@ -16,12 +16,16 @@ pub struct RerankTool {
 
 impl RerankTool {
     pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        let id = ActorId::of::<Rerank>("/rag/rerank");
+        let id = ActorId::of::<Rerank>("/rag_mcp/rerank");
 
-        let (mut rerank_ctx, mut rerank_actor) =
-            Actor::spawn(engine.clone(), id.clone(), Rerank::default(), SpawnOptions::default()).await.map_err(
-                |e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn rerank actor: {}", e))),
-            )?;
+        let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
+            engine.clone(),
+            id.clone(),
+            Rerank::default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await
+        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn rerank actor: {}", e))))?;
 
         tokio::spawn(async move {
             if let Err(e) = rerank_actor.start(&mut rerank_ctx).await {
@@ -39,7 +43,7 @@ impl ToolDef for RerankTool {
     type Args = RankTextsArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag/rerank/relay");
+        let relay_id = ActorId::of::<Relay>("/rag_mcp/rerank/relay");
 
         let (relay_ctx, _) = Actor::spawn(
             self.engine.clone(),

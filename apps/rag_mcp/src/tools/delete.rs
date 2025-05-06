@@ -17,12 +17,16 @@ pub struct DeleteTool {
 
 impl DeleteTool {
     pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        let id = ActorId::of::<Indexer>("/rag/delete");
+        let id = ActorId::of::<Indexer>("/rag_mcp/delete");
 
-        let (mut indexer_ctx, mut indexer_actor) =
-            Actor::spawn(engine.clone(), id.clone(), Indexer::default(), SpawnOptions::default()).await.map_err(
-                |e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn indexer actor: {}", e))),
-            )?;
+        let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
+            engine.clone(),
+            id.clone(),
+            Indexer::default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await
+        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn indexer actor: {}", e))))?;
 
         tokio::spawn(async move {
             if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
@@ -40,7 +44,7 @@ impl ToolDef for DeleteTool {
     type Args = DeleteSourceArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag/delete/relay");
+        let relay_id = ActorId::of::<Relay>("/rag_mcp/delete/relay");
 
         let (relay_ctx, _) = Actor::spawn(
             self.engine.clone(),

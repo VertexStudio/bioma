@@ -21,12 +21,16 @@ pub struct SourcesTool {
 
 impl SourcesTool {
     pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
-        let id = ActorId::of::<Retriever>("/rag/retriever");
+        let id = ActorId::of::<Retriever>("/rag_mcp/retriever");
 
-        let (mut retriever_ctx, mut retriever_actor) =
-            Actor::spawn(engine.clone(), id.clone(), Retriever::default(), SpawnOptions::default()).await.map_err(
-                |e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn retriever actor: {}", e))),
-            )?;
+        let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
+            engine.clone(),
+            id.clone(),
+            Retriever::default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await
+        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn retriever actor: {}", e))))?;
 
         tokio::spawn(async move {
             if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
@@ -44,7 +48,7 @@ impl ToolDef for SourcesTool {
     type Args = ListSourcesArgs;
 
     async fn call(&self, _args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag/retriever/relay");
+        let relay_id = ActorId::of::<Relay>("/rag_mcp/retriever/relay");
 
         let (relay_ctx, _) = Actor::spawn(
             self.engine.clone(),
