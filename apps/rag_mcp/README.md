@@ -54,6 +54,47 @@ cargo run --release -p rag_mcp -- --streamable --endpoint 127.0.0.1:7090 --respo
 - `--page-size, -p`: Number of items per page (default: 20)
 - `--db-endpoint`: Database endpoint (default: "memory")
 
+## Example Client
+
+A client example is provided to demonstrate how to interact with the RAG MCP server:
+
+```bash
+# Run client with stdio transport
+RUST_LOG=debug cargo run -p rag_mcp --example client stdio
+
+# Run client with SSE transport
+RUST_LOG=debug cargo run -p rag_mcp --example client sse --endpoint http://127.0.0.1:8090
+
+# Run client with WebSocket transport
+RUST_LOG=debug cargo run -p rag_mcp --example client ws --endpoint ws://127.0.0.1:9090
+
+# Run client with Streamable transport
+RUST_LOG=debug cargo run -p rag_mcp --example client streamable --endpoint http://127.0.0.1:7090
+```
+
+The client example demonstrates:
+
+- Connecting to the server using different transport options
+- Document ingestion and indexing
+- Query retrieval and embedding generation
+- Source management and deletion
+- RAG-augmented LLM response generation
+
+## Testing
+
+Run all tools tests:
+
+```bash
+RUST_LOG=info cargo test --package rag_mcp --bin rag_mcp -- tools --show-output
+```
+
+Module-specific tests can also be run:
+
+```bash
+# Example: Run tests for a specific module
+RUST_LOG=info cargo test --package rag_mcp --bin rag_mcp -- module_name --show-output
+```
+
 ## Tools
 
 The server provides the following MCP tools:
