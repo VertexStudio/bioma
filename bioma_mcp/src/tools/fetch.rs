@@ -112,7 +112,7 @@ impl Fetch {
 
                 let mut matcher = DefaultMatcher::default();
                 if !matcher.one_agent_allowed_by_robots(&robots_content, &self.user_agent, url.as_str()) {
-                    return Err(anyhow!("Access denied by robots.txt"));
+                    return Err(anyhow!("Access denied by robots.txt for URL: {}", url));
                 }
                 Ok(())
             }

@@ -113,7 +113,6 @@ impl ToolDef for GenerateTool {
     type Args = GenerateArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        println!("args: {:#?}", args);
         let query_text = Self::user_query(&args.messages);
         let retrieve_ctx = RetrieveContext {
             query: RetrieveQuery::Text(query_text.clone()),
@@ -121,8 +120,6 @@ impl ToolDef for GenerateTool {
             threshold: 0.0,
             sources: args.sources.clone(),
         };
-
-        tracing::info!("retrieve_ctx: {:#?}", retrieve_ctx);
 
         let retrieval = self
             .relay_ctx
