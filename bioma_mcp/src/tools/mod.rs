@@ -1,6 +1,6 @@
 use crate::schema::{self, CallToolResult};
 use crate::server::RequestContext;
-use anyhow::{Context, Error};
+use anyhow::Error;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
@@ -20,7 +20,7 @@ pub trait ToolCallHandler: Send + Sync {
         &'a self,
         args: Option<BTreeMap<String, Value>>,
         request_context: RequestContext,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<CallToolResult, Error>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<CallToolResult, Error>> + Send + 'a>>;
 
     fn def(&self) -> schema::Tool;
 }
@@ -49,7 +49,7 @@ pub trait ToolDef: Serialize {
         &'a self,
         args: Self::Args,
         request_context: RequestContext,
-    ) -> impl Future<Output = std::result::Result<CallToolResult, Error>> + Send + 'a;
+    ) -> impl Future<Output = Result<CallToolResult, Error>> + Send + 'a;
 }
 
 impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
@@ -57,13 +57,13 @@ impl<T: ToolDef + Send + Sync> ToolCallHandler for T {
         &'a self,
         args: Option<BTreeMap<String, Value>>,
         request_context: RequestContext,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<CallToolResult, Error>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<CallToolResult, Error>> + Send + 'a>> {
         Box::pin(async move {
             let value = match args {
-                Some(map) => serde_json::to_value(map).context("failed to turn arg map into JSON value")?,
+                Some(map) => serde_json::to_value(map)?,
                 None => Value::Null,
             };
-            let args: T::Args = serde_json::from_value(value).context("failed to deserialize tool args")?;
+            let args: T::Args = serde_json::from_value(value)?;
             self.call(args, request_context).await
         })
     }
