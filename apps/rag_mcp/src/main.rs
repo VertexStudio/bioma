@@ -15,7 +15,8 @@ use bioma_mcp::{
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::signal;
+use std::time::Duration;
+use tokio::{signal, time::timeout};
 use tracing::{error, info};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -167,8 +168,9 @@ impl ModelContextProtocolServer for RagMcpServer {
             tools.push(Arc::new(delete_tool));
         }
 
-        let generate_tool = tools::generate::GenerateTool::new(engine, context);
-        tools.push(Arc::new(generate_tool));
+        if let Ok(generate_tool) = tools::generate::GenerateTool::new(engine, context).await {
+            tools.push(Arc::new(generate_tool));
+        }
 
         tools
     }
@@ -225,8 +227,14 @@ async fn main() -> Result<()> {
         .password(args.password.into())
         .build();
 
-    println!("Connecting to engine...");
-    let engine = Arc::new(Engine::connect(engine_options).await?);
+    let connection = timeout(Duration::from_secs(30), Engine::connect(engine_options)).await;
+
+    let engine = match connection {
+        Ok(result) => Arc::new(result?),
+        Err(_) => {
+            return Err(anyhow::anyhow!("Connection to engine timed out after 30 seconds"));
+        }
+    };
 
     let server = RagMcpServer {
         transport_config,

@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Relay, SendOptions, SpawnOptions};
+use bioma_actor::{Actor, ActorId, Relay, SendOptions, SpawnExistsOptions, SpawnOptions};
 use bioma_llm::prelude::{ChatMessage, MessageRole};
 use bioma_mcp::{
     schema::{CallToolResult, CreateMessageRequestParams, Role, SamplingMessage, TextContent},
@@ -17,14 +17,41 @@ use std::time::Duration;
 #[derive(Serialize)]
 pub struct GenerateTool {
     #[serde(skip_serializing)]
-    engine: bioma_actor::Engine,
-    #[serde(skip_serializing)]
     context: Context,
+    #[serde(skip_serializing)]
+    relay_ctx: bioma_actor::ActorContext<Relay>,
+    #[serde(skip_serializing)]
+    retriever_id: ActorId,
 }
 
 impl GenerateTool {
-    pub fn new(engine: &bioma_actor::Engine, context: Context) -> Self {
-        Self { engine: engine.clone(), context }
+    pub async fn new(engine: &bioma_actor::Engine, context: Context) -> Result<Self, Error> {
+        let relay_id = ActorId::of::<Relay>("/rag/generate/relay");
+        let retriever_id = ActorId::of::<Retriever>("/rag/generate/retriever");
+
+        let (relay_ctx, _) = Actor::spawn(
+            engine.clone(),
+            relay_id.clone(),
+            Relay,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
+
+        let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
+            engine.clone(),
+            retriever_id.clone(),
+            Retriever::default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
+
+        tokio::spawn(async move {
+            if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+                tracing::error!("Retriever actor error: {}", e);
+            }
+        });
+
+        Ok(Self { context, relay_ctx, retriever_id })
     }
 
     fn user_query(messages: &[ChatMessage]) -> String {
@@ -86,6 +113,7 @@ impl ToolDef for GenerateTool {
     type Args = GenerateArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
+        println!("args: {:#?}", args);
         let query_text = Self::user_query(&args.messages);
         let retrieve_ctx = RetrieveContext {
             query: RetrieveQuery::Text(query_text.clone()),
@@ -94,17 +122,18 @@ impl ToolDef for GenerateTool {
             sources: args.sources.clone(),
         };
 
-        let relay_id = ActorId::of::<Relay>("/rag/generate/relay");
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
+        tracing::info!("retrieve_ctx: {:#?}", retrieve_ctx);
 
-        let retriever_id = ActorId::of::<Retriever>("/rag/retriever");
-        let retrieval = relay_ctx
+        let retrieval = self
+            .relay_ctx
             .send_and_wait_reply::<Retriever, RetrieveContext>(
                 retrieve_ctx,
-                &retriever_id,
+                &self.retriever_id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),
             )
             .await?;
+
+        tracing::info!("retrieval: {:#?}", retrieval);
 
         let mut chunks = retrieval.context.clone();
         chunks.reverse();
@@ -135,7 +164,7 @@ impl ToolDef for GenerateTool {
         let params =
             CreateMessageRequestParams { messages: sampling_messages, ..CreateMessageRequestParams::default() };
 
-        let operation = self.context.create_message(params, true).await?;
+        let operation = self.context.create_message(params, false).await?;
 
         match operation.await {
             Ok(msg) => Ok(Self::success(format!("{:#?}", msg))),

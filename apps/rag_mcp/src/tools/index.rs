@@ -46,7 +46,13 @@ impl ToolDef for IndexTool {
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let relay_id = ActorId::of::<Relay>("/rag/indexer/relay");
 
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
+        let (relay_ctx, _) = Actor::spawn(
+            self.engine.clone(),
+            relay_id,
+            Relay,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
 
         let response = relay_ctx
             .send_and_wait_reply::<Indexer, IndexArgs>(

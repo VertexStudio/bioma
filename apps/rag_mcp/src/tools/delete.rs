@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{DeleteSource as DeleteSourceArgs, Indexer};
 use serde::Serialize;
@@ -42,7 +42,13 @@ impl ToolDef for DeleteTool {
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let relay_id = ActorId::of::<Relay>("/rag/delete/relay");
 
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
+        let (relay_ctx, _) = Actor::spawn(
+            self.engine.clone(),
+            relay_id,
+            Relay,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
 
         let delete_source = DeleteSourceArgs { sources: args.sources, delete_from_disk: args.delete_from_disk };
 

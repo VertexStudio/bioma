@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{ListSources, Retriever};
 use schemars::JsonSchema;
@@ -46,7 +46,13 @@ impl ToolDef for SourcesTool {
     async fn call(&self, _args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let relay_id = ActorId::of::<Relay>("/rag/retriever/relay");
 
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
+        let (relay_ctx, _) = Actor::spawn(
+            self.engine.clone(),
+            relay_id,
+            Relay,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
 
         let response = relay_ctx
             .send_and_wait_reply::<Retriever, ListSources>(

@@ -1,5 +1,5 @@
 use anyhow::{Error, anyhow};
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::schema::CallToolResult;
 use bioma_mcp::server::RequestContext;
 use bioma_mcp::tools::ToolDef;
@@ -58,7 +58,13 @@ impl ToolDef for EmbedTool {
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let relay_id = ActorId::of::<Relay>("/rag/embeddings/relay");
 
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
+        let (relay_ctx, _) = Actor::spawn(
+            self.engine.clone(),
+            relay_id,
+            Relay,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
 
         let embedding_content = match args.model {
             ModelEmbed::NomicEmbedTextV15 => {

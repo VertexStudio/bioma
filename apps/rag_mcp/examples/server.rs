@@ -165,8 +165,9 @@ impl ModelContextProtocolServer for RagMcpServer {
             tools.push(Arc::new(delete_tool));
         }
 
-        let generate_tool = rag_mcp::generate::GenerateTool::new(engine, context);
-        tools.push(Arc::new(generate_tool));
+        if let Ok(generate_tool) = rag_mcp::generate::GenerateTool::new(engine, context).await {
+            tools.push(Arc::new(generate_tool));
+        }
 
         tools
     }

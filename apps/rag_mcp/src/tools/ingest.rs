@@ -25,7 +25,7 @@ pub struct IngestTool {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Uploaded {
+struct Ingested {
     message: String,
     paths: Vec<PathBuf>,
     size: usize,
@@ -38,8 +38,8 @@ impl IngestTool {
 }
 
 impl ToolDef for IngestTool {
-    const NAME: &'static str = "upload";
-    const DESCRIPTION: &'static str = "Upload files for indexing and retrieval by downloading from a URL";
+    const NAME: &'static str = "ingest";
+    const DESCRIPTION: &'static str = "Ingest files for indexing and retrieval by downloading from a URL";
     type Args = IngestArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
@@ -145,7 +145,7 @@ impl ToolDef for IngestTool {
             let _ = fs::remove_file(&temp_path).await;
 
             match extract_result {
-                Ok(Ok(files)) => Uploaded {
+                Ok(Ok(files)) => Ingested {
                     message: format!("Zip file extracted {} files successfully", files.len()),
                     paths: files,
                     size: bytes.len(),
@@ -165,7 +165,7 @@ impl ToolDef for IngestTool {
             let _ = fs::remove_file(&temp_path).await;
 
             let relative_path = dest_path.strip_prefix(&output_dir).unwrap_or(&dest_path).to_path_buf();
-            Uploaded {
+            Ingested {
                 message: "File downloaded and saved successfully".to_string(),
                 paths: vec![relative_path],
                 size: bytes.len(),
@@ -204,13 +204,13 @@ mod tests {
         let args = IngestArgs { url: format!("{}/file.txt", server.uri()), path: "greetings/file.txt".into() };
         let result = tool.call(args, RequestContext::default()).await.unwrap();
 
-        let uploaded: Uploaded = serde_json::from_value(result.content[0].clone()).unwrap();
-        assert_eq!(uploaded.paths[0], PathBuf::from("greetings/file.txt"));
+        let ingested: Ingested = serde_json::from_value(result.content[0].clone()).unwrap();
+        assert_eq!(ingested.paths[0], PathBuf::from("greetings/file.txt"));
 
-        let abs_path = engine.local_store_dir().join(&uploaded.paths[0]);
+        let abs_path = engine.local_store_dir().join(&ingested.paths[0]);
         let bytes_on_disk = tokio::fs::read(&abs_path).await.unwrap();
         assert_eq!(bytes_on_disk.as_slice(), body);
-        assert_eq!(uploaded.size, body.len());
+        assert_eq!(ingested.size, body.len());
 
         let _ = tokio::fs::remove_file(abs_path).await;
     }
@@ -244,11 +244,11 @@ mod tests {
         let args = IngestArgs { url: format!("{}/archive.zip", server.uri()), path: "archive.zip".into() };
         let result = tool.call(args, RequestContext::default()).await.unwrap();
 
-        let uploaded: Uploaded = serde_json::from_value(result.content[0].clone()).unwrap();
-        assert_eq!(uploaded.paths.len(), 2, "two files extracted");
+        let ingested: Ingested = serde_json::from_value(result.content[0].clone()).unwrap();
+        assert_eq!(ingested.paths.len(), 2, "two files extracted");
 
-        assert!(uploaded.paths.contains(&PathBuf::from("archive/a.txt")));
-        assert!(uploaded.paths.contains(&PathBuf::from("archive/b/b.txt")));
+        assert!(ingested.paths.contains(&PathBuf::from("archive/a.txt")));
+        assert!(ingested.paths.contains(&PathBuf::from("archive/b/b.txt")));
 
         let abs_a = engine.local_store_dir().join("archive/a.txt");
         let data_a = tokio::fs::read(&abs_a).await.unwrap();

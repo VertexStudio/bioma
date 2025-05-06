@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{RankTexts as RankTextsArgs, Rerank};
 use serde::Serialize;
@@ -41,7 +41,13 @@ impl ToolDef for RerankTool {
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let relay_id = ActorId::of::<Relay>("/rag/rerank/relay");
 
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
+        let (relay_ctx, _) = Actor::spawn(
+            self.engine.clone(),
+            relay_id,
+            Relay,
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
 
         let response = relay_ctx
             .send_and_wait_reply::<Rerank, RankTextsArgs>(

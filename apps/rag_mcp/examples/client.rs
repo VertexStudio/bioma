@@ -159,24 +159,26 @@ impl ModelContextProtocolClient for RagMcpClient {
     }
 }
 
-async fn upload_and_index(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> {
-    info!("Demonstrating upload and index operations");
+async fn ingest_and_index(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> {
+    info!("Demonstrating ingest and index operations");
 
-    let sample_text = "This is a sample document for RAG. It contains information about Rust programming.";
-    let upload_args = IngestArgs { url: format!("data:text/plain,{}", sample_text), path: "sample.txt".to_string() };
-
-    let upload_call = CallToolRequestParams {
-        name: "upload".to_string(),
-        arguments: serde_json::from_value(serde_json::to_value(upload_args).unwrap()).unwrap(),
+    let ingest_args = IngestArgs {
+        url: format!("https://sample-files.com/downloads/documents/txt/simple.txt"),
+        path: "simple.txt".to_string(),
     };
 
-    info!("Uploading sample document...");
-    let upload_result = client.call_tool(upload_call, false).await?.await?;
-    info!("Upload response: {:?}", upload_result);
+    let ingest_call = CallToolRequestParams {
+        name: "ingest".to_string(),
+        arguments: serde_json::from_value(serde_json::to_value(ingest_args)?)?,
+    };
+
+    info!("Ingesting sample document...");
+    let ingest_result = client.call_tool(ingest_call, false).await?.await?;
+    info!("Ingest response: {:?}", ingest_result);
 
     let index_args = IndexArgs {
         content: IndexContent::Globs(bioma_rag::indexer::GlobsContent {
-            globs: vec!["sample.txt".into()],
+            globs: vec!["simple.txt".into()],
             config: TextChunkConfig::default(),
         }),
         source: "example".into(),
@@ -188,7 +190,7 @@ async fn upload_and_index(client: &mut Client<RagMcpClient>) -> Result<(), Clien
         arguments: serde_json::from_value(serde_json::to_value(index_args).unwrap()).unwrap(),
     };
 
-    info!("Indexing uploaded document...");
+    info!("Indexing ingested document...");
     let mut index_operation = client.call_tool(index_call, true).await?;
 
     let mut progress_stream = index_operation.recv();
@@ -394,9 +396,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    if all_tools.iter().any(|t| t.name == "upload") && all_tools.iter().any(|t| t.name == "index") {
-        if let Err(e) = upload_and_index(&mut client).await {
-            error!("Error during upload and index: {:?}", e);
+    if all_tools.iter().any(|t| t.name == "ingest") && all_tools.iter().any(|t| t.name == "index") {
+        if let Err(e) = ingest_and_index(&mut client).await {
+            error!("Error during ingest and index: {:?}", e);
         }
     }
 
