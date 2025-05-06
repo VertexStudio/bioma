@@ -133,33 +133,31 @@ impl ToolDef for GenerateTool {
             )
             .await?;
 
-        tracing::info!("retrieval: {:#?}", retrieval);
-
         let mut chunks = retrieval.context.clone();
         chunks.reverse();
         let context_md = retrieval.to_markdown();
 
-        let (mut sys_opt, mut convo): (Option<ChatMessage>, Vec<ChatMessage>) = (None, Vec::new());
-        for m in &args.messages {
-            if m.role == MessageRole::System {
-                sys_opt = Some(m.clone());
-            } else {
-                convo.push(m.clone());
+        let mut modified_messages = Vec::new();
+        let mut last_user_index = None;
+
+        for (i, msg) in args.messages.iter().enumerate() {
+            if msg.role == MessageRole::User {
+                last_user_index = Some(i);
             }
         }
 
-        let sys_text = match sys_opt {
-            Some(sys) => format!("{}\n\n{}", context_md, sys.content),
-            None => format!("Use the following context to answer the user's query:\n{}", context_md),
-        };
-        let system_msg = ChatMessage::system(sys_text);
-
-        let mut full_convo = Vec::with_capacity(convo.len() + 1);
-        full_convo.push(system_msg);
-        full_convo.extend(convo);
+        for (i, msg) in args.messages.iter().enumerate() {
+            if Some(i) == last_user_index {
+                let modified_content =
+                    format!("Use the following context to answer:\n{}\n\n{}", context_md, msg.content);
+                modified_messages.push(ChatMessage::user(modified_content));
+            } else {
+                modified_messages.push(msg.clone());
+            }
+        }
 
         let sampling_messages: Vec<SamplingMessage> =
-            full_convo.into_iter().map(Self::to_sampling).collect::<Result<_, _>>().unwrap();
+            modified_messages.into_iter().filter_map(|msg| Self::to_sampling(msg).ok()).collect();
 
         let params =
             CreateMessageRequestParams { messages: sampling_messages, ..CreateMessageRequestParams::default() };
