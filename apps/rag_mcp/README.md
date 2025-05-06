@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) server implementation for Retrieval-Augmented Gen
 - File upload support (single files and zip archives)
 - Document source management
 - Delete functionality for indexed content
+- RAG-augmented LLM response generation
 
 ## Transport Options
 
