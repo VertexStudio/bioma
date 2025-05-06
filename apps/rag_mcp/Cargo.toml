@@ -18,15 +18,14 @@ uuid = { workspace = true }
 url = { workspace = true }
 zip = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
-futures-util = { workspace = true }
 
 bioma_actor = { path = "../../bioma_actor" }
-bioma_llm = { path = "../../bioma_llm" }
 bioma_mcp = { path = "../../bioma_mcp", features = ["json-schema"] }
 bioma_rag = { path = "../../bioma_rag" }
 
 [dev-dependencies]
 wiremock = "0.6"
+futures-util = { workspace = true }
 
 [lib]
 path = "src/lib.rs"

@@ -5272,7 +5272,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bioma_actor",
- "bioma_llm",
  "bioma_mcp",
  "bioma_rag",
  "clap",
