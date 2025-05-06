@@ -35,7 +35,7 @@ struct Args {
     #[arg(long, short, default_value = "20")]
     page_size: usize,
 
-    #[arg(long, default_value = "memory")]
+    #[arg(long, default_value = "ws://0.0.0.0:9123")]
     endpoint: String,
 
     #[arg(long, default_value = "dev")]
@@ -136,7 +136,7 @@ impl ModelContextProtocolServer for RagMcpServer {
         vec![]
     }
 
-    async fn new_tools(&self, _context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
+    async fn new_tools(&self, context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
         let engine = &self.engine;
         let mut tools: Vec<Arc<dyn ToolCallHandler>> = Vec::new();
 
@@ -166,6 +166,9 @@ impl ModelContextProtocolServer for RagMcpServer {
         if let Ok(delete_tool) = tools::delete::DeleteTool::new(engine).await {
             tools.push(Arc::new(delete_tool));
         }
+
+        let generate_tool = tools::generate::GenerateTool::new(engine, context);
+        tools.push(Arc::new(generate_tool));
 
         tools
     }
@@ -222,6 +225,7 @@ async fn main() -> Result<()> {
         .password(args.password.into())
         .build();
 
+    println!("Connecting to engine...");
     let engine = Arc::new(Engine::connect(engine_options).await?);
 
     let server = RagMcpServer {

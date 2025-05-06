@@ -1,6 +1,7 @@
 use anyhow::{Error, Result};
 use bioma_actor::{Engine, EngineOptions};
 use bioma_mcp::{
+    resources::ResourceReadHandler,
     schema::{
         ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesPromptsResources,
         ServerCapabilitiesPromptsResourcesTools,
@@ -21,16 +22,31 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
-#[command(author, version, about = "RAG MCP Server Example", long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, short, default_value = "rag_example_server.log")]
+    #[arg(long, short, default_value = "rag_mcp_server.log")]
     log_file: PathBuf,
+
+    #[arg(long, short, default_value = ".")]
+    base_dir: PathBuf,
 
     #[arg(long, short, default_value = "20")]
     page_size: usize,
 
     #[arg(long, default_value = "memory")]
-    db_endpoint: String,
+    endpoint: String,
+
+    #[arg(long, default_value = "dev")]
+    namespace: String,
+
+    #[arg(long, default_value = "bioma")]
+    database: String,
+
+    #[arg(long, default_value = "root")]
+    username: String,
+
+    #[arg(long, default_value = "root")]
+    password: String,
 
     #[command(subcommand)]
     transport: Option<Transport>,
@@ -63,7 +79,7 @@ enum Transport {
 }
 
 #[derive(Clone)]
-pub struct RagExampleServer {
+pub struct RagMcpServer {
     transport_config: TransportConfig,
     capabilities: ServerCapabilities,
     pagination: Pagination,
@@ -71,7 +87,7 @@ pub struct RagExampleServer {
     engine: Arc<Engine>,
 }
 
-impl ModelContextProtocolServer for RagExampleServer {
+impl ModelContextProtocolServer for RagMcpServer {
     async fn get_transport_config(&self) -> TransportConfig {
         self.transport_config.clone()
     }
@@ -110,17 +126,15 @@ impl ModelContextProtocolServer for RagExampleServer {
         Some(Box::new(file_layer))
     }
 
-    async fn new_resources(&self, _context: Context) -> Vec<Arc<dyn bioma_mcp::resources::ResourceReadHandler>> {
-        // No resources in this example
+    async fn new_resources(&self, _context: Context) -> Vec<Arc<dyn ResourceReadHandler>> {
         vec![]
     }
 
     async fn new_prompts(&self, _context: Context) -> Vec<Arc<dyn bioma_mcp::prompts::PromptGetHandler>> {
-        // No prompts in this example
         vec![]
     }
 
-    async fn new_tools(&self, _context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
+    async fn new_tools(&self, context: Context) -> Vec<Arc<dyn ToolCallHandler>> {
         let engine = &self.engine;
         let mut tools: Vec<Arc<dyn ToolCallHandler>> = Vec::new();
 
@@ -150,6 +164,9 @@ impl ModelContextProtocolServer for RagExampleServer {
         if let Ok(delete_tool) = rag_mcp::delete::DeleteTool::new(engine).await {
             tools.push(Arc::new(delete_tool));
         }
+
+        let generate_tool = rag_mcp::generate::GenerateTool::new(engine, context);
+        tools.push(Arc::new(generate_tool));
 
         tools
     }
@@ -198,13 +215,17 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let engine_options = EngineOptions::builder().endpoint(args.db_endpoint.into()).build();
+    let engine_options = EngineOptions::builder()
+        .endpoint(args.endpoint.into())
+        .namespace(args.namespace.into())
+        .database(args.database.into())
+        .username(args.username.into())
+        .password(args.password.into())
+        .build();
+
     let engine = Arc::new(Engine::connect(engine_options).await?);
 
-    info!("RAG MCP Example Server starting...");
-    info!("Engine connected");
-
-    let server = RagExampleServer {
+    let server = RagMcpServer {
         transport_config,
         capabilities,
         pagination: Pagination::new(args.page_size),

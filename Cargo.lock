@@ -4553,7 +4553,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.3.0"
-source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=b2ea73c5460e341d19df7167f25fe8dafc73b629#b2ea73c5460e341d19df7167f25fe8dafc73b629"
+source = "git+https://github.com/VertexStudio/ollama-rs.git?rev=a52b6e6ab6f6cdea1ae9da73969fef370b559dde#a52b6e6ab6f6cdea1ae9da73969fef370b559dde"
 dependencies = [
  "async-stream",
  "log",
@@ -5272,6 +5272,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bioma_actor",
+ "bioma_llm",
  "bioma_mcp",
  "bioma_rag",
  "clap",

@@ -1,33 +1,19 @@
-// apps/rag_mcp/src/tools/generate.rs
-// -----------------------------------------------------------------------------
-// Generate Tool – combines retrieval with direct LLM sampling via
-// `Context::create_message`. Mirrors the /chat handler but wrapped as an MCP
-// tool. No custom progress tracking; we rely on the LLM operation’s own stream.
-// -----------------------------------------------------------------------------
-// Author: Sergio & ChatGPT – May 2025
-
+use anyhow::Error;
 use bioma_actor::{Actor, ActorId, Relay, SendOptions, SpawnOptions};
+use bioma_llm::prelude::{ChatMessage, MessageRole};
 use bioma_mcp::{
-    schema::{CallToolResult, TextContent},
-    server::RequestContext,
-    tools::{ToolDef, ToolError},
+    schema::{CallToolResult, CreateMessageRequestParams, Role, SamplingMessage, TextContent},
+    server::{Context, RequestContext},
+    tools::ToolDef,
 };
 use bioma_rag::{
     prelude::{RetrieveContext, RetrieveQuery},
     retriever::Retriever,
 };
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tracing::error;
 
-// Re‑use chat types so the tool takes exactly the same payload as /chat
-use crate::chat::{ChatMessage, ChatQuery, MessageRole};
-// Bring Context + params for direct LLM invocation
-use crate::server::{Context, CreateMessageRequestParams};
-// SamplingMessage schema is used when building the LLM request
-use crate::tools::sampling::SamplingMessage;
-
-// -----------------------------------------------------------------------------
 #[derive(Serialize)]
 pub struct GenerateTool {
     #[serde(skip_serializing)]
@@ -50,11 +36,13 @@ impl GenerateTool {
             .join("\n")
     }
 
-    fn to_sampling(msg: ChatMessage) -> SamplingMessage {
-        SamplingMessage {
-            role: msg.role.to_string().to_lowercase(),
-            content: serde_json::json!({ "text": msg.content }),
-        }
+    fn to_sampling(msg: ChatMessage) -> Result<SamplingMessage, anyhow::Error> {
+        let role = match msg.role {
+            MessageRole::User => Role::User,
+            MessageRole::Assistant => Role::Assistant,
+            _ => return Err(anyhow::anyhow!("Unsupported message role: {:?}", msg.role)),
+        };
+        Ok(SamplingMessage { role: role.into(), content: serde_json::json!({ "text": msg.content }) })
     }
 
     fn success(message: impl Into<String>) -> CallToolResult {
@@ -80,13 +68,24 @@ impl GenerateTool {
     }
 }
 
+#[derive(JsonSchema, Serialize, Deserialize, Clone, Debug)]
+pub struct GenerateArgs {
+    pub messages: Vec<ChatMessage>,
+
+    #[serde(default = "default_retriever_sources")]
+    pub sources: Vec<String>,
+}
+
+fn default_retriever_sources() -> Vec<String> {
+    vec!["/global".to_string()]
+}
+
 impl ToolDef for GenerateTool {
     const NAME: &'static str = "generate";
     const DESCRIPTION: &'static str = "Generates a reply using retrieval‑augmented context via direct LLM sampling.";
-    type Args = ChatQuery;
+    type Args = GenerateArgs;
 
-    async fn call(&self, args: Self::Args, request_context: RequestContext) -> Result<CallToolResult, ToolError> {
-        // 1. Retrieve context -------------------------------------------------
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let query_text = Self::user_query(&args.messages);
         let retrieve_ctx = RetrieveContext {
             query: RetrieveQuery::Text(query_text.clone()),
@@ -96,9 +95,7 @@ impl ToolDef for GenerateTool {
         };
 
         let relay_id = ActorId::of::<Relay>("/rag/generate/relay");
-        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default())
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to spawn relay: {e}")))?;
+        let (relay_ctx, _) = Actor::spawn(self.engine.clone(), relay_id, Relay, SpawnOptions::default()).await?;
 
         let retriever_id = ActorId::of::<Retriever>("/rag/retriever");
         let retrieval = relay_ctx
@@ -107,14 +104,12 @@ impl ToolDef for GenerateTool {
                 &retriever_id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),
             )
-            .await
-            .map_err(|e| ToolError::Execution(format!("Retrieval failed: {e}")))?;
+            .await?;
 
-        let mut chunks = retrieval.context;
+        let mut chunks = retrieval.context.clone();
         chunks.reverse();
         let context_md = retrieval.to_markdown();
 
-        // 2. Construct conversation with system prompt ----------------------
         let (mut sys_opt, mut convo): (Option<ChatMessage>, Vec<ChatMessage>) = (None, Vec::new());
         for m in &args.messages {
             if m.role == MessageRole::System {
@@ -134,21 +129,13 @@ impl ToolDef for GenerateTool {
         full_convo.push(system_msg);
         full_convo.extend(convo);
 
-        // 3. Send to LLM via Context::create_message -------------------------
-        let sampling_messages: Vec<SamplingMessage> = full_convo.into_iter().map(Self::to_sampling).collect();
+        let sampling_messages: Vec<SamplingMessage> =
+            full_convo.into_iter().map(Self::to_sampling).collect::<Result<_, _>>().unwrap();
 
-        let params = CreateMessageRequestParams {
-            include_context: None,
-            max_tokens: args.options.as_ref().and_then(|o| o.max_tokens).unwrap_or(1024),
-            messages: sampling_messages,
-            ..CreateMessageRequestParams::default()
-        };
+        let params =
+            CreateMessageRequestParams { messages: sampling_messages, ..CreateMessageRequestParams::default() };
 
-        let mut operation = self
-            .context
-            .create_message(params, true) // <- stream enabled per Sampling example
-            .await
-            .map_err(|e| ToolError::Execution(format!("LLM request failed: {e}")))?;
+        let operation = self.context.create_message(params, true).await?;
 
         match operation.await {
             Ok(msg) => Ok(Self::success(format!("{:#?}", msg))),
@@ -157,29 +144,39 @@ impl ToolDef for GenerateTool {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Tests ------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bioma_actor::Engine;
+    use serde_json::Value;
 
-    #[tokio::test]
-    async fn generate_smoke() {
-        let engine = Engine::test().await.unwrap();
-        let ctx = Context::test();
-        let tool = GenerateTool::new(&engine, ctx);
+    #[test]
+    fn user_query() {
+        let messages = vec![
+            ChatMessage::system("ignore me".into()),
+            ChatMessage::user("what's up?".into()),
+            ChatMessage::assistant("hello!".into()),
+            ChatMessage::user("any updates?".into()),
+        ];
+        let q = GenerateTool::user_query(&messages);
+        assert_eq!(q, "what's up?\nany updates?");
+    }
 
-        let query = ChatQuery {
-            messages: vec![ChatMessage::user("Explain Rust ownership".into())],
-            sources: vec![],
-            format: None,
-            tools: vec![],
-            tools_actors: vec![],
-            stream: false,
-            options: None,
-        };
+    #[test]
+    fn to_sampling() {
+        let u = ChatMessage::user("hey".into());
+        let sm_u = GenerateTool::to_sampling(u.clone()).unwrap();
+        assert_eq!(sm_u.role, Role::User.into());
+        assert_eq!(sm_u.content["text"], Value::String("hey".into()));
 
-        let _ = tool.call(query, RequestContext::default()).await;
+        let a = ChatMessage::assistant("hi there".into());
+        let sm_a = GenerateTool::to_sampling(a.clone()).unwrap();
+        assert_eq!(sm_a.role, Role::Assistant.into());
+        assert_eq!(sm_a.content["text"], Value::String("hi there".into()));
+    }
+
+    #[test]
+    fn rejects_roles() {
+        let sys = ChatMessage::system("system prompt".into());
+        assert!(GenerateTool::to_sampling(sys).is_err());
     }
 }

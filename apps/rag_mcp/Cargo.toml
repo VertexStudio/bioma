@@ -20,9 +20,10 @@ zip = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 futures-util = { workspace = true }
 
+bioma_actor = { path = "../../bioma_actor" }
+bioma_llm = { path = "../../bioma_llm" }
 bioma_mcp = { path = "../../bioma_mcp" }
 bioma_rag = { path = "../../bioma_rag" }
-bioma_actor = { path = "../../bioma_actor" }
 
 [dev-dependencies]
 wiremock = "0.6"

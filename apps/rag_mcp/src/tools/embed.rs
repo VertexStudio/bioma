@@ -103,10 +103,19 @@ impl ToolDef for EmbedTool {
     }
 }
 
+#[cfg(test)]
 mod tests {
+    use bioma_actor::Engine;
+    use bioma_mcp::server::RequestContext;
+    use bioma_mcp::tools::ToolDef;
+    use bioma_rag::prelude::GeneratedEmbeddings;
+    use serde_json::json;
+
+    use crate::tools::embed::{EmbedTool, EmbeddingsQueryArgs, ModelEmbed};
+
     #[tokio::test]
     async fn generate_text_embeddings() {
-        let engine = Engine::test().await.unwrap();
+        let engine = bioma_actor::Engine::test().await.unwrap();
         let embed_tool = EmbedTool::new(&engine).await.unwrap();
 
         let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!(["Hello from Sergio!"]) };

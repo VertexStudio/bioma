@@ -1,10 +1,11 @@
 use anyhow::Result;
+use bioma_llm::prelude::ChatMessage;
 use bioma_mcp::{
     client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     progress::Progress,
     schema::{
         CallToolRequestParams, ClientCapabilities, ClientCapabilitiesRoots, CreateMessageRequestParams,
-        CreateMessageResult, Implementation, Root,
+        CreateMessageResult, Implementation, Role, Root, SamplingMessage,
     },
 };
 use bioma_rag::{
@@ -15,9 +16,11 @@ use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
 use rag_mcp::{
     embed::{EmbeddingsQueryArgs, ModelEmbed},
+    generate::GenerateArgs,
     ingest::IngestArgs,
     sources::ListSourcesArgs,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use tracing::{error, info};
@@ -32,7 +35,7 @@ struct Args {
 #[derive(Subcommand)]
 enum TransportArg {
     Stdio {
-        #[arg(long, short, default_value = "target/debug/examples/server")]
+        #[arg(long, short, default_value = "target/release/examples/server")]
         command: String,
 
         #[arg(long, short, default_value = "rag-client")]
@@ -83,6 +86,13 @@ pub struct RagMcpClient {
     roots: Vec<Root>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<SamplingMessage>,
+    stream: bool,
+}
+
 impl ModelContextProtocolClient for RagMcpClient {
     async fn get_server_configs(&self) -> Vec<ServerConfig> {
         self.server_configs.clone()
@@ -98,17 +108,60 @@ impl ModelContextProtocolClient for RagMcpClient {
 
     async fn on_create_message(
         &self,
-        _params: CreateMessageRequestParams,
-        _progress: Progress,
+        params: CreateMessageRequestParams,
+        mut progress: Progress,
     ) -> Result<CreateMessageResult, ClientError> {
-        Err(ClientError::Request("Message creation not supported".into()))
+        info!("Params: {:#?}", params);
+
+        info!("Accepting sampling request..."); // In a real implementation, client should the capability to accept or decline the request
+
+        progress.update_to(0.1, Some("Starting sampling actor...".to_string())).await?;
+
+        info!("Starting sampling actor...");
+
+        let model = match params.model_preferences {
+            Some(model_preferences) => match model_preferences.hints {
+                Some(hints) => hints.iter().find_map(|hint| hint.name.clone()).unwrap_or("llama3.2".to_string()),
+                None => {
+                    info!("Using default model");
+                    "llama3.2".to_string()
+                }
+            },
+            None => {
+                info!("Using default model");
+                "llama3.2".to_string()
+            }
+        };
+
+        info!("Model: {}", model);
+
+        let body = OllamaRequest { model: "llama3.2".to_string(), messages: params.messages, stream: false };
+
+        progress.update_to(0.5, Some("Sending request to LLM...".to_string())).await?;
+
+        let client = reqwest::Client::new();
+        let res = client.post("http://localhost:11434/api/chat").json(&body).send().await;
+
+        let llm_response = match res {
+            Ok(res) => res.text().await.unwrap(),
+            Err(_) => "Error while sending request".to_string(),
+        };
+
+        progress.update_to(1.0, Some("Sampling completed".to_string())).await?;
+
+        Ok(CreateMessageResult {
+            meta: None,
+            content: serde_json::to_value(llm_response).unwrap(),
+            model: body.model,
+            role: Role::Assistant,
+            stop_reason: None,
+        })
     }
 }
 
 async fn upload_and_index(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> {
     info!("Demonstrating upload and index operations");
 
-    // Create typed upload arguments
     let sample_text = "This is a sample document for RAG. It contains information about Rust programming.";
     let upload_args = IngestArgs { url: format!("data:text/plain,{}", sample_text), path: "sample.txt".to_string() };
 
@@ -121,7 +174,6 @@ async fn upload_and_index(client: &mut Client<RagMcpClient>) -> Result<(), Clien
     let upload_result = client.call_tool(upload_call, false).await?.await?;
     info!("Upload response: {:?}", upload_result);
 
-    // Create typed index arguments
     let index_args = IndexArgs {
         content: IndexContent::Globs(bioma_rag::indexer::GlobsContent {
             globs: vec!["sample.txt".into()],
@@ -139,7 +191,6 @@ async fn upload_and_index(client: &mut Client<RagMcpClient>) -> Result<(), Clien
     info!("Indexing uploaded document...");
     let mut index_operation = client.call_tool(index_call, true).await?;
 
-    // Handle progress stream
     let mut progress_stream = index_operation.recv();
     tokio::spawn(async move {
         while let Some(progress) = progress_stream.next().await {
@@ -156,7 +207,6 @@ async fn upload_and_index(client: &mut Client<RagMcpClient>) -> Result<(), Clien
 async fn retrieval(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> {
     info!("Demonstrating retrieval operations");
 
-    // Create typed retrieve arguments
     let retrieve_args = RetrieveContext {
         query: RetrieveQuery::Text("Rust programming".into()),
         limit: 5,
@@ -173,7 +223,6 @@ async fn retrieval(client: &mut Client<RagMcpClient>) -> Result<(), ClientError>
     let retrieve_result = client.call_tool(retrieve_call, false).await?.await?;
     info!("Retrieval response: {:?}", retrieve_result);
 
-    // Create typed embedding arguments
     let embed_args =
         EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!("Rust programming language") };
 
@@ -192,7 +241,6 @@ async fn retrieval(client: &mut Client<RagMcpClient>) -> Result<(), ClientError>
 async fn sources_and_delete(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> {
     info!("Demonstrating sources listing and deletion");
 
-    // Use the proper type for sources listing
     let sources_args = ListSourcesArgs {};
 
     let sources_call = CallToolRequestParams {
@@ -204,7 +252,6 @@ async fn sources_and_delete(client: &mut Client<RagMcpClient>) -> Result<(), Cli
     let sources_result = client.call_tool(sources_call, false).await?.await?;
     info!("Sources response: {:?}", sources_result);
 
-    // Create typed delete arguments
     let delete_args = DeleteSource { sources: vec!["sample.txt".into()], delete_from_disk: false };
 
     let delete_call = CallToolRequestParams {
@@ -215,6 +262,28 @@ async fn sources_and_delete(client: &mut Client<RagMcpClient>) -> Result<(), Cli
     info!("Deleting source...");
     let delete_result = client.call_tool(delete_call, false).await?.await?;
     info!("Deletion response: {:?}", delete_result);
+
+    Ok(())
+}
+
+async fn generate(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> {
+    info!("Demonstrating generate tool for RAG-based LLM responses");
+
+    let messages = vec![
+        ChatMessage::assistant("How can I help you today?".into()),
+        ChatMessage::user("What are the key features of Rust?".into()),
+    ];
+
+    let generate_args = GenerateArgs { messages, sources: vec!["example".into()] };
+
+    let generate_call = CallToolRequestParams {
+        name: "generate".to_string(),
+        arguments: serde_json::from_value(serde_json::to_value(generate_args).unwrap()).unwrap(),
+    };
+
+    info!("Generating RAG-augmented response...");
+    let generate_result = client.call_tool(generate_call, false).await?.await?;
+    info!("Generate response: {:?}", generate_result);
 
     Ok(())
 }
@@ -340,6 +409,12 @@ async fn main() -> Result<()> {
     if all_tools.iter().any(|t| t.name == "sources") && all_tools.iter().any(|t| t.name == "delete") {
         if let Err(e) = sources_and_delete(&mut client).await {
             error!("Error during sources and delete: {:?}", e);
+        }
+    }
+
+    if all_tools.iter().any(|t| t.name == "generate") {
+        if let Err(e) = generate(&mut client).await {
+            error!("Error during generate: {:?}", e);
         }
     }
 

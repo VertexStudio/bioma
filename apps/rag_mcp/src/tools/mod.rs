@@ -1,6 +1,6 @@
 pub mod delete;
 pub mod embed;
-// pub mod generate;
+pub mod generate;
 pub mod index;
 pub mod ingest;
 pub mod rerank;
