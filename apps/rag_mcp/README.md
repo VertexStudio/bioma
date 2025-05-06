@@ -107,3 +107,4 @@ The server provides the following MCP tools:
 - **upload**: Upload files for processing
 - **sources**: Manage document sources
 - **delete**: Delete indexed content
+- **generate**: Generate a reply using retrieval‑augmented context via direct LLM sampling
