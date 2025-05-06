@@ -1,5 +1,4 @@
 use anyhow::Result;
-use bioma_llm::prelude::ChatMessage;
 use bioma_mcp::{
     client::{Client, ClientError, ModelContextProtocolClient, ServerConfig, StdioConfig, TransportConfig},
     progress::Progress,
@@ -285,11 +284,20 @@ async fn generate(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> 
     info!("Demonstrating generate tool for RAG-based LLM responses");
 
     let messages = vec![
-        ChatMessage::assistant("How can I help you today?".into()),
-        ChatMessage::user("What are the key features of Rust?".into()),
+        SamplingMessage {
+            content: serde_json::to_value("How can I help you today?".to_string()).unwrap(),
+            role: Role::Assistant,
+        },
+        SamplingMessage {
+            content: serde_json::to_value("What are the key features of Rust?".to_string()).unwrap(),
+            role: Role::User,
+        },
     ];
 
-    let generate_args = GenerateArgs { messages, sources: vec!["example".into()] };
+    let generate_args = GenerateArgs {
+        create_message_request: CreateMessageRequestParams { messages, ..Default::default() },
+        sources: vec!["example".into()],
+    };
 
     let generate_call = CallToolRequestParams {
         name: "generate".to_string(),

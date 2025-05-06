@@ -1,10 +1,7 @@
-//! Retrieval-augmented message generation.
-
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use bioma_actor::{Actor, ActorContext, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions};
-use bioma_llm::prelude::{ChatMessage, MessageRole};
 use bioma_mcp::{
     schema::{CallToolResult, CreateMessageRequestParams, Role, SamplingMessage, TextContent},
     server::{Context, RequestContext},
@@ -16,35 +13,10 @@ use bioma_rag::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
-type Result<T> = anyhow::Result<T>;
-
-#[derive(Debug, Clone, Copy)]
-enum ConversationalRole {
-    User,
-    Assistant,
-}
-
-impl TryFrom<MessageRole> for ConversationalRole {
-    type Error = anyhow::Error;
-
-    fn try_from(role: MessageRole) -> Result<Self> {
-        match role {
-            MessageRole::User => Ok(ConversationalRole::User),
-            MessageRole::Assistant => Ok(ConversationalRole::Assistant),
-            other => Err(anyhow!("Unsupported role: {:?}", other)),
-        }
-    }
-}
-
-impl From<ConversationalRole> for Role {
-    fn from(r: ConversationalRole) -> Self {
-        match r {
-            ConversationalRole::User => Role::User,
-            ConversationalRole::Assistant => Role::Assistant,
-        }
-    }
-}
+type UserQuery = String;
+type ContextMarkdown = String;
 
 #[derive(Serialize)]
 pub struct GenerateTool {
@@ -60,12 +32,12 @@ pub struct GenerateTool {
 
 impl GenerateTool {
     pub async fn new(engine: &Engine, ctx: Context) -> Result<Self> {
-        const RELAY_PATH: &str = "/rag/generate/relay";
-        const RETRIEVER_PATH: &str = "/rag/generate/retriever";
+        const RELAY_NAME: &str = "rag/generate/relay";
+        const RETRIEVER_NAME: &str = "rag/generate/retriever";
 
         let (relay_ctx, _) = Actor::spawn(
             engine.clone(),
-            ActorId::of::<Relay>(RELAY_PATH),
+            ActorId::of::<Relay>(RELAY_NAME),
             Relay,
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
@@ -73,7 +45,7 @@ impl GenerateTool {
 
         let (mut rec_ctx, mut rec_actor) = Actor::spawn(
             engine.clone(),
-            ActorId::of::<Retriever>(RETRIEVER_PATH),
+            ActorId::of::<Retriever>(RETRIEVER_NAME),
             Retriever::default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
@@ -85,36 +57,74 @@ impl GenerateTool {
             }
         });
 
-        Ok(Self { ctx, relay_ctx, retriever_id: ActorId::of::<Retriever>(RETRIEVER_PATH) })
+        Ok(Self { ctx, relay_ctx, retriever_id: ActorId::of::<Retriever>(RETRIEVER_NAME) })
     }
 
-    fn user_query(messages: &[ChatMessage]) -> String {
+    fn extract_text(content: &JsonValue) -> Option<&str> {
+        match content {
+            JsonValue::String(s) => Some(s.as_str()),
+            JsonValue::Object(map) => map.get("text").and_then(|v| v.as_str()),
+            _ => None,
+        }
+    }
+
+    fn extract_user_query(messages: &[SamplingMessage]) -> UserQuery {
         messages
             .iter()
-            .filter(|m| m.role == MessageRole::User)
-            .map(|m| m.content.as_str())
+            .filter(|m| m.role == Role::User)
+            .filter_map(|m| Self::extract_text(&m.content))
             .collect::<Vec<_>>()
             .join("\n")
     }
 
-    fn to_sampling(msg: &ChatMessage) -> Result<SamplingMessage> {
-        let conv_role: ConversationalRole = msg.role.clone().try_into()?;
-        Ok(SamplingMessage { role: Role::from(conv_role).into(), content: serde_json::json!(msg.content) })
-    }
-
-    fn mk_result(text: impl Into<String>, is_error: bool) -> CallToolResult {
+    fn create_result(text: impl Into<String>, is_error: bool) -> CallToolResult {
         let content = TextContent { type_: "text".into(), text: text.into(), annotations: None };
+
         CallToolResult {
             content: vec![serde_json::to_value(content).unwrap_or_default()],
             is_error: Some(is_error),
             meta: None,
         }
     }
+
+    fn add_context_to_system_prompt(request: &mut CreateMessageRequestParams, context: &ContextMarkdown) {
+        const DEFAULT_SYSTEM_PROMPT: &str = "You are a helpful assistant.";
+
+        let context_section = format!("Use the following context when answering:\n{context}\n\n");
+
+        if let Some(current_prompt) = request.system_prompt.as_mut() {
+            *current_prompt = format!("{context_section}{current_prompt}");
+        } else {
+            request.system_prompt = Some(format!("{context_section}{DEFAULT_SYSTEM_PROMPT}"));
+        }
+    }
+
+    async fn retrieve_context(&self, query: UserQuery, sources: Vec<String>, limit: usize) -> Result<ContextMarkdown> {
+        let retrieval = self
+            .relay_ctx
+            .send_and_wait_reply::<Retriever, _>(
+                RetrieveContext { query: RetrieveQuery::Text(query), limit, threshold: 0.0, sources },
+                &self.retriever_id,
+                SendOptions::builder().timeout(Duration::from_secs(200)).build(),
+            )
+            .await?;
+
+        Ok(retrieval.to_markdown())
+    }
+
+    async fn generate_message(&self, request: CreateMessageRequestParams) -> Result<String> {
+        let operation = self.ctx.create_message(request, false).await?;
+
+        match operation.await {
+            Ok(msg) => Ok(format!("{:#?}", msg)),
+            Err(e) => Err(anyhow!("LLM generation failed: {}", e)),
+        }
+    }
 }
 
 #[derive(JsonSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct GenerateArgs {
-    pub messages: Vec<ChatMessage>,
+    pub create_message_request: CreateMessageRequestParams,
 
     #[serde(default = "default_sources")]
     pub sources: Vec<String>,
@@ -126,60 +136,28 @@ fn default_sources() -> Vec<String> {
 
 impl ToolDef for GenerateTool {
     const NAME: &'static str = "generate";
-    const DESCRIPTION: &'static str = "Generate a reply using retrieval-augmented context via direct LLM sampling.";
+    const DESCRIPTION: &'static str = "Generate a reply using retrieval‑augmented context via direct LLM sampling.";
     type Args = GenerateArgs;
 
     async fn call(&self, args: Self::Args, _rc: RequestContext) -> Result<CallToolResult> {
-        let query = Self::user_query(&args.messages);
-        let limit = if args.sources.is_empty() { 8 } else { args.sources.len() };
+        let mut req = args.create_message_request;
+        let msgs = &req.messages;
 
-        let retrieval = self
-            .relay_ctx
-            .send_and_wait_reply::<Retriever, _>(
-                RetrieveContext {
-                    query: RetrieveQuery::Text(query.clone()),
-                    limit,
-                    threshold: 0.0,
-                    sources: args.sources.clone(),
-                },
-                &self.retriever_id,
-                SendOptions::builder().timeout(Duration::from_secs(200)).build(),
-            )
-            .await?;
+        let query = Self::extract_user_query(msgs);
+        if query.is_empty() {
+            return Ok(Self::create_result("No user content found – nothing to do", true));
+        }
 
-        let last_user_idx = args
-            .messages
-            .iter()
-            .rposition(|m| m.role == MessageRole::User)
-            .ok_or_else(|| anyhow!("No user message provided"))?;
+        let context = match self.retrieve_context(query, args.sources.clone(), 10).await {
+            Ok(context) => context,
+            Err(e) => return Ok(Self::create_result(format!("Retrieval failed: {e}"), true)),
+        };
 
-        let context_md = retrieval.to_markdown();
-        let augmented = args
-            .messages
-            .into_iter()
-            .enumerate()
-            .map(|(i, msg)| {
-                if i == last_user_idx {
-                    ChatMessage::user(format!(
-                        "Use the following context when answering:\n{context_md}\n\n{}",
-                        msg.content
-                    ))
-                } else {
-                    msg
-                }
-            })
-            .collect::<Vec<_>>();
+        Self::add_context_to_system_prompt(&mut req, &context);
 
-        let sampling_msgs = augmented.iter().map(|m| Self::to_sampling(m)).collect::<Result<Vec<_>>>()?;
-
-        let op = self
-            .ctx
-            .create_message(CreateMessageRequestParams { messages: sampling_msgs, ..Default::default() }, false)
-            .await?;
-
-        match op.await {
-            Ok(msg) => Ok(Self::mk_result(format!("{:#?}", msg), false)),
-            Err(e) => Ok(Self::mk_result(format!("LLM generation failed: {e}"), true)),
+        match self.generate_message(req).await {
+            Ok(result) => Ok(Self::create_result(result, false)),
+            Err(e) => Ok(Self::create_result(e.to_string(), true)),
         }
     }
 }
@@ -187,35 +165,49 @@ impl ToolDef for GenerateTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    #[test]
-    fn user_query_concat() {
-        let msgs =
-            vec![ChatMessage::system("sys".into()), ChatMessage::user("u1".into()), ChatMessage::user("u2".into())];
-        assert_eq!(GenerateTool::user_query(&msgs), "u1\nu2");
+    fn create_test_message(role: Role, text: &str) -> SamplingMessage {
+        SamplingMessage { role, content: JsonValue::String(text.to_owned()) }
+    }
+
+    fn create_test_request(
+        system_prompt: Option<String>,
+        messages: Vec<SamplingMessage>,
+    ) -> CreateMessageRequestParams {
+        CreateMessageRequestParams { system_prompt, messages, max_tokens: 100, ..Default::default() }
     }
 
     #[test]
-    fn chat_to_sampling_ok() {
-        let c = ChatMessage::assistant("hi".into());
-        let sm = GenerateTool::to_sampling(&c).unwrap();
-        assert_eq!(sm.role, Role::Assistant.into());
-        assert_eq!(sm.content, json!({ "text": "hi" }));
+    fn test_user_query_concatenation() {
+        let messages = vec![
+            create_test_message(Role::Assistant, "ignore"),
+            create_test_message(Role::User, "one"),
+            create_test_message(Role::User, "two"),
+        ];
+        assert_eq!(GenerateTool::extract_user_query(&messages), "one\ntwo");
     }
 
     #[test]
-    fn to_sampling_rejects_system() {
-        let c = ChatMessage::system("ignored".into());
-        assert!(GenerateTool::to_sampling(&c).is_err());
+    fn test_add_context_to_existing_system_prompt() {
+        let messages = vec![create_test_message(Role::User, "test query")];
+        let mut request = create_test_request(Some("Original system prompt".to_string()), messages);
+        let context = "Retrieved context";
+
+        GenerateTool::add_context_to_system_prompt(&mut request, &context.to_string());
+
+        let expected = "Use the following context when answering:\nRetrieved context\n\nOriginal system prompt";
+        assert_eq!(request.system_prompt, Some(expected.to_string()));
     }
 
     #[test]
-    fn mk_result_variants() {
-        let ok = GenerateTool::mk_result("hello", false);
-        assert_eq!(ok.is_error, Some(false));
+    fn test_add_context_to_no_system_prompt() {
+        let messages = vec![create_test_message(Role::User, "test query")];
+        let mut request = create_test_request(None, messages);
+        let context = "Retrieved context";
 
-        let err = GenerateTool::mk_result("oops", true);
-        assert_eq!(err.is_error, Some(true));
+        GenerateTool::add_context_to_system_prompt(&mut request, &context.to_string());
+
+        let expected = "Use the following context when answering:\nRetrieved context\n\nYou are a helpful assistant.";
+        assert_eq!(request.system_prompt, Some(expected.to_string()));
     }
 }
