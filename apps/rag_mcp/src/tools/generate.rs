@@ -117,7 +117,8 @@ impl GenerateTool {
 
 #[derive(JsonSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct GenerateArgs {
-    pub create_message_request: CreateMessageRequestParams,
+    #[serde(flatten)]
+    pub create_message: CreateMessageRequestParams,
 
     #[serde(default = "default_sources")]
     pub sources: Vec<String>,
@@ -133,7 +134,7 @@ impl ToolDef for GenerateTool {
     type Args = GenerateArgs;
 
     async fn call(&self, args: Self::Args, _rc: RequestContext) -> Result<CallToolResult> {
-        let mut req = args.create_message_request;
+        let mut req = args.create_message;
         let msgs = &req.messages;
 
         let query = Self::extract_user_query(msgs);

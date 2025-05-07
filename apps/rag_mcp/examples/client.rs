@@ -295,7 +295,7 @@ async fn generate(client: &mut Client<RagMcpClient>) -> Result<(), ClientError> 
     ];
 
     let generate_args = GenerateArgs {
-        create_message_request: CreateMessageRequestParams { messages, ..Default::default() },
+        create_message: CreateMessageRequestParams { messages, ..Default::default() },
         sources: vec!["example".into()],
     };
 
