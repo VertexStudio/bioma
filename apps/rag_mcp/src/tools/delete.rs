@@ -1,9 +1,8 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{DeleteSource as DeleteSourceArgs, Indexer};
 use serde::Serialize;
-use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
@@ -18,7 +17,7 @@ pub struct DeleteTool {
 }
 
 impl DeleteTool {
-    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+    pub async fn new(engine: &Engine) -> Result<Self, Error> {
         let id = ActorId::of::<Indexer>("/rag_mcp/delete");
 
         let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
@@ -27,8 +26,7 @@ impl DeleteTool {
             Indexer::default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
-        .await
-        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn indexer actor: {}", e))))?;
+        .await?;
 
         tokio::spawn(async move {
             if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {

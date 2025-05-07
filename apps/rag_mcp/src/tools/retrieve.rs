@@ -1,9 +1,8 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, SendOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{RetrieveContext as RetrieveContextArgs, Retriever};
 use serde::Serialize;
-use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
@@ -18,7 +17,7 @@ pub struct RetrieveTool {
 }
 
 impl RetrieveTool {
-    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+    pub async fn new(engine: &Engine) -> Result<Self, Error> {
         let id = ActorId::of::<Retriever>("/rag_mcp/retriever");
 
         let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
@@ -27,8 +26,7 @@ impl RetrieveTool {
             Retriever::default(),
             bioma_actor::SpawnOptions::builder().exists(bioma_actor::SpawnExistsOptions::Reset).build(),
         )
-        .await
-        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn retriever actor: {}", e))))?;
+        .await?;
 
         tokio::spawn(async move {
             if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {

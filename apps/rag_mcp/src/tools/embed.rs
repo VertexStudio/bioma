@@ -1,11 +1,10 @@
 use anyhow::{Error, anyhow};
-use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions};
 use bioma_mcp::schema::CallToolResult;
 use bioma_mcp::server::RequestContext;
 use bioma_mcp::tools::ToolDef;
 use bioma_rag::prelude::{EmbeddingContent, Embeddings, GenerateEmbeddings, ImageData};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
@@ -34,7 +33,7 @@ pub struct EmbedTool {
 }
 
 impl EmbedTool {
-    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+    pub async fn new(engine: &Engine) -> Result<Self, Error> {
         let id = ActorId::of::<Embeddings>("/rag_mcp/embeddings");
 
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
@@ -43,8 +42,7 @@ impl EmbedTool {
             Embeddings::default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
-        .await
-        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn embeddings actor: {}", e))))?;
+        .await?;
 
         tokio::spawn(async move {
             if let Err(e) = embeddings_actor.start(&mut embeddings_ctx).await {

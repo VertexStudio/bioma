@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Error, anyhow};
 use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions};
 use bioma_mcp::{
     schema::{CallToolResult, CreateMessageRequestParams, Role, SamplingMessage, TextContent},
@@ -32,7 +32,7 @@ pub struct GenerateTool {
 }
 
 impl GenerateTool {
-    pub async fn new(engine: &Engine, ctx: Context) -> Result<Self> {
+    pub async fn new(engine: &Engine, ctx: Context) -> Result<Self, Error> {
         let (mut rec_ctx, mut rec_actor) = Actor::spawn(
             engine.clone(),
             ActorId::of::<Retriever>("rag/generate/retriever"),
@@ -91,7 +91,12 @@ impl GenerateTool {
         }
     }
 
-    async fn retrieve_context(&self, query: UserQuery, sources: Vec<String>, limit: usize) -> Result<ContextMarkdown> {
+    async fn retrieve_context(
+        &self,
+        query: UserQuery,
+        sources: Vec<String>,
+        limit: usize,
+    ) -> Result<ContextMarkdown, Error> {
         let retrieval = self
             .relay
             .ctx
@@ -105,7 +110,7 @@ impl GenerateTool {
         Ok(retrieval.to_markdown())
     }
 
-    async fn generate_message(&self, request: CreateMessageRequestParams) -> Result<String> {
+    async fn generate_message(&self, request: CreateMessageRequestParams) -> Result<String, Error> {
         let operation = self.ctx.create_message(request, false).await?;
 
         match operation.await {
@@ -133,7 +138,7 @@ impl ToolDef for GenerateTool {
     const DESCRIPTION: &'static str = "Generate a reply using retrieval‑augmented context via direct LLM sampling.";
     type Args = GenerateArgs;
 
-    async fn call(&self, args: Self::Args, _rc: RequestContext) -> Result<CallToolResult> {
+    async fn call(&self, args: Self::Args, _rc: RequestContext) -> Result<CallToolResult, Error> {
         let mut req = args.create_message;
         let msgs = &req.messages;
 

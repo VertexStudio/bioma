@@ -22,6 +22,7 @@ reqwest = { workspace = true, features = ["json"] }
 bioma_actor = { path = "../../bioma_actor" }
 bioma_mcp = { path = "../../bioma_mcp", features = ["json-schema"] }
 bioma_rag = { path = "../../bioma_rag" }
+futures.workspace = true
 
 [dev-dependencies]
 wiremock = "0.6"

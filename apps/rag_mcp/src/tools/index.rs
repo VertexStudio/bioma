@@ -1,9 +1,8 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, SendOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{Index as IndexArgs, Indexer};
 use serde::Serialize;
-use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
@@ -18,7 +17,7 @@ pub struct IndexTool {
 }
 
 impl IndexTool {
-    pub async fn new(engine: &Engine) -> Result<Self, SystemActorError> {
+    pub async fn new(engine: &Engine) -> Result<Self, Error> {
         let id = ActorId::of::<Indexer>("/rag_mcp/indexer");
 
         let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
@@ -27,8 +26,7 @@ impl IndexTool {
             Indexer::default(),
             bioma_actor::SpawnOptions::builder().exists(bioma_actor::SpawnExistsOptions::Reset).build(),
         )
-        .await
-        .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn indexer: {}", e))))?;
+        .await?;
 
         tokio::spawn(async move {
             if let Err(e) = indexer_actor.start(&mut indexer_ctx).await {
