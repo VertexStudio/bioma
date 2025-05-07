@@ -1,5 +1,5 @@
 use anyhow::{Error, anyhow};
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::schema::CallToolResult;
 use bioma_mcp::server::RequestContext;
 use bioma_mcp::tools::ToolDef;
@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
+
+use crate::tools::ToolRelay;
 
 #[derive(schemars::JsonSchema, Serialize, Deserialize)]
 pub struct EmbeddingsQueryArgs {
@@ -28,7 +30,7 @@ pub struct EmbedTool {
     #[serde(skip_serializing)]
     id: ActorId,
     #[serde(skip_serializing)]
-    engine: Engine,
+    relay: ToolRelay,
 }
 
 impl EmbedTool {
@@ -50,7 +52,9 @@ impl EmbedTool {
             }
         });
 
-        Ok(Self { id, engine: engine.clone() })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/embeddings").await?;
+
+        Ok(Self { id, relay })
     }
 }
 
@@ -60,16 +64,6 @@ impl ToolDef for EmbedTool {
     type Args = EmbeddingsQueryArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag_mcp/embeddings/relay");
-
-        let (relay_ctx, _) = Actor::spawn(
-            self.engine.clone(),
-            relay_id,
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
         let embedding_content = match args.model {
             ModelEmbed::NomicEmbedTextV15 => {
                 let texts = match args.input.as_str() {
@@ -99,7 +93,9 @@ impl ToolDef for EmbedTool {
             }
         };
 
-        let response = relay_ctx
+        let response = self
+            .relay
+            .ctx
             .send_and_wait_reply::<Embeddings, GenerateEmbeddings>(
                 GenerateEmbeddings { content: embedding_content },
                 &self.id,

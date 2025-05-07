@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{RetrieveContext as RetrieveContextArgs, Retriever};
 use serde::Serialize;
@@ -7,12 +7,14 @@ use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
+use crate::tools::ToolRelay;
+
 #[derive(Serialize)]
 pub struct RetrieveTool {
     #[serde(skip_serializing)]
     id: ActorId,
     #[serde(skip_serializing)]
-    engine: Engine,
+    relay: ToolRelay,
 }
 
 impl RetrieveTool {
@@ -23,7 +25,7 @@ impl RetrieveTool {
             engine.clone(),
             id.clone(),
             Retriever::default(),
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+            bioma_actor::SpawnOptions::builder().exists(bioma_actor::SpawnExistsOptions::Reset).build(),
         )
         .await
         .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn retriever actor: {}", e))))?;
@@ -34,7 +36,9 @@ impl RetrieveTool {
             }
         });
 
-        Ok(Self { id, engine: engine.clone() })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/retriever").await?;
+
+        Ok(Self { id, relay })
     }
 }
 
@@ -44,17 +48,9 @@ impl ToolDef for RetrieveTool {
     type Args = RetrieveContextArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag_mcp/retriever/relay");
-
-        let (relay_ctx, _relay_actor) = Actor::spawn(
-            self.engine.clone(),
-            relay_id,
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
-        let response = relay_ctx
+        let response = self
+            .relay
+            .ctx
             .send_and_wait_reply::<Retriever, RetrieveContextArgs>(
                 args,
                 &self.id,

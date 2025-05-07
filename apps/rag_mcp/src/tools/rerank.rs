@@ -1,17 +1,19 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{RankTexts as RankTextsArgs, Rerank};
 use serde::Serialize;
 use std::{borrow::Cow, time::Duration};
 use tracing::error;
 
+use crate::tools::ToolRelay;
+
 #[derive(Serialize)]
 pub struct RerankTool {
     #[serde(skip_serializing)]
     id: ActorId,
     #[serde(skip_serializing)]
-    engine: Engine,
+    relay: ToolRelay,
 }
 
 impl RerankTool {
@@ -33,7 +35,9 @@ impl RerankTool {
             }
         });
 
-        Ok(Self { id, engine: engine.clone() })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/rerank").await?;
+
+        Ok(Self { id, relay })
     }
 }
 
@@ -43,17 +47,9 @@ impl ToolDef for RerankTool {
     type Args = RankTextsArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag_mcp/rerank/relay");
-
-        let (relay_ctx, _) = Actor::spawn(
-            self.engine.clone(),
-            relay_id,
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
-        let response = relay_ctx
+        let response = self
+            .relay
+            .ctx
             .send_and_wait_reply::<Rerank, RankTextsArgs>(
                 args,
                 &self.id,

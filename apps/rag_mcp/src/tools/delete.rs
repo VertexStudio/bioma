@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{DeleteSource as DeleteSourceArgs, Indexer};
 use serde::Serialize;
@@ -7,12 +7,14 @@ use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
+use crate::tools::ToolRelay;
+
 #[derive(Serialize)]
 pub struct DeleteTool {
     #[serde(skip_serializing)]
     id: ActorId,
     #[serde(skip_serializing)]
-    engine: Engine,
+    relay: ToolRelay,
 }
 
 impl DeleteTool {
@@ -34,7 +36,9 @@ impl DeleteTool {
             }
         });
 
-        Ok(Self { id, engine: engine.clone() })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/delete").await?;
+
+        Ok(Self { id, relay })
     }
 }
 
@@ -44,19 +48,11 @@ impl ToolDef for DeleteTool {
     type Args = DeleteSourceArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag_mcp/delete/relay");
-
-        let (relay_ctx, _) = Actor::spawn(
-            self.engine.clone(),
-            relay_id,
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
         let delete_source = DeleteSourceArgs { sources: args.sources, delete_from_disk: args.delete_from_disk };
 
-        let response = relay_ctx
+        let response = self
+            .relay
+            .ctx
             .send_and_wait_reply::<Indexer, DeleteSourceArgs>(
                 delete_source,
                 &self.id,

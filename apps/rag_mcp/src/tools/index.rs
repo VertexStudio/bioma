@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{Index as IndexArgs, Indexer};
 use serde::Serialize;
@@ -7,12 +7,14 @@ use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
 
+use crate::tools::ToolRelay;
+
 #[derive(Serialize)]
 pub struct IndexTool {
     #[serde(skip_serializing)]
     id: ActorId,
     #[serde(skip_serializing)]
-    engine: Engine,
+    relay: ToolRelay,
 }
 
 impl IndexTool {
@@ -23,7 +25,7 @@ impl IndexTool {
             engine.clone(),
             id.clone(),
             Indexer::default(),
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+            bioma_actor::SpawnOptions::builder().exists(bioma_actor::SpawnExistsOptions::Reset).build(),
         )
         .await
         .map_err(|e| SystemActorError::LiveStream(Cow::Owned(format!("Failed to spawn indexer: {}", e))))?;
@@ -34,7 +36,9 @@ impl IndexTool {
             }
         });
 
-        Ok(Self { id, engine: engine.clone() })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/indexer").await?;
+
+        Ok(Self { id, relay })
     }
 }
 
@@ -44,17 +48,9 @@ impl ToolDef for IndexTool {
     type Args = IndexArgs;
 
     async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag_mcp/indexer/relay");
-
-        let (relay_ctx, _) = Actor::spawn(
-            self.engine.clone(),
-            relay_id,
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
-        let response = relay_ctx
+        let response = self
+            .relay
+            .ctx
             .send_and_wait_reply::<Indexer, IndexArgs>(
                 args,
                 &self.id,

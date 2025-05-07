@@ -1,7 +1,5 @@
-use std::time::Duration;
-
 use anyhow::{Result, anyhow};
-use bioma_actor::{Actor, ActorContext, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions};
 use bioma_mcp::{
     schema::{CallToolResult, CreateMessageRequestParams, Role, SamplingMessage, TextContent},
     server::{Context, RequestContext},
@@ -14,6 +12,9 @@ use bioma_rag::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::time::Duration;
+
+use crate::tools::ToolRelay;
 
 type UserQuery = String;
 type ContextMarkdown = String;
@@ -21,31 +22,20 @@ type ContextMarkdown = String;
 #[derive(Serialize)]
 pub struct GenerateTool {
     #[serde(skip_serializing)]
-    ctx: Context,
-
-    #[serde(skip_serializing)]
-    relay_ctx: ActorContext<Relay>,
-
-    #[serde(skip_serializing)]
     retriever_id: ActorId,
+
+    #[serde(skip_serializing)]
+    relay: ToolRelay,
+
+    #[serde(skip_serializing)]
+    ctx: Context,
 }
 
 impl GenerateTool {
     pub async fn new(engine: &Engine, ctx: Context) -> Result<Self> {
-        const RELAY_NAME: &str = "rag/generate/relay";
-        const RETRIEVER_NAME: &str = "rag/generate/retriever";
-
-        let (relay_ctx, _) = Actor::spawn(
-            engine.clone(),
-            ActorId::of::<Relay>(RELAY_NAME),
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
         let (mut rec_ctx, mut rec_actor) = Actor::spawn(
             engine.clone(),
-            ActorId::of::<Retriever>(RETRIEVER_NAME),
+            ActorId::of::<Retriever>("rag/generate/retriever"),
             Retriever::default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
@@ -57,7 +47,9 @@ impl GenerateTool {
             }
         });
 
-        Ok(Self { ctx, relay_ctx, retriever_id: ActorId::of::<Retriever>(RETRIEVER_NAME) })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag/generate").await?;
+
+        Ok(Self { ctx, relay, retriever_id: ActorId::of::<Retriever>("rag/generate/retriever") })
     }
 
     fn extract_text(content: &JsonValue) -> Option<&str> {
@@ -101,8 +93,9 @@ impl GenerateTool {
 
     async fn retrieve_context(&self, query: UserQuery, sources: Vec<String>, limit: usize) -> Result<ContextMarkdown> {
         let retrieval = self
-            .relay_ctx
-            .send_and_wait_reply::<Retriever, _>(
+            .relay
+            .ctx
+            .send_and_wait_reply::<Retriever, RetrieveContext>(
                 RetrieveContext { query: RetrieveQuery::Text(query), limit, threshold: 0.0, sources },
                 &self.retriever_id,
                 SendOptions::builder().timeout(Duration::from_secs(200)).build(),

@@ -1,5 +1,5 @@
 use anyhow::Error;
-use bioma_actor::{Actor, ActorId, Engine, Relay, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions, SystemActorError};
 use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
 use bioma_rag::prelude::{ListSources, Retriever};
 use schemars::JsonSchema;
@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::time::Duration;
 use tracing::error;
+
+use crate::tools::ToolRelay;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ListSourcesArgs {}
@@ -16,7 +18,7 @@ pub struct SourcesTool {
     #[serde(skip_serializing)]
     id: ActorId,
     #[serde(skip_serializing)]
-    engine: Engine,
+    relay: ToolRelay,
 }
 
 impl SourcesTool {
@@ -38,7 +40,9 @@ impl SourcesTool {
             }
         });
 
-        Ok(Self { id, engine: engine.clone() })
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/retriever").await?;
+
+        Ok(Self { id, relay })
     }
 }
 
@@ -48,17 +52,9 @@ impl ToolDef for SourcesTool {
     type Args = ListSourcesArgs;
 
     async fn call(&self, _args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
-        let relay_id = ActorId::of::<Relay>("/rag_mcp/retriever/relay");
-
-        let (relay_ctx, _) = Actor::spawn(
-            self.engine.clone(),
-            relay_id,
-            Relay,
-            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
-        )
-        .await?;
-
-        let response = relay_ctx
+        let response = self
+            .relay
+            .ctx
             .send_and_wait_reply::<Retriever, ListSources>(
                 ListSources,
                 &self.id,
