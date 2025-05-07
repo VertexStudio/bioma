@@ -17,13 +17,13 @@ pub struct DeleteTool {
 }
 
 impl DeleteTool {
-    pub async fn new(engine: &Engine) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, indexer: Option<Indexer>) -> Result<Self, Error> {
         let id = ActorId::of::<Indexer>("/rag_mcp/delete");
 
         let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
             engine.clone(),
             id.clone(),
-            Indexer::default(),
+            indexer.unwrap_or_default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
@@ -79,7 +79,7 @@ mod tests {
         let engine = Engine::test().await.unwrap();
 
         let source_name = "/unit-test-delete";
-        let index_tool = IndexTool::new(&engine).await.unwrap();
+        let index_tool = IndexTool::new(&engine, None).await.unwrap();
         index_tool
             .call(
                 IndexArgs {
@@ -96,7 +96,7 @@ mod tests {
             .await
             .expect("indexing must succeed");
 
-        let delete_tool = DeleteTool::new(&engine).await.unwrap();
+        let delete_tool = DeleteTool::new(&engine, None).await.unwrap();
         let raw = delete_tool
             .call(
                 DeleteSourceArgs { sources: vec![source_name.into()], delete_from_disk: false },

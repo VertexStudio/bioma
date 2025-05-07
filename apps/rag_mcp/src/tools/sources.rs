@@ -21,13 +21,13 @@ pub struct SourcesTool {
 }
 
 impl SourcesTool {
-    pub async fn new(engine: &Engine) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, retriever: Option<Retriever>) -> Result<Self, Error> {
         let id = ActorId::of::<Retriever>("/rag_mcp/retriever");
 
         let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
             engine.clone(),
             id.clone(),
-            Retriever::default(),
+            retriever.unwrap_or_default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
@@ -81,7 +81,7 @@ mod tests {
         let engine = Engine::test().await.unwrap();
 
         let source_name = "unit-test-source";
-        let index_tool = IndexTool::new(&engine).await.unwrap();
+        let index_tool = IndexTool::new(&engine, None).await.unwrap();
         index_tool
             .call(
                 IndexArgs {
@@ -98,7 +98,7 @@ mod tests {
             .await
             .expect("indexing must succeed");
 
-        let list_tool = SourcesTool::new(&engine).await.unwrap();
+        let list_tool = SourcesTool::new(&engine, None).await.unwrap();
         let raw = list_tool.call(ListSourcesArgs {}, RequestContext::default()).await.expect("listing must succeed");
 
         let listed: ListedSources = serde_json::from_value(raw.content[0].clone()).unwrap();

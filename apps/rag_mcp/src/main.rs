@@ -141,22 +141,22 @@ impl ModelContextProtocolServer for RagMcpServer {
         let engine = &self.engine;
         let mut tools: Vec<Arc<dyn ToolCallHandler>> = Vec::new();
 
-        match tools::index::IndexTool::new(engine).await {
+        match tools::index::IndexTool::new(engine, None).await {
             Ok(index_tool) => tools.push(Arc::new(index_tool)),
             Err(e) => error!("Error: {}", e),
         }
 
-        match tools::retrieve::RetrieveTool::new(engine).await {
+        match tools::retrieve::RetrieveTool::new(engine, None).await {
             Ok(retrieve_tool) => tools.push(Arc::new(retrieve_tool)),
             Err(e) => error!("Error: {}", e),
         }
 
-        match tools::embed::EmbedTool::new(engine).await {
+        match tools::embed::EmbedTool::new(engine, None).await {
             Ok(embed_tool) => tools.push(Arc::new(embed_tool)),
             Err(e) => error!("Error: {}", e),
         }
 
-        match tools::rerank::RerankTool::new(engine).await {
+        match tools::rerank::RerankTool::new(engine, None).await {
             Ok(rerank_tool) => tools.push(Arc::new(rerank_tool)),
             Err(e) => error!("Error: {}", e),
         }
@@ -164,17 +164,17 @@ impl ModelContextProtocolServer for RagMcpServer {
         let ingest_tool = tools::ingest::IngestTool::new(engine.clone());
         tools.push(Arc::new(ingest_tool));
 
-        match tools::sources::SourcesTool::new(engine).await {
+        match tools::sources::SourcesTool::new(engine, None).await {
             Ok(sources_tool) => tools.push(Arc::new(sources_tool)),
             Err(e) => error!("Error: {}", e),
         }
 
-        match tools::delete::DeleteTool::new(engine).await {
+        match tools::delete::DeleteTool::new(engine, None).await {
             Ok(delete_tool) => tools.push(Arc::new(delete_tool)),
             Err(e) => error!("Error: {}", e),
         }
 
-        match tools::generate::GenerateTool::new(engine, context).await {
+        match tools::generate::GenerateTool::new(engine, context, None).await {
             Ok(generate_tool) => tools.push(Arc::new(generate_tool)),
             Err(e) => error!("Error: {}", e),
         }

@@ -17,13 +17,13 @@ pub struct RerankTool {
 }
 
 impl RerankTool {
-    pub async fn new(engine: &Engine) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, rerank: Option<Rerank>) -> Result<Self, Error> {
         let id = ActorId::of::<Rerank>("/rag_mcp/rerank");
 
         let (mut rerank_ctx, mut rerank_actor) = Actor::spawn(
             engine.clone(),
             id.clone(),
-            Rerank::default(),
+            rerank.unwrap_or_default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
@@ -71,7 +71,7 @@ mod tests {
     #[tokio::test]
     async fn rerank_texts() {
         let engine = Engine::test().await.unwrap();
-        let rerank_tool = RerankTool::new(&engine).await.unwrap();
+        let rerank_tool = RerankTool::new(&engine, None).await.unwrap();
 
         let raw = rerank_tool
             .call(

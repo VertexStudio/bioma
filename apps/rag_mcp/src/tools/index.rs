@@ -17,13 +17,13 @@ pub struct IndexTool {
 }
 
 impl IndexTool {
-    pub async fn new(engine: &Engine) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, indexer: Option<Indexer>) -> Result<Self, Error> {
         let id = ActorId::of::<Indexer>("/rag_mcp/indexer");
 
         let (mut indexer_ctx, mut indexer_actor) = Actor::spawn(
             engine.clone(),
             id.clone(),
-            Indexer::default(),
+            indexer.unwrap_or_default(),
             bioma_actor::SpawnOptions::builder().exists(bioma_actor::SpawnExistsOptions::Reset).build(),
         )
         .await?;
@@ -79,7 +79,7 @@ mod tests {
     #[tokio::test]
     async fn index_plain_text() {
         let engine = Engine::test().await.unwrap();
-        let index_tool = IndexTool::new(&engine).await.unwrap();
+        let index_tool = IndexTool::new(&engine, None).await.unwrap();
 
         let args = IndexArgs {
             content: IndexContent::Texts(TextsContent {
@@ -114,7 +114,7 @@ mod tests {
             ingest::IngestArgs { url: format!("{}/docs/file.txt", server.uri()), path: "docs/file.txt".into() };
         ingest_tool.call(ingest_args, RequestContext::default()).await.expect("upload works");
 
-        let index_tool = IndexTool::new(&engine).await.unwrap();
+        let index_tool = IndexTool::new(&engine, None).await.unwrap();
         let idx_args = IndexArgs {
             content: IndexContent::Globs(GlobsContent {
                 globs: vec!["docs/*.txt".into()],

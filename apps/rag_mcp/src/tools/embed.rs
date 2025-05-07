@@ -33,13 +33,13 @@ pub struct EmbedTool {
 }
 
 impl EmbedTool {
-    pub async fn new(engine: &Engine) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, embeddings: Option<Embeddings>) -> Result<Self, Error> {
         let id = ActorId::of::<Embeddings>("/rag_mcp/embeddings");
 
         let (mut embeddings_ctx, mut embeddings_actor) = Actor::spawn(
             engine.clone(),
             id.clone(),
-            Embeddings::default(),
+            embeddings.unwrap_or_default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
@@ -120,7 +120,7 @@ mod tests {
     #[tokio::test]
     async fn generate_text_embeddings() {
         let engine = bioma_actor::Engine::test().await.unwrap();
-        let embed_tool = EmbedTool::new(&engine).await.unwrap();
+        let embed_tool = EmbedTool::new(&engine, None).await.unwrap();
 
         let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!(["Hello from Sergio!"]) };
 
@@ -139,7 +139,7 @@ mod tests {
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
         let engine = Engine::test().await.unwrap();
-        let embed_tool = EmbedTool::new(&engine).await.unwrap();
+        let embed_tool = EmbedTool::new(&engine, None).await.unwrap();
 
         let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedVisionV15, input: json!(IMAGE) };
 

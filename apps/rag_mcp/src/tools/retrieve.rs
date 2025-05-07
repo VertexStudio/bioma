@@ -17,13 +17,13 @@ pub struct RetrieveTool {
 }
 
 impl RetrieveTool {
-    pub async fn new(engine: &Engine) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, retriever: Option<Retriever>) -> Result<Self, Error> {
         let id = ActorId::of::<Retriever>("/rag_mcp/retriever");
 
         let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
             engine.clone(),
             id.clone(),
-            Retriever::default(),
+            retriever.unwrap_or_default(),
             bioma_actor::SpawnOptions::builder().exists(bioma_actor::SpawnExistsOptions::Reset).build(),
         )
         .await?;
@@ -79,7 +79,7 @@ mod tests {
     async fn index_then_retrieve() {
         let engine = Engine::test().await.unwrap();
 
-        let idx_tool = IndexTool::new(&engine).await.unwrap();
+        let idx_tool = IndexTool::new(&engine, None).await.unwrap();
         idx_tool
             .call(
                 IndexArgs {
@@ -96,7 +96,7 @@ mod tests {
             .await
             .expect("indexing should succeed");
 
-        let ret_tool = RetrieveTool::new(&engine).await.unwrap();
+        let ret_tool = RetrieveTool::new(&engine, None).await.unwrap();
 
         let raw = ret_tool
             .call(

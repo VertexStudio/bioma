@@ -32,11 +32,11 @@ pub struct GenerateTool {
 }
 
 impl GenerateTool {
-    pub async fn new(engine: &Engine, ctx: Context) -> Result<Self, Error> {
+    pub async fn new(engine: &Engine, ctx: Context, retriever: Option<Retriever>) -> Result<Self, Error> {
         let (mut rec_ctx, mut rec_actor) = Actor::spawn(
             engine.clone(),
             ActorId::of::<Retriever>("rag/generate/retriever"),
-            Retriever::default(),
+            retriever.unwrap_or_default(),
             SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
         )
         .await?;
