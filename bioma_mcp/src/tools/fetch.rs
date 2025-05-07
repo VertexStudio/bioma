@@ -1,6 +1,7 @@
 use crate::schema::{CallToolResult, TextContent};
 use crate::server::RequestContext;
-use crate::tools::{ToolDef, ToolError};
+use crate::tools::ToolDef;
+use anyhow::{anyhow, Error};
 use readability::ExtractOptions;
 use reqwest::header::CONTENT_TYPE;
 use robotstxt::DefaultMatcher;
@@ -41,7 +42,7 @@ impl ToolDef for Fetch {
     const DESCRIPTION: &'static str = "Fetches a URL from the internet and extracts its contents as markdown";
     type Args = FetchArgs;
 
-    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let url = Url::parse(&args.url);
         let url = match url {
             Ok(url) => url,
@@ -96,10 +97,8 @@ impl Fetch {
         }
     }
 
-    async fn check_robots_txt(&self, url: &Url) -> Result<(), ToolError> {
-        let robots_url = url
-            .join("/robots.txt")
-            .map_err(|e| ToolError::Custom(format!("Failed to construct robots.txt URL: {}", e)))?;
+    async fn check_robots_txt(&self, url: &Url) -> Result<(), Error> {
+        let robots_url = url.join("/robots.txt").map_err(|e| anyhow!("Failed to construct robots.txt URL: {}", e))?;
 
         let response = self.client.get(robots_url).header("User-Agent", &self.user_agent).send().await;
 
@@ -109,12 +108,11 @@ impl Fetch {
                     return Ok(());
                 }
 
-                let robots_content =
-                    resp.text().await.map_err(|e| ToolError::Custom(format!("Failed to read robots.txt: {}", e)))?;
+                let robots_content = resp.text().await.map_err(|e| anyhow!("Failed to read robots.txt: {}", e))?;
 
                 let mut matcher = DefaultMatcher::default();
                 if !matcher.one_agent_allowed_by_robots(&robots_content, &self.user_agent, url.as_str()) {
-                    return Err(ToolError::Custom("Access denied by robots.txt".to_string()));
+                    return Err(anyhow!("Access denied by robots.txt for URL: {}", url));
                 }
                 Ok(())
             }
@@ -126,17 +124,11 @@ impl Fetch {
         self.client.get(url.as_str()).header("User-Agent", &self.user_agent).send().await
     }
 
-    async fn process_content(
-        &self,
-        url: &Url,
-        response: reqwest::Response,
-        args: &FetchArgs,
-    ) -> Result<String, ToolError> {
+    async fn process_content(&self, url: &Url, response: reqwest::Response, args: &FetchArgs) -> Result<String, Error> {
         let content_type =
             response.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
 
-        let html =
-            response.text().await.map_err(|e| ToolError::Custom(format!("Failed to get response text: {}", e)))?;
+        let html = response.text().await.map_err(|e| anyhow!("Failed to get response text: {}", e))?;
 
         let is_html = html.trim().starts_with("<html") || content_type.contains("text/html");
 
@@ -148,7 +140,7 @@ impl Fetch {
             let readable = readability::extract(&mut cursor, url, ExtractOptions::default());
             let readable = match readable {
                 Ok(readable) => readable,
-                Err(e) => return Err(ToolError::Custom(format!("Failed to extract content: {}", e))),
+                Err(e) => return Err(anyhow!("Failed to extract content: {}", e)),
             };
 
             html2md::parse_html(&readable.content)

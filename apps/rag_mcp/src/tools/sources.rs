@@ -1,0 +1,113 @@
+use anyhow::Error;
+use bioma_actor::{Actor, ActorId, Engine, SendOptions, SpawnExistsOptions, SpawnOptions};
+use bioma_mcp::{schema::CallToolResult, server::RequestContext, tools::ToolDef};
+use bioma_rag::prelude::{ListSources, Retriever};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tracing::error;
+
+use crate::tools::ToolRelay;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ListSourcesArgs {}
+
+#[derive(Serialize)]
+pub struct SourcesTool {
+    #[serde(skip_serializing)]
+    id: ActorId,
+    #[serde(skip_serializing)]
+    relay: ToolRelay,
+}
+
+impl SourcesTool {
+    pub async fn new(engine: &Engine, retriever: Option<Retriever>) -> Result<Self, Error> {
+        let id = ActorId::of::<Retriever>("/rag_mcp/retriever");
+
+        let (mut retriever_ctx, mut retriever_actor) = Actor::spawn(
+            engine.clone(),
+            id.clone(),
+            retriever.unwrap_or_default(),
+            SpawnOptions::builder().exists(SpawnExistsOptions::Reset).build(),
+        )
+        .await?;
+
+        tokio::spawn(async move {
+            if let Err(e) = retriever_actor.start(&mut retriever_ctx).await {
+                error!("Retriever actor error: {}", e);
+            }
+        });
+
+        let relay = ToolRelay::new(engine, "/tool_relay/rag_mcp/retriever").await?;
+
+        Ok(Self { id, relay })
+    }
+}
+
+impl ToolDef for SourcesTool {
+    const NAME: &'static str = "list_sources";
+    const DESCRIPTION: &'static str = "List indexed sources available for retrieval";
+    type Args = ListSourcesArgs;
+
+    async fn call(&self, _args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
+        let response = self
+            .relay
+            .ctx
+            .send_and_wait_reply::<Retriever, ListSources>(
+                ListSources,
+                &self.id,
+                SendOptions::builder().timeout(Duration::from_secs(60)).build(),
+            )
+            .await?;
+
+        let response_value = serde_json::to_value(response)?;
+
+        Ok(CallToolResult { meta: None, content: vec![response_value], is_error: None })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::index::IndexTool;
+    use bioma_mcp::server::RequestContext;
+    use bioma_rag::{
+        indexer::{Index as IndexArgs, IndexContent, TextChunkConfig, TextsContent},
+        prelude::ListedSources,
+    };
+
+    #[tokio::test]
+    async fn list_sources_after_indexing() {
+        let engine = Engine::test().await.unwrap();
+
+        let source_name = "unit-test-source";
+        let index_tool = IndexTool::new(&engine, None).await.unwrap();
+        index_tool
+            .call(
+                IndexArgs {
+                    content: IndexContent::Texts(TextsContent {
+                        texts: vec!["Hello world!".to_owned()],
+                        mime_type: "text/plain".into(),
+                        config: TextChunkConfig::default(),
+                    }),
+                    source: source_name.into(),
+                    summarize: false,
+                },
+                RequestContext::default(),
+            )
+            .await
+            .expect("indexing must succeed");
+
+        let list_tool = SourcesTool::new(&engine, None).await.unwrap();
+        let raw = list_tool.call(ListSourcesArgs {}, RequestContext::default()).await.expect("listing must succeed");
+
+        let listed: ListedSources = serde_json::from_value(raw.content[0].clone()).unwrap();
+
+        assert!(
+            listed.sources.iter().any(|s| s.source == source_name),
+            "returned list should include the source we just indexed"
+        );
+
+        assert!(listed.sources.iter().all(|s| !s.uri.is_empty()));
+    }
+}

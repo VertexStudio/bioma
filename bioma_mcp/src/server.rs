@@ -282,7 +282,7 @@ impl Context {
         track: bool,
     ) -> Result<Operation<CreateMessageResult>, ServerError> {
         let params = serde_json::to_value(params).unwrap_or_default();
-        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(20), track).await
+        self.request("sampling/createMessage".to_string(), params, std::time::Duration::from_secs(30), track).await
     }
 
     pub async fn resource_updated(&self, params: ResourceUpdatedNotificationParams) -> Result<(), ServerError> {

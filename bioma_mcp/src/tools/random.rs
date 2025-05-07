@@ -1,8 +1,9 @@
 use crate::{
     schema::{CallToolResult, TextContent},
     server::RequestContext,
-    tools::{ToolDef, ToolError},
+    tools::ToolDef,
 };
+use anyhow::Error;
 use rand::Rng;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ impl ToolDef for RandomNumber {
     const DESCRIPTION: &'static str = "Generate a random number";
     type Args = RandomNumberArgs;
 
-    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, ToolError> {
+    async fn call(&self, args: Self::Args, _request_context: RequestContext) -> Result<CallToolResult, Error> {
         let start = args.start;
         let end = args.end;
 

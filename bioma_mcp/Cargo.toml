@@ -40,6 +40,9 @@ dashmap = "6.1.0"
 tokio-util = "0.7.1"
 eventsource-client = "0.15.0"
 
+[features]
+json-schema = []
+
 [dev-dependencies]
 mockito = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -1,6 +1,6 @@
 use crate::schema::{CallToolResult, TextContent};
 use crate::server::RequestContext;
-use crate::tools::{ToolDef, ToolError};
+use crate::tools::ToolDef;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -22,14 +22,13 @@ impl ToolDef for Echo {
         &self,
         properties: Self::Args,
         _request_context: RequestContext,
-    ) -> Result<CallToolResult, ToolError> {
+    ) -> Result<CallToolResult, anyhow::Error> {
         Ok(CallToolResult {
             content: vec![serde_json::to_value(TextContent {
                 type_: "text".to_string(),
                 text: properties.message,
                 annotations: None,
-            })
-            .map_err(ToolError::ResultSerialize)?],
+            })?],
             is_error: Some(false),
             meta: None,
         })
