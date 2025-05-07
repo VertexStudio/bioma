@@ -122,7 +122,7 @@ mod tests {
         let engine = bioma_actor::Engine::test().await.unwrap();
         let embed_tool = EmbedTool::new(&engine, None).await.unwrap();
 
-        let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!(["Hello from Sergio!"]) };
+        let args = EmbeddingsQueryArgs { model: ModelEmbed::NomicEmbedTextV15, input: json!(["Hello world!"]) };
 
         let raw =
             embed_tool.call(args, RequestContext::default()).await.unwrap_or_else(|e| panic!("tool failed: {e:?}"));

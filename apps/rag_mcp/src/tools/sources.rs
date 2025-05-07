@@ -86,7 +86,7 @@ mod tests {
             .call(
                 IndexArgs {
                     content: IndexContent::Texts(TextsContent {
-                        texts: vec!["Sergio loves type-driven dev.".to_owned()],
+                        texts: vec!["Hello world!".to_owned()],
                         mime_type: "text/plain".into(),
                         config: TextChunkConfig::default(),
                     }),

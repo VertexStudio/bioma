@@ -34,7 +34,7 @@ struct Args {
 #[derive(Subcommand)]
 enum TransportArg {
     Stdio {
-        #[arg(long, short, default_value = "target/release/examples/server")]
+        #[arg(long, short, default_value = "target/release/rag_mcp")]
         command: String,
 
         #[arg(long, short, default_value = "rag-client")]
